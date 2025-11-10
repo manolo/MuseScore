@@ -161,6 +161,20 @@ void TremoloRenderer::doRender(const EngravingItem* item, const mpe::Articulatio
         return;
     }
 
+    // Try to use tremolo channel first (for instruments that support it)
+    // If channel events produce results, use those; otherwise fall back to synthetic tremolo
+    TremoloTimeCache tremoloTimeCache;
+    mpe::PlaybackEventList channelEvents;
+
+    // First, try rendering with tremolo channel (single event)
+    buildAndAppendEvents(chord, preferredType, ctx.nominalDurationTicks, ctx.nominalPositionStartTick,
+                         ctx, tremoloTimeCache, channelEvents);
+
+    // If we got events from the channel attempt, use them
+    if (!channelEvents.empty()) {
+        result.insert(result.end(), channelEvents.begin(), channelEvents.end());
+        return;
+    }    // Fallback to synthetic tremolo for instruments without tremolo channel
     // TODO: We need a member like articulationData.overallDurationTicks (ticks rather than duration),
     // so that we are not duplicating this calculation (see TremoloTwoMetaParser::doParse)
     //const ArticulationAppliedData& articulationData = context.commonArticulations.at(preferredType);
@@ -186,10 +200,7 @@ void TremoloRenderer::doRender(const EngravingItem* item, const mpe::Articulatio
     if (stepsCount == 0) {
         return;
     }
-
     stepDurationTicks = overallDurationTicks / stepsCount;
-
-    TremoloTimeCache tremoloTimeCache;
 
     if (tremolo.two) {
         const Chord* firstTremoloChord = tremolo.two->chord1();

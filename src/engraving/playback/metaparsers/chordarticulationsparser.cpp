@@ -150,22 +150,62 @@ void ChordArticulationsParser::parseAnnotations(const Chord* chord, const Render
     }
 }
 
-void ChordArticulationsParser::parseTremolo(const Chord* chord, const RenderingContext& ctx, mpe::ArticulationMap& result)
+// Helper function to convert TremoloType to ArticulationType
+static mpe::ArticulationType tremoloTypeToArticulationType(TremoloType type)
 {
-    // single chord
-    {
-        const TremoloSingleChord* tremoloSingle = chord->tremoloSingleChord();
-        if (tremoloSingle && tremoloSingle->playTremolo()) {
-            TremoloSingleMetaParser::parse(tremoloSingle, ctx, result);
-        }
+    switch (type) {
+    case TremoloType::R8:
+    case TremoloType::C8:
+        return mpe::ArticulationType::Tremolo8th;
+    case TremoloType::R16:
+    case TremoloType::C16:
+        return mpe::ArticulationType::Tremolo16th;
+    case TremoloType::R32:
+    case TremoloType::C32:
+        return mpe::ArticulationType::Tremolo32nd;
+    case TremoloType::R64:
+    case TremoloType::C64:
+        return mpe::ArticulationType::Tremolo64th;
+    case TremoloType::BUZZ_ROLL:
+        return mpe::ArticulationType::TremoloBuzz;
+    case TremoloType::INVALID_TREMOLO:
+        break;
     }
 
-    // two chord
-    {
-        const TremoloTwoChord* tremoloTwo = chord->tremoloTwoChord();
-        if (tremoloTwo && tremoloTwo->playTremolo()) {
-            TremoloTwoMetaParser::parse(tremoloTwo, ctx, result);
-        }
+    return mpe::ArticulationType::Undefined;
+}
+
+void ChordArticulationsParser::parseTremolo(const Chord* chord, const RenderingContext& ctx, mpe::ArticulationMap& result)
+{
+    // Check for single chord tremolo
+    const TremoloSingleChord* tremoloSingle = chord->tremoloSingleChord();
+    const TremoloTwoChord* tremoloTwo = chord->tremoloTwoChord();
+
+    TremoloType tremoloType = TremoloType::INVALID_TREMOLO;
+
+    if (tremoloSingle && tremoloSingle->playTremolo()) {
+        tremoloType = tremoloSingle->tremoloType();
+    } else if (tremoloTwo && tremoloTwo->playTremolo()) {
+        tremoloType = tremoloTwo->tremoloType();
+    } else {
+        return; // No tremolo to play
+    }
+
+    mpe::ArticulationType articulationType = tremoloTypeToArticulationType(tremoloType);
+    if (articulationType == mpe::ArticulationType::Undefined) {
+        return;
+    }
+
+    // For tremolo symbols, use the existing profile pattern for tremolo channel
+    const mpe::ArticulationPattern& pattern = ctx.profile->pattern(articulationType);
+    if (!pattern.empty()) {
+        mpe::ArticulationMeta articulationMeta;
+        articulationMeta.type = articulationType;
+        articulationMeta.pattern = pattern;
+        articulationMeta.timestamp = ctx.nominalTimestamp;
+        articulationMeta.overallDuration = ctx.nominalDuration;
+
+        appendArticulationData(std::move(articulationMeta), result);
     }
 }
 
