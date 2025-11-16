@@ -23,6 +23,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+#include <vector>
+
 #include "engraving/infrastructure/mscreader.h"
 
 #include "notationsolomutestate.h"
@@ -120,6 +122,22 @@ void NotationSoloMuteState::removeTrackSoloMuteState(const engraving::Instrument
     auto soloMuteSearch = m_trackSoloMuteStatesMap.find(trackId);
     if (soloMuteSearch != m_trackSoloMuteStatesMap.end()) {
         m_trackSoloMuteStatesMap.erase(soloMuteSearch);
+    }
+}
+
+void NotationSoloMuteState::clearAllStates()
+{
+    std::vector<InstrumentTrackId> trackIds;
+    for (const auto& pair : m_trackSoloMuteStatesMap) {
+        trackIds.push_back(pair.first);
+    }
+
+    m_trackSoloMuteStatesMap.clear();
+
+    // Listeners learn about each cleared track, with the default state
+    const SoloMuteState emptyState;
+    for (const InstrumentTrackId& trackId : trackIds) {
+        m_trackSoloMuteStateChanged.send(trackId, emptyState);
     }
 }
 

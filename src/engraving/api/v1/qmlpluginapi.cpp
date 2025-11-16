@@ -42,6 +42,7 @@
 #include "elements.h"
 #include "selection.h"
 #include "util.h"
+#include "mixer.h"
 
 #include "log.h"
 
@@ -196,6 +197,8 @@ void PluginAPI::registerQmlTypes()
     qmlRegisterAnonymousType<Spanner>("MuseScore", 3);
     qmlRegisterAnonymousType<SpannerSegment>("MuseScore", 3);
     qmlRegisterAnonymousType<Ornament>("MuseScore", 3);
+    qmlRegisterAnonymousType<MixerChannel>("MuseScore", 3);
+    qmlRegisterAnonymousType<AudioResource>("MuseScore", 3);
     qmlRegisterType<PlayEvent>("MuseScore", 3, 0, "PlayEvent");
 
     qmlRegisterAnonymousType<Fraction>("MuseScore", 3);
