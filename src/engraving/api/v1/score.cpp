@@ -550,6 +550,11 @@ void Score::setName(const QString& /*name*/)
     NOT_IMPLEMENTED;
 }
 
+Score* Score::masterScore()
+{
+    return wrap<Score>(score()->masterScore(), Ownership::SCORE);
+}
+
 void Score::createPlayEvents()
 {
     mu::engraving::CompatMidiRender::createPlayEvents(score());

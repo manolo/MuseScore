@@ -77,6 +77,15 @@ class Score : public apiv1::ScoreElement, public muse::Contextable
     Q_OBJECT
 
     /** APIDOC
+     * The master score containing all parts. When called on an excerpt,
+     * returns the main score; on the main score, returns itself.
+     * @readonly
+     * @q_property {Engraving.Score}
+     * @since 4.7
+     */
+    Q_PROPERTY(apiv1::Score * masterScore READ masterScore)
+
+    /** APIDOC
      * Name of the score, without path leading to it and extension.
      * @q_property {String}
      */
@@ -864,6 +873,10 @@ public:
      * @deprecated PlayEvents don't have a playback effect in MuseScore 4.
     */
     Q_INVOKABLE void createPlayEvents();
+
+    /// \cond MS_INTERNAL
+    apiv1::Score* masterScore();
+    /// \endcond
 
     static const mu::engraving::InstrumentTemplate* instrTemplateFromName(const QString& name);   // used by PluginAPI::newScore()
 
