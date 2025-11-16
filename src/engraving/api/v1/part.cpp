@@ -28,6 +28,9 @@
 #include "apistructs.h"
 #include "elements.h"
 #include "instrument.h"
+#include "mixer.h"
+
+#include "log.h"
 
 using namespace mu::engraving::apiv1;
 
@@ -127,4 +130,48 @@ EngravingItem* Part::prevHarpDiagramFromTick(Fraction* tick)
 Fraction* Part::tickOfCurrentHarpDiagram(Fraction* tick)
 {
     return wrap(part()->currentHarpDiagramTick(tick->fraction()));
+}
+
+//---------------------------------------------------------
+//   Part::mixerChannel
+//---------------------------------------------------------
+
+MixerChannel* Part::mixerChannel()
+{
+    // Check local cache first (for same Part wrapper instance)
+    if (m_mixerChannel) {
+        LOGD() << "Returning locally cached MixerChannel: " << m_mixerChannel;
+        return m_mixerChannel;
+    }
+
+    // Check if part is valid
+    if (!part()) {
+        LOGW() << "Part is null, cannot create MixerChannel";
+        return nullptr;
+    }
+
+    // Create the InstrumentTrackId from this part
+    mu::engraving::InstrumentTrackId trackId;
+    trackId.partId = part()->id();
+
+    // Use the first instrument's ID (parts typically have one primary instrument)
+    auto instrument = part()->instrument();
+    if (instrument) {
+        trackId.instrumentId = instrument->id();
+    }
+
+    // Check global cache (persists across Part wrapper lifecycles)
+    if (MixerChannel::s_mixerChannelCache.contains(trackId)) {
+        m_mixerChannel = MixerChannel::s_mixerChannelCache[trackId];
+        LOGD() << "Reusing globally cached MixerChannel: " << m_mixerChannel << " for part: " << part()->partName().toStdString();
+        return m_mixerChannel;
+    }
+
+    // Create new MixerChannel and add to both caches
+    LOGD() << "Creating new MixerChannel for part: " << part()->partName().toStdString();
+    m_mixerChannel = new MixerChannel(trackId, nullptr);  // nullptr parent - owned by global cache
+    MixerChannel::s_mixerChannelCache[trackId] = m_mixerChannel;
+    LOGD() << "Created and globally cached MixerChannel: " << m_mixerChannel;
+
+    return m_mixerChannel;
 }
