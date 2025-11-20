@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# MuseScore-CLA-applies
+# MuseScore-Studio-CLA-applies
 #
-# MuseScore
+# MuseScore Studio
 # Music Composition & Notation
 #
 # Copyright (C) 2025 MuseScore Limited
@@ -22,6 +22,8 @@ set(MODULE_TEST engraving_api_tests)
 
 set(MODULE_TEST_SRC
     ${CMAKE_CURRENT_LIST_DIR}/util_tests.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/environment.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/score_tests.cpp
 )
 
 set(MODULE_TEST_LINK
