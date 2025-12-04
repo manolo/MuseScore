@@ -111,3 +111,24 @@ QQmlEngine* ExtensionsUiEngine::qmlEngineApiV1() const
 {
     return const_cast<ExtensionsUiEngine*>(this)->engineV1();
 }
+
+void ExtensionsUiEngine::clearComponentCache()
+{
+    // For V2 engine - just clear cache
+    if (m_engine) {
+        m_engine->clearComponentCache();
+    }
+
+    // For V1 (legacy plugins) - destroy and recreate engine to force full reload
+    if (m_engineV1) {
+        delete m_apiV1;
+        delete m_apiEngineV1;
+        delete m_engineV1;
+
+        m_apiV1 = nullptr;
+        m_apiEngineV1 = nullptr;
+        m_engineV1 = nullptr;
+
+        // Engine will be recreated on next plugin run via engineV1()
+    }
+}
