@@ -2310,6 +2310,13 @@ class Staff : public ScoreElement
     /// The primary (not linked) staff of this staff.
     /// \since MuseScore 4.6
     Q_PROPERTY(apiv1::Staff * primaryStaff READ primaryStaff)
+    /// Whether this staff is a tablature staff.
+    /// \since MuseScore 4.5
+    Q_PROPERTY(bool isTabStaff READ isTabStaff)
+    /// The number of linked staves (including this one).
+    /// If > 1, there are linked staves.
+    /// \since MuseScore 4.5
+    Q_PROPERTY(int linkedStavesCount READ linkedStavesCount)
 
     /// List of bracket items for this staff.
     /// \since MuseScore 4.6
@@ -2331,6 +2338,8 @@ public:
     int mergeMatchingRests() { return int(staff()->mergeMatchingRests()); }
     bool shouldMergeMatchingRests() { return staff()->shouldMergeMatchingRests(); }
     Staff* primaryStaff() { return wrap<Staff>(staff()->primaryStaff()); }
+    bool isTabStaff() { return staff()->staffType(mu::engraving::Fraction(0, 1))->group() == mu::engraving::StaffGroup::TAB; }
+    int linkedStavesCount() { return static_cast<int>(staff()->staffList().size()); }
     QQmlListProperty<EngravingItem> brackets() { return wrapContainerProperty<EngravingItem>(this, staff()->brackets()); }
     /// \endcond
 

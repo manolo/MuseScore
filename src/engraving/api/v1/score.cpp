@@ -24,6 +24,7 @@
 
 #include "compat/midi/compatmidirender.h"
 #include "io/file.h"
+#include "dom/excerpt.h"
 #include "dom/factory.h"
 #include "dom/instrtemplate.h"
 #include "dom/measure.h"
@@ -31,11 +32,15 @@
 #include "dom/score.h"
 #include "dom/masterscore.h"
 #include "dom/segment.h"
+#include "dom/staff.h"
+#include "dom/stafftype.h"
 #include "dom/text.h"
 #include "editing/editpart.h"
 #include "editing/editsystemlocks.h"
 #include "editing/undo.h"
 #include "types/typesconv.h"
+
+#include "notation/imasternotation.h"
 
 // api
 #include "apistructs.h"
@@ -397,4 +402,107 @@ bool Score::loadStyle(const QString& filePath, bool allowAnyVersion)
     }
 
     return score()->loadStyle(styleFile, allowAnyVersion);
+}
+
+//---------------------------------------------------------
+//   Score::addLinkedStaff
+//---------------------------------------------------------
+
+bool Score::addLinkedStaff(apiv1::Staff* staffWrapper, const QString& staffTypeId)
+{
+    if (!staffWrapper) {
+        LOGW("addLinkedStaff: staff is null");
+        return false;
+    }
+
+    mu::engraving::Staff* sourceStaff = staffWrapper->staff();
+    if (!sourceStaff) {
+        LOGW("addLinkedStaff: source staff is null");
+        return false;
+    }
+
+    mu::engraving::Part* part = sourceStaff->part();
+    if (!part) {
+        LOGW("addLinkedStaff: part is null");
+        return false;
+    }
+
+    // Get the staff type preset
+    const mu::engraving::StaffType* staffTypePreset = mu::engraving::StaffType::presetFromXmlName(staffTypeId);
+    if (!staffTypePreset) {
+        LOGW("addLinkedStaff: staff type <%s> not found", qPrintable(staffTypeId));
+        return false;
+    }
+
+    // Create a copy of the staff type to modify
+    mu::engraving::StaffType staffType = *staffTypePreset;
+
+    // For tablature, use circled frets for half notes
+    if (staffType.group() == mu::engraving::StaffGroup::TAB) {
+        staffType.setMinimStyle(mu::engraving::TablatureMinimStyle::CIRCLED);
+    }
+
+    // Create the new linked staff
+    mu::engraving::Staff* linkedStaff = mu::engraving::Factory::createStaff(part);
+    linkedStaff->setScore(score());
+    linkedStaff->setPart(part);
+
+    // Set the staff type
+    linkedStaff->setStaffType(mu::engraving::Fraction(0, 1), staffType);
+
+    // Calculate local index within the part (part-relative, not global)
+    // Insert after the source staff within the part
+    staff_idx_t sourceLocalIdx = sourceStaff->idx() - part->staff(0)->idx();
+    staff_idx_t insertLocalIdx = sourceLocalIdx + 1;
+
+    // Insert the staff
+    score()->undoInsertStaff(linkedStaff, insertLocalIdx, false);
+
+    // Clone/link the content
+    mu::engraving::Excerpt::cloneStaff(sourceStaff, linkedStaff);
+
+    return true;
+}
+
+bool Score::resetExcerpt(apiv1::Excerpt* excerptWrapper)
+{
+    if (!excerptWrapper) {
+        LOGW("resetExcerpt: excerpt is null");
+        return false;
+    }
+
+    mu::engraving::Excerpt* targetExcerpt = excerptWrapper->excerpt();
+    if (!targetExcerpt) {
+        LOGW("resetExcerpt: underlying excerpt is null");
+        return false;
+    }
+
+    // Get the master notation from context
+    auto masterNotation = context()->currentMasterNotation();
+    if (!masterNotation) {
+        LOGW("resetExcerpt: master notation is null");
+        return false;
+    }
+
+    // Find the matching IExcerptNotationPtr by comparing excerpt scores
+    const auto& excerptNotations = masterNotation->excerpts();
+    mu::notation::IExcerptNotationPtr matchingExcerpt;
+
+    mu::engraving::Score* targetScore = targetExcerpt->excerptScore();
+    for (const auto& excerptNotation : excerptNotations) {
+        if (excerptNotation->notation() && excerptNotation->notation()->elements()) {
+            if (excerptNotation->notation()->elements()->msScore() == targetScore) {
+                matchingExcerpt = excerptNotation;
+                break;
+            }
+        }
+    }
+
+    if (!matchingExcerpt) {
+        LOGW("resetExcerpt: could not find matching excerpt notation");
+        return false;
+    }
+
+    masterNotation->resetExcerpt(matchingExcerpt);
+    return true;
 }

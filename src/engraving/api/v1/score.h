@@ -592,6 +592,26 @@ public:
     Q_INVOKABLE bool loadStyle(const QString& filePath, bool allowAnyVersion = false);
 
     /** APIDOC
+     * Add a linked staff to the given staff with a specific staff type.
+     * @method
+     * @param {Engraving.Staff} staff The source staff to link from.
+     * @param {String} staffTypeId The staff type identifier (e.g., "tab6StrFull" for Tab. 6-str. full).
+     * @returns {Boolean} true if the linked staff was added successfully.
+     * @since 4.7
+    */
+    Q_INVOKABLE bool addLinkedStaff(apiv1::Staff* staff, const QString& staffTypeId);
+
+    /** APIDOC
+     * Reset an excerpt to regenerate it with current staves from the main score.
+     * Use this after adding linked staves to include them in existing parts.
+     * @method
+     * @param {Engraving.Excerpt} excerpt The excerpt to reset.
+     * @returns {Boolean} true if successful.
+     * @since 4.7
+    */
+    Q_INVOKABLE bool resetExcerpt(apiv1::Excerpt* excerpt);
+
+    /** APIDOC
      * Create PlayEvents for all notes based on ornamentation.
      * You need to call this if you are manipulating PlayEvent's
      * so that all ornamentations are populated into Note's PlayEvent lists.
