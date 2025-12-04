@@ -582,6 +582,16 @@ public:
     Q_INVOKABLE void showElementInScore(apiv1::EngravingItem* element, int staffIdx = -1);
 
     /** APIDOC
+     * Load a style file (.mss) into the score.
+     * @method
+     * @param {String} filePath Path to the .mss style file.
+     * @param {Boolean} allowAnyVersion If true, allows loading styles from any MuseScore version.
+     * @returns {Boolean} true if the style was loaded successfully.
+     * @since 4.7
+    */
+    Q_INVOKABLE bool loadStyle(const QString& filePath, bool allowAnyVersion = false);
+
+    /** APIDOC
      * Create PlayEvents for all notes based on ornamentation.
      * You need to call this if you are manipulating PlayEvent's
      * so that all ornamentations are populated into Note's PlayEvent lists.

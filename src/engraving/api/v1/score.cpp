@@ -23,6 +23,7 @@
 #include "score.h"
 
 #include "compat/midi/compatmidirender.h"
+#include "io/file.h"
 #include "dom/factory.h"
 #include "dom/instrtemplate.h"
 #include "dom/measure.h"
@@ -381,4 +382,19 @@ void Score::showElementInScore(apiv1::EngravingItem* wrappedElement, int staffId
         return;
     }
     notation()->interaction()->showItem(wrappedElement->element(), staffIdx);
+}
+
+//---------------------------------------------------------
+//   Score::loadStyle
+//---------------------------------------------------------
+
+bool Score::loadStyle(const QString& filePath, bool allowAnyVersion)
+{
+    muse::io::File styleFile(filePath);
+    if (!styleFile.open(muse::io::IODevice::ReadOnly)) {
+        LOGW("loadStyle: cannot open <%s>", qPrintable(filePath));
+        return false;
+    }
+
+    return score()->loadStyle(styleFile, allowAnyVersion);
 }
