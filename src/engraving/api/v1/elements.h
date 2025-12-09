@@ -2447,6 +2447,11 @@ public:
     /// \param voice The voice number (0-3) to check.
     /// \since MuseScore 4.6
     Q_INVOKABLE bool isVoiceVisible(int voice);
+
+    /// Set whether the staff is visible.
+    /// \param visible Whether the staff should be visible.
+    /// \since MuseScore 4.6
+    Q_INVOKABLE void setShow(bool visible);
 };
 
 //---------------------------------------------------------

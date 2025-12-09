@@ -46,6 +46,7 @@
 #include "apistructs.h"
 #include "cursor.h"
 #include "elements.h"
+#include "excerpt.h"
 #include "apitypes.h"
 
 using namespace mu::engraving::apiv1;
@@ -505,4 +506,146 @@ bool Score::resetExcerpt(apiv1::Excerpt* excerptWrapper)
 
     masterNotation->resetExcerpt(matchingExcerpt);
     return true;
+}
+
+Excerpt* Score::createExcerptFromPart(Part* partWrapper, const QString& name)
+{
+    if (!partWrapper) {
+        LOGW("createExcerptFromPart: part is null");
+        return nullptr;
+    }
+
+    mu::engraving::Part* part = partWrapper->part();
+    if (!part) {
+        LOGW("createExcerptFromPart: underlying part is null");
+        return nullptr;
+    }
+
+    mu::engraving::MasterScore* ms = score()->masterScore();
+    if (!ms) {
+        LOGW("createExcerptFromPart: master score is null");
+        return nullptr;
+    }
+
+    // Check if an excerpt already exists for this part
+    for (mu::engraving::Excerpt* ex : ms->excerpts()) {
+        if (ex->containsPart(part)) {
+            LOGW("createExcerptFromPart: excerpt already exists for this part");
+            return nullptr;
+        }
+    }
+
+    // Create the excerpt using the internal API
+    std::vector<mu::engraving::Part*> parts = { part };
+    std::vector<mu::engraving::Excerpt*> newExcerpts = mu::engraving::Excerpt::createExcerptsFromParts(parts, ms);
+
+    if (newExcerpts.empty()) {
+        LOGW("createExcerptFromPart: failed to create excerpt");
+        return nullptr;
+    }
+
+    mu::engraving::Excerpt* newExcerpt = newExcerpts.front();
+
+    // Set custom name if provided
+    if (!name.isEmpty()) {
+        newExcerpt->setName(name);
+    }
+
+    // Initialize and add the excerpt to the master score
+    ms->initAndAddExcerpt(newExcerpt, false);
+    ms->setExcerptsChanged(true);
+
+    // Return wrapped excerpt
+    return excerptWrap(newExcerpt);
+}
+
+Excerpt* Score::duplicateExcerpt(Excerpt* excerptWrapper, const QString& name)
+{
+    if (!excerptWrapper) {
+        LOGW("duplicateExcerpt: excerpt is null");
+        return nullptr;
+    }
+
+    mu::engraving::Excerpt* sourceExcerpt = excerptWrapper->excerpt();
+    if (!sourceExcerpt) {
+        LOGW("duplicateExcerpt: underlying excerpt is null");
+        return nullptr;
+    }
+
+    mu::engraving::MasterScore* ms = score()->masterScore();
+    if (!ms) {
+        LOGW("duplicateExcerpt: master score is null");
+        return nullptr;
+    }
+
+    // Create a copy of the excerpt using copy constructor
+    mu::engraving::Excerpt* newExcerpt = new mu::engraving::Excerpt(*sourceExcerpt);
+    newExcerpt->markAsCustom();
+
+    // Set the new name
+    if (!name.isEmpty()) {
+        newExcerpt->setName(name);
+    }
+
+    // Initialize and add the excerpt to the master score
+    ms->initAndAddExcerpt(newExcerpt, false);
+    ms->setExcerptsChanged(true);
+
+    // Return wrapped excerpt
+    return excerptWrap(newExcerpt);
+}
+
+bool Score::openExcerpt(Excerpt* excerptWrapper, bool setAsCurrent)
+{
+    if (!excerptWrapper) {
+        LOGW("openExcerpt: excerpt is null");
+        return false;
+    }
+
+    mu::engraving::Excerpt* targetExcerpt = excerptWrapper->excerpt();
+    if (!targetExcerpt) {
+        LOGW("openExcerpt: underlying excerpt is null");
+        return false;
+    }
+
+    // Get the master notation from context
+    auto masterNotation = context()->currentMasterNotation();
+    if (!masterNotation) {
+        LOGW("openExcerpt: master notation is null");
+        return false;
+    }
+
+    // Find the matching IExcerptNotationPtr by comparing excerpt scores
+    const auto& excerptNotations = masterNotation->excerpts();
+    mu::notation::IExcerptNotationPtr matchingExcerpt;
+
+    mu::engraving::Score* targetScore = targetExcerpt->excerptScore();
+    for (const auto& excerptNotation : excerptNotations) {
+        if (excerptNotation->notation() && excerptNotation->notation()->elements()) {
+            if (excerptNotation->notation()->elements()->msScore() == targetScore) {
+                matchingExcerpt = excerptNotation;
+                break;
+            }
+        }
+    }
+
+    if (!matchingExcerpt) {
+        LOGW("openExcerpt: could not find matching excerpt notation");
+        return false;
+    }
+
+    // Open the excerpt in tabs
+    masterNotation->setExcerptIsOpen(matchingExcerpt->notation(), true);
+
+    // Optionally set as current view
+    if (setAsCurrent && matchingExcerpt->notation()) {
+        context()->setCurrentNotation(matchingExcerpt->notation());
+    }
+
+    return true;
+}
+
+void Score::resetTextStyleOverrides()
+{
+    score()->cmdResetTextStyleOverrides();
 }

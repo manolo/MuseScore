@@ -36,6 +36,7 @@
 #include "engraving/dom/trill.h"
 
 #include "engraving/editing/editnote.h"
+#include "engraving/editing/editstaff.h"
 #include "engraving/editing/editsystemlocks.h"
 
 // api
@@ -648,6 +649,25 @@ int Staff::pitchOffset(Fraction* tick)
 bool Staff::isVoiceVisible(int voice)
 {
     return staff()->isVoiceVisible(voice);
+}
+
+void Staff::setShow(bool visible)
+{
+    mu::engraving::Staff* s = staff();
+    if (!s) {
+        return;
+    }
+
+    s->score()->undo(new mu::engraving::ChangeStaff(
+        s,
+        visible,
+        s->defaultClefType(),
+        s->userDist(),
+        s->cutaway(),
+        s->hideSystemBarLine(),
+        s->mergeMatchingRests(),
+        s->reflectTranspositionInLinkedTab()
+    ));
 }
 
 //---------------------------------------------------------

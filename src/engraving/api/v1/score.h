@@ -612,6 +612,45 @@ public:
     Q_INVOKABLE bool resetExcerpt(apiv1::Excerpt* excerpt);
 
     /** APIDOC
+     * Create a new excerpt (part) from an existing Part in the score.
+     * @method
+     * @param {Engraving.Part} part The Part to create an excerpt from.
+     * @param {String} name Optional custom name for the excerpt. If empty, uses the part name.
+     * @returns {Engraving.Excerpt} The newly created Excerpt, or null if creation failed.
+     * @since 4.7
+    */
+    Q_INVOKABLE apiv1::Excerpt* createExcerptFromPart(apiv1::Part* part, const QString& name = QString());
+
+    /** APIDOC
+     * Duplicate an existing excerpt with a new name.
+     * @method
+     * @param {Engraving.Excerpt} excerpt The Excerpt to duplicate.
+     * @param {String} name The name for the duplicated excerpt.
+     * @returns {Engraving.Excerpt} The newly created Excerpt, or null if duplication failed.
+     * @since 4.7
+    */
+    Q_INVOKABLE apiv1::Excerpt* duplicateExcerpt(apiv1::Excerpt* excerpt, const QString& name);
+
+    /** APIDOC
+     * Open an excerpt in a new tab and optionally set it as the current view.
+     * This is equivalent to clicking "Open selected" in the Parts dialog.
+     * @method
+     * @param {Engraving.Excerpt} excerpt The Excerpt to open.
+     * @param {Boolean} setAsCurrent If true, switch the view to this excerpt.
+     * @returns {Boolean} true if successful.
+     * @since 4.7
+    */
+    Q_INVOKABLE bool openExcerpt(apiv1::Excerpt* excerpt, bool setAsCurrent = true);
+
+    /** APIDOC
+     * Reset all text elements to use their default style properties.
+     * This removes any manual overrides (font, size, etc.) from text elements.
+     * @method
+     * @since 4.7
+    */
+    Q_INVOKABLE void resetTextStyleOverrides();
+
+    /** APIDOC
      * Create PlayEvents for all notes based on ornamentation.
      * You need to call this if you are manipulating PlayEvent's
      * so that all ornamentations are populated into Note's PlayEvent lists.
