@@ -39,11 +39,17 @@ public:
     struct SoloMuteState {
         bool mute = false;
         bool solo = false;
+        float volumeDb = 0.0f;
+        float balance = 0.0f;
+        bool hasCustomVolume = false;  // true if this excerpt has its own volume/balance
 
         bool operator ==(const SoloMuteState& other) const
         {
             return mute == other.mute
-                   && solo == other.solo;
+                   && solo == other.solo
+                   && volumeDb == other.volumeDb
+                   && balance == other.balance
+                   && hasCustomVolume == other.hasCustomVolume;
         }
     };
 
@@ -56,6 +62,7 @@ public:
     virtual const SoloMuteState& trackSoloMuteState(const engraving::InstrumentTrackId& trackId) const = 0;
     virtual void setTrackSoloMuteState(const engraving::InstrumentTrackId& trackId, const SoloMuteState& state) = 0;
     virtual void removeTrackSoloMuteState(const engraving::InstrumentTrackId& trackId) = 0;
+    virtual void clearAllStates() = 0;
     virtual muse::async::Channel<engraving::InstrumentTrackId, SoloMuteState> trackSoloMuteStateChanged() const = 0;
 };
 

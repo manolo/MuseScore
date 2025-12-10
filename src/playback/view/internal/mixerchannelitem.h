@@ -207,5 +207,12 @@ protected:
     muse::ui::NavigationPanel* m_panel = nullptr;
 
     bool m_outputResourceItemsLoading = false;
+
+    // Debounce mechanism for volume/balance changes to prevent feedback loops.
+    // When user drags a fader, multiple intermediate values are sent to the audio system.
+    // The audio system echoes them back asynchronously. These flags block the echoed values
+    // from updating the slider until the audio system catches up to our current value.
+    bool m_volumeChangeInFlight = false;
+    bool m_balanceChangeInFlight = false;
 };
 }

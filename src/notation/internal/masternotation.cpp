@@ -534,6 +534,13 @@ void MasterNotation::resetExcerpt(IExcerptNotationPtr excerptNotation)
 
     get_impl(excerptNotation)->reinit(newExcerpt);
 
+    // Clear custom volume/balance/mute settings for this excerpt
+    // and re-initialize with default states (which will trigger playback updates)
+    if (excerptNotation->notation()->soloMuteState()) {
+        excerptNotation->notation()->soloMuteState()->clearAllStates();
+    }
+    initNotationSoloMuteState(excerptNotation->notation());
+
     masterScore()->setExcerptsChanged(false);
 
     undoStack()->commitChanges();
