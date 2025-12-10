@@ -22,10 +22,13 @@
 
 #include "mixer.h"
 
+#include "async/notifylist.h"
 #include "modularity/ioc.h"
 #include "context/iglobalcontext.h"
 #include "playback/iplaybackcontroller.h"
 #include "audio/main/iplayback.h"
+#include "notation/inotationparts.h"
+#include "engraving/dom/part.h"
 
 #include "log.h"
 
@@ -35,7 +38,7 @@ using namespace muse;
 // Initialize static members
 QList<AudioResource*> MixerChannel::s_cachedAvailableSounds;
 bool MixerChannel::s_availableSoundsCacheValid = false;
-QMap<mu::engraving::InstrumentTrackId, MixerChannel*> MixerChannel::s_mixerChannelCache;
+QMap<mu::engraving::ID, MixerChannel*> MixerChannel::s_mixerChannelCache;
 
 //---------------------------------------------------------
 //   AudioResource
@@ -239,15 +242,22 @@ float MixerChannel::volume() const
 
 void MixerChannel::setVolume(float volume)
 {
-    // Clamp volume to valid dB range (mixer UI shows -∞ to +12 dB)
-    // Use -60 dB as practical minimum (close enough to -∞)
+    // Clamp volume to valid dB range (-60 to +12 dB)
     volume = std::max(-60.0f, std::min(12.0f, volume));
 
-    // Update cache immediately (responsive UI)
+    // Update the notation solo/mute state (persists the volume for excerpts)
+    auto controller = playbackController();
+    if (controller) {
+        mu::notation::INotationSoloMuteState::SoloMuteState state = controller->trackSoloMuteState(m_trackId);
+        state.volumeDb = volume;
+        state.hasCustomVolume = true;
+        controller->setTrackSoloMuteState(m_trackId, state);
+    }
+
+    // Update local cache and send to audio system
     m_cachedOutputParams.volume = volume;
     m_outputParamsValid = true;
 
-    // Send to audio system (async, fire & forget)
     auto pb = playback();
     if (!pb) {
         return;
@@ -255,11 +265,9 @@ void MixerChannel::setVolume(float volume)
 
     auto sequenceId = currentSequenceId();
     auto trackId = audioTrackId();
-    if (trackId == -1) {
-        return;
+    if (trackId != -1) {
+        pb->setOutputParams(sequenceId, trackId, m_cachedOutputParams);
     }
-
-    pb->setOutputParams(sequenceId, trackId, m_cachedOutputParams);
 }
 
 float MixerChannel::balance() const
@@ -300,11 +308,18 @@ bool MixerChannel::muted() const
 
 void MixerChannel::setMuted(bool muted)
 {
-    // Update cache immediately (responsive UI)
+    // Update the notation solo/mute state (persists the mute for excerpts)
+    auto controller = playbackController();
+    if (controller) {
+        mu::notation::INotationSoloMuteState::SoloMuteState state = controller->trackSoloMuteState(m_trackId);
+        state.mute = muted;
+        controller->setTrackSoloMuteState(m_trackId, state);
+    }
+
+    // Update local cache and send to audio system
     m_cachedOutputParams.muted = muted;
     m_outputParamsValid = true;
 
-    // Send to audio system (async, fire & forget)
     auto pb = playback();
     if (!pb) {
         return;
@@ -312,11 +327,9 @@ void MixerChannel::setMuted(bool muted)
 
     auto sequenceId = currentSequenceId();
     auto trackId = audioTrackId();
-    if (trackId == -1) {
-        return;
+    if (trackId != -1) {
+        pb->setOutputParams(sequenceId, trackId, m_cachedOutputParams);
     }
-
-    pb->setOutputParams(sequenceId, trackId, m_cachedOutputParams);
 }
 
 bool MixerChannel::solo() const
@@ -327,11 +340,6 @@ bool MixerChannel::solo() const
 
 void MixerChannel::setSolo(bool solo)
 {
-    // Update cache immediately (responsive UI)
-    m_cachedOutputParams.solo = solo;
-    m_outputParamsValid = true;
-
-    // Send to audio system (async, fire & forget)
     auto pb = playback();
     if (!pb) {
         return;
@@ -343,6 +351,23 @@ void MixerChannel::setSolo(bool solo)
         return;
     }
 
+    if (!m_outputParamsValid) {
+        // Need to load params first, then set solo
+        pb->outputParams(sequenceId, trackId)
+            .onResolve(this, [this, pb, sequenceId, trackId, solo](const muse::audio::AudioOutputParams& params) {
+            m_cachedOutputParams = params;
+            m_cachedOutputParams.solo = solo;
+            m_outputParamsValid = true;
+            pb->setOutputParams(sequenceId, trackId, m_cachedOutputParams);
+        })
+            .onReject(this, [](int code, const std::string& msg) {
+            LOGW() << "setSolo failed to load params: " << code << " - " << msg;
+        });
+        return;
+    }
+
+    // Cache is valid, update and send immediately
+    m_cachedOutputParams.solo = solo;
     pb->setOutputParams(sequenceId, trackId, m_cachedOutputParams);
 }
 
@@ -350,7 +375,6 @@ QList<AudioResource*> MixerChannel::availableSounds()
 {
     // Use global cache (shared across all MixerChannel instances)
     if (s_availableSoundsCacheValid) {
-        LOGD() << "Returning globally cached sounds: " << s_cachedAvailableSounds.size();
         return s_cachedAvailableSounds;
     }
 
@@ -360,38 +384,25 @@ QList<AudioResource*> MixerChannel::availableSounds()
 
     auto pb = playback();
     if (!pb) {
-        LOGW() << "Playback service not available for availableSounds()";
         s_availableSoundsCacheValid = true;
         return s_cachedAvailableSounds;
     }
 
-    LOGD() << "Requesting availableInputResources() from playback (first call)...";
-
-    // Load available resources async (following MuseScore pattern)
-    // Note: Using 'this' for Asyncable binding, but populating static cache
+    // Load available resources async
     pb->availableInputResources()
         .onResolve(this, [](const muse::audio::AudioResourceMetaList& resources) {
-        LOGD() << "availableInputResources() resolved with " << resources.size() << " resources";
-
-        // Clean up before repopulating global cache
         qDeleteAll(s_cachedAvailableSounds);
         s_cachedAvailableSounds.clear();
 
-        // Convert to AudioResource wrappers (owned by global cache)
-        // Note: parent is nullptr since these are owned by the static cache
         for (const auto& meta : resources) {
             s_cachedAvailableSounds.append(new AudioResource(meta, nullptr));
         }
-
         s_availableSoundsCacheValid = true;
-        LOGD() << "Global cache populated with " << s_cachedAvailableSounds.size() << " sounds";
     })
         .onReject(this, [](int code, const std::string& msg) {
         LOGW() << "Failed to load available sounds: " << code << " - " << msg;
     });
 
-    // Return current global cache (may be empty on first call)
-    LOGD() << "Returning current global cache (may be empty): " << s_cachedAvailableSounds.size();
     return s_cachedAvailableSounds;
 }
 
@@ -544,4 +555,58 @@ bool MixerChannel::setMidiBank(int bank)
 
     pb->setInputParams(sequenceId, trackId, m_cachedInputParams);
     return true;
+}
+
+void MixerChannel::resetToMaster()
+{
+    auto globalContext = muse::modularity::globalIoc()->resolve<mu::context::IGlobalContext>("context");
+    if (!globalContext) {
+        return;
+    }
+
+    auto masterNotation = globalContext->currentMasterNotation();
+    auto currentNotation = globalContext->currentNotation();
+
+    if (!masterNotation || !currentNotation) {
+        return;
+    }
+
+    // Only works in an excerpt (part), not the master score
+    if (currentNotation == masterNotation->notation()) {
+        return;
+    }
+
+    auto excerptSoloMuteState = currentNotation->soloMuteState();
+    if (!excerptSoloMuteState) {
+        return;
+    }
+
+    // Clear all custom states for this excerpt (like Parts dialog Reset does)
+    excerptSoloMuteState->clearAllStates();
+
+    // Re-initialize with correct mute states (replicates MasterNotation::initNotationSoloMuteState):
+    // - Parts that exist in the excerpt: mute=false
+    // - Parts that don't exist in the excerpt: mute=true
+    auto masterParts = masterNotation->notation()->parts();
+    auto excerptParts = currentNotation->parts();
+
+    if (!masterParts || !excerptParts) {
+        return;
+    }
+
+    for (const mu::engraving::Part* masterPart : masterParts->partList()) {
+        const mu::engraving::Part* excerptPart = excerptParts->part(masterPart->id());
+        const bool shouldMute = !excerptPart || !excerptPart->isVisible();
+
+        mu::notation::INotationSoloMuteState::SoloMuteState state;
+        state.mute = shouldMute;
+        state.solo = false;
+
+        for (const mu::engraving::InstrumentTrackId& trackId : masterPart->instrumentTrackIdSet()) {
+            excerptSoloMuteState->setTrackSoloMuteState(trackId, state);
+        }
+    }
+
+    // Invalidate local cache so next read gets fresh values
+    m_outputParamsValid = false;
 }

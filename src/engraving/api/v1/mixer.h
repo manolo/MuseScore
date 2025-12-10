@@ -121,8 +121,9 @@ public:
     ~MixerChannel();
 
     // Global cache for MixerChannel instances (shared across Part wrapper lifecycles)
-    // Maps InstrumentTrackId -> MixerChannel to persist state across plugin re-runs
-    static QMap<mu::engraving::InstrumentTrackId, MixerChannel*> s_mixerChannelCache;
+    // Maps partId -> MixerChannel to persist state across plugin re-runs
+    // Note: Using only partId (not full InstrumentTrackId) because instrumentId can vary
+    static QMap<mu::engraving::ID, MixerChannel*> s_mixerChannelCache;
     /// \endcond
 
     /// Returns the current volume level in dB
@@ -198,6 +199,12 @@ public:
     /// \returns True if successful, false if not applicable to current sound
     /// \since MuseScore 4.7
     Q_INVOKABLE bool setMidiBank(int bank);
+
+    /// Resets this channel's mixer state to match the master score.
+    /// This removes any excerpt-specific volume, balance, mute, and solo settings,
+    /// so the channel will use the values from the main score.
+    /// \since MuseScore 4.7
+    Q_INVOKABLE void resetToMaster();
 
 private:
     mu::engraving::InstrumentTrackId m_trackId;

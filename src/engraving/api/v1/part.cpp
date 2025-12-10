@@ -150,9 +150,12 @@ MixerChannel* Part::mixerChannel()
         return nullptr;
     }
 
-    // Create the InstrumentTrackId from this part
+    // Use partId as the cache key (instrumentId can vary, causing cache misses)
+    mu::engraving::ID partId = part()->id();
+
+    // Create the InstrumentTrackId for MixerChannel constructor (still needs full trackId)
     mu::engraving::InstrumentTrackId trackId;
-    trackId.partId = part()->id();
+    trackId.partId = partId;
 
     // Use the first instrument's ID (parts typically have one primary instrument)
     auto instrument = part()->instrument();
@@ -160,9 +163,9 @@ MixerChannel* Part::mixerChannel()
         trackId.instrumentId = instrument->id();
     }
 
-    // Check global cache (persists across Part wrapper lifecycles)
-    if (MixerChannel::s_mixerChannelCache.contains(trackId)) {
-        m_mixerChannel = MixerChannel::s_mixerChannelCache[trackId];
+    // Check global cache using only partId (persists across Part wrapper lifecycles)
+    if (MixerChannel::s_mixerChannelCache.contains(partId)) {
+        m_mixerChannel = MixerChannel::s_mixerChannelCache[partId];
         LOGD() << "Reusing globally cached MixerChannel: " << m_mixerChannel << " for part: " << part()->partName().toStdString();
         return m_mixerChannel;
     }
@@ -170,7 +173,7 @@ MixerChannel* Part::mixerChannel()
     // Create new MixerChannel and add to both caches
     LOGD() << "Creating new MixerChannel for part: " << part()->partName().toStdString();
     m_mixerChannel = new MixerChannel(trackId, nullptr);  // nullptr parent - owned by global cache
-    MixerChannel::s_mixerChannelCache[trackId] = m_mixerChannel;
+    MixerChannel::s_mixerChannelCache[partId] = m_mixerChannel;
     LOGD() << "Created and globally cached MixerChannel: " << m_mixerChannel;
 
     return m_mixerChannel;
