@@ -53,6 +53,8 @@ class Score;
 class Staff;
 class Lyrics;
 class Spanner;
+class Note;
+class Chord;
 
 extern Selection* selectionWrap(mu::engraving::Selection* select);
 
@@ -679,6 +681,18 @@ public:
      * @since 4.7
     */
     Q_INVOKABLE void resetTextStyleOverrides();
+
+    /** APIDOC
+     * Add a grace note to a chord.
+     * @method
+     * @param {Engraving.Chord} chord The chord to add the grace note to.
+     * @param {Number} pitch The MIDI pitch of the grace note (0-127).
+     * @param {Number} noteType The type of grace note (use NoteType enum: ACCIACCATURA, APPOGGIATURA, GRACE4, GRACE16, GRACE32).
+     * @param {Number} duration The visual duration in ticks (e.g., 480 for quarter, 240 for eighth, 120 for sixteenth, 60 for thirty-second).
+     * @returns {Engraving.Note} The created Note, or null if creation failed.
+     * @since 4.7
+    */
+    Q_INVOKABLE apiv1::Note* setGraceNote(apiv1::Chord* chord, int pitch, int noteType, int duration);
 
     /** APIDOC
      * Create PlayEvents for all notes based on ornamentation.
