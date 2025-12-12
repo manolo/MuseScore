@@ -654,6 +654,25 @@ public:
     Q_INVOKABLE bool openExcerpt(apiv1::Excerpt* excerpt, bool setAsCurrent = true);
 
     /** APIDOC
+     * Remove an excerpt (linked part) from the score.
+     * This is equivalent to deleting a part in the Parts dialog.
+     * @method
+     * @param {Engraving.Excerpt} excerpt The Excerpt to remove.
+     * @returns {Boolean} true if successful.
+     * @since 4.7
+    */
+    Q_INVOKABLE bool removeExcerpt(apiv1::Excerpt* excerpt);
+
+    /** APIDOC
+     * Remove a staff from the score.
+     * @method
+     * @param {Engraving.Staff} staff The Staff to remove.
+     * @returns {Boolean} true if successful.
+     * @since 4.7
+    */
+    Q_INVOKABLE bool removeStaff(apiv1::Staff* staff);
+
+    /** APIDOC
      * Reset all text elements to use their default style properties.
      * This removes any manual overrides (font, size, etc.) from text elements.
      * @method

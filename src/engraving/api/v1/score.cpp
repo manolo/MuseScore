@@ -23,6 +23,7 @@
 #include "score.h"
 
 #include "compat/midi/compatmidirender.h"
+#include "global/containers.h"
 #include "io/file.h"
 #include "dom/excerpt.h"
 #include "dom/factory.h"
@@ -651,6 +652,89 @@ bool Score::openExcerpt(Excerpt* excerptWrapper, bool setAsCurrent)
         context()->setCurrentNotation(matchingExcerpt->notation());
     }
 
+    return true;
+}
+
+bool Score::removeExcerpt(Excerpt* excerptWrapper)
+{
+    if (!excerptWrapper) {
+        LOGW("removeExcerpt: excerpt is null");
+        return false;
+    }
+
+    mu::engraving::Excerpt* targetExcerpt = excerptWrapper->excerpt();
+    if (!targetExcerpt) {
+        LOGW("removeExcerpt: underlying excerpt is null");
+        return false;
+    }
+
+    // Get the master notation from context
+    auto masterNotation = context()->currentMasterNotation();
+    if (!masterNotation) {
+        LOGW("removeExcerpt: master notation is null");
+        return false;
+    }
+
+    // Find the matching IExcerptNotationPtr by comparing excerpt scores
+    const auto& excerptNotations = masterNotation->excerpts();
+    mu::notation::IExcerptNotationPtr matchingExcerpt;
+
+    mu::engraving::Score* targetScore = targetExcerpt->excerptScore();
+    for (const auto& excerptNotation : excerptNotations) {
+        if (excerptNotation->notation() && excerptNotation->notation()->elements()) {
+            if (excerptNotation->notation()->elements()->msScore() == targetScore) {
+                matchingExcerpt = excerptNotation;
+                break;
+            }
+        }
+    }
+
+    if (!matchingExcerpt) {
+        LOGW("removeExcerpt: could not find matching excerpt notation");
+        return false;
+    }
+
+    // Close the excerpt tab if open
+    masterNotation->setExcerptIsOpen(matchingExcerpt->notation(), false);
+
+    // Remove the excerpt by getting the list, removing from it, and setting it back
+    mu::notation::ExcerptNotationList excerpts = masterNotation->excerpts();
+    if (muse::remove(excerpts, matchingExcerpt)) {
+        masterNotation->setExcerpts(excerpts);
+    } else {
+        LOGW("removeExcerpt: failed to remove excerpt from list");
+        return false;
+    }
+
+    return true;
+}
+
+bool Score::removeStaff(Staff* staffWrapper)
+{
+    if (!staffWrapper) {
+        LOGW("removeStaff: staff is null");
+        return false;
+    }
+
+    mu::engraving::Staff* staff = staffWrapper->staff();
+    if (!staff) {
+        LOGW("removeStaff: underlying staff is null");
+        return false;
+    }
+
+    mu::engraving::Score* sc = staff->score();
+    if (!sc) {
+        LOGW("removeStaff: staff has no score");
+        return false;
+    }
+
+    staff_idx_t staffIdx = staff->idx();
+    if (staffIdx == muse::nidx) {
+        LOGW("removeStaff: invalid staff index");
+        return false;
+    }
+
+    sc->cmdRemoveStaff(staffIdx);
     return true;
 }
 
