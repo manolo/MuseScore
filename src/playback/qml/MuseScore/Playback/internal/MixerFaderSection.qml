@@ -39,11 +39,12 @@ MixerPanelSection {
         Row {
             anchors.horizontalCenter: parent.horizontalCenter
 
-            spacing: 8
+            spacing: 2
 
             VolumeSlider {
                 volumeLevel: channelItem.volumeLevel
                 stepSize: 1.0
+                showRuler: true
 
                 navigation.panel: channelItem.panel
                 navigation.row: root.navigationRowStart
@@ -70,7 +71,7 @@ MixerPanelSection {
             Row {
                 anchors.verticalCenter: parent.verticalCenter
 
-                spacing: 2
+                spacing: 1
 
                 VolumePressureMeter {
                     id: leftPressure

@@ -31,13 +31,14 @@ Slider {
 
     property real volumeLevel: 0.0
     property real readableVolumeLevel: Math.round(root.volumeLevel * 10) / 10
+    property bool showRuler: true
 
     property alias navigation: navCtrl
 
     signal volumeLevelMoved(var level)
 
     height: 140 + prv.handleHeight
-    width: 32 + prv.unitsTextWidth
+    width: showRuler ? 32 + prv.unitsTextWidth : 20
 
     from: -60
     to: 12
@@ -99,10 +100,10 @@ Slider {
 
         readonly property int fullValueRangeLength: Math.abs(root.from) + Math.abs(root.to)
 
-        readonly property real unitsTextWidth: 12
+        readonly property real unitsTextWidth: 8
         readonly property color unitTextColor: Utils.colorWithAlpha(ui.theme.fontPrimaryColor, 0.8)
         readonly property string unitTextFont: {
-            var pxSize = String('8px')
+            var pxSize = String('6px')
             var family = String('\'' + ui.theme.bodyFont.family + '\'')
 
             return pxSize + ' ' + family
@@ -112,12 +113,12 @@ Slider {
         onUnitTextFontChanged: { bgCanvas.requestPaint() }
 
         // strokes
-        readonly property real strokeHorizontalMargin: 2
+        readonly property real strokeHorizontalMargin: 1
         readonly property real longStrokeHeight: 1
-        readonly property real longStrokeWidth: 8
+        readonly property real longStrokeWidth: 5
         readonly property color longStrokeColor: Utils.colorWithAlpha(ui.theme.fontPrimaryColor, 0.5)
         readonly property real shortStrokeHeight: 1
-        readonly property real shortStrokeWidth: 4
+        readonly property real shortStrokeWidth: 3
         readonly property color shortStrokeColor: Utils.colorWithAlpha(ui.theme.fontPrimaryColor, 0.3)
 
         onLongStrokeColorChanged: { bgCanvas.requestPaint() }
@@ -245,10 +246,12 @@ Slider {
                          prv.rulerLineHeight,
                          prv.rulerLineWidth)
 
-            var originVPos = prv.handleHeight / 2
-            var originHPos = bgCanvas.width - prv.handleWidth/2 - prv.rulerLineWidth - prv.strokeHorizontalMargin - 2
+            if (root.showRuler) {
+                var originVPos = prv.handleHeight / 2
+                var originHPos = bgCanvas.width - prv.handleWidth/2 - prv.rulerLineWidth - prv.strokeHorizontalMargin - 2
 
-            drawRuler(ctx, originVPos, originHPos, 6/*fullStep*/, 2/*smallStep*/)
+                drawRuler(ctx, originVPos, originHPos, 6/*fullStep*/, 2/*smallStep*/)
+            }
         }
     }
 

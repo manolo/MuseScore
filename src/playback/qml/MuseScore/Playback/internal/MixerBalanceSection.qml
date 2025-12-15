@@ -33,74 +33,86 @@ MixerPanelSection {
     Item {
         id: content
 
-        height: contentRow.implicitHeight
+        height: balanceKnob.height
         width: root.channelItemWidth
 
         property string accessibleName: (Boolean(root.needReadChannelName) ? channelItem.title + " " : "") + root.headerTitle
+        property bool isEditing: false
 
-        Row {
-            id: contentRow
+        KnobControl {
+            id: balanceKnob
 
-            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.centerIn: parent
+            visible: !content.isEditing
 
-            spacing: 8
+            radius: 18
 
-            KnobControl {
-                id: balanceKnob
+            from: -100
+            to: 100
+            value: channelItem.balance
+            stepSize: 1
+            isBalanceKnob: true
 
-                from: -100
-                to: 100
-                value: channelItem.balance
-                stepSize: 1
-                isBalanceKnob: true
+            showValueLabel: true
+            valueLabel: Math.round(channelItem.balance)
+            handleLengthRatio: 0.5
 
-                navigation.panel: channelItem.panel
-                navigation.row: root.navigationRowStart
-                navigation.accessible.name: content.accessibleName
-                navigation.onActiveChanged: {
-                    if (navigation.active) {
-                        root.navigateControlIndexChanged({row: navigation.row, column: navigation.column})
-                    }
-                }
-
-                onNewValueRequested: function(newValue) {
-                    channelItem.balance = newValue
+            navigation.panel: channelItem.panel
+            navigation.row: root.navigationRowStart
+            navigation.accessible.name: content.accessibleName
+            navigation.onActiveChanged: {
+                if (navigation.active) {
+                    root.navigateControlIndexChanged({row: navigation.row, column: navigation.column})
                 }
             }
 
-            TextInputField {
-                id: balanceTextInputField
+            onNewValueRequested: function(newValue) {
+                channelItem.balance = newValue
+            }
 
-                anchors.verticalCenter: balanceKnob.verticalCenter
+            onValueLabelClicked: {
+                content.isEditing = true
+                balanceInput.forceActiveFocus()
+            }
+        }
 
-                height: 24
-                width: 36
+        TextInputField {
+            id: balanceInput
 
-                textHorizontalAlignment: Qt.AlignHCenter
-                textSidePadding: 0
-                background.radius: 2
+            anchors.centerIn: parent
+            visible: content.isEditing
 
-                navigation.panel: channelItem.panel
-                navigation.row: root.navigationRowStart + 1
-                navigation.accessible.name: content.accessibleName + " " + currentText
-                navigation.onActiveChanged: {
-                    if (navigation.active) {
-                        root.navigateControlIndexChanged({row: navigation.row, column: navigation.column})
-                    }
+            width: 40
+            height: 20
+
+            inputField.font.family: ui.theme.bodyFont.family
+            inputField.font.pixelSize: ui.theme.bodyFont.pixelSize - 2
+
+            currentText: Math.round(channelItem.balance)
+
+            validator: IntValidator { bottom: -100; top: 100 }
+
+            navigation.panel: channelItem.panel
+            navigation.row: root.navigationRowStart + 1
+
+            onTextEditingFinished: function(newTextValue) {
+                var newVal = parseInt(newTextValue)
+                if (!isNaN(newVal)) {
+                    channelItem.balance = Math.max(-100, Math.min(100, newVal))
                 }
+                content.isEditing = false
+            }
 
-                validator: IntInputValidator {
-                    id: intInputValidator
-                    top: 100
-                    bottom: -100
-                }
+            Component.onCompleted: {
+                balanceInput.selectAll()
+            }
+        }
 
-                currentText: channelItem.balance
-
-                onTextChanged: function(newTextValue) {
-                    if (channelItem.balance !== Number(newTextValue)) {
-                        channelItem.balance = Number(newTextValue)
-                    }
+        Connections {
+            target: balanceInput
+            function onActiveFocusChanged() {
+                if (!balanceInput.activeFocus && content.isEditing) {
+                    content.isEditing = false
                 }
             }
         }

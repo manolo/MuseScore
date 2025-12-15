@@ -36,26 +36,26 @@ Canvas {
 
     property bool isClipping: currentVolumePressure >= maxDisplayedVolumePressure
 
-    width: root.showRuler ? prv.indicatorWidth + 20 : prv.indicatorWidth
+    width: root.showRuler ? prv.indicatorWidth + 14 : prv.indicatorWidth
     height: prv.indicatorHeight + (prv.overloadHeight * 2)
 
     QtObject {
         id: prv
 
         property var gradient: null
-        readonly property int overloadHeight: 4
+        readonly property int overloadHeight: 3
 
         readonly property real indicatorHeight: 140
-        readonly property real indicatorWidth: 6
+        readonly property real indicatorWidth: 4
 
         // value ranges
         readonly property int fullValueRangeLength: root.maxDisplayedVolumePressure - root.minDisplayedVolumePressure
         readonly property real divisionPixels: (prv.indicatorHeight - prv.overloadHeight) / fullValueRangeLength
 
-        readonly property real unitsTextWidth: 12
+        readonly property real unitsTextWidth: 8
         readonly property color unitTextColor: Utils.colorWithAlpha(ui.theme.fontPrimaryColor, 0.8)
         readonly property string unitTextFont: {
-            var pxSize = String('8px')
+            var pxSize = String('6px')
             var family = String('\'' + ui.theme.bodyFont.family + '\'')
 
             return pxSize + ' ' + family
@@ -65,9 +65,9 @@ Canvas {
         onUnitTextFontChanged: { prv.rulerNeedsPaint = true; root.requestPaint() }
 
         // strokes
-        readonly property real strokeHorizontalMargin: 2
+        readonly property real strokeHorizontalMargin: 1
         readonly property real longStrokeHeight: 1
-        readonly property real longStrokeWidth: 5
+        readonly property real longStrokeWidth: 4
         readonly property color longStrokeColor: Utils.colorWithAlpha(ui.theme.fontPrimaryColor, 0.5)
         readonly property real shortStrokeHeight: 1
         readonly property real shortStrokeWidth: 2

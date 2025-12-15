@@ -60,8 +60,8 @@ Item {
 
     signal navigateControlIndexChanged(var index)
 
-    height: 24
-    width: 96
+    height: 18
+    width: 62
 
     QtObject {
         id: prv
@@ -229,9 +229,11 @@ Item {
                 }
 
                 contentItem: StyledTextLabel {
-                    width: titleButton.width - 8 // 4px padding on each side
+                    width: titleButton.width - 4 // 2px padding on each side
                     height: titleButton.height
 
+                    font.family: ui.theme.bodyFont.family
+                    font.pixelSize: ui.theme.bodyFont.pixelSize - 2
                     text: root.title
                 }
 

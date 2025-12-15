@@ -63,7 +63,7 @@ ColumnLayout {
         property bool isPanelActivated: false
 
         readonly property real headerWidth: 98
-        readonly property real channelItemWidth: 108
+        readonly property real channelItemWidth: 66
 
         function setNavigateControlIndex(index) {
             if (!Boolean(prv.currentNavigateControlIndex) ||
@@ -257,6 +257,8 @@ ColumnLayout {
                 headerVisible: contextMenuModel.labelsSectionVisible
                 headerWidth: prv.headerWidth
                 channelItemWidth: prv.channelItemWidth
+                spacingAbove: 2
+                spacingBelow: 2
 
                 model: mixerPanelModel
 
@@ -275,6 +277,8 @@ ColumnLayout {
                 headerVisible: contextMenuModel.labelsSectionVisible
                 headerWidth: prv.headerWidth
                 channelItemWidth: prv.channelItemWidth
+                spacingAbove: 2
+                spacingBelow: 2
 
                 model: mixerPanelModel
 
@@ -313,6 +317,8 @@ ColumnLayout {
                 headerVisible: contextMenuModel.labelsSectionVisible
                 headerWidth: prv.headerWidth
                 channelItemWidth: prv.channelItemWidth
+                spacingAbove: 2
+                spacingBelow: 2
 
                 model: mixerPanelModel
 

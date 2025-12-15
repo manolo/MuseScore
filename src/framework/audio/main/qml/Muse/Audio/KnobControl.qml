@@ -37,6 +37,12 @@ Dial {
 
     property bool accentControl: true
 
+    property string valueLabel: ""
+    property bool showValueLabel: false
+    property real handleLengthRatio: 1.0
+
+    signal valueLabelClicked()
+
     property alias mouseArea: mouseArea
 
     implicitWidth: root.radius * 2
@@ -64,7 +70,7 @@ Dial {
         readonly property real handlerWidth: 2
 
         readonly property real outerArcLineWidth: 3
-        readonly property real innerArcLineWidth: 2
+        readonly property real innerArcLineWidth: 1
 
         readonly property real startAngle: -140 * (Math.PI/180) - Math.PI/2
         readonly property real endAngle: 140 * (Math.PI/180) - Math.PI/2
@@ -162,19 +168,38 @@ Dial {
         }
     }
 
-    handle: Rectangle {
-        x: root.radius - prv.handlerWidth / 2
-        y: prv.outerArcLineWidth + prv.innerArcLineWidth + 2
+    handle: Item {
+        x: 0
+        y: 0
+        width: root.radius * 2
+        height: root.radius * 2
 
-        height: prv.handlerHeight
-        width: prv.handlerWidth
-        radius: prv.handlerWidth / 2
+        Rectangle {
+            property real fullHeight: root.radius - prv.outerArcLineWidth - prv.innerArcLineWidth - 2
 
-        color: ui.theme.fontPrimaryColor
-        antialiasing: true
+            x: parent.width / 2 - prv.handlerWidth / 2
+            y: prv.outerArcLineWidth + prv.innerArcLineWidth + 2
+            height: fullHeight * root.handleLengthRatio
 
-        transformOrigin: Item.Bottom
+            width: prv.handlerWidth
+            radius: prv.handlerWidth / 2
+
+            color: ui.theme.fontPrimaryColor
+            antialiasing: true
+        }
+
+        transformOrigin: Item.Center
         rotation: root.angle
+    }
+
+    StyledTextLabel {
+        id: centerLabel
+        z: 10
+        visible: root.showValueLabel
+        anchors.centerIn: parent
+        font.family: ui.theme.bodyFont.family
+        font.pixelSize: ui.theme.bodyFont.pixelSize - 2
+        text: root.valueLabel
     }
 
     onValueChanged: {
@@ -198,6 +223,20 @@ Dial {
             prv.requestNewValue(0)
         }
 
+        onClicked: function(mouse) {
+            if (root.showValueLabel) {
+                var centerX = root.width / 2
+                var centerY = root.height / 2
+                var dx = mouse.x - centerX
+                var dy = mouse.y - centerY
+                var distFromCenter = Math.sqrt(dx * dx + dy * dy)
+                var innerRadius = root.radius - prv.outerArcLineWidth - prv.innerArcLineWidth - prv.handlerHeight
+                if (distFromCenter < innerRadius) {
+                    root.valueLabelClicked()
+                }
+            }
+        }
+
         // The MouseArea steals mouse press events from the slider.
         // There is really no way to prevent that.
         // (if you set mouse.accepted to false in the onPressed handler,
@@ -208,13 +247,17 @@ Dial {
 
         preventStealing: true // Don't let a Flickable steal the mouse
 
+        property bool isDragging: false
+
         onPressed: function(mouse) {
             prv.initialValue = root.value
             prv.dragStartX = mouse.x
             prv.dragStartY = mouse.y
+            isDragging = false
         }
 
         onPositionChanged: function(mouse)  {
+            isDragging = true
             let dx = mouse.x - prv.dragStartX
             let dy = mouse.y - prv.dragStartY
             let dist = Math.sqrt(dx * dx + dy * dy)

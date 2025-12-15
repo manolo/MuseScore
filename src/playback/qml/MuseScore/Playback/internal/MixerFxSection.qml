@@ -30,7 +30,7 @@ MixerPanelSection {
 
     //: FX is an abbreviation of "effects".
     headerTitle: qsTrc("playback", "Audio FX")
-    headerHeight: 24
+    headerHeight: 18
 
     Column {
         id: content
@@ -42,7 +42,7 @@ MixerPanelSection {
 
         property string accessibleName: (Boolean(root.needReadChannelName) ? channelItem.title + " " : "") + root.headerTitle
 
-        spacing: 4
+        spacing: 2
 
         Repeater {
             id: repeater

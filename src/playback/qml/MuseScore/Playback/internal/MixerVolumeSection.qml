@@ -28,7 +28,7 @@ import Muse.Audio 1.0
 MixerPanelSection {
     id: root
 
-    headerTitle: qsTrc("playback", "Volume")
+    headerTitle: qsTrc("playback", "Vol")
 
     Item {
         id: content
@@ -43,8 +43,11 @@ MixerPanelSection {
 
             anchors.horizontalCenter: parent.horizontalCenter
 
-            height: 24
-            width: 46
+            height: 18
+            width: 42
+
+            inputField.font.family: ui.theme.bodyFont.family
+            inputField.font.pixelSize: ui.theme.bodyFont.pixelSize - 2
 
             textHorizontalAlignment: Qt.AlignHCenter
             textSidePadding: 0

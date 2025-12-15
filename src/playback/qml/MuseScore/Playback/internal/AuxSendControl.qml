@@ -41,20 +41,20 @@ Item {
 
     signal navigateControlIndexChanged(var index)
 
-    height: 24
-    width: 96
+    height: 20
+    width: 60
 
     RowLayout {
         id: content
 
         anchors.fill: parent
 
-        spacing: 8
+        spacing: 4
 
         KnobControl {
             id: audioSignalAmountKnob
 
-            radius: root.height / 2 + 1.5
+            radius: root.height / 2
 
             from: 0
             to: 100
@@ -85,6 +85,9 @@ Item {
             Layout.fillWidth: true
             Layout.preferredHeight: audioSignalAmountKnob.backgroundHeight
             Layout.alignment: Qt.AlignTop
+
+            textFont.family: ui.theme.bodyFont.family
+            textFont.pixelSize: ui.theme.bodyFont.pixelSize - 2
 
             navigation.panel: root.navigationPanel
             navigation.row: root.navigationRowStart + 1
