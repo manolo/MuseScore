@@ -48,6 +48,7 @@ MixerPanelSection {
 
             supportsByPassing: false
             resourceItemModel: channelItem.inputResourceItem ?? null
+            condensed: root.condensed
 
             navigationPanel: channelItem.panel
             navigationRowStart: root.navigationRowStart

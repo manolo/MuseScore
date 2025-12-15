@@ -33,7 +33,7 @@ MixerPanelSection {
 
     Rectangle {
         width: root.channelItemWidth
-        height: 18
+        height: root.condensed ? 18 : 22
 
         function resolveLabelColor() {
             switch(channelItem.type) {
@@ -68,7 +68,7 @@ MixerPanelSection {
             anchors.centerIn: parent
 
             font.family: ui.theme.bodyBoldFont.family
-            font.pixelSize: ui.theme.bodyBoldFont.pixelSize - 2
+            font.pixelSize: root.condensed ? ui.theme.bodyBoldFont.pixelSize - 2 : ui.theme.bodyBoldFont.pixelSize
             font.weight: ui.theme.bodyBoldFont.weight
 
             readonly property int margin: -8

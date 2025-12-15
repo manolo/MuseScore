@@ -35,6 +35,7 @@ Loader {
     property int headerHeight: implicitHeight - spacingAbove - spacingBelow
 
     property int channelItemWidth: 108
+    property bool condensed: false
 
     property real spacingAbove: 4
     property real spacingBelow: 4

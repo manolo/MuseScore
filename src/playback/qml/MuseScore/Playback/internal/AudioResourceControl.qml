@@ -30,6 +30,7 @@ Item {
     id: root
 
     property QtObject resourceItemModel: null
+    property bool condensed: false
 
     property var menuAnchorItem: undefined
 
@@ -60,8 +61,8 @@ Item {
 
     signal navigateControlIndexChanged(var index)
 
-    height: 18
-    width: 62
+    height: root.condensed ? 18 : 24
+    width: root.condensed ? 52 : 96
 
     QtObject {
         id: prv
@@ -229,11 +230,11 @@ Item {
                 }
 
                 contentItem: StyledTextLabel {
-                    width: titleButton.width - 4 // 2px padding on each side
+                    width: titleButton.width - (root.condensed ? 4 : 8) // padding on each side
                     height: titleButton.height
 
                     font.family: ui.theme.bodyFont.family
-                    font.pixelSize: ui.theme.bodyFont.pixelSize - 2
+                    font.pixelSize: root.condensed ? ui.theme.bodyFont.pixelSize - 2 : ui.theme.bodyFont.pixelSize
                     text: root.title
                 }
 

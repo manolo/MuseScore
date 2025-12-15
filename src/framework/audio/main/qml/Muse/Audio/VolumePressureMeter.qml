@@ -33,29 +33,30 @@ Canvas {
     property real maxDisplayedVolumePressure: 0.0
 
     property bool showRuler: false
+    property bool condensed: false
 
     property bool isClipping: currentVolumePressure >= maxDisplayedVolumePressure
 
-    width: root.showRuler ? prv.indicatorWidth + 14 : prv.indicatorWidth
+    width: root.showRuler ? prv.indicatorWidth + (root.condensed ? 14 : 20) : prv.indicatorWidth
     height: prv.indicatorHeight + (prv.overloadHeight * 2)
 
     QtObject {
         id: prv
 
         property var gradient: null
-        readonly property int overloadHeight: 3
+        readonly property int overloadHeight: root.condensed ? 3 : 4
 
         readonly property real indicatorHeight: 140
-        readonly property real indicatorWidth: 4
+        readonly property real indicatorWidth: root.condensed ? 4 : 6
 
         // value ranges
         readonly property int fullValueRangeLength: root.maxDisplayedVolumePressure - root.minDisplayedVolumePressure
         readonly property real divisionPixels: (prv.indicatorHeight - prv.overloadHeight) / fullValueRangeLength
 
-        readonly property real unitsTextWidth: 8
+        readonly property real unitsTextWidth: root.condensed ? 8 : 12
         readonly property color unitTextColor: Utils.colorWithAlpha(ui.theme.fontPrimaryColor, 0.8)
         readonly property string unitTextFont: {
-            var pxSize = String('6px')
+            var pxSize = root.condensed ? String('6px') : String('8px')
             var family = String('\'' + ui.theme.bodyFont.family + '\'')
 
             return pxSize + ' ' + family
@@ -65,9 +66,9 @@ Canvas {
         onUnitTextFontChanged: { prv.rulerNeedsPaint = true; root.requestPaint() }
 
         // strokes
-        readonly property real strokeHorizontalMargin: 1
+        readonly property real strokeHorizontalMargin: root.condensed ? 1 : 2
         readonly property real longStrokeHeight: 1
-        readonly property real longStrokeWidth: 4
+        readonly property real longStrokeWidth: root.condensed ? 4 : 5
         readonly property color longStrokeColor: Utils.colorWithAlpha(ui.theme.fontPrimaryColor, 0.5)
         readonly property real shortStrokeHeight: 1
         readonly property real shortStrokeWidth: 2

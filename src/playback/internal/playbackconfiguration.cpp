@@ -51,6 +51,7 @@ static const Settings::Key MIXER_VOLUME_SECTION_VISIBLE_KEY(moduleName, "playbac
 static const Settings::Key MIXER_FADER_SECTION_VISIBLE_KEY(moduleName, "playback/mixer/faderSectionVisible");
 static const Settings::Key MIXER_MUTE_AND_SOLO_SECTION_VISIBLE_KEY(moduleName, "playback/mixer/muteAndSoloSectionVisible");
 static const Settings::Key MIXER_TITLE_SECTION_VISIBLE_KEY(moduleName, "playback/mixer/titleSectionVisible");
+static const Settings::Key MIXER_CONDENSED_MODE_KEY(moduleName, "playback/mixer/condensedMode");
 
 static const Settings::Key MIXER_RESET_SOUND_FLAGS_WHEN_CHANGE_SOUND_WARNING(moduleName,
                                                                              "playback/mixer/needToShowAboutResetSoundFlagsWhwnChangeSoundWarning");
@@ -124,6 +125,11 @@ void PlaybackConfiguration::init()
             m_isMixerSectionVisibleChanged.send(sectionType, val.toBool());
         });
     }
+
+    settings()->setDefaultValue(MIXER_CONDENSED_MODE_KEY, Val(false));
+    settings()->valueChanged(MIXER_CONDENSED_MODE_KEY).onReceive(this, [this](const Val& val) {
+        m_isMixerCondensedModeChanged.send(val.toBool());
+    });
 
     settings()->setDefaultValue(MUTE_HIDDEN_INSTRUMENTS, Val(true));
     settings()->valueChanged(MUTE_HIDDEN_INSTRUMENTS).onReceive(nullptr, [this](const Val& mute) {
@@ -237,6 +243,21 @@ void PlaybackConfiguration::setMixerSectionVisible(MixerSectionType sectionType,
 muse::async::Channel<MixerSectionType, bool> PlaybackConfiguration::isMixerSectionVisibleChanged() const
 {
     return m_isMixerSectionVisibleChanged;
+}
+
+bool PlaybackConfiguration::isMixerCondensedMode() const
+{
+    return settings()->value(MIXER_CONDENSED_MODE_KEY).toBool();
+}
+
+void PlaybackConfiguration::setMixerCondensedMode(bool condensed)
+{
+    settings()->setSharedValue(MIXER_CONDENSED_MODE_KEY, Val(condensed));
+}
+
+muse::async::Channel<bool> PlaybackConfiguration::isMixerCondensedModeChanged() const
+{
+    return m_isMixerCondensedModeChanged;
 }
 
 bool PlaybackConfiguration::isAuxSendVisible(aux_channel_idx_t index) const

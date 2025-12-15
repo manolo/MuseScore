@@ -32,6 +32,7 @@ Slider {
     property real volumeLevel: 0.0
     property real readableVolumeLevel: Math.round(root.volumeLevel * 10) / 10
     property bool showRuler: true
+    property bool condensed: false
 
     property alias navigation: navCtrl
 
@@ -100,10 +101,10 @@ Slider {
 
         readonly property int fullValueRangeLength: Math.abs(root.from) + Math.abs(root.to)
 
-        readonly property real unitsTextWidth: 8
+        readonly property real unitsTextWidth: root.condensed ? 8 : 12
         readonly property color unitTextColor: Utils.colorWithAlpha(ui.theme.fontPrimaryColor, 0.8)
         readonly property string unitTextFont: {
-            var pxSize = String('6px')
+            var pxSize = root.condensed ? String('6px') : String('8px')
             var family = String('\'' + ui.theme.bodyFont.family + '\'')
 
             return pxSize + ' ' + family
@@ -113,12 +114,12 @@ Slider {
         onUnitTextFontChanged: { bgCanvas.requestPaint() }
 
         // strokes
-        readonly property real strokeHorizontalMargin: 1
+        readonly property real strokeHorizontalMargin: root.condensed ? 1 : 2
         readonly property real longStrokeHeight: 1
-        readonly property real longStrokeWidth: 5
+        readonly property real longStrokeWidth: root.condensed ? 5 : 8
         readonly property color longStrokeColor: Utils.colorWithAlpha(ui.theme.fontPrimaryColor, 0.5)
         readonly property real shortStrokeHeight: 1
-        readonly property real shortStrokeWidth: 3
+        readonly property real shortStrokeWidth: root.condensed ? 3 : 4
         readonly property color shortStrokeColor: Utils.colorWithAlpha(ui.theme.fontPrimaryColor, 0.3)
 
         onLongStrokeColorChanged: { bgCanvas.requestPaint() }
@@ -193,20 +194,29 @@ Slider {
                                  prv.shortStrokeWidth)
 
                 } else {
-                    ctx.fillStyle = prv.longStrokeColor
+                    var dbValue = root.from + i
+                    var isZero = (dbValue === 0)
+
+                    ctx.fillStyle = isZero ? ui.theme.fontPrimaryColor : prv.longStrokeColor
 
                     ctx.fillRect(currentStrokeVPos,
                                  originHPos - prv.longStrokeWidth,
                                  prv.longStrokeHeight,
-                                 prv.longStrokeWidth)
+                                 isZero ? prv.longStrokeWidth + 2 : prv.longStrokeWidth)
 
                     let textHPos = originHPos - prv.longStrokeWidth - prv.strokeHorizontalMargin
 
                     ctx.save()
 
                     ctx.rotate(Math.PI/2)
-                    ctx.fillStyle = prv.unitTextColor
-                    ctx.fillText(textByDbValue(root.from + i), textHPos, -currentStrokeVPos + 2)
+                    if (isZero) {
+                        ctx.font = "bold " + prv.unitTextFont
+                        ctx.fillStyle = ui.theme.fontPrimaryColor
+                    } else {
+                        ctx.font = prv.unitTextFont
+                        ctx.fillStyle = prv.unitTextColor
+                    }
+                    ctx.fillText(textByDbValue(dbValue), textHPos, -currentStrokeVPos + 2)
 
                     ctx.restore()
                 }

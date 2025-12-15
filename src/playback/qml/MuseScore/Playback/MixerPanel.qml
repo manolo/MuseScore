@@ -62,8 +62,8 @@ ColumnLayout {
         property var currentNavigateControlIndex: undefined
         property bool isPanelActivated: false
 
-        readonly property real headerWidth: 98
-        readonly property real channelItemWidth: 66
+        readonly property real headerWidth: contextMenuModel.condensedModeEnabled ? 88 : 98
+        readonly property real channelItemWidth: contextMenuModel.condensedModeEnabled ? 66 : 108
 
         function setNavigateControlIndex(index) {
             if (!Boolean(prv.currentNavigateControlIndex) ||
@@ -201,6 +201,7 @@ ColumnLayout {
                 headerVisible: contextMenuModel.labelsSectionVisible
                 headerWidth: prv.headerWidth
                 channelItemWidth: prv.channelItemWidth
+                condensed: contextMenuModel.condensedModeEnabled
                 spacingAbove: 8
 
                 model: mixerPanelModel
@@ -220,6 +221,7 @@ ColumnLayout {
                 headerVisible: contextMenuModel.labelsSectionVisible
                 headerWidth: prv.headerWidth
                 channelItemWidth: prv.channelItemWidth
+                condensed: contextMenuModel.condensedModeEnabled
 
                 model: mixerPanelModel
 
@@ -237,8 +239,8 @@ ColumnLayout {
                 visible: contextMenuModel.auxSendsSectionVisible
                 headerVisible: contextMenuModel.labelsSectionVisible
                 headerWidth: prv.headerWidth
-
                 channelItemWidth: prv.channelItemWidth
+                condensed: contextMenuModel.condensedModeEnabled
 
                 model: mixerPanelModel
 
@@ -257,6 +259,7 @@ ColumnLayout {
                 headerVisible: contextMenuModel.labelsSectionVisible
                 headerWidth: prv.headerWidth
                 channelItemWidth: prv.channelItemWidth
+                condensed: contextMenuModel.condensedModeEnabled
                 spacingAbove: 2
                 spacingBelow: 2
 
@@ -277,6 +280,7 @@ ColumnLayout {
                 headerVisible: contextMenuModel.labelsSectionVisible
                 headerWidth: prv.headerWidth
                 channelItemWidth: prv.channelItemWidth
+                condensed: contextMenuModel.condensedModeEnabled
                 spacingAbove: 2
                 spacingBelow: 2
 
@@ -297,6 +301,7 @@ ColumnLayout {
                 headerVisible: contextMenuModel.labelsSectionVisible
                 headerWidth: prv.headerWidth
                 channelItemWidth: prv.channelItemWidth
+                condensed: contextMenuModel.condensedModeEnabled
                 spacingAbove: -3
                 spacingBelow: -2
 
@@ -317,6 +322,7 @@ ColumnLayout {
                 headerVisible: contextMenuModel.labelsSectionVisible
                 headerWidth: prv.headerWidth
                 channelItemWidth: prv.channelItemWidth
+                condensed: contextMenuModel.condensedModeEnabled
                 spacingAbove: 2
                 spacingBelow: 2
 
@@ -337,6 +343,7 @@ ColumnLayout {
                 headerVisible: contextMenuModel.labelsSectionVisible
                 headerWidth: prv.headerWidth
                 channelItemWidth: prv.channelItemWidth
+                condensed: contextMenuModel.condensedModeEnabled
                 spacingAbove: 2
                 spacingBelow: 0
 

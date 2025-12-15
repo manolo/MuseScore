@@ -33,17 +33,18 @@ MixerPanelSection {
     Item {
         id: content
 
-        height: balanceKnob.height
+        height: root.condensed ? balanceKnob.height : contentRow.implicitHeight
         width: root.channelItemWidth
 
         property string accessibleName: (Boolean(root.needReadChannelName) ? channelItem.title + " " : "") + root.headerTitle
         property bool isEditing: false
 
+        // Condensed mode: knob centered with value label inside, click to edit
         KnobControl {
             id: balanceKnob
 
             anchors.centerIn: parent
-            visible: !content.isEditing
+            visible: root.condensed && !content.isEditing
 
             radius: 18
 
@@ -80,7 +81,7 @@ MixerPanelSection {
             id: balanceInput
 
             anchors.centerIn: parent
-            visible: content.isEditing
+            visible: root.condensed && content.isEditing
 
             width: 40
             height: 20
@@ -113,6 +114,75 @@ MixerPanelSection {
             function onActiveFocusChanged() {
                 if (!balanceInput.activeFocus && content.isEditing) {
                     content.isEditing = false
+                }
+            }
+        }
+
+        // Normal mode: knob and text field side by side (original layout)
+        Row {
+            id: contentRow
+
+            anchors.horizontalCenter: parent.horizontalCenter
+            visible: !root.condensed
+
+            spacing: 8
+
+            KnobControl {
+                id: balanceKnobNormal
+
+                from: -100
+                to: 100
+                value: channelItem.balance
+                stepSize: 1
+                isBalanceKnob: true
+
+                navigation.panel: channelItem.panel
+                navigation.row: root.navigationRowStart
+                navigation.accessible.name: content.accessibleName
+                navigation.onActiveChanged: {
+                    if (navigation.active) {
+                        root.navigateControlIndexChanged({row: navigation.row, column: navigation.column})
+                    }
+                }
+
+                onNewValueRequested: function(newValue) {
+                    channelItem.balance = newValue
+                }
+            }
+
+            TextInputField {
+                id: balanceTextInputField
+
+                anchors.verticalCenter: balanceKnobNormal.verticalCenter
+
+                height: 24
+                width: 36
+
+                textHorizontalAlignment: Qt.AlignHCenter
+                textSidePadding: 0
+                background.radius: 2
+
+                navigation.panel: channelItem.panel
+                navigation.row: root.navigationRowStart + 1
+                navigation.accessible.name: content.accessibleName + " " + currentText
+                navigation.onActiveChanged: {
+                    if (navigation.active) {
+                        root.navigateControlIndexChanged({row: navigation.row, column: navigation.column})
+                    }
+                }
+
+                validator: IntInputValidator {
+                    id: intInputValidator
+                    top: 100
+                    bottom: -100
+                }
+
+                currentText: channelItem.balance
+
+                onTextChanged: function(newTextValue) {
+                    if (channelItem.balance !== Number(newTextValue)) {
+                        channelItem.balance = Number(newTextValue)
+                    }
                 }
             }
         }

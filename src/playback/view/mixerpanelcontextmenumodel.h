@@ -47,6 +47,7 @@ class MixerPanelContextMenuModel : public muse::uicomponents::AbstractMenuModel,
     Q_PROPERTY(bool faderSectionVisible READ faderSectionVisible NOTIFY faderSectionVisibleChanged)
     Q_PROPERTY(bool muteAndSoloSectionVisible READ muteAndSoloSectionVisible NOTIFY muteAndSoloSectionVisibleChanged)
     Q_PROPERTY(bool titleSectionVisible READ titleSectionVisible NOTIFY titleSectionVisibleChanged)
+    Q_PROPERTY(bool condensedModeEnabled READ condensedModeEnabled NOTIFY condensedModeEnabledChanged)
 
 public:
     explicit MixerPanelContextMenuModel(QObject* parent = nullptr);
@@ -60,6 +61,7 @@ public:
     bool faderSectionVisible() const;
     bool muteAndSoloSectionVisible() const;
     bool titleSectionVisible() const;
+    bool condensedModeEnabled() const;
 
     Q_INVOKABLE void load() override;
 
@@ -73,6 +75,7 @@ signals:
     void faderSectionVisibleChanged();
     void muteAndSoloSectionVisibleChanged();
     void titleSectionVisibleChanged();
+    void condensedModeEnabledChanged();
 
 private:
     bool isSectionVisible(MixerSectionType sectionType) const;
@@ -80,10 +83,16 @@ private:
     muse::uicomponents::MenuItem* buildSectionVisibleItem(MixerSectionType sectionType);
     muse::uicomponents::MenuItem* buildAuxSendVisibleItem(muse::audio::aux_channel_idx_t index);
     muse::uicomponents::MenuItem* buildAuxChannelVisibleItem(muse::audio::aux_channel_idx_t index);
+    muse::uicomponents::MenuItem* buildCondensedModeItem();
+    muse::uicomponents::MenuItem* buildShowAllItem();
+    muse::uicomponents::MenuItem* buildShowMinimumItem();
 
     void toggleMixerSection(const muse::actions::ActionData& args);
     void toggleAuxSend(const muse::actions::ActionData& args);
     void toggleAuxChannel(const muse::actions::ActionData& args);
+    void toggleCondensedMode();
+    void showAllSections();
+    void showMinimumSections();
 
     void emitMixerSectionVisibilityChanged(MixerSectionType sectionType);
 

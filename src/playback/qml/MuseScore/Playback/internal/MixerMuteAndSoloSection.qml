@@ -40,13 +40,13 @@ MixerPanelSection {
         Row {
             anchors.horizontalCenter: parent.horizontalCenter
 
-            spacing: 4
+            spacing: root.condensed ? 4 : 6
 
             FlatToggleButton {
                 id: muteButton
 
-                height: 18
-                width: 18
+                height: root.condensed ? 18 : 20
+                width: root.condensed ? 18 : 20
 
                 icon: IconCode.MUTE
                 checked: channelItem.muted
@@ -72,8 +72,8 @@ MixerPanelSection {
             FlatToggleButton {
                 id: soloButton
 
-                height: 18
-                width: 18
+                height: root.condensed ? 18 : 20
+                width: root.condensed ? 18 : 20
 
                 icon: IconCode.SOLO
                 checked: channelItem.solo

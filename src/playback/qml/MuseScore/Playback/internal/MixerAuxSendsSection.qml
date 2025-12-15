@@ -29,7 +29,7 @@ MixerPanelSection {
     id: root
 
     headerTitle: qsTrc("playback", "Aux sends")
-    headerHeight: 20
+    headerHeight: root.condensed ? 20 : 24
 
     Column {
         id: content
@@ -41,7 +41,7 @@ MixerPanelSection {
 
         property string accessibleName: (Boolean(root.needReadChannelName) ? channelItem.title + " " : "") + root.headerTitle
 
-        spacing: 2
+        spacing: root.condensed ? 2 : 4
 
         Repeater {
             id: repeater
@@ -55,6 +55,7 @@ MixerPanelSection {
                 anchors.horizontalCenter: parent.horizontalCenter
 
                 auxSendItemModel: modelData
+                condensed: root.condensed
 
                 navigationPanel: channelItem.panel
                 navigationRowStart: root.navigationRowStart + (model.index * 2) // NOTE: 2 - because AuxSendControl has 2 controls

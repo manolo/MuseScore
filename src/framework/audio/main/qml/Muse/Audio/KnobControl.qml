@@ -70,7 +70,7 @@ Dial {
         readonly property real handlerWidth: 2
 
         readonly property real outerArcLineWidth: 3
-        readonly property real innerArcLineWidth: 1
+        readonly property real innerArcLineWidth: 2
 
         readonly property real startAngle: -140 * (Math.PI/180) - Math.PI/2
         readonly property real endAngle: 140 * (Math.PI/180) - Math.PI/2

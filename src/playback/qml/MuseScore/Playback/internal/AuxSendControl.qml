@@ -30,6 +30,7 @@ Item {
     id: root
 
     property QtObject auxSendItemModel: null
+    property bool condensed: false
 
     readonly property string title: root.auxSendItemModel ? root.auxSendItemModel.title : ""
 
@@ -41,20 +42,20 @@ Item {
 
     signal navigateControlIndexChanged(var index)
 
-    height: 20
-    width: 60
+    height: root.condensed ? 20 : 24
+    width: root.condensed ? 60 : 96
 
     RowLayout {
         id: content
 
         anchors.fill: parent
 
-        spacing: 4
+        spacing: root.condensed ? 4 : 8
 
         KnobControl {
             id: audioSignalAmountKnob
 
-            radius: root.height / 2
+            radius: root.condensed ? root.height / 2 : root.height / 2 + 1.5
 
             from: 0
             to: 100
@@ -87,7 +88,7 @@ Item {
             Layout.alignment: Qt.AlignTop
 
             textFont.family: ui.theme.bodyFont.family
-            textFont.pixelSize: ui.theme.bodyFont.pixelSize - 2
+            textFont.pixelSize: root.condensed ? ui.theme.bodyFont.pixelSize - 2 : ui.theme.bodyFont.pixelSize
 
             navigation.panel: root.navigationPanel
             navigation.row: root.navigationRowStart + 1

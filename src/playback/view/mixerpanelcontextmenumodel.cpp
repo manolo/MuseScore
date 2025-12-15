@@ -35,6 +35,11 @@ using namespace muse::audio;
 static const ActionCode TOGGLE_MIXER_SECTION_ACTION("toggle-mixer-section");
 static const ActionCode TOGGLE_AUX_SEND_ACTION("toggle-aux-send");
 static const ActionCode TOGGLE_AUX_CHANNEL_ACTION("toggle-aux-channel");
+static const ActionCode TOGGLE_CONDENSED_MODE_ACTION("toggle-condensed-mode");
+static const ActionCode SHOW_ALL_SECTIONS_ACTION("show-all-mixer-sections");
+static const ActionCode SHOW_MINIMUM_SECTIONS_ACTION("show-minimum-mixer-sections");
+
+static const QString CONDENSED_MODE_ITEM_ID("condensed-mode");
 
 static const QString VIEW_MENU_ID("view-menu");
 
@@ -121,6 +126,11 @@ bool MixerPanelContextMenuModel::titleSectionVisible() const
     return isSectionVisible(MixerSectionType::Title);
 }
 
+bool MixerPanelContextMenuModel::condensedModeEnabled() const
+{
+    return configuration()->isMixerCondensedMode();
+}
+
 void MixerPanelContextMenuModel::load()
 {
     AbstractMenuModel::load();
@@ -128,6 +138,9 @@ void MixerPanelContextMenuModel::load()
     dispatcher()->reg(this, TOGGLE_MIXER_SECTION_ACTION, this, &MixerPanelContextMenuModel::toggleMixerSection);
     dispatcher()->reg(this, TOGGLE_AUX_SEND_ACTION, this, &MixerPanelContextMenuModel::toggleAuxSend);
     dispatcher()->reg(this, TOGGLE_AUX_CHANNEL_ACTION, this, &MixerPanelContextMenuModel::toggleAuxChannel);
+    dispatcher()->reg(this, TOGGLE_CONDENSED_MODE_ACTION, this, &MixerPanelContextMenuModel::toggleCondensedMode);
+    dispatcher()->reg(this, SHOW_ALL_SECTIONS_ACTION, this, &MixerPanelContextMenuModel::showAllSections);
+    dispatcher()->reg(this, SHOW_MINIMUM_SECTIONS_ACTION, this, &MixerPanelContextMenuModel::showMinimumSections);
 
     configuration()->isAuxSendVisibleChanged().onReceive(this, [this](aux_channel_idx_t auxSendIndex, bool newVisibilityValue) {
         setViewMenuItemChecked(auxSendVisibleMenuItemId(auxSendIndex), newVisibilityValue);
@@ -145,7 +158,17 @@ void MixerPanelContextMenuModel::load()
         emitMixerSectionVisibilityChanged(sectionType);
     });
 
+    configuration()->isMixerCondensedModeChanged().onReceive(this, [this](bool newValue) {
+        setViewMenuItemChecked(CONDENSED_MODE_ITEM_ID, newValue);
+        emit condensedModeEnabledChanged();
+    });
+
     MenuItemList viewMenuItems {
+        buildCondensedModeItem(),
+        makeSeparator(),
+        buildShowAllItem(),
+        buildShowMinimumItem(),
+        makeSeparator(),
         buildSectionVisibleItem(MixerSectionType::Labels),
         buildSectionVisibleItem(MixerSectionType::Sound),
         buildSectionVisibleItem(MixerSectionType::AudioFX),
@@ -167,6 +190,7 @@ void MixerPanelContextMenuModel::load()
 
     MenuItemList items {
         makeMenuItem("playback-setup"),
+        makeSeparator(),
         makeMenu(TranslatableString("playback", "View"), viewMenuItems, VIEW_MENU_ID)
     };
 
@@ -240,6 +264,59 @@ MenuItem* MixerPanelContextMenuModel::buildAuxChannelVisibleItem(aux_channel_idx
     return item;
 }
 
+MenuItem* MixerPanelContextMenuModel::buildCondensedModeItem()
+{
+    MenuItem* item = new MenuItem(this);
+    item->setId(CONDENSED_MODE_ITEM_ID);
+
+    UiAction action;
+    action.title = TranslatableString("playback", "Condensed");
+    action.code = TOGGLE_CONDENSED_MODE_ACTION;
+    action.checkable = Checkable::Yes;
+    item->setAction(action);
+
+    UiActionState state;
+    state.enabled = true;
+    state.checked = configuration()->isMixerCondensedMode();
+    item->setState(state);
+
+    return item;
+}
+
+MenuItem* MixerPanelContextMenuModel::buildShowAllItem()
+{
+    MenuItem* item = new MenuItem(this);
+    item->setId("show-all");
+
+    UiAction action;
+    action.title = TranslatableString("playback", "Show all");
+    action.code = SHOW_ALL_SECTIONS_ACTION;
+    item->setAction(action);
+
+    UiActionState state;
+    state.enabled = true;
+    item->setState(state);
+
+    return item;
+}
+
+MenuItem* MixerPanelContextMenuModel::buildShowMinimumItem()
+{
+    MenuItem* item = new MenuItem(this);
+    item->setId("show-minimum");
+
+    UiAction action;
+    action.title = TranslatableString("playback", "Show minimum");
+    action.code = SHOW_MINIMUM_SECTIONS_ACTION;
+    item->setAction(action);
+
+    UiActionState state;
+    state.enabled = true;
+    item->setState(state);
+
+    return item;
+}
+
 void MixerPanelContextMenuModel::toggleMixerSection(const ActionData& args)
 {
     if (args.empty()) {
@@ -251,6 +328,50 @@ void MixerPanelContextMenuModel::toggleMixerSection(const ActionData& args)
 
     bool newVisibilityValue = !isSectionVisible(sectionType);
     configuration()->setMixerSectionVisible(sectionType, newVisibilityValue);
+}
+
+void MixerPanelContextMenuModel::toggleCondensedMode()
+{
+    bool newValue = !configuration()->isMixerCondensedMode();
+    configuration()->setMixerCondensedMode(newValue);
+}
+
+void MixerPanelContextMenuModel::showAllSections()
+{
+    // Show all mixer sections
+    configuration()->setMixerSectionVisible(MixerSectionType::Labels, true);
+    configuration()->setMixerSectionVisible(MixerSectionType::Sound, true);
+    configuration()->setMixerSectionVisible(MixerSectionType::AudioFX, true);
+    configuration()->setMixerSectionVisible(MixerSectionType::Balance, true);
+    configuration()->setMixerSectionVisible(MixerSectionType::Volume, true);
+    configuration()->setMixerSectionVisible(MixerSectionType::Fader, true);
+    configuration()->setMixerSectionVisible(MixerSectionType::MuteAndSolo, true);
+    configuration()->setMixerSectionVisible(MixerSectionType::Title, true);
+
+    // Show all aux sends and channels
+    for (aux_channel_idx_t idx = 0; idx < AUX_CHANNEL_NUM; ++idx) {
+        configuration()->setAuxSendVisible(idx, true);
+        configuration()->setAuxChannelVisible(idx, true);
+    }
+}
+
+void MixerPanelContextMenuModel::showMinimumSections()
+{
+    // Hide all except Title, MuteAndSolo, and Fader
+    configuration()->setMixerSectionVisible(MixerSectionType::Labels, false);
+    configuration()->setMixerSectionVisible(MixerSectionType::Sound, false);
+    configuration()->setMixerSectionVisible(MixerSectionType::AudioFX, false);
+    configuration()->setMixerSectionVisible(MixerSectionType::Balance, false);
+    configuration()->setMixerSectionVisible(MixerSectionType::Volume, false);
+    configuration()->setMixerSectionVisible(MixerSectionType::Fader, true);
+    configuration()->setMixerSectionVisible(MixerSectionType::MuteAndSolo, true);
+    configuration()->setMixerSectionVisible(MixerSectionType::Title, true);
+
+    // Hide all aux sends and channels
+    for (aux_channel_idx_t idx = 0; idx < AUX_CHANNEL_NUM; ++idx) {
+        configuration()->setAuxSendVisible(idx, false);
+        configuration()->setAuxChannelVisible(idx, false);
+    }
 }
 
 void MixerPanelContextMenuModel::toggleAuxSend(const ActionData& args)
@@ -286,7 +407,7 @@ void MixerPanelContextMenuModel::setViewMenuItemChecked(const QString& itemId, b
             UiActionState state = item->state();
             state.checked = checked;
             item->setState(state);
-            return;
+            break;
         }
     }
 }

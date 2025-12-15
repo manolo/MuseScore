@@ -60,6 +60,10 @@ public:
     void setMixerSectionVisible(MixerSectionType sectionType, bool visible) override;
     muse::async::Channel<MixerSectionType, bool> isMixerSectionVisibleChanged() const override;
 
+    bool isMixerCondensedMode() const override;
+    void setMixerCondensedMode(bool condensed) override;
+    muse::async::Channel<bool> isMixerCondensedModeChanged() const override;
+
     bool isAuxSendVisible(muse::audio::aux_channel_idx_t index) const override;
     void setAuxSendVisible(muse::audio::aux_channel_idx_t index, bool visible) override;
     muse::async::Channel<muse::audio::aux_channel_idx_t, bool> isAuxSendVisibleChanged() const override;
@@ -115,6 +119,7 @@ private:
     muse::async::Channel<muse::audio::aux_channel_idx_t, bool> m_isAuxSendVisibleChanged;
     muse::async::Channel<muse::audio::aux_channel_idx_t, bool> m_isAuxChannelVisibleChanged;
     muse::async::Channel<MixerSectionType, bool> m_isMixerSectionVisibleChanged;
+    muse::async::Channel<bool> m_isMixerCondensedModeChanged;
 
     muse::async::Channel<bool> m_muteHiddenInstrumentsChanged;
 };

@@ -30,7 +30,7 @@ MixerPanelSection {
 
     //: FX is an abbreviation of "effects".
     headerTitle: qsTrc("playback", "Audio FX")
-    headerHeight: 18
+    headerHeight: root.condensed ? 18 : 24
 
     Column {
         id: content
@@ -42,7 +42,7 @@ MixerPanelSection {
 
         property string accessibleName: (Boolean(root.needReadChannelName) ? channelItem.title + " " : "") + root.headerTitle
 
-        spacing: 2
+        spacing: root.condensed ? 2 : 4
 
         Repeater {
             id: repeater
@@ -55,6 +55,7 @@ MixerPanelSection {
                 anchors.horizontalCenter: parent.horizontalCenter
 
                 resourceItemModel: modelData
+                condensed: root.condensed
 
                 navigationPanel: channelItem.panel
                 navigationRowStart: root.navigationRowStart + (model.index * 3) // NOTE: 3 - because AudioResourceControl have 3 controls
