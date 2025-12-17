@@ -192,6 +192,7 @@ private:
     void setMidiUseWrittenPitch(bool useWrittenPitch);
     void toggleLoopPlayback();
     void toggleHearPlaybackWhenEditing();
+    void togglePlaybackCursor();
 
     void reloadPlaybackCache();
 

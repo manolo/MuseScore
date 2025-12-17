@@ -127,6 +127,14 @@ const UiActionList PlaybackUiActions::s_midiInputPitchActions = {
 };
 
 const UiActionList PlaybackUiActions::s_settingsActions = {
+    UiAction("playback-cursor",
+             mu::context::UiCtxAny,
+             mu::context::CTX_ANY,
+             TranslatableString("action", "Show playback cursor"),
+             TranslatableString("action", "Show playback cursor"),
+             IconCode::Code::VERTICAL,
+             Checkable::Yes
+             ),
     UiAction("repeat",
              mu::context::UiCtxAny,
              mu::context::CTX_NOTATION_FOCUSED,

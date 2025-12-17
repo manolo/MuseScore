@@ -708,6 +708,10 @@ void AbstractNotationPaintView::onNotationSetup()
         onPlayingChanged();
     });
 
+    playbackConfiguration()->isPlaybackCursorVisibleChanged().onReceive(this, [this](bool) {
+        onPlayingChanged();
+    });
+
     playbackController()->currentPlaybackPositionChanged().onReceive(this, [this](audio::secs_t, midi::tick_t tick) {
         movePlaybackCursor(tick);
     });
@@ -1457,10 +1461,11 @@ void AbstractNotationPaintView::onPlayingChanged()
     }
 
     bool isPlaying = playbackController()->isPlaying();
-    m_playbackCursor->setVisible(isPlaying);
+    bool cursorVisible = isPlaying && playbackConfiguration()->isPlaybackCursorVisible();
+    m_playbackCursor->setVisible(cursorVisible);
 
     if (m_playbackCursorItem) {
-        m_playbackCursorItem->setVisible(isPlaying);
+        m_playbackCursorItem->setVisible(cursorVisible);
     }
 
     m_autoScrollEnabled = true;
