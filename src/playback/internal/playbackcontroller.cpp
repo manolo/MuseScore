@@ -70,6 +70,7 @@ static const ActionCode REPEAT_CODE("repeat");
 static const ActionCode PLAY_CHORD_SYMBOLS_CODE("play-chord-symbols");
 static const ActionCode PLAYBACK_SETUP("playback-setup");
 static const ActionCode TOGGLE_HEAR_PLAYBACK_WHEN_EDITING_CODE("toggle-hear-playback-when-editing");
+static const ActionCode PLAYBACK_CURSOR_CODE("playback-cursor");
 
 static AudioOutputParams makeReverbOutputParams()
 {
@@ -127,6 +128,7 @@ void PlaybackController::init()
     dispatcher()->reg(this, INPUT_SOUNDING_PITCH, [this]() { PlaybackController::setMidiUseWrittenPitch(false); });
     dispatcher()->reg(this, PLAYBACK_SETUP, this, &PlaybackController::openPlaybackSetupDialog);
     dispatcher()->reg(this, TOGGLE_HEAR_PLAYBACK_WHEN_EDITING_CODE, this, &PlaybackController::toggleHearPlaybackWhenEditing);
+    dispatcher()->reg(this, PLAYBACK_CURSOR_CODE, this, &PlaybackController::togglePlaybackCursor);
     dispatcher()->reg(this, "playback-reload-cache", this, &PlaybackController::reloadPlaybackCache);
 
     m_onlineSoundsController->regActions();
@@ -163,6 +165,10 @@ void PlaybackController::init()
 
     configuration()->playNotesWhenEditingChanged().onNotify(this, [this]() {
         notifyActionCheckedChanged(TOGGLE_HEAR_PLAYBACK_WHEN_EDITING_CODE);
+    });
+
+    configuration()->isPlaybackCursorVisibleChanged().onReceive(this, [this](bool) {
+        notifyActionCheckedChanged(PLAYBACK_CURSOR_CODE);
     });
 
     m_measureInputLag = configuration()->shouldMeasureInputLag();
@@ -951,6 +957,12 @@ void PlaybackController::toggleHearPlaybackWhenEditing()
     configuration()->setPlayNotesWhenEditing(!wasPlayNotesWhenEditing);
 }
 
+void PlaybackController::togglePlaybackCursor()
+{
+    bool wasVisible = configuration()->isPlaybackCursorVisible();
+    configuration()->setPlaybackCursorVisible(!wasVisible);
+}
+
 void PlaybackController::reloadPlaybackCache()
 {
     INotationPlaybackPtr nPlayback = notationPlayback();
@@ -1643,7 +1655,8 @@ bool PlaybackController::actionChecked(const ActionCode& actionCode) const
         { PAN_CODE, notationConfiguration()->isAutomaticallyPanEnabled() },
         { METRONOME_CODE, notationConfiguration()->isMetronomeEnabled() },
         { COUNT_IN_CODE, notationConfiguration()->isCountInEnabled() },
-        { TOGGLE_HEAR_PLAYBACK_WHEN_EDITING_CODE, configuration()->playNotesWhenEditing() }
+        { TOGGLE_HEAR_PLAYBACK_WHEN_EDITING_CODE, configuration()->playNotesWhenEditing() },
+        { PLAYBACK_CURSOR_CODE, configuration()->isPlaybackCursorVisible() }
     };
 
     return isChecked[actionCode];
