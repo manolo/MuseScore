@@ -43,8 +43,14 @@
 #include <QFileInfo>
 #include <QRegularExpression>
 
+#include "engraving/dom/arpeggio.h"
 #include "engraving/dom/box.h"
 #include "engraving/dom/chord.h"
+#include "engraving/dom/dynamic.h"
+#include "engraving/dom/fermata.h"
+#include "engraving/dom/fingering.h"
+#include "engraving/dom/ornament.h"
+#include "engraving/dom/tremolosinglechord.h"
 #include "engraving/dom/clef.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/hairpin.h"
@@ -163,11 +169,24 @@ static void buildScore(MasterScore* score, const EncFile& enc)
         }
         if (encMeas.endBarline() == EncBarlineType::REPEATEND) {
             measure->setRepeatEnd(true);
-        } else if (encMeas.endBarline() == EncBarlineType::FINAL) {
-            measure->setEndBarLineType(BarLineType::END, false);
-        } else if (encMeas.endBarline() == EncBarlineType::DOUBLEL
-                   || encMeas.endBarline() == EncBarlineType::DOUBLER) {
-            measure->setEndBarLineType(BarLineType::DOUBLE, false);
+        } else if (encMeas.endBarline() == EncBarlineType::FINAL
+                   || encMeas.endBarline() == EncBarlineType::DOUBLEL
+                   || encMeas.endBarline() == EncBarlineType::DOUBLER
+                   || encMeas.endBarline() == EncBarlineType::DOTTED) {
+            // Encore renders barline graphics across every instrument on the
+            // system. MuseScore stores barlines per staff, so set the bar
+            // line on every track. Passing only track 0 leaves the bar line
+            // visible on the first instrument only (Beethoven Plectro m26
+            // double bar reproduced this).
+            BarLineType type = BarLineType::DOUBLE;
+            if (encMeas.endBarline() == EncBarlineType::FINAL) {
+                type = BarLineType::END;
+            } else if (encMeas.endBarline() == EncBarlineType::DOTTED) {
+                type = BarLineType::DOTTED;
+            }
+            for (int s = 0; s < totalStaves; ++s) {
+                measure->setEndBarLineType(type, static_cast<track_idx_t>(s) * VOICES);
+            }
         }
 
         score->measures()->append(measure);
@@ -188,9 +207,64 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     }
 
     // --------------- Notes, rests, ornaments, chord symbols ---------------
-    // Track pending slurs/hairpins: key = (staffIdx, xoffset)
-    std::map<std::pair<int, int>, Slur*> pendingSlurs;
-    std::map<std::pair<int, int>, Hairpin*> pendingHairpins;
+    // Index of Measure pointers by 0-based measure index. Used to resolve a
+    // hairpin's end measure (current measIdx + EncOrnament::alMezuro) without
+    // re-walking the score.
+    std::vector<Measure*> measuresByIdx;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (mb->isMeasure()) {
+            measuresByIdx.push_back(toMeasure(mb));
+        }
+    }
+
+    // SLURSTART intents collected during the measure pass, resolved after the
+    // pass when destination measures are populated. Encore .enc binaries do
+    // not emit SLURSTOP markers; the end measure offset lives in alMezuro and
+    // we anchor the slur on the last ChordRest in the target measure on this
+    // track (an approximation, since xoffset2 is a layout x and not a tick).
+    struct PendingSlur {
+        Fraction startTick;
+        track_idx_t track;
+        int endMeasIdx;
+    };
+    std::vector<PendingSlur> pendingSlurs;
+
+    // ARPEGGIO intents collected during the measure pass. The ORN element
+    // comes before the chord's notes in MEAS order, so the chord doesn't
+    // exist yet at the time the ornament is parsed -- the attachment is
+    // deferred to a post-measure pass.
+    struct PendingArpeggio {
+        Fraction tick;
+        track_idx_t track;
+    };
+    std::vector<PendingArpeggio> pendingArpeggios;
+
+    // Chord-level Trill ornaments (ORN tipo 0x35/0x36/0x37). Same pattern
+    // as PendingArpeggio: the chord does not exist yet when the ornament
+    // is parsed, so the attachment is deferred to a post-measure pass.
+    struct PendingTrill {
+        Fraction tick;
+        track_idx_t track;
+    };
+    std::vector<PendingTrill> pendingTrills;
+
+    // Chord-level Staccato markers (ORN tipo=0xC9). Same deferred pattern
+    // as ARPEGGIO/TRILL: Encore writes the ORN before the chord notes in
+    // MEAS order so the chord doesn't exist yet at parse time.
+    struct PendingStaccato {
+        Fraction tick;
+        track_idx_t track;
+    };
+    std::vector<PendingStaccato> pendingStaccatos;
+
+    // Section markers (Segno / Coda). Stored as size-16 ORN tipos 0xA2
+    // and 0xA6. Encore attaches them to the measure (not a chord), so
+    // the importer adds a Marker on the measure containing the ORN tick.
+    struct PendingMarker {
+        Fraction tick;
+        MarkerType type;
+    };
+    std::vector<PendingMarker> pendingMarkers;
 
     // Tuplet state per (staffIdx, msVoice) — keyed by MuseScore voice/track
     std::map<std::pair<int, int>, TupletTracker> tuplets;
@@ -200,6 +274,23 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     // tie-end note (same staffIdx, voice, pitch) is placed.  Persists across measures
     // to handle ties across barlines.
     std::map<std::tuple<int, int, int>, Note*> pendingTieNote;
+
+    // Lyric syllables queued for attachment to ChordRest segments on the
+    // same track. Each entry carries the syllable's raw Encore tick so we
+    // can anchor it to the closest chord at the end of the measure pass
+    // (a queue position would otherwise shift everything by the count of
+    // separator elements present in the binary).
+    struct PendingLyric {
+        int encTick;        // raw Encore tick within the current measure
+        String text;        // the syllable text (separators are pre-filtered)
+        bool hyphenBefore;  // a "-" LYRIC element preceded this syllable
+        bool hyphenAfter;   // a "-" LYRIC element follows this syllable
+    };
+    std::map<track_idx_t, std::vector<PendingLyric> > pendingLyrics;
+    // Tracks whether the next syllable enqueued on each track follows a
+    // hyphen separator. Reset by either a syllable consuming the flag, an
+    // empty-string LYRIC (word break in Encore), or a measure boundary.
+    std::map<track_idx_t, bool> nextLyricHyphenBefore;
 
     // faceValue-cumulative placement: accumulate written note durations per (staffIdx, msVoice).
     // Notes are placed at cumTick, not at MIDI tick positions.  MIDI ticks are used only
@@ -243,6 +334,76 @@ static void buildScore(MasterScore* score, const EncFile& enc)
         Measure* measure = toMeasure(mb);
         const EncMeasure& encMeas = enc.measures[measIdx];
         const Fraction measTick = measure->tick();
+
+        // closeTupletWithFill: like TupletTracker::closeTuplet, but for a
+        // partial group whose placedTicks does not fit a TDuration (e.g. 2 of
+        // 3 notes of a 3:2 triplet -> 1/12 actual), first synthesizes
+        // invisible rests inside the tuplet so the chord-sum equals canonical
+        // (baseLen * normalN). Without this, sanityCheck reports the missing
+        // slot as an incomplete measure, and Beam::calcBeamBreaks asserts on
+        // a non-TDuration tuplet ticks value. Uses the surrounding scope for
+        // measure / cumTick / score access.
+        auto closeTupletWithFill = [&](TupletTracker& tt,
+                                       std::pair<int, int> trackKey) {
+            if (!tt.inTuplet() || tt.placedTicks <= Fraction(0, 1)) {
+                tt.closeTuplet();
+                return;
+            }
+            const Fraction expectedTup = TDuration(tt.currentTuplet->baseLen()).fraction()
+                                         * tt.currentTuplet->ratio().denominator();
+            TDuration snap(tt.placedTicks, true /*truncate*/);
+            const bool fitsTD = snap.isValid()
+                                && snap.fraction() == tt.placedTicks;
+            if (tt.placedTicks < expectedTup && !fitsTD) {
+                // Two cases produce placedTicks < expected with a non-
+                // TDuration value:
+                //   - Strictly partial: fewer than actualN notes placed
+                //     (e.g. 2 of 3 in a 3:2 quarter triplet). Fill the
+                //     remaining slots with invisible rests so the tuplet's
+                //     chord-sum reaches canonical and beam layout stays
+                //     TDuration-safe.
+                //   - Mixed-value: actualN members placed but with a shorter
+                //     face duration than baseLen (e.g. quarter rest + eighth
+                //     + eighth in a 3:2 quarter triplet, face sum 1/2 vs
+                //     fullFaceSum 3/4). The tuplet is structurally complete;
+                //     filling more rests would exceed actualN. The remaining
+                //     content gap is left for the post-checkMeasure micro-
+                //     correction (maxDelta covers up to a triplet 16th = 1/24).
+                if (static_cast<int>(tt.currentTuplet->elements().size())
+                    < tt.actualN) {
+                    track_idx_t trk = static_cast<track_idx_t>(trackKey.first) * VOICES
+                                      + trackKey.second;
+                    DurationType baseLen = tt.currentTuplet->baseLen().type();
+                    Fraction perNote = TDuration(baseLen).fraction()
+                                       * Fraction(tt.normalN, tt.actualN);
+                    int safety = tt.actualN + 1;
+                    while (tt.placedTicks < expectedTup && safety-- > 0
+                           && static_cast<int>(tt.currentTuplet->elements().size())
+                              < tt.actualN
+                           && cumTick[trackKey] + perNote <= measure->ticks()) {
+                        Fraction restTick = measure->tick() + cumTick[trackKey];
+                        Segment* seg = measure->getSegment(SegmentType::ChordRest, restTick);
+                        if (seg->element(trk)) {
+                            break;
+                        }
+                        TDuration dur(baseLen);
+                        Rest* rest = Factory::createRest(seg, dur);
+                        rest->setTrack(trk);
+                        // setTicks takes the FACE duration; globalTicks() (the
+                        // tuplet-scaled actualTicks) is computed as
+                        // m_duration / tuplet->ratio() at read time.
+                        rest->setTicks(dur.fraction());
+                        rest->setVisible(false);
+                        rest->setTuplet(tt.currentTuplet);
+                        tt.currentTuplet->add(rest);
+                        seg->add(rest);
+                        tt.placedTicks += perNote;
+                        cumTick[trackKey] += perNote;
+                    }
+                }
+            }
+            tt.closeTuplet();
+        };
 
         // Reset per-measure state: tuplets, cumulative positions, chord tracking.
         for (auto& [key, tt] : tuplets) {
@@ -376,10 +537,17 @@ static void buildScore(MasterScore* score, const EncFile& enc)
         for (const EncMeasureElem* e : sortedElems) {
             EncElemType et = static_cast<EncElemType>(e->type);
 
-            // Skip notes/rests/ornaments at or beyond measure end.
-            if ((et == EncElemType::NOTE || et == EncElemType::REST
-                 || et == EncElemType::ORNAMENT)
+            // Skip notes/rests strictly at or beyond measure end (they would
+            // write past the bar). Ornaments at `tick == durTicks` mark the
+            // end-of-measure boundary (e.g. a WEDGESTART that visually starts
+            // on the bar line); they belong to the current measure and must
+            // not be discarded, otherwise hairpins like the f -> p diminuendo
+            // that spans m1 -> m3 in Beethoven Plectro disappear silently.
+            if ((et == EncElemType::NOTE || et == EncElemType::REST)
                 && e->tick >= encMeas.durTicks) {
+                continue;
+            }
+            if (et == EncElemType::ORNAMENT && e->tick > encMeas.durTicks) {
                 continue;
             }
 
@@ -389,8 +557,19 @@ static void buildScore(MasterScore* score, const EncFile& enc)
             if (staffIdx >= totalStaves) {
                 continue;
             }
+            // Encore stores system-level ornaments (dynamics, mordents,
+            // tremolos, technical markings, ...) with voice=4 (one slot
+            // above the four real voices). MuseScore has no voice 4, but
+            // these marks anchor visually to voice 0 of the same staff.
+            // Map any out-of-range voice down to 0 for ORNAMENT elements;
+            // every other element type (NOTE/REST/LYRIC/CHORD/TIE) keeps
+            // the strict drop -- they have no meaning past voice 3.
             if (voice >= static_cast<int>(VOICES)) {
-                continue;
+                if (et == EncElemType::ORNAMENT) {
+                    voice = 0;
+                } else {
+                    continue;
+                }
             }
 
             // Determine which MuseScore voice to use for this Encore (staffIdx, voice) slot.
@@ -527,10 +706,15 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                         gc->add(gnote);
 
                         // Articulation on a grace is rare but Encore can encode it.
-                        if (en->articulationUp == 0x20 || en->articulationDown == 0x20) {
-                            Articulation* art = Factory::createArticulation(gc);
-                            art->setSymId(SymId::fermataAbove);
-                            gc->add(art);
+                        for (quint8 ab : { en->articulationUp, en->articulationDown }) {
+                            for (SymId sid : encArticulation2SymIds(ab)) {
+                                if (sid == SymId::noSym) {
+                                    continue;
+                                }
+                                Articulation* art = Factory::createArticulation(gc);
+                                art->setSymId(sid);
+                                gc->add(art);
+                            }
                         }
 
                         pendingGraces[trackKey].push_back(gc);
@@ -763,7 +947,7 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                         // 3:2 triplet) are treated as plain non-tuplet notes to avoid
                         // partial-tuplet checkMeasure overshoot.
                         if (tt.groupFull()) {
-                            tt.closeTuplet();
+                            closeTupletWithFill(tt, trackKey);
                         }
                         if (!tt.inTuplet()) {
                             if (isStandardExplicit && !validTupletGroupMember.count(e)) {
@@ -800,10 +984,10 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                         tt.faceTicks += TDuration(dt).fraction();
                     } else {
                         if (tt.groupFull()) {
-                            tt.closeTuplet();
+                            closeTupletWithFill(tt, trackKey);
                         }
                         if (tt.inTuplet()) {
-                            tt.closeTuplet();                 // non-tuplet note exits group
+                            closeTupletWithFill(tt, trackKey);   // non-tuplet note exits group
                         }
                     }
 
@@ -883,6 +1067,30 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                 note->setTpcFromPitch();
                 chord->add(note);
 
+                // Fingering glyphs and the open-string marker travel in the
+                // same artic byte slot. Fingerings 1..5 (bytes 0x0D..0x11)
+                // become a Fingering text element; 0x46 becomes a
+                // Fingering with STRING_NUMBER style and text "0" so the
+                // MusicXML exporter emits <open-string/>.
+                for (quint8 ab : { en->articulationUp, en->articulationDown }) {
+                    int n = encArticByteToFingerNumber(ab);
+                    if (n > 0) {
+                        Fingering* fg = Factory::createFingering(note);
+                        fg->setTrack(track);
+                        fg->setXmlText(String::number(n));
+                        note->add(fg);
+                        break;
+                    }
+                    if (encArticByteIsOpenString(ab)) {
+                        Fingering* fg = Factory::createFingering(
+                            note, mu::engraving::TextStyleType::STRING_NUMBER);
+                        fg->setTrack(track);
+                        fg->setXmlText(u"0");
+                        note->add(fg);
+                        break;
+                    }
+                }
+
                 // Complete pending tie: if a prior note of same (staffIdx, voice, pitch)
                 // was a tie-start, create the Tie object from that note to this one.
                 {
@@ -899,11 +1107,111 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                     }
                 }
 
-                // Articulations
-                if (en->articulationUp == 0x20 || en->articulationDown == 0x20) {
-                    Articulation* art = Factory::createArticulation(chord);
-                    art->setSymId(SymId::fermataAbove);
-                    chord->add(art);
+                // Articulations (fermata, staccato, accent, marcato, tenuto,
+                // staccatissimo, up/down bow) and ornaments (trill-mark,
+                // mordent, inverted-mordent). Encore packs the glyph index
+                // in articulationUp / articulationDown and may pair two
+                // glyphs in a single byte. SymIds in the ornament family
+                // must be wrapped in an Ornament element (Articulation
+                // subclass) so MuseScore's MusicXML export emits them under
+                // <ornaments> instead of <articulations>.
+                auto isOrnamentSymId = [](SymId s) {
+                    return s == SymId::ornamentTrill
+                           || s == SymId::ornamentShortTrill
+                           || s == SymId::ornamentMordent;
+                };
+                auto isFermataSymId = [](SymId s) {
+                    return s == SymId::fermataAbove
+                           || s == SymId::fermataBelow
+                           || s == SymId::fermataShortAbove
+                           || s == SymId::fermataShortBelow
+                           || s == SymId::fermataLongAbove
+                           || s == SymId::fermataLongBelow;
+                };
+                Segment* chordSeg = chord->segment();
+                for (int slot = 0; slot < 2; ++slot) {
+                    const quint8 ab = slot == 0 ? en->articulationUp
+                                                : en->articulationDown;
+                    const bool isAbove = slot == 0;
+                    for (SymId sid : encArticulation2SymIds(ab)) {
+                        if (sid == SymId::noSym) {
+                            continue;
+                        }
+                        // Fermatas anchor on the ChordRest segment (not the
+                        // chord) and produce MusicXML <fermata>. Slot drives
+                        // the upright/inverted variant (articUp -> above,
+                        // articDown -> below).
+                        if (isFermataSymId(sid) && chordSeg) {
+                            Fermata* ferm = Factory::createFermata(chordSeg);
+                            ferm->setTrack(track);
+                            SymId resolved = sid;
+                            if (sid == SymId::fermataAbove || sid == SymId::fermataBelow) {
+                                resolved = isAbove ? SymId::fermataAbove
+                                                   : SymId::fermataBelow;
+                            } else if (sid == SymId::fermataShortAbove
+                                       || sid == SymId::fermataShortBelow) {
+                                resolved = isAbove ? SymId::fermataShortAbove
+                                                   : SymId::fermataShortBelow;
+                            }
+                            ferm->setSymId(resolved);
+                            ferm->setPlacement(isAbove ? mu::engraving::PlacementV::ABOVE
+                                                      : mu::engraving::PlacementV::BELOW);
+                            ferm->setPropertyFlags(mu::engraving::Pid::PLACEMENT,
+                                                   mu::engraving::PropertyFlags::UNSTYLED);
+                            chordSeg->add(ferm);
+                            continue;
+                        }
+                        // Other ornaments (trill, mordent, ...) need to be
+                        // wrapped in Ornament so MusicXML emits them under
+                        // <ornaments>. Plain articulations stay as
+                        // Articulation under <articulations>.
+                        Articulation* art = isOrnamentSymId(sid)
+                            ? static_cast<Articulation*>(Factory::createOrnament(chord))
+                            : Factory::createArticulation(chord);
+                        art->setSymId(sid);
+                        chord->add(art);
+                    }
+                }
+                // Single-note tremolos. Encore encodes the stroke count in
+                // the low nibble of articulationUp / articulationDown for
+                // bytes that the regular articulation table does not match.
+                // Observed patterns in encore-symbols.enc:
+                //   m1 tick=480: au=0x41 -> tremolo 1 stroke
+                //   m2 tick=  0: ad=0x42 -> tremolo 2 strokes
+                //   m2 tick=240: ad=0x03 -> tremolo 3 strokes
+                //   m2 tick=480: ad=0x43 -> tremolo 3 strokes (REF: 4, off by 1)
+                auto tremoloStrokeFromByte = [](quint8 b) -> int {
+                    // Encore packs single-note tremolos into the artic byte
+                    // with stroke count in the low nibble. The 0x40 flag
+                    // appears for stroke counts 1..3 (0x41/0x42/0x43); a bare
+                    // 0x03 also encodes "tremolo with 3 strokes" (m2 tick=240
+                    // in encore-symbols.enc). Stop at 3 strokes: 0x44 and up
+                    // are technical markings (fingering, thumb-position,
+                    // harmonic, open-string), not tremolos. 4-stroke
+                    // tremolos appear stored as 0x43 in the corpus and are
+                    // rendered as 3 strokes for now.
+                    if (b == 0x41 || b == 0x42 || b == 0x43) {
+                        return b & 0x0F;
+                    }
+                    if (b == 0x03) {
+                        return 3;
+                    }
+                    return 0;
+                };
+                int strokes = std::max(tremoloStrokeFromByte(en->articulationUp),
+                                       tremoloStrokeFromByte(en->articulationDown));
+                if (strokes > 0 && !chord->tremoloSingleChord()) {
+                    TremoloSingleChord* trem = Factory::createTremoloSingleChord(chord);
+                    TremoloType type = TremoloType::R8;
+                    switch (strokes) {
+                    case 1: type = TremoloType::R8;  break;
+                    case 2: type = TremoloType::R16; break;
+                    case 3: type = TremoloType::R32; break;
+                    case 4: type = TremoloType::R64; break;
+                    default: break;
+                    }
+                    trem->setTremoloType(type);
+                    chord->add(trem);
                 }
 
                 // Register tie-start if a TIE element exists at this note's position, OR
@@ -982,7 +1290,7 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                     }
                     if (actualNr > 0 && normalNr > 0) {
                         if (tt.groupFull()) {
-                            tt.closeTuplet();
+                            closeTupletWithFill(tt, trackKey);
                         }
                         if (!tt.inTuplet()) {
                             if (isStdExplicitR && !validTupletGroupMember.count(e)) {
@@ -1007,10 +1315,10 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                         tt.faceTicks += TDuration(dt).fraction();
                     } else {
                         if (tt.groupFull()) {
-                            tt.closeTuplet();
+                            closeTupletWithFill(tt, trackKey);
                         }
                         if (tt.inTuplet()) {
-                            tt.closeTuplet();
+                            closeTupletWithFill(tt, trackKey);
                         }
                     }
 
@@ -1071,45 +1379,99 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                 }
             }
 
+            // -- Lyrics --
+            // Encore stores lyric syllables, hyphen-continuation markers
+            // ("-") and word-break markers ("") as separate LYRIC elements,
+            // each with its own tick. Treating "-" / "" as plain syllables
+            // shifts every following syllable by one chord-rest slot. We
+            // therefore filter the stream:
+            //   - "-" never produces a Lyrics; it just marks the previous
+            //     syllable as hyphenated and the next as having a
+            //     hyphen-before flag (mapped to LyricsSyllabic later).
+            //   - "" is a word boundary; it never produces a Lyrics and
+            //     resets the hyphen-before flag for the next syllable.
+            //   - real syllables enter the queue tagged with the hyphen
+            //     state and their raw Encore tick so the attach pass can
+            //     anchor them on the closest chord, instead of consuming
+            //     the next available slot in order.
+            if (et == EncElemType::LYRIC) {
+                const EncLyric* el = static_cast<const EncLyric*>(e);
+                const String text(el->text);
+                auto& queue = pendingLyrics[track];
+                if (text == u"-") {
+                    if (!queue.empty()) {
+                        queue.back().hyphenAfter = true;
+                    }
+                    nextLyricHyphenBefore[track] = true;
+                } else if (text.isEmpty()) {
+                    nextLyricHyphenBefore[track] = false;
+                } else {
+                    PendingLyric pl;
+                    pl.encTick = static_cast<int>(e->tick);
+                    pl.text = text;
+                    auto it = nextLyricHyphenBefore.find(track);
+                    pl.hyphenBefore = (it != nextLyricHyphenBefore.end()) && it->second;
+                    pl.hyphenAfter = false;
+                    nextLyricHyphenBefore[track] = false;
+                    queue.push_back(std::move(pl));
+                }
+            }
+
             // -- Ornaments (slurs, hairpins, tempo, staff text) --
             if (et == EncElemType::ORNAMENT) {
                 const EncOrnament* eo = static_cast<const EncOrnament*>(e);
-                auto key = std::make_pair(staffIdx, static_cast<int>(eo->xoffset));
 
                 switch (eo->ornType()) {
-                case EncOrnamentType::SLURSTART:
+                case EncOrnamentType::SLURSTART: {
+                    // Encore .enc binaries do NOT emit SLURSTOP. alMezuro is the
+                    // count of measures forward to the end measure. Endpoint is
+                    // resolved in a post-pass once destination measures are
+                    // populated; see the loop after the main measure loop.
+                    int endIdx = measIdx + static_cast<int>(eo->alMezuro);
+                    if (endIdx < 0 || endIdx >= static_cast<int>(measuresByIdx.size())) {
+                        endIdx = measIdx;
+                    }
+                    pendingSlurs.push_back({ elemTick, track, endIdx });
+                    break;
+                }
                 case EncOrnamentType::SLURSTOP:
-                    // TODO: slur import disabled until reliable endpoint matching is implemented.
-                    // Corrupted Encore files can create slurs with invalid endpoints causing NaN.
+                    // Encore .enc files do not contain SLURSTOP markers; the
+                    // endpoint is encoded inside the SLURSTART (see above).
                     break;
                 case EncOrnamentType::WEDGESTART: {
+                    // Encore .enc files do NOT emit a separate WEDGESTOP element.
+                    // The endpoint lives inside the WEDGESTART itself: alMezuro is
+                    // the count of measures forward to the end measure. Resolve
+                    // the end tick now (anchored at the end of the target measure)
+                    // instead of waiting for a stop event that never arrives.
+                    int endIdx = measIdx + static_cast<int>(eo->alMezuro);
+                    if (endIdx < 0 || endIdx >= static_cast<int>(measuresByIdx.size())) {
+                        endIdx = measIdx;
+                    }
+                    Measure* endMeas = measuresByIdx[endIdx];
+                    Fraction endTick = endMeas->tick() + endMeas->ticks();
+                    if (endTick <= elemTick) {
+                        // Zero or negative span: drop cleanly rather than
+                        // asserting in Spanner::setTicks().
+                        break;
+                    }
                     Hairpin* hp = Factory::createHairpin(score->dummy()->segment());
                     hp->setTrack(track);
+                    hp->setTrack2(track);
                     hp->setTick(elemTick);
+                    hp->setTick2(endTick);
                     // speguleco: 0=crescendo, other=diminuendo (from enc2ly)
                     hp->setHairpinType(eo->speguleco == 0
                                        ? HairpinType::CRESC_HAIRPIN
                                        : HairpinType::DIM_HAIRPIN);
                     score->addElement(hp);
-                    pendingHairpins[key] = hp;
                     break;
                 }
-                case EncOrnamentType::WEDGESTOP: {
-                    auto it = pendingHairpins.find(key);
-                    if (it != pendingHairpins.end()) {
-                        if (elemTick > it->second->tick()) {
-                            it->second->setTrack2(track);
-                            it->second->setTick2(elemTick);
-                        } else {
-                            // Zero or negative span: stop tick not after start.
-                            // Drop the hairpin rather than asserting in setTicks().
-                            score->removeElement(it->second);
-                            delete it->second;
-                        }
-                        pendingHairpins.erase(it);
-                    }
+                case EncOrnamentType::WEDGESTOP:
+                    // Encore .enc files do not contain WEDGESTOP markers; the
+                    // endpoint is encoded inside the WEDGESTART. Kept as a no-op
+                    // in case a future Encore variant ever emits one.
                     break;
-                }
                 case EncOrnamentType::TEMPO: {
                     if (eo->tempo > 0) {
                         Segment* seg = measure->getSegment(SegmentType::ChordRest, elemTick);
@@ -1126,52 +1488,253 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                     }
                     break;
                 }
-                case EncOrnamentType::STAFFTEXT:
-                    // not yet implemented
+                case EncOrnamentType::ARPEGGIO: {
+                    // Encore writes the ORN before the chord's notes in MEAS
+                    // order, so the chord does not exist yet at this point.
+                    // Queue the intent; a post-measure pass resolves it once
+                    // the chord segment is populated.
+                    pendingArpeggios.push_back({ elemTick, track });
                     break;
+                }
+                case EncOrnamentType::TRILL_START:
+                case EncOrnamentType::TRILL_ALT: {
+                    // Same deferred attachment as ARPEGGIO -- the chord is
+                    // not built yet at this point in the element loop.
+                    // TRILL_END (0x35) is dropped because it marks the end
+                    // of a trill+wavy-line span; the start markers already
+                    // place the visible trill-mark glyph.
+                    pendingTrills.push_back({ elemTick, track });
+                    break;
+                }
+                case EncOrnamentType::TRILL_END:
+                    break;
+                case EncOrnamentType::SEGNO:
+                case EncOrnamentType::TO_CODA:
+                case EncOrnamentType::CODA: {
+                    // Section markers attach to a measure, not a chord, so
+                    // they don't need the chord-deferred pattern. Queue the
+                    // tick + marker type; the post-measure pass adds the
+                    // Marker to the measure that contains the tick.
+                    MarkerType mt = MarkerType::CODA;
+                    if (eo->ornType() == EncOrnamentType::SEGNO) {
+                        mt = MarkerType::SEGNO;
+                    } else if (eo->ornType() == EncOrnamentType::TO_CODA) {
+                        mt = MarkerType::TOCODA;
+                    }
+                    pendingMarkers.push_back({ elemTick, mt });
+                    break;
+                }
+                case EncOrnamentType::STACCATO: {
+                    // Encore stores chord-level staccato as a separate ORN
+                    // tipo=0xC9 at the same tick as the chord. Its own
+                    // MusicXML exporter drops 0xC9 entirely, but the dot
+                    // is visible in Encore's display. Defer attachment
+                    // like ARPEGGIO/TRILL because the chord segment is
+                    // not built yet at this point in the element loop.
+                    pendingStaccatos.push_back({ elemTick, track });
+                    break;
+                }
+                case EncOrnamentType::DYN_PPP:
+                case EncOrnamentType::DYN_PP:
+                case EncOrnamentType::DYN_P:
+                case EncOrnamentType::DYN_MP:
+                case EncOrnamentType::DYN_MF:
+                case EncOrnamentType::DYN_F:
+                case EncOrnamentType::DYN_FF:
+                case EncOrnamentType::DYN_FFF:
+                case EncOrnamentType::DYN_SFZ:
+                case EncOrnamentType::DYN_SFFZ:
+                case EncOrnamentType::DYN_FP:
+                case EncOrnamentType::DYN_FZ:
+                case EncOrnamentType::DYN_SF: {
+                    // Size-16 dynamic markings. The size-16 ORN payload only
+                    // carries the tipo byte reliably (later fields run past
+                    // the element boundary in the parser); the tipo alone
+                    // selects the DynamicType.
+                    DynamicType dt = DynamicType::OTHER;
+                    switch (eo->ornType()) {
+                    case EncOrnamentType::DYN_PPP:  dt = DynamicType::PPP;  break;
+                    case EncOrnamentType::DYN_PP:   dt = DynamicType::PP;   break;
+                    case EncOrnamentType::DYN_P:    dt = DynamicType::P;    break;
+                    case EncOrnamentType::DYN_MP:   dt = DynamicType::MP;   break;
+                    case EncOrnamentType::DYN_MF:   dt = DynamicType::MF;   break;
+                    case EncOrnamentType::DYN_F:    dt = DynamicType::F;    break;
+                    case EncOrnamentType::DYN_FF:   dt = DynamicType::FF;   break;
+                    case EncOrnamentType::DYN_FFF:  dt = DynamicType::FFF;  break;
+                    case EncOrnamentType::DYN_SFZ:  dt = DynamicType::SFZ;  break;
+                    case EncOrnamentType::DYN_SFFZ: dt = DynamicType::SFFZ; break;
+                    case EncOrnamentType::DYN_FP:   dt = DynamicType::FP;   break;
+                    case EncOrnamentType::DYN_FZ:   dt = DynamicType::FZ;   break;
+                    case EncOrnamentType::DYN_SF:   dt = DynamicType::SF;   break;
+                    default: break;
+                    }
+                    Segment* seg = measure->getSegment(SegmentType::ChordRest, elemTick);
+                    if (!seg) {
+                        seg = measure->getSegment(SegmentType::ChordRest, measTick);
+                    }
+                    Dynamic* dyn = Factory::createDynamic(seg);
+                    dyn->setTrack(track);
+                    dyn->setDynamicType(dt);
+                    dyn->setXmlText(Dynamic::dynamicText(dt));
+                    if (eo->yoffset < 0) {
+                        dyn->setPlacement(mu::engraving::PlacementV::BELOW);
+                        dyn->setPropertyFlags(mu::engraving::Pid::PLACEMENT, mu::engraving::PropertyFlags::UNSTYLED);
+                    }
+                    seg->add(dyn);
+                    break;
+                }
+                case EncOrnamentType::STAFFTEXT: {
+                    // STAFFTEXT 0x1E is a position-only marker; the text
+                    // payload lives in the TEXT block and is referenced by
+                    // the ornament's tind byte (+32).
+                    const int textIdx = static_cast<int>(eo->tind);
+                    if (textIdx < 0
+                        || textIdx >= static_cast<int>(enc.textBlock.entries.size())) {
+                        break;
+                    }
+                    QString text = enc.textBlock.entries[textIdx];
+                    if (text.isEmpty()) {
+                        break;
+                    }
+                    Segment* seg = measure->getSegment(SegmentType::ChordRest, elemTick);
+                    if (!seg) {
+                        seg = measure->getSegment(SegmentType::ChordRest, measTick);
+                    }
+                    StaffText* st = Factory::createStaffText(seg);
+                    st->setTrack(track);
+                    st->setXmlText(String(text));
+                    // Encore stores text y-offset with Cartesian sign (positive =
+                    // upward). When yoffset is below the staff baseline (negative
+                    // in that convention) the text was placed under the system in
+                    // Encore, e.g. "ten" markers in Beethoven Plectro m3. Mirror
+                    // that into MuseScore's PlacementV.
+                    if (eo->yoffset < 0) {
+                        st->setPlacement(mu::engraving::PlacementV::BELOW);
+                        st->setPropertyFlags(mu::engraving::Pid::PLACEMENT, mu::engraving::PropertyFlags::UNSTYLED);
+                    }
+                    seg->add(st);
+                    break;
+                }
                 default:
                     break;
                 }
             }
 
             // -- Key changes --
+            // KEYCHANGE elements can carry tipo=0 (= C major / A minor, 0 fifths).
+            // A modulation BACK to no accidentals is a legitimate key change, so
+            // we render it like any other; the previous "skip tipo == 0" guard
+            // dropped ~24 of 40 changes on Beethoven's Plectro arrangement.
             if (et == EncElemType::KEYCHANGE) {
                 const EncKeyChange* ekc = static_cast<const EncKeyChange*>(e);
-                if (ekc->tipo != 0) {
-                    Key newKey = Key(encKeyToFifths(ekc->tipo));
-                    Staff* staff = score->staff(staffIdx);
-                    if (!staff) {
-                        continue;
-                    }
-                    KeySigEvent ke;
-                    ke.setConcertKey(newKey);
-                    ke.setKey(newKey);
-                    staff->setKey(elemTick, ke);
-                    Segment* seg = measure->getSegment(SegmentType::KeySig, elemTick);
-                    KeySig* ks = Factory::createKeySig(seg);
-                    ks->setTrack(track);
-                    ks->setKey(newKey, newKey);
-                    seg->add(ks);
+                Staff* staff = score->staff(staffIdx);
+                if (!staff) {
+                    continue;
                 }
+                Key newKey = Key(encKeyToFifths(ekc->tipo));
+                KeySigEvent ke;
+                ke.setConcertKey(newKey);
+                ke.setKey(newKey);
+                staff->setKey(elemTick, ke);
+                Segment* seg = measure->getSegment(SegmentType::KeySig, elemTick);
+                KeySig* ks = Factory::createKeySig(seg);
+                ks->setTrack(track);
+                ks->setKey(newKey, newKey);
+                seg->add(ks);
             }
         }
 
-        // Before checkMeasure: correct ticks on any tuplets still open at measure end
-        // whose actual placed content differs from the default baseLen*normalN.
-        // checkMeasure uses tuplet->ticks() via skipTuplet(); an incorrect value
-        // inserts fill rests at wrong positions or misses gaps.
-        // beam.cpp uses TDuration(ticks, true) so non-standard fractions are safe.
+        // Before checkMeasure: finalize any tuplets still open at measure end.
+        // closeTupletWithFill fills partial groups whose placedTicks does not
+        // fit a TDuration, then closes the tracker; TupletTracker::closeTuplet
+        // handles the remaining cases (shrink to placedTicks when it fits, or
+        // leave canonical for full / mixed-overshoot groups). Required before
+        // checkMeasure -- otherwise the canonical tuplet ticks would skip
+        // past the actual placed content and leave the measure incomplete.
         for (auto& [key, tt] : tuplets) {
-            if (tt.inTuplet() && tt.placedTicks > Fraction(0, 1)) {
-                const Fraction expected = TDuration(tt.currentTuplet->baseLen()).fraction()
-                                          * tt.currentTuplet->ratio().denominator();
-                const bool mixedOvershoot = (tt.placedTicks > expected)
-                                            && (tt.faceTicks > tt.fullFaceSum);
-                if (tt.placedTicks < expected || mixedOvershoot) {
-                    tt.currentTuplet->setTicks(tt.placedTicks);
-                }
-            }
+            closeTupletWithFill(tt, key);
         }
+
+        // Attach queued lyric syllables to ChordRest segments by tick. The
+        // queue has already filtered out "-" and "" separator elements; each
+        // remaining entry carries the raw Encore tick the syllable was
+        // anchored to in the binary, and a hyphen flag pair that determines
+        // its LyricsSyllabic when rendered. For every Chord segment in this
+        // measure we pick the syllable whose encTick is closest to the
+        // segment tick, within half a beat. Leftover lyrics (the binary
+        // sometimes places end-of-measure syllables past the bar) persist
+        // to the next measure's attach pass.
+        // Encore PPQ derives from beatTicks (quarter-note tick count). For
+        // a 240-PPQ quarter, 480 raw Encore ticks per whole note; one
+        // MuseScore tick (DIVISION=480 per quarter) == 2 Encore ticks.
+        const int encTicksPerQuarter = encMeas.beatTicks
+                                       ? static_cast<int>(encMeas.beatTicks) : 240;
+        const int matchThreshold = encTicksPerQuarter / 2;   // half-beat window
+        for (auto& [lyTrack, entries] : pendingLyrics) {
+            if (entries.empty()) {
+                continue;
+            }
+            // Encore stores multi-verse lyrics on different voices of the
+            // same staff: verse 1 = voice 0, verse 2 = voice 1, etc. Within
+            // MuseScore every verse anchors to the same voice-0 chord and
+            // uses Lyrics::setVerse() to disambiguate verse number.
+            const int lyStaffIdx = static_cast<int>(lyTrack) / VOICES;
+            const int lyVerseNo = static_cast<int>(lyTrack) % VOICES;
+            const track_idx_t chordTrack = static_cast<track_idx_t>(lyStaffIdx) * VOICES;
+            std::vector<bool> consumed(entries.size(), false);
+            for (Segment* s = measure->first(SegmentType::ChordRest);
+                 s; s = s->next(SegmentType::ChordRest)) {
+                EngravingItem* el = s->element(chordTrack);
+                if (!el || !el->isChord()) {
+                    continue;
+                }
+                // Convert segment tick (relative to measure start) to raw
+                // Encore PPQ for comparison with the queued lyric ticks.
+                const Fraction relTick = s->tick() - measure->tick();
+                const int segEncTick = (relTick.numerator() * encTicksPerQuarter * 4)
+                                       / std::max(1, relTick.denominator());
+                int bestIdx = -1;
+                int bestDelta = matchThreshold + 1;
+                for (size_t i = 0; i < entries.size(); ++i) {
+                    if (consumed[i]) {
+                        continue;
+                    }
+                    const int delta = std::abs(entries[i].encTick - segEncTick);
+                    if (delta < bestDelta) {
+                        bestDelta = delta;
+                        bestIdx = static_cast<int>(i);
+                    }
+                }
+                if (bestIdx < 0) {
+                    continue;
+                }
+                Chord* c = toChord(el);
+                Lyrics* ly = Factory::createLyrics(c);
+                ly->setTrack(chordTrack);
+                ly->setVerse(lyVerseNo);
+                ly->setXmlText(entries[bestIdx].text);
+                LyricsSyllabic syll = LyricsSyllabic::SINGLE;
+                if (entries[bestIdx].hyphenBefore && entries[bestIdx].hyphenAfter) {
+                    syll = LyricsSyllabic::MIDDLE;
+                } else if (entries[bestIdx].hyphenBefore) {
+                    syll = LyricsSyllabic::END;
+                } else if (entries[bestIdx].hyphenAfter) {
+                    syll = LyricsSyllabic::BEGIN;
+                }
+                ly->setSyllabic(syll);
+                c->add(ly);
+                consumed[bestIdx] = true;
+            }
+            // Lyric ticks are encoded relative to the measure they live in,
+            // so unmatched leftovers cannot anchor anywhere in a later
+            // measure -- discard them rather than letting the queue grow.
+            entries.clear();
+        }
+        // The hyphen-after flag on the trailing syllable is preserved as
+        // part of the just-rendered Lyrics. The hyphen-before flag for the
+        // next syllable, however, lives in nextLyricHyphenBefore and must
+        // survive bar lines (e.g. Encore's "RO -" at the end of a measure
+        // carrying the hyphen into the next bar's first syllable).
 
         // Fill any remaining gaps with invisible rests.
         // With faceValue-cumulative placement, notes always land at canonical positions
@@ -1180,20 +1743,25 @@ static void buildScore(MasterScore* score, const EncFile& enc)
             measure->checkMeasure(static_cast<staff_idx_t>(si));
         }
 
-        // Post-checkMeasure micro-correction: fix tiny over/undershoots (≤ 1/48)
+        // Post-checkMeasure micro-correction: fix tiny over/undershoots (≤ 1/24)
         // that result from non-standard gaps that toRhythmicDurationList cannot
         // fill or match exactly.
         //
-        // Overshoot (voiceSum > mLen ≤ 1/48): gap rests from cascade fills went
+        // Overshoot (voiceSum > mLen ≤ 1/24): gap rests from cascade fills went
         //   1/64+1/256+1/1024 = 21/1024 when the actual gap was smaller (or zero).
         //   Remove gap rests smallest-first until voiceSum ≤ mLen.
         //
-        // Undershoot (voiceSum < mLen ≤ 1/48): cascade left a sub-standard residual
+        // Undershoot (voiceSum < mLen ≤ 1/24): cascade left a sub-standard residual
         //   (e.g. 1/3072 = 1/48 - 21/1024). Add a V_MEASURE gap rest for the exact
         //   deficit (V_MEASURE accepts non-standard ticks without TDuration assertion).
+        //
+        // The 1/24 ceiling covers triplet 16th gaps left by mixed-value tuplets
+        // (Q rest + eighth + eighth in a 3:2 quarter triplet contributes 1/3
+        // instead of canonical 1/2, leaving the measure 1/24 short after the
+        // following non-tuplet element forces an early close).
         {
             const Fraction mLen_fix = measure->ticks();
-            const Fraction maxDelta(1, 48);
+            const Fraction maxDelta(1, 24);
             for (int si = 0; si < totalStaves; ++si) {
                 for (voice_idx_t v = 0; v < VOICES; ++v) {
                     track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
@@ -1269,12 +1837,134 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     }
     pendingGraces.clear();
 
-    // Remove open-ended slurs/hairpins (no matching STOP ornament).
-    for (auto& [key, slur] : pendingSlurs) {
-        score->removeElement(slur);
+    // Resolve SLURSTART intents collected during the measure pass. Encore
+    // .enc binaries do not contain SLURSTOP markers; the endpoint measure
+    // is in alMezuro. xoffset2 (a layout x, not a tick) is not used here:
+    // we anchor on the last ChordRest in the target measure on this track,
+    // which is correct for most slurs and acceptable for the rest until a
+    // proper xoffset -> tick mapping is wired in.
+    for (const PendingSlur& ps : pendingSlurs) {
+        if (ps.endMeasIdx < 0 || ps.endMeasIdx >= static_cast<int>(measuresByIdx.size())) {
+            continue;
+        }
+        Measure* endMeas = measuresByIdx[ps.endMeasIdx];
+        Segment* lastSeg = nullptr;
+        for (Segment* s = endMeas->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            if (s->element(ps.track)) {
+                lastSeg = s;
+            }
+        }
+        if (!lastSeg) {
+            continue;
+        }
+        Fraction endTick = lastSeg->tick();
+        if (endTick <= ps.startTick) {
+            continue;   // zero or negative span: drop
+        }
+        Slur* slur = Factory::createSlur(score->dummy());
+        slur->setTrack(ps.track);
+        slur->setTrack2(ps.track);
+        slur->setTick(ps.startTick);
+        slur->setTick2(endTick);
+        score->addElement(slur);
     }
-    for (auto& [key, hp] : pendingHairpins) {
-        score->removeElement(hp);
+
+    // Resolve ARPEGGIO intents collected during the measure pass. The
+    // ornament element is written before the chord notes inside MEAS, so
+    // attachment has to wait until the chord segment exists.
+    for (const PendingArpeggio& pa : pendingArpeggios) {
+        Measure* m = score->tick2measure(pa.tick);
+        if (!m) {
+            continue;
+        }
+        Segment* seg = m->findSegment(SegmentType::ChordRest, pa.tick);
+        if (!seg) {
+            continue;
+        }
+        EngravingItem* el = seg->element(pa.track);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        Chord* c = toChord(el);
+        if (c->arpeggio()) {
+            continue;   // chord already carries an arpeggio
+        }
+        Arpeggio* arp = Factory::createArpeggio(c);
+        arp->setTrack(pa.track);
+        arp->setArpeggioType(ArpeggioType::NORMAL);
+        c->add(arp);
+    }
+
+    // Resolve SEGNO / CODA section markers on their measures.
+    for (const PendingMarker& pm : pendingMarkers) {
+        Measure* m = score->tick2measure(pm.tick);
+        if (!m) {
+            continue;
+        }
+        Marker* mk = Factory::createMarker(m);
+        mk->setMarkerType(pm.type);
+        mk->setTrack(0);
+        m->add(mk);
+    }
+
+    // Resolve STACCATO intents collected during the measure pass.
+    // Add the SymId::articStaccatoAbove articulation if the chord
+    // does not already carry one (the per-note artic byte 0x1D
+    // produces the same glyph and we don't want duplicates).
+    for (const PendingStaccato& ps : pendingStaccatos) {
+        Measure* m = score->tick2measure(ps.tick);
+        if (!m) {
+            continue;
+        }
+        Segment* seg = m->findSegment(SegmentType::ChordRest, ps.tick);
+        if (!seg) {
+            continue;
+        }
+        EngravingItem* el = seg->element(ps.track);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        Chord* c = toChord(el);
+        bool alreadyHas = false;
+        for (Articulation* a : c->articulations()) {
+            if (a->symId() == SymId::articStaccatoAbove
+                || a->symId() == SymId::articStaccatoBelow) {
+                alreadyHas = true;
+                break;
+            }
+        }
+        if (alreadyHas) {
+            continue;
+        }
+        Articulation* art = Factory::createArticulation(c);
+        art->setTrack(ps.track);
+        art->setSymId(SymId::articStaccatoAbove);
+        c->add(art);
+    }
+
+    // Resolve TRILL intents collected during the measure pass. Same
+    // pattern as ARPEGGIO -- the source ORN element is written before
+    // the chord's notes inside MEAS, so the chord segment only exists
+    // after the per-measure pass completes.
+    for (const PendingTrill& pt : pendingTrills) {
+        Measure* m = score->tick2measure(pt.tick);
+        if (!m) {
+            continue;
+        }
+        Segment* seg = m->findSegment(SegmentType::ChordRest, pt.tick);
+        if (!seg) {
+            continue;
+        }
+        EngravingItem* el = seg->element(pt.track);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        Chord* c = toChord(el);
+        Ornament* orn = Factory::createOrnament(c);
+        orn->setTrack(pt.track);
+        orn->setSymId(SymId::ornamentTrill);
+        c->add(orn);
     }
 
     // Remove slurs whose start or end note doesn't exist (corrupted files).

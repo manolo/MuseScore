@@ -83,7 +83,8 @@ enum class EncBarlineType : quint8 {
     DOUBLEL     = 3,
     REPEATEND   = 4,
     FINAL       = 5,
-    DOUBLER     = 6
+    DOUBLER     = 6,
+    DOTTED      = 8
 };
 
 enum class EncRepeatType : quint8 {
@@ -105,9 +106,58 @@ enum class EncOrnamentType : quint8 {
     WEDGESTART = 0x1D,
     STAFFTEXT  = 0x1E,
     SLURSTART  = 0x21,
+    ARPEGGIO   = 0x22,
+    // Trill-line ornaments. encore-symbols.enc m22 carries three size-28
+    // ORN tipos for two adjacent trill+wavy-line spans: 0x36 starts the
+    // first trill, 0x37 starts the second, and 0x35 is the end-of-line
+    // marker (does NOT add a trill-mark itself). A follow-up commit will
+    // promote 0x36/0x37 to proper Trill spanners with the wavy-line
+    // companion once alMezuro semantics are confirmed.
+    TRILL_END   = 0x35,
+    TRILL_START = 0x36,
+    TRILL_ALT   = 0x37,
+    // Section navigation markers stored as size-16 ORN tipos.
+    // 0xA2 = segno, 0xA5 = to coda, 0xA6 = coda. The position within
+    // the measure matches Encore's visual placement (start vs end of
+    // measure).
+    SEGNO       = 0xA2,
+    TO_CODA     = 0xA5,
+    CODA        = 0xA6,
+    // Per-chord staccato. Encore emits one size-16 ORN tipo=0xC9 next to
+    // every staccato'd chord (voice 0, staff in the low byte). The dot
+    // is rendered by Encore's display engine but its own MusicXML
+    // exporter drops 0xC9 entirely, so the reference XML shows only the
+    // rare cases where the artic byte (0x1D) holds the glyph directly.
+    // 1813 occurrences in Beethoven Plectro account for nearly every
+    // visible staccato in the score; users like to see them in MuseScore.
+    STACCATO    = 0xC9,
     TEMPO      = 0x32,
     SLURSTOP   = 0x41,
-    WEDGESTOP  = 0x4D
+    WEDGESTOP  = 0x4D,
+    // Size-16 dynamic markings. The mapping was confirmed by walking
+    // encore-symbols.enc measure by measure against Encore's own MusicXML
+    // export (`encore-symbols.xml`):
+    //   m1 0x80 0x81 0x82 0x83 ... 0x84 -> ppp, pp, p, mp, mf
+    //   m2 0x85 0x86 ... 0x87 0x88 0x89 -> f,  ff, fff, sfz, sffz
+    //   m3 0x8a ...                     -> fp
+    // The remaining dynamics in the reference (fz, sf) must live in
+    // tipos not yet observed; they stay decoded as the general dynamic
+    // pattern via the OTHER fallback in the importer.
+    DYN_PPP    = 0x80,
+    DYN_PP     = 0x81,
+    DYN_P      = 0x82,
+    DYN_MP     = 0x83,
+    DYN_MF     = 0x84,
+    DYN_F      = 0x85,
+    DYN_FF     = 0x86,
+    DYN_FFF    = 0x87,
+    DYN_SFZ    = 0x88,
+    DYN_SFFZ   = 0x89,
+    DYN_FP     = 0x8A,
+    // High-range dynamic tipos seen only in encore-symbols.enc m3
+    // ([fp, fz, sf] -> [0x8A, 0xAA, 0xAB]):
+    DYN_FZ     = 0xAA,
+    DYN_SF     = 0xAB
 };
 
 enum class EncAccidentalType : quint8 {
@@ -203,6 +253,7 @@ struct EncChordSym : EncMeasureElem {
 struct EncOrnament : EncMeasureElem {
     // Field names follow the Encore binary format notation used throughout the spec
     quint8 tipo      { 0 };
+    qint16 yoffset   { 0 };  // signed 16-bit Cartesian y (positive = upward in Encore)
     quint8 alMezuro  { 0 };
     quint8 xoffset2  { 0 };
     quint8 speguleco { 0 };
@@ -219,6 +270,9 @@ struct EncOrnament : EncMeasureElem {
 };
 
 struct EncLyric : EncMeasureElem {
+    QString text;
+    quint8 kie { 0 };   // location/anchor byte (similar to xoffset)
+
     using EncMeasureElem::EncMeasureElem;
 
     bool read(QDataStream& ds) override;
@@ -293,7 +347,7 @@ struct EncMeasure {
 
     EncBarlineType startBarline() const { return static_cast<EncBarlineType>(barTypeStart); }
     EncBarlineType endBarline() const { return static_cast<EncBarlineType>(barTypeEnd); }
-    EncRepeatType repeatMark() const { return static_cast<EncRepeatType>((coda >> 8) & 0xFF); }
+    EncRepeatType repeatMark() const { return static_cast<EncRepeatType>(coda & 0xFF); }
 
     bool read(QDataStream& ds, const quint32 vs, bool oldFormat, bool veryOldFormat);
     void calculateRealDurations();
@@ -352,13 +406,27 @@ struct EncLine {
 
 QString readTextItem(QDataStream& ds, EncCharSize cs);
 
+// Header/footer line in the TITL block. The 30-byte line prefix includes a
+// horizontal-alignment byte at +14 (0x02 = right, 0x04 = left, 0x06 = center)
+// that picks which page corner the text lands on.
+enum class EncTextAlign : quint8 {
+    LEFT   = 0x04,
+    CENTER = 0x06,
+    RIGHT  = 0x02
+};
+
+struct EncHeaderFooter {
+    QString text;
+    EncTextAlign align { EncTextAlign::LEFT };
+};
+
 struct EncTitle {
     QString title;
     std::vector<QString> subtitle;
     std::vector<QString> instruction;
     std::vector<QString> author;
-    std::vector<QString> header;
-    std::vector<QString> footer;
+    std::vector<EncHeaderFooter> header;
+    std::vector<EncHeaderFooter> footer;
     std::vector<QString> copyright;
 
     bool read(QDataStream& ds, quint32 vs, EncCharSize cs);
@@ -395,12 +463,31 @@ bool isKnownMagic(const QString& magic);
 QString findNextKnownMagic(QDataStream& ds);
 void addSpannerEnds(std::vector<EncMeasure>& measures);
 
+// TEXT block: indexed text payload for STAFFTEXT 0x1E ornaments (and possibly
+// other free-text annotations). The N-th entry is referenced by an ornament's
+// `tind` field (+32). Block layout:
+//   +0..+1: 0x0000 sync
+//   +2..+3: entry count (2 bytes)
+//   +4..+7: content size (4 bytes, total of all entries)
+//   then, for each entry:
+//     +0..+1: payload size (S)
+//     +2..+S+1: payload
+//       +0..+13: 14 bytes of header (not fully decoded)
+//       +14..+S-5: UTF-16 LE text
+//       +S-4..+S-1: 0x04 0x00 0x00 0x00 terminator
+struct EncTextBlock {
+    std::vector<QString> entries;
+
+    bool read(QDataStream& ds, quint32 varSize);
+};
+
 struct EncFile {
     EncHeader header;
     std::vector<EncInstrument> instruments;
     std::vector<EncLine> lines;
     std::vector<EncMeasure> measures;
     EncTitle titleBlock;
+    EncTextBlock textBlock;
 
     bool read(QDataStream& ds);
 };
