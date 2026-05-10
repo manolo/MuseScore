@@ -44,23 +44,41 @@ bool TupletTracker::groupFull() const
     return inTuplet() && fullFaceSum > Fraction(0, 1) && faceTicks >= fullFaceSum;
 }
 
+// Returns true when a Fraction can be represented exactly by a TDuration
+// (power-of-two value with up to 4 dots). Used to guard tuplet setTicks calls,
+// since downstream beam layout constructs TDuration(ticks, /*truncate*/false)
+// and asserts if the value does not fit exactly.
+static bool fitsTDuration(const Fraction& f)
+{
+    if (f.numerator() <= 0) {
+        return false;
+    }
+    TDuration snap(f, true /*truncate*/);
+    return snap.isValid() && snap.fraction() == f;
+}
+
 void TupletTracker::closeTuplet()
 {
     // Correct tuplet->ticks() to the actual placed span when it differs from baseLen*normalN.
     // checkMeasure advances by ticks() via skipTuplet(): a wrong value inserts stray
     // fill rests (overshoot) or leaves a gap (undershoot).
-    // beam.cpp uses TDuration(ticks, true) so non-standard fractions are safe.
     //
     // Two cases need correction:
     //   placedTicks < expected: partial group (fewer notes than actualN).
     //   placedTicks > expected AND faceTicks > fullFaceSum: mixed-duration bracket
     //     (e.g. {16,16,Q}) where a note larger than baseLen closed the group early.
+    //
+    // Skip the shortening when placedTicks does not fit a TDuration (e.g. 1/3
+    // from a partial 3:2 quarter triplet). Beam layout in beam.cpp::calcBeamBreaks
+    // calls TDuration(tuplet->ticks()) with truncate=false and asserts on
+    // non-TDuration fractions. Keeping the full baseLen*normalN default is safe.
     if (currentTuplet && placedTicks > Fraction(0, 1)) {
         const Fraction expected = TDuration(currentTuplet->baseLen()).fraction()
                                   * currentTuplet->ratio().denominator();
         const bool mixedValueOvershoot = (placedTicks > expected)
                                          && (faceTicks > fullFaceSum);
-        if (placedTicks < expected || mixedValueOvershoot) {
+        if ((placedTicks < expected || mixedValueOvershoot)
+            && fitsTDuration(placedTicks)) {
             currentTuplet->setTicks(placedTicks);
         }
     }
