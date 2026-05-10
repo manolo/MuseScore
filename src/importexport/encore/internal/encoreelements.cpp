@@ -136,7 +136,9 @@ bool EncOrnament::read(QDataStream& ds)
     ds >> tipo;
     ds.skipRawData(4);
     ds >> xoffset;
-    ds.skipRawData(7);
+    ds.skipRawData(1);
+    ds >> yoffset;
+    ds.skipRawData(4);
     ds >> alMezuro;
     ds.skipRawData(1);
     ds >> xoffset2;
@@ -158,10 +160,72 @@ bool EncOrnament::read(QDataStream& ds)
 
 bool EncLyric::read(QDataStream& ds)
 {
-    EncMeasureElem::read(ds);
-    int toSkip = static_cast<int>(size) - 5;
-    if (toSkip > 0) {
-        ds.skipRawData(toSkip);
+    EncMeasureElem::read(ds);   // consumed: size + staffIdx (5 bytes from elemStart)
+
+    // Layout (offsets from elemStart):
+    //   +0..+1: tick
+    //   +2:     type/voice
+    //   +3:     size (full element span; variable!)
+    //   +4:     staffIdx
+    //   +5..+9: 5 unknown bytes
+    //   +0xA:   kie (text anchor; enc2ly's "adr0 + 0x05" where adr0 = +5)
+    //   +0xB..+0x13: 9 unknown bytes
+    //   +0x14..: text, null-terminated, followed by 0..6 bytes of padding
+    //           so the element occupies `size` bytes total. Encoding is
+    //           detected per element: UTF-16 LE in modern v0xC4 files, but
+    //           Latin-1 (1 byte/char) still appears in v0xC4 lyrics of
+    //           Portuguese/Spanish scores (e.g. Fe_cega_faca_amolada_tk.enc
+    //           stores "txã" as 74 78 E3 00...).
+    int remaining = static_cast<int>(size) - 5;
+    if (remaining < 15) {
+        if (remaining > 0) {
+            ds.skipRawData(remaining);
+        }
+        return true;
+    }
+
+    ds.skipRawData(5);
+    ds >> kie;
+    ds.skipRawData(9);
+    remaining -= 15;
+
+    QString s;
+    if (remaining >= 2) {
+        // Encoding probe (mirrors EncInstrument::read): a printable ASCII
+        // byte followed by 0x00 is UTF-16 LE; otherwise Latin-1.
+        const qint64 savedPos = ds.device()->pos();
+        quint8 b0 = 0, b1 = 0;
+        ds >> b0 >> b1;
+        ds.device()->seek(savedPos);
+        const bool isUtf16 = (b0 >= 0x20 && b0 < 0x7F && b1 == 0x00);
+
+        if (isUtf16) {
+            while (remaining >= 2) {
+                quint8 lo = 0, hi = 0;
+                ds >> lo >> hi;
+                remaining -= 2;
+                const char16_t ch = static_cast<char16_t>((hi << 8) | lo);
+                if (ch == 0) {
+                    break;
+                }
+                s.append(QChar(ch));
+            }
+        } else {
+            while (remaining >= 1) {
+                quint8 b = 0;
+                ds >> b;
+                remaining -= 1;
+                if (b == 0) {
+                    break;
+                }
+                s.append(QChar(static_cast<char16_t>(b)));
+            }
+        }
+    }
+    text = s;
+
+    if (remaining > 0) {
+        ds.skipRawData(remaining);
     }
     return true;
 }
@@ -191,11 +255,26 @@ bool EncTie::read(QDataStream& ds)
 {
     EncMeasureElem::read(ds);   // reads size + staffIdx
     quint8 dirByte = 0;
+    quint8 startFlag = 0;
     if (size > 5) {
-        ds >> dirByte;          // elemStart+2: arc direction byte
+        ds >> dirByte;          // tie arc direction byte at element offset +5
     }
-    isTieStart = (dirByte == 0xfe);
-    int toSkip = static_cast<int>(size) - 5 - (size > 5 ? 1 : 0);
+    if (size > 6) {
+        ds >> startFlag;        // tie-start flag at element offset +6
+    }
+    // The TIE element appears in both halves of a tie. Encore stores the
+    // arc-direction byte at offset +5 (low bit = arc-only endpoint, high
+    // bit = outgoing tie) AND a separate tie-start flag at +6 (high bit
+    // set when the note sends a tie forward, regardless of arc direction).
+    // The Beethoven Sinfonia 7 II Allegretto Plectro corpus showed that
+    // ~32 % of outgoing ties (50/157) carry the high bit on +6 with +5 as
+    // an arc-only value (e.g. 0x04). Recognising either byte's high bit
+    // as a tie-start marker recovers them; END-only markers are still
+    // dropped (no high bit set on either byte) since the receiving note
+    // is matched by (staffIdx, voice, pitch) when it is placed.
+    isTieStart = ((dirByte & 0x80) != 0) || ((startFlag & 0x80) != 0);
+    int consumed = (size > 5 ? 1 : 0) + (size > 6 ? 1 : 0);
+    int toSkip = static_cast<int>(size) - 5 - consumed;
     if (toSkip > 0) {
         ds.skipRawData(toSkip);
     }
@@ -469,9 +548,19 @@ bool EncLine::read(QDataStream& ds, quint32 vs, int staffPerSystem)
 // Title block
 // ---------------------------------------------------------------------------
 
-QString readTextItem(QDataStream& ds, EncCharSize cs)
+// Read the 30-byte line prefix plus the 1024- or 64-byte text payload of a
+// TITL line. For header/footer lines the prefix carries an alignment byte
+// at +12 (0x02=right, 0x04=left, 0x06=center); other line kinds keep that
+// byte at 0x00 so the default alignment applies.
+static EncHeaderFooter readTitleLine(QDataStream& ds, EncCharSize cs)
 {
-    ds.skipRawData(30);
+    QByteArray prefix(30, 0);
+    int got = ds.readRawData(prefix.data(), 30);
+    // Alignment byte sits at prefix offset 14 for header/footer lines
+    // (0x02 = right, 0x04 = left, 0x06 = center). Other line kinds carry
+    // 0 here so the default LEFT mapping applies.
+    quint8 alignByte = (got >= 15) ? static_cast<quint8>(prefix[14]) : 0;
+
     QString item;
     bool done = false;
     if (cs == EncCharSize::ONE_BYTE) {
@@ -501,7 +590,20 @@ QString readTextItem(QDataStream& ds, EncCharSize cs)
             }
         }
     }
-    return item;
+
+    EncHeaderFooter out;
+    out.text = item;
+    switch (alignByte) {
+    case static_cast<quint8>(EncTextAlign::CENTER): out.align = EncTextAlign::CENTER; break;
+    case static_cast<quint8>(EncTextAlign::RIGHT):  out.align = EncTextAlign::RIGHT;  break;
+    default:                                        out.align = EncTextAlign::LEFT;   break;
+    }
+    return out;
+}
+
+QString readTextItem(QDataStream& ds, EncCharSize cs)
+{
+    return readTitleLine(ds, cs).text;
 }
 
 bool EncTitle::read(QDataStream& ds, quint32 vs, EncCharSize cs)
@@ -528,10 +630,10 @@ bool EncTitle::read(QDataStream& ds, quint32 vs, EncCharSize cs)
         author.push_back(readTextItem(ds, cs));
     }
     for (int i = 0; i < 2; ++i) {
-        header.push_back(readTextItem(ds, cs));
+        header.push_back(readTitleLine(ds, cs));
     }
     for (int i = 0; i < 2; ++i) {
-        footer.push_back(readTextItem(ds, cs));
+        footer.push_back(readTitleLine(ds, cs));
     }
     for (int i = 0; i < 6; ++i) {
         copyright.push_back(readTextItem(ds, cs));
@@ -563,6 +665,72 @@ bool EncHeader::read(QDataStream& ds)
     ds >> chuVersio >> nekon1 >> fiksa1 >> lineCount >> pageCount;
     ds >> instrumentCount >> staffPerSystem >> measureCount;
     ds.skipRawData(0xC2 - 0x36);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// EncTextBlock - indexed text payload for STAFFTEXT 0x1E ornaments
+// ---------------------------------------------------------------------------
+
+bool EncTextBlock::read(QDataStream& ds, quint32 varSize)
+{
+    // Block layout (varSize bytes total):
+    //   +0..+1: 0x0000 sync
+    //   +2..+3: entry count
+    //   +4..+7: content size (= sum of all entries)
+    //   then `count` entries; each:
+    //     +0..+1: payload size S
+    //     +2..+S+1: payload
+    //       +0..+13: 14 bytes of fields not fully decoded
+    //       +14..+S-5: UTF-16 LE text
+    //       +S-4..+S-1: 0x04 0x00 0x00 0x00 terminator
+    //
+    // The N-th entry is referenced by an ornament's `tind` byte (+32).
+    // Encore writes the text in storage order regardless of measure order;
+    // the ornament's tind picks the matching entry directly.
+    if (varSize < 8) {
+        ds.skipRawData(varSize);
+        return true;
+    }
+    quint16 sync = 0;
+    quint16 count = 0;
+    quint32 contentSize = 0;
+    ds >> sync >> count >> contentSize;
+    quint32 consumed = 8;
+    entries.clear();
+    entries.reserve(count);
+    for (quint16 i = 0; i < count && consumed + 2 <= varSize; ++i) {
+        quint16 entrySize = 0;
+        ds >> entrySize;
+        consumed += 2;
+        if (entrySize == 0 || consumed + entrySize > varSize) {
+            break;
+        }
+        QByteArray payload(entrySize, 0);
+        int rd = ds.readRawData(payload.data(), entrySize);
+        if (rd != entrySize) {
+            break;
+        }
+        consumed += entrySize;
+        // Text is in payload[14..entrySize-4] as UTF-16 LE.
+        QString text;
+        if (entrySize >= 18) {
+            const int textBytes = entrySize - 14 - 4;
+            text = QString::fromUtf16(
+                reinterpret_cast<const char16_t*>(payload.constData() + 14),
+                textBytes / 2);
+            // Strip trailing nulls.
+            int nullIdx = text.indexOf(QChar(QChar::Null));
+            if (nullIdx >= 0) {
+                text = text.left(nullIdx);
+            }
+        }
+        entries.push_back(text);
+    }
+    // Skip any remaining bytes inside the block (padding or unparsed tail).
+    if (consumed < varSize) {
+        ds.skipRawData(varSize - consumed);
+    }
     return true;
 }
 
@@ -661,6 +829,8 @@ bool EncFile::read(QDataStream& ds)
             measures.push_back(std::move(meas));
         } else if (nextId == "TITL") {
             titleBlock.read(ds, varSize, charsize);
+        } else if (nextId == "TEXT") {
+            textBlock.read(ds, varSize);
         } else if (isInstrumentMagic(nextId)) {
             EncInstrument instr;
             // Probe encoding for v0xC4 files: Encore 5.0.2 writes names

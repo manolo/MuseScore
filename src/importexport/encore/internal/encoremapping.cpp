@@ -24,6 +24,7 @@
 
 #include <QRegularExpression>
 
+#include "engraving/style/style.h"
 #include "engraving/dom/box.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/instrtemplate.h"
@@ -131,6 +132,44 @@ void addTitleFrame(MasterScore* score, const EncTitle& titleBlock)
         Text* t = Factory::createText(vbox, TextStyleType::COMPOSER);
         t->setPlainText(String(titleBlock.author[0]));
         vbox->add(t);
+    }
+
+    // Encore's TITL block carries up to two header lines and two footer
+    // lines, each with its own horizontal alignment byte. Map them onto
+    // MuseScore's odd/even page header & footer style slots so the text
+    // appears in the same screen corner Encore showed it in.
+    auto applyHF = [score](const EncHeaderFooter& hf,
+                           mu::engraving::Sid sidL,
+                           mu::engraving::Sid sidC,
+                           mu::engraving::Sid sidR,
+                           mu::engraving::Sid sidEvenL,
+                           mu::engraving::Sid sidEvenC,
+                           mu::engraving::Sid sidEvenR) {
+        if (hf.text.isEmpty()) {
+            return;
+        }
+        mu::engraving::Sid sid     = sidL;
+        mu::engraving::Sid sidEven = sidEvenL;
+        if (hf.align == EncTextAlign::CENTER) {
+            sid     = sidC;
+            sidEven = sidEvenC;
+        } else if (hf.align == EncTextAlign::RIGHT) {
+            sid     = sidR;
+            sidEven = sidEvenR;
+        }
+        const String text = String(hf.text);
+        score->style().set(sid, text);
+        score->style().set(sidEven, text);
+    };
+    for (const EncHeaderFooter& hf : titleBlock.header) {
+        applyHF(hf,
+                mu::engraving::Sid::oddHeaderL, mu::engraving::Sid::oddHeaderC, mu::engraving::Sid::oddHeaderR,
+                mu::engraving::Sid::evenHeaderL, mu::engraving::Sid::evenHeaderC, mu::engraving::Sid::evenHeaderR);
+    }
+    for (const EncHeaderFooter& hf : titleBlock.footer) {
+        applyHF(hf,
+                mu::engraving::Sid::oddFooterL, mu::engraving::Sid::oddFooterC, mu::engraving::Sid::oddFooterR,
+                mu::engraving::Sid::evenFooterL, mu::engraving::Sid::evenFooterC, mu::engraving::Sid::evenFooterR);
     }
 }
 
@@ -329,6 +368,100 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName)
     }
 
     return nullptr;
+}
+
+std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
+{
+    using mu::engraving::SymId;
+    // Encore packs articulation glyphs into a single byte. Simple bytes carry
+    // one glyph (0x1C = tenuto, 0x1D = staccato, ...); combo bytes carry two
+    // (0x24 = tenuto + staccato, 0x27 = marcato + tenuto, ...). The mapping
+    // was confirmed against `encore-symbols.enc` measure-by-measure: m8-m12
+    // each line up one byte per ChordRest with the per-note articulation
+    // list in Encore's MusicXML export, so each combo decomposes uniquely.
+    switch (articByte) {
+    // 0x04..0x07: trill-mark glyphs.
+    // 0x0A, 0x0C:    inverted-mordent.
+    // 0x0B, 0x2F:    mordent.
+    // Mapping derived from encore-symbols.enc m16 (4 trill-marks at
+    // articUp 0x04..0x07 across 4 notes) and m17 (4 mordents at
+    // articUp 0x0a 0x0b 0x0c 0x2f).
+    case 0x04:
+    case 0x05:
+    case 0x06:
+    case 0x07: return { SymId::ornamentTrill };
+    case 0x0A:
+    case 0x0C: return { SymId::ornamentShortTrill };   // <inverted-mordent>
+    case 0x0B:
+    case 0x2F: return { SymId::ornamentMordent };
+    case 0x12: return { SymId::articAccentAbove };
+    case 0x13: return { SymId::articMarcatoAbove };
+    case 0x14: return { SymId::articAccentAbove, SymId::articTenutoAbove };
+    case 0x15: return { SymId::articMarcatoAbove, SymId::articStaccatoAbove };
+    case 0x16: return { SymId::articAccentAbove, SymId::articStaccatissimoAbove };
+    case 0x17: return { SymId::articAccentAbove, SymId::articStaccatoAbove };
+    case 0x18: return { SymId::stringsUpBow };
+    case 0x19: return { SymId::stringsDownBow };
+    case 0x1A: return { SymId::articMarcatoAbove };
+    case 0x1C: return { SymId::articTenutoAbove };
+    case 0x1D: return { SymId::articStaccatoAbove };
+    case 0x20:
+    case 0x21: return { SymId::fermataAbove };
+    case 0x22: return { SymId::fermataShortAbove };  // short / square fermata
+    case 0x23: return { SymId::articAccentAbove, SymId::articTenutoAbove };
+    case 0x24: return { SymId::articTenutoAbove, SymId::articStaccatoAbove };
+    case 0x25: return { SymId::articMarcatoAbove, SymId::articTenutoAbove };
+    case 0x26: return { SymId::articMarcatoAbove, SymId::articStaccatissimoAbove };
+    case 0x27: return { SymId::articMarcatoAbove, SymId::articTenutoAbove };
+    case 0x28:
+    case 0x29: return { SymId::articStaccatissimoAbove };
+    case 0x2A: return { SymId::articStaccatissimoAbove, SymId::articStaccatoAbove };
+    case 0x2B: return { SymId::articAccentAbove, SymId::articStaccatissimoAbove };
+    case 0x2C: return { SymId::articStaccatissimoAbove };
+    case 0x2D: return { SymId::articTenutoAbove, SymId::articStaccatissimoAbove };
+    // String technical markings derived from encore-symbols.enc m3, m4, m18:
+    //   0x1E, 0x1F -> harmonic (natural and artificial variants share the
+    //                 same MuseScore Symbol because MuseScore only has one
+    //                 stringsHarmonic glyph; the artificial variant is
+    //                 emitted as <harmonic><artificial/></harmonic> by the
+    //                 MusicXML exporter when the note carries a separate
+    //                 sounding pitch which we do not yet read).
+    //   0x44, 0x45 -> thumb-position
+    //   0x46 is open-string and is handled separately in
+    //   encArticByteToOpenString() because MuseScore lacks a dedicated
+    //   SymId; it must be emitted as a Fingering with STRING_NUMBER text "0".
+    case 0x1E:
+    case 0x1F: return { SymId::stringsHarmonic };
+    case 0x44:
+    case 0x45: return { SymId::stringsThumbPosition };
+    default:
+        return {};
+    }
+}
+
+int encArticByteToFingerNumber(quint8 articByte)
+{
+    // Per-note fingering glyphs. Encore numbers the fingers 1..5 with the
+    // contiguous byte range 0x0D..0x11. Other low-byte values in the
+    // articulation slot belong to ornament glyphs (trill, mordent) and
+    // must not be confused for fingerings.
+    switch (articByte) {
+    case 0x0D: return 1;
+    case 0x0E: return 2;
+    case 0x0F: return 3;
+    case 0x10: return 4;
+    case 0x11: return 5;
+    default:   return 0;
+    }
+}
+
+bool encArticByteIsOpenString(quint8 articByte)
+{
+    // Encore stores open-string with byte 0x46 in the articulationUp slot.
+    // MuseScore has no dedicated SymId for open-string; the exporter emits
+    // <open-string/> when it sees a Fingering with TextStyleType
+    // STRING_NUMBER and text "0".
+    return articByte == 0x46;
 }
 
 } // namespace mu::iex::encore

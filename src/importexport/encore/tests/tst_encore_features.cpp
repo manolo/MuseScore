@@ -25,9 +25,20 @@
 
 #include <gtest/gtest.h>
 
+#include "engraving/dom/arpeggio.h"
+#include "engraving/dom/articulation.h"
+#include "engraving/dom/barline.h"
 #include "engraving/dom/chord.h"
+#include "engraving/dom/dynamic.h"
+#include "engraving/dom/fermata.h"
+#include "engraving/dom/fingering.h"
+#include "engraving/dom/hairpin.h"
+#include "engraving/dom/jump.h"
 #include "engraving/dom/keysig.h"
+#include "engraving/dom/lyrics.h"
+#include "engraving/dom/marker.h"
 #include "engraving/dom/masterscore.h"
+#include "engraving/dom/stafftext.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/note.h"
 #include "engraving/dom/part.h"
@@ -37,6 +48,7 @@
 #include "engraving/dom/staff.h"
 #include "engraving/dom/textbase.h"
 #include "engraving/dom/tie.h"
+#include "engraving/dom/tremolosinglechord.h"
 #include "engraving/dom/timesig.h"
 #include "engraving/dom/tuplet.h"
 
@@ -699,10 +711,10 @@ TEST_F(Tst_EncoreFeatures, beamed_triplet_capped_no_beam_assert)
 }
 
 // ===========================================================================
-// BUG FIX: Zero-length hairpin (alMezuro=0, xoffset=xoffset2) does not assert
-// in Spanner::setTicks().  addSpannerEnds() clones the WEDGESTOP into the same
-// measure at the same tick as the WEDGESTART; setTick2(tick) → setTicks(0).
-// The fix drops the hairpin when elemTick <= hairpin->tick().
+// REGRESSION: WEDGESTART with alMezuro=0 produces a hairpin with positive span.
+// Encore .enc binaries do not contain a separate WEDGESTOP; the end is encoded
+// inside the WEDGESTART (alMezuro = number of measures forward). When alMezuro
+// is 0 the hairpin must span the current measure, not collapse to zero.
 // ===========================================================================
 
 TEST_F(Tst_EncoreFeatures, zero_length_hairpin_dropped_cleanly)
@@ -711,10 +723,1127 @@ TEST_F(Tst_EncoreFeatures, zero_length_hairpin_dropped_cleanly)
     ASSERT_NE(score, nullptr) << "File should load without Spanner::setTicks assert";
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
-    // The zero-length hairpin must be dropped: no spanners with tick2 <= tick
+    // Every spanner must have positive span.
     for (auto& [tick, sp] : score->spannerMap().map()) {
         EXPECT_LT(sp->tick(), sp->tick2()) << "Spanner has non-positive span";
     }
+    delete score;
+}
+
+// ===========================================================================
+// REGRESSION: Partial 3:2 quarter triplet must not crash beam layout.
+// closeTuplet would previously set tuplet->ticks() to placedTicks = 1/3, which
+// is not a TDuration fraction. Beam::calcBeamBreaks then constructs
+// TDuration(ticks, /*truncate*/false) and asserts in debug builds.
+// ===========================================================================
+
+TEST_F(Tst_EncoreFeatures, partial_quarter_triplet_layout_does_not_assert)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_partial_quarter_triplet.enc");
+    ASSERT_NE(score, nullptr) << "File must load and lay out without assert in beam.cpp";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+    delete score;
+}
+
+// ===========================================================================
+// FIX: LYRIC (type 6) syllables attached to chords (P3.7).
+// 4/4 measure with notes do/re/mi/fa and matching LYRIC elements. The
+// importer parses the 6-character text payload (UTF-16 LE in v0xC4) and
+// attaches one syllable per ChordRest in tick order.
+// ===========================================================================
+
+// ===========================================================================
+// FIX: Variable-length LYRIC parsing + empty placeholder alignment.
+// Encore writes each lyric element as variable size (text length determines
+// total bytes). A standalone empty LYRIC keeps the per-chord syllable count
+// aligned but produces no <Lyrics>. Without this, "MU" between "LA" and
+// "JER" goes missing on real songs (LaMorenaDeMiCopla.enc).
+// ===========================================================================
+
+// ===========================================================================
+// FIX: Multi-verse lyrics (Encore stores verse 2 on voice 1, etc.).
+// Two LYRIC streams on the same staff but different voices: the importer
+// must anchor both on the voice-0 chord and tag them with Lyrics::verse()
+// so MuseScore renders them as separate rows.
+// ===========================================================================
+
+// ===========================================================================
+// FIX: Encore "-" LYRIC elements are hyphen continuation markers, not
+// syllables. Filtering them out and tagging adjacent syllables with the
+// matching LyricsSyllabic keeps lyrics aligned with their notes and lets
+// MuseScore draw the hyphen automatically. The LaMorenaDeMiCopla m18 case
+// "JU - LIO RO -" reproduced the off-by-one shift the user reported.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, lyrics_hyphen_separators_dropped_and_set_syllabic)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_lyrics_hyphenated_words.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    struct Entry { String text; LyricsSyllabic syll; };
+    std::vector<Entry> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Lyrics* ly : toChord(el)->lyrics()) {
+                seen.push_back({ ly->plainText(), ly->syllabic() });
+            }
+        }
+    }
+    ASSERT_EQ(seen.size(), 3u);
+    EXPECT_EQ(seen[0].text, String(u"JU"));
+    EXPECT_EQ(seen[0].syll, LyricsSyllabic::BEGIN)
+        << "JU is followed by a hyphen continuation";
+    EXPECT_EQ(seen[1].text, String(u"LIO"));
+    EXPECT_EQ(seen[1].syll, LyricsSyllabic::END)
+        << "LIO closes the JU-LIO word";
+    EXPECT_EQ(seen[2].text, String(u"RO"));
+    EXPECT_EQ(seen[2].syll, LyricsSyllabic::BEGIN)
+        << "RO is followed by a hyphen continuation past the bar";
+    delete score;
+}
+
+TEST_F(Tst_EncoreFeatures, lyrics_two_verses_on_voice_0_chord)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_lyrics_two_verses.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> verse0;
+    std::vector<String> verse1;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Lyrics* ly : toChord(el)->lyrics()) {
+                if (ly->verse() == 0) {
+                    verse0.push_back(ly->plainText());
+                } else if (ly->verse() == 1) {
+                    verse1.push_back(ly->plainText());
+                }
+            }
+        }
+    }
+    std::vector<String> expectedV0 = { u"JU", u"LIO", u"RO", u"ME" };
+    std::vector<String> expectedV1 = { u"Co", u"mo", u"ca", u"pa" };
+    EXPECT_EQ(verse0, expectedV0);
+    EXPECT_EQ(verse1, expectedV1);
+    delete score;
+}
+
+TEST_F(Tst_EncoreFeatures, lyrics_variable_length_with_empty_placeholder)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_lyrics_variable.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> expected = { u"JU", u"LIO", u"RO" };
+    std::vector<String> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Lyrics* ly : toChord(el)->lyrics()) {
+                seen.push_back(ly->plainText());
+            }
+        }
+    }
+    EXPECT_EQ(seen, expected);
+    delete score;
+}
+
+TEST_F(Tst_EncoreFeatures, lyrics_attached_to_chords)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_lyrics.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> expected = { u"do", u"re", u"mi", u"fa" };
+    std::vector<String> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            Chord* c = toChord(el);
+            for (Lyrics* ly : c->lyrics()) {
+                seen.push_back(ly->plainText());
+            }
+        }
+    }
+    EXPECT_EQ(seen, expected);
+    delete score;
+}
+
+// ===========================================================================
+// FIX: Articulations beyond fermata (P2.5).
+// Four quarter notes carry staccato (0x1D), accent (0x12), tenuto (0x1C),
+// marcato (0x13) in articulationUp. The importer maps each known glyph byte
+// to a MuseScore SymId via encArticulation2SymId.
+// ===========================================================================
+
+// ===========================================================================
+// FIX: TIE element direction bytes beyond 0xfe (P2.6).
+// Encore uses two values for outgoing ties (0xfc and 0xfe -- both have the
+// high bit set) plus two arc-only endpoint markers (0x02 and 0x04). The
+// importer treats any high-bit-set value as a tie-start, so a TIE with
+// dirByte=0xfc still produces a Tie element on the first note.
+// ===========================================================================
+
+// ===========================================================================
+// FIX: KEYCHANGE elements with tipo=0 (modulation to C major) are now emitted
+// (P4.10). The previous guard skipped them, dropping ~24 of 40 key signatures
+// on Beethoven's Plectro arrangement.
+// ===========================================================================
+
+TEST_F(Tst_EncoreFeatures, keychange_to_c_major_emitted)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_keychange_to_c.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int keySigCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        Measure* m = toMeasure(mb);
+        for (Segment* s = m->first(SegmentType::KeySig); s; s = s->next(SegmentType::KeySig)) {
+            if (s->element(0)) {
+                ++keySigCount;
+            }
+        }
+    }
+    // Expect: initial key sig (G major from measure 0) + tipo=0 modulation
+    // signature at measure 1. Without the fix, measure 1 would have no key sig.
+    EXPECT_GE(keySigCount, 2);
+    delete score;
+}
+
+// ===========================================================================
+// FIX: STAFFTEXT 0x1E rendered from TEXT block (P3.8).
+// Four STAFFTEXT ornaments reference indices 0..3 of an injected TEXT block
+// containing "Allegretto", "cresc.", "dimin.", "ten.". The importer reads
+// the TEXT block, parses each entry's UTF-16 LE payload, and indexes via
+// the ornament's tind byte (+32) to create a StaffText element.
+// ===========================================================================
+
+TEST_F(Tst_EncoreFeatures, staff_text_resolved_via_text_block)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_staff_text.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> expected = { u"Allegretto", u"cresc.", u"dimin.", u"ten." };
+    std::vector<String> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isStaffText()) {
+                    seen.push_back(toStaffText(e)->plainText());
+                }
+            }
+        }
+    }
+    EXPECT_EQ(seen, expected);
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: STAFFTEXT placement derived from Encore y-offset.
+// Two ornaments at adjacent ticks: yoffset=+10 keeps default (ABOVE) and
+// yoffset=-10 must flip placement to BELOW (the case Beethoven Plectro m3
+// hits for its "ten" markers).
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, staff_text_placement_from_yoffset)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_staff_text_placement.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::map<String, PlacementV> placements;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isStaffText()) {
+                    StaffText* st = toStaffText(e);
+                    placements[st->plainText()] = st->placement();
+                }
+            }
+        }
+    }
+    ASSERT_EQ(placements.size(), 2u) << "two STAFFTEXT elements expected";
+    EXPECT_EQ(placements[u"Above"], PlacementV::ABOVE)
+        << "yoffset=+10 must keep default ABOVE placement";
+    EXPECT_EQ(placements[u"ten"], PlacementV::BELOW)
+        << "yoffset=-10 (Cartesian below) must map to PlacementV::BELOW";
+    delete score;
+}
+
+TEST_F(Tst_EncoreFeatures, tie_direction_fc_creates_tie)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_tie_dir_fc.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int tieCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Note* n : toChord(el)->notes()) {
+                if (n->tieFor()) {
+                    ++tieCount;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(tieCount, 1) << "expected one tie from the 0xfc TIE element";
+    delete score;
+}
+
+// ===========================================================================
+// FIX: Encore stores the tie-start indicator on either byte +5 (arc
+// direction) or byte +6 (start flag). Around a third of outgoing ties in
+// the LaMorenaDeMiCopla / Beethoven Plectro corpora use the +6 variant
+// with +5 = 0x04 (arc-only). The importer must accept either byte's high
+// bit as a tie-start marker; otherwise long ties such as the m20 dotted
+// quarter B in LaMorenaDeMiCopla disappear.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, tie_start_flag_on_byte6_creates_tie)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_tie_start_flag_byte6.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int tieCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Note* n : toChord(el)->notes()) {
+                if (n->tieFor()) {
+                    ++tieCount;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(tieCount, 1)
+        << "expected one tie from the +6=0x80 TIE-start-flag element";
+    delete score;
+}
+
+TEST_F(Tst_EncoreFeatures, articulations_mapped_beyond_fermata)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_articulations.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    // Layout may flip Above -> Below based on stem direction. Normalize by
+    // checking the type predicate rather than the exact SymId.
+    enum class ArtKind { Staccato, Accent, Tenuto, Marcato, Other };
+    auto kindOf = [](Articulation* a) -> ArtKind {
+        if (a->isStaccato()) {
+            return ArtKind::Staccato;
+        }
+        if (a->isAccent()) {
+            return ArtKind::Accent;
+        }
+        if (a->isTenuto()) {
+            return ArtKind::Tenuto;
+        }
+        if (a->isMarcato()) {
+            return ArtKind::Marcato;
+        }
+        return ArtKind::Other;
+    };
+    std::vector<ArtKind> expected = {
+        ArtKind::Staccato, ArtKind::Accent, ArtKind::Tenuto, ArtKind::Marcato,
+    };
+    std::vector<ArtKind> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Articulation* a : toChord(el)->articulations()) {
+                seen.push_back(kindOf(a));
+            }
+        }
+    }
+    EXPECT_EQ(seen.size(), expected.size());
+    for (size_t i = 0; i < std::min(seen.size(), expected.size()); ++i) {
+        EXPECT_EQ(seen[i], expected[i]) << "articulation #" << i;
+    }
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Combo articulation bytes emit multiple Articulation elements.
+// Encore packs two glyphs into one byte (e.g. 0x24 = tenuto + staccato).
+// Treating each byte as a single SymId would silently drop ~85 % of the
+// articulations in encore-symbols.enc m8-m13. The new fixture exercises
+// every combo byte; the importer must add both glyphs to the chord.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, articulation_combos_expand_to_two_glyphs)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_articulations_combo.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    enum class K { Tenuto, Staccato, Accent, Marcato, Staccatissimo, Other };
+    auto kindOf = [](Articulation* a) -> K {
+        using mu::engraving::SymId;
+        switch (a->symId()) {
+        case SymId::articTenutoAbove: case SymId::articTenutoBelow:
+            return K::Tenuto;
+        case SymId::articStaccatoAbove: case SymId::articStaccatoBelow:
+            return K::Staccato;
+        case SymId::articAccentAbove: case SymId::articAccentBelow:
+            return K::Accent;
+        case SymId::articMarcatoAbove: case SymId::articMarcatoBelow:
+            return K::Marcato;
+        case SymId::articStaccatissimoAbove: case SymId::articStaccatissimoBelow:
+            return K::Staccatissimo;
+        default:
+            return K::Other;
+        }
+    };
+    // Per-chord expected set of articulations, in the binary's note order:
+    //   m1: 0x24 (ten+stacc), 0x17 (acc+stacc), 0x27 (marc+ten), 0x15 (marc+stacc)
+    //   m2: 0x23 (acc+ten),   0x2D (ten+statiss), 0x2B (acc+statiss), 0x24 (ten+stacc)
+    const std::vector<std::set<K> > expected = {
+        { K::Tenuto, K::Staccato },
+        { K::Accent, K::Staccato },
+        { K::Marcato, K::Tenuto },
+        { K::Marcato, K::Staccato },
+        { K::Accent, K::Tenuto },
+        { K::Tenuto, K::Staccatissimo },
+        { K::Accent, K::Staccatissimo },
+        { K::Tenuto, K::Staccato },
+    };
+    std::vector<std::set<K> > seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            std::set<K> kinds;
+            for (Articulation* a : toChord(el)->articulations()) {
+                kinds.insert(kindOf(a));
+            }
+            if (!kinds.empty()) {
+                seen.push_back(kinds);
+            }
+        }
+    }
+    ASSERT_EQ(seen.size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(seen[i], expected[i]) << "chord #" << i;
+    }
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Every Encore navigation option survives the import.
+// Encore exposes ten jump / section options in its UI:
+//   Segno, Coda, To Coda, Fine, D.C., D.C. al Coda, D.C. al Fine,
+//   D.S., D.S. al Coda, D.S. al Fine.
+// Three (Segno, Coda, To Coda) travel via ORN tipos 0xA2 / 0xA6 / 0xA5;
+// the rest are encoded in the MEAS header coda byte (offset 0x1A low
+// byte). The fixture exercises every variant; the importer must create
+// the matching Marker (Segno/Coda/To Coda/Fine) or Jump (D.C./D.S. ...)
+// element on the right measure.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, all_encore_navigation_options)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_jump_marks_all.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int segnoMarkers = 0;
+    int codaMarkers = 0;
+    int toCodaMarkers = 0;
+    int fineMarkers = 0;
+    std::set<JumpType> jumpTypes;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (EngravingItem* e : mb->el()) {
+            if (e && e->isMarker()) {
+                MarkerType mt = toMarker(e)->markerType();
+                if (mt == MarkerType::SEGNO) ++segnoMarkers;
+                else if (mt == MarkerType::CODA) ++codaMarkers;
+                else if (mt == MarkerType::TOCODA) ++toCodaMarkers;
+                else if (mt == MarkerType::FINE) ++fineMarkers;
+            } else if (e && e->isJump()) {
+                jumpTypes.insert(toJump(e)->jumpType());
+            }
+        }
+    }
+    // Segno comes from ORN 0xA2 AND coda byte 0x88; both add a Marker.
+    EXPECT_GE(segnoMarkers, 1) << "ORN 0xA2 must produce a Segno Marker";
+    // Coda comes from ORN 0xA6 AND coda bytes 0x85/0x89; all add a Marker.
+    EXPECT_GE(codaMarkers, 1) << "ORN 0xA6 must produce a Coda Marker";
+    // To Coda comes from ORN 0xA5.
+    EXPECT_EQ(toCodaMarkers, 1) << "ORN 0xA5 must produce a TOCODA Marker";
+    // Fine comes from coda byte 0x86.
+    EXPECT_EQ(fineMarkers, 1) << "coda byte 0x86 must produce a FINE Marker";
+    // Every Jump variant must appear at least once.
+    const std::set<JumpType> expectedJumps = {
+        JumpType::DC, JumpType::DS,
+        JumpType::DC_AL_FINE, JumpType::DS_AL_FINE,
+        JumpType::DC_AL_CODA, JumpType::DS_AL_CODA,
+    };
+    for (JumpType j : expectedJumps) {
+        EXPECT_TRUE(jumpTypes.count(j) > 0)
+            << "missing Jump variant for the Encore-UI option";
+    }
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Jump marks (To Coda + D.S. / D.C. al Coda / Fine).
+// Encore stores "To Coda" as ORN tipo=0xA5 (a measure-attached marker)
+// and the per-measure repeat-mark byte at the LOW byte of the coda u32
+// at MEAS header offset 0x1A. The previous accessor extracted byte+1 of
+// the u32 and consequently missed every DCALCODA / DSALCODA / FINE / DC
+// directive. After the fix, m2 (codaByte=0x81) becomes a Jump element
+// with D.S. al Coda text, m3 (codaByte=0x87) becomes a D.C. jump, and
+// the ORN 0xA5 in m1 becomes a TOCODA marker.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, jump_marks_dc_ds_tocoda)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_jump_marks.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<std::pair<int, String> > seen;  // measure number (1-based), text
+    int measIdx = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        ++measIdx;
+        for (EngravingItem* e : mb->el()) {
+            if (e && e->isMarker()) {
+                seen.emplace_back(measIdx, toMarker(e)->plainText());
+            } else if (e && e->isJump()) {
+                seen.emplace_back(measIdx, toJump(e)->plainText());
+            }
+        }
+    }
+    // Marker (TOCODA) lands on m1; Jumps land on m2 and m3.
+    ASSERT_EQ(seen.size(), 3u);
+    EXPECT_EQ(seen[0].first, 1);
+    EXPECT_TRUE(seen[0].second.contains(u"Coda"))
+        << "expected To Coda Marker on m1";
+    EXPECT_EQ(seen[1].first, 2);
+    EXPECT_TRUE(seen[1].second.contains(u"D.S."))
+        << "expected D.S. al Coda Jump on m2";
+    EXPECT_EQ(seen[2].first, 3);
+    EXPECT_TRUE(seen[2].second.contains(u"D.C."))
+        << "expected D.C. Jump on m3";
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Section markers (Segno / Coda) from ORN tipos 0xA2 / 0xA6 and
+// DOTTED end barline (barTypeEnd=0x08).
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, section_markers_and_dotted_barline)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_section_markers.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<MarkerType> seenMarkers;
+    BarLineType m3Bar = BarLineType::NORMAL;
+    int measIdx = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        ++measIdx;
+        for (EngravingItem* e : mb->el()) {
+            if (e && e->isMarker()) {
+                seenMarkers.push_back(toMarker(e)->markerType());
+            }
+        }
+        if (measIdx == 3) {
+            Measure* m3 = toMeasure(mb);
+            Segment* seg = m3->findSegment(SegmentType::EndBarLine, m3->endTick());
+            if (seg) {
+                if (EngravingItem* el = seg->element(0)) {
+                    if (el->isBarLine()) {
+                        m3Bar = toBarLine(el)->barLineType();
+                    }
+                }
+            }
+        }
+    }
+    const std::vector<MarkerType> expectedMarkers = {
+        MarkerType::SEGNO, MarkerType::CODA,
+    };
+    EXPECT_EQ(seenMarkers, expectedMarkers);
+    EXPECT_EQ(m3Bar, BarLineType::DOTTED)
+        << "m3 end barline must be DOTTED (barTypeEnd=0x08)";
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Per-chord staccato from size-16 ORN tipo=0xC9.
+// Encore stores staccato as a separate ORN at the same tick as the chord;
+// its MusicXML exporter drops the byte but the dot is visible. The
+// importer must add Staccato per ORN and dedup against the per-note
+// artic byte 0x1D (which produces the same glyph).
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, staccato_from_orn_c9)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_staccato_orn.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<bool> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            int staccatoCount = 0;
+            for (Articulation* a : toChord(el)->articulations()) {
+                if (a->symId() == SymId::articStaccatoAbove
+                    || a->symId() == SymId::articStaccatoBelow) {
+                    ++staccatoCount;
+                }
+            }
+            seen.push_back(staccatoCount == 1);
+            EXPECT_LE(staccatoCount, 1) << "no duplicate staccato per chord";
+        }
+    }
+    // Expected sequence: chord 0 has staccato (0xC9), chord 1 has
+    // staccato (0xC9), chord 2 has none, chord 3 has staccato (both
+    // 0xC9 and the per-note artic byte 0x1D -- must dedup).
+    const std::vector<bool> expected = { true, true, false, true };
+    EXPECT_EQ(seen, expected);
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Size-28 ORN tipos 0x36 / 0x37 produce trill-mark ornaments;
+// tipo 0x35 is the trill-span end marker and adds nothing.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, trill_spanner_start_markers)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_trill_spanner.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int trillCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Articulation* a : toChord(el)->articulations()) {
+                if (a->symId() == SymId::ornamentTrill) {
+                    ++trillCount;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(trillCount, 2) << "0x36 and 0x37 should add one trill each; 0x35 adds nothing";
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Per-note technical markings from artic byte.
+//   0x0D..0x11 -> fingering 1..5 (Fingering text "1".."5")
+//   0x46       -> open-string (Fingering STRING_NUMBER text "0")
+//   0x44, 0x45 -> thumb-position (Articulation stringsThumbPosition)
+//   0x1E, 0x1F -> harmonic (Articulation stringsHarmonic)
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, technical_markings_per_note_artic_byte)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_technical.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> fingerings;
+    std::vector<SymId> articulations;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Note* n : toChord(el)->notes()) {
+                for (EngravingItem* e : n->el()) {
+                    if (e && e->isFingering()) {
+                        fingerings.push_back(toFingering(e)->plainText());
+                    }
+                }
+            }
+            for (Articulation* a : toChord(el)->articulations()) {
+                articulations.push_back(a->symId());
+            }
+        }
+    }
+    const std::vector<String> expectedFingerings = {
+        u"0", u"1", u"2", u"3", u"4", u"5",
+    };
+    EXPECT_EQ(fingerings, expectedFingerings);
+    const std::vector<SymId> expectedArticulations = {
+        SymId::stringsThumbPosition,
+        SymId::stringsHarmonic,
+    };
+    EXPECT_EQ(articulations, expectedArticulations);
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Fermata anchored on segment, direction follows artic slot.
+// Encore stores the fermata above/below distinction by which artic slot
+// carries the byte: articUp=0x20 -> upright (above), articDown=0x21 ->
+// inverted (below). The importer must attach a Fermata to the chord's
+// segment (not the chord) so MusicXML exports <fermata> instead of
+// <other-articulation smufl="..."/>, and the PlacementV must follow the
+// slot so the type attribute renders correctly.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, fermatas_emit_segment_anchored_element)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_fermatas.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<PlacementV> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isFermata()) {
+                    seen.push_back(toFermata(e)->placement());
+                }
+            }
+        }
+    }
+    ASSERT_EQ(seen.size(), 2u);
+    EXPECT_EQ(seen[0], PlacementV::BELOW)
+        << "articDown=0x21 must produce an inverted (below) fermata";
+    EXPECT_EQ(seen[1], PlacementV::ABOVE)
+        << "articUp=0x20 must produce an upright (above) fermata";
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Single-note tremolos derived from per-note artic byte.
+// Encore packs the stroke count in the low nibble of articulationUp /
+// articulationDown for byte values 0x41/0x42/0x43/0x03. The importer
+// attaches a TremoloSingleChord with TremoloType::R8/R16/R32.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, tremolos_from_per_note_artic_byte)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_tremolos.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<TremoloType> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            if (TremoloSingleChord* trem = toChord(el)->tremoloSingleChord()) {
+                seen.push_back(trem->tremoloType());
+            }
+        }
+    }
+    const std::vector<TremoloType> expected = {
+        TremoloType::R8, TremoloType::R16, TremoloType::R32, TremoloType::R32,
+    };
+    EXPECT_EQ(seen, expected);
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Trill-mark / mordent / inverted-mordent from per-note artic byte.
+// Encore stores ornament glyphs in the same articulationUp byte as plain
+// articulations. The importer wraps them in Ornament (an Articulation
+// subclass) so MuseScore's MusicXML export emits them under <ornaments>.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, trill_mordent_from_per_note_artic_byte)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_trill_mordent.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<SymId> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Articulation* a : toChord(el)->articulations()) {
+                seen.push_back(a->symId());
+            }
+        }
+    }
+    const std::vector<SymId> expected = {
+        SymId::ornamentTrill,
+        SymId::ornamentShortTrill,   // <inverted-mordent>
+        SymId::ornamentMordent,
+        SymId::ornamentMordent,
+    };
+    EXPECT_EQ(seen, expected);
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: End-of-measure DOUBLE barline lands on every staff.
+// Encore renders barline graphics across every instrument on the system,
+// while MuseScore stores the barline per staff. The importer must apply
+// BarLineType::DOUBLE to every track, not only track 0 (the Beethoven
+// Plectro m26 double bar reproduced the original off-by-tracks bug).
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, double_barline_lands_on_every_staff)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_double_barline_multi_staff.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m1 = score->firstMeasure();
+    ASSERT_NE(m1, nullptr);
+    const size_t nstaves = score->nstaves();
+    ASSERT_GE(nstaves, 2u) << "fixture must have at least two staves";
+
+    Segment* endBarSeg = m1->findSegment(SegmentType::EndBarLine, m1->endTick());
+    ASSERT_NE(endBarSeg, nullptr) << "m1 must have an EndBarLine segment";
+
+    int doubleBarStaves = 0;
+    for (size_t s = 0; s < nstaves; ++s) {
+        EngravingItem* el = endBarSeg->element(s * VOICES);
+        if (!el || !el->isBarLine()) {
+            continue;
+        }
+        if (toBarLine(el)->barLineType() == BarLineType::DOUBLE) {
+            ++doubleBarStaves;
+        }
+    }
+    EXPECT_EQ(doubleBarStaves, static_cast<int>(nstaves))
+        << "DOUBLE barline must be present on every staff, not only track 0";
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: WEDGESTART tick == durTicks (measure-end boundary) is kept.
+// Encore stores hairpins whose visible start sits on the bar line at
+// tick == measure->durTicks. The importer used to drop these along with
+// notes/rests beyond the bar; this test guards against the regression.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, wedgestart_at_measure_end_boundary)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_wedgestart_at_measure_end.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int hairpinCount = 0;
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (sp->isHairpin()) {
+            ++hairpinCount;
+            EXPECT_LT(sp->tick(), sp->tick2()) << "hairpin span must be positive";
+        }
+    }
+    EXPECT_EQ(hairpinCount, 1)
+        << "WEDGESTART at tick == durTicks must produce a hairpin";
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Dynamics from size-16 ORN cluster (0x81=pp, 0x82=p, 0x85=f,
+// 0x86=ff). The mapping was reverse-engineered against Beethoven Sinfonia
+// 7 II Allegretto Plectro cross-referenced with the Encore MusicXML export.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, dynamics_from_size16_ornaments)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_dynamics.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<DynamicType> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isDynamic()) {
+                    seen.push_back(toDynamic(e)->dynamicType());
+                }
+            }
+        }
+    }
+    const std::vector<DynamicType> expected = {
+        DynamicType::P, DynamicType::PP, DynamicType::F, DynamicType::FF,
+    };
+    EXPECT_EQ(seen, expected);
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Voice=4 ORN with staffByte high bit, full dynamic ladder.
+// Encore writes system-level ornaments (dynamics, tremolos, technical
+// markings, etc.) with voice=4 and the staffByte high bit (0x40) set.
+// The importer must (a) accept voice=4 ORN elements as system marks
+// rather than dropping them, and (b) map the extended tipo ladder
+// 0x80..0x8A to the full DynamicType set. encore-symbols.enc reproduces
+// this; with the previous voice<VOICES filter every dynamic was lost.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, dynamics_full_ladder_voice4_system_mark)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_dynamics_full.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<DynamicType> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isDynamic()) {
+                    seen.push_back(toDynamic(e)->dynamicType());
+                }
+            }
+        }
+    }
+    const std::vector<DynamicType> expected = {
+        DynamicType::PPP, DynamicType::PP,  DynamicType::P,   DynamicType::MP,
+        DynamicType::MF,  DynamicType::F,   DynamicType::FF,  DynamicType::FFF,
+        DynamicType::SFZ, DynamicType::SFFZ, DynamicType::FP, DynamicType::FZ,
+        DynamicType::SF,
+    };
+    EXPECT_EQ(seen, expected);
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Arpeggios from ORN tipo=0x22.
+// The synthetic file has a quarter-note C major triad at tick 0 with an
+// ORN tipo=0x22 attached. The importer must add an Arpeggio element to
+// the chord; no second arpeggio should appear elsewhere.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, arpeggio_attaches_to_chord)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_arpeggio.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int arpeggioCount = 0;
+    int notesUnderArpeggio = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            Chord* c = toChord(el);
+            if (c->arpeggio()) {
+                ++arpeggioCount;
+                notesUnderArpeggio = static_cast<int>(c->notes().size());
+            }
+        }
+    }
+    EXPECT_EQ(arpeggioCount, 1) << "exactly one arpeggio expected";
+    EXPECT_EQ(notesUnderArpeggio, 3)
+        << "arpeggio must sit on the 3-note C major triad";
+    delete score;
+}
+
+// ===========================================================================
+// FIX: SLURSTART resolves end tick from alMezuro after the measure pass.
+// Two slurs: a multi-measure slur (alMezuro=2) and a same-measure one
+// (alMezuro=0). Encore .enc binaries do not emit SLURSTOP; the importer
+// collects intents and anchors them on the last ChordRest in the target
+// measure once measures are populated.
+// ===========================================================================
+
+TEST_F(Tst_EncoreFeatures, multi_measure_slur_resolved_from_almezuro)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_multi_measure_slur.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int slurCount = 0;
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (!sp->isSlur()) {
+            continue;
+        }
+        ++slurCount;
+        EXPECT_LT(sp->tick(), sp->tick2()) << "slur span must be positive";
+        EXPECT_NE(sp->startElement(), nullptr) << "slur missing start element";
+        EXPECT_NE(sp->endElement(), nullptr) << "slur missing end element";
+    }
+    EXPECT_EQ(slurCount, 2);
+    delete score;
+}
+
+// ===========================================================================
+// FIX: Multi-measure hairpin resolves end tick from WEDGESTART's alMezuro.
+// Two hairpins:
+//   - crescendo from measure 0 tick=0 with alMezuro=2 -> ends at end of measure 2
+//   - diminuendo from measure 1 tick=480 with alMezuro=1 -> ends at end of measure 2
+// ===========================================================================
+
+TEST_F(Tst_EncoreFeatures, multi_measure_hairpin_resolved_from_almezuro)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_multi_measure_hairpin.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int hairpinCount = 0;
+    bool foundCresc = false;
+    bool foundDim = false;
+    const Fraction wholeMeasure(4, 4);
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (!sp->isHairpin()) {
+            continue;
+        }
+        ++hairpinCount;
+        Hairpin* hp = toHairpin(sp);
+        EXPECT_LT(hp->tick(), hp->tick2()) << "hairpin span must be positive";
+        if (hp->hairpinType() == HairpinType::CRESC_HAIRPIN) {
+            foundCresc = true;
+            // start at measure 0 / tick 0, end at end of measure 2 (= 3 * 4/4)
+            EXPECT_EQ(hp->tick(), Fraction(0, 1));
+            EXPECT_EQ(hp->tick2(), wholeMeasure * 3);
+        } else if (hp->hairpinType() == HairpinType::DIM_HAIRPIN) {
+            foundDim = true;
+            // start at measure 1 / beat 2 (480 enc ticks = 2/4),
+            // end at end of measure 2 (= 3 * 4/4)
+            EXPECT_EQ(hp->tick(), wholeMeasure + Fraction(2, 4));
+            EXPECT_EQ(hp->tick2(), wholeMeasure * 3);
+        }
+    }
+    EXPECT_EQ(hairpinCount, 2);
+    EXPECT_TRUE(foundCresc);
+    EXPECT_TRUE(foundDim);
     delete score;
 }
 
@@ -864,6 +1993,48 @@ TEST_F(Tst_EncoreFeatures, title_frame_instruction_and_copyright)
     delete score;
 }
 
+TEST_F(Tst_EncoreFeatures, title_frame_headers_footers)
+{
+    // synthetic_v0c4_titl_headers_footers.enc carries two header lines and
+    // two footer lines with non-trivial alignment bytes:
+    //   header[0] = "Header Right"   align=0x02 (RIGHT)
+    //   header[1] = "Header Center"  align=0x06 (CENTER)
+    //   footer[0] = "Footer Center"  align=0x06 (CENTER)
+    //   footer[1] = "Footer Right"   align=0x02 (RIGHT)
+    // The importer must apply the texts to BOTH the odd- and even-page Sids
+    // so they show on every page regardless of page parity, and place each
+    // text in the column the alignment byte selects.
+    MasterScore* score = readEncoreScore("synthetic_v0c4_titl_headers_footers.enc");
+    ASSERT_NE(score, nullptr);
+
+    auto styleText = [score](Sid sid) -> String {
+        return score->style().styleSt(sid);
+    };
+
+    EXPECT_EQ(styleText(Sid::oddHeaderR),  String(u"Header Right"));
+    EXPECT_EQ(styleText(Sid::evenHeaderR), String(u"Header Right"));
+    EXPECT_EQ(styleText(Sid::oddHeaderC),  String(u"Header Center"));
+    EXPECT_EQ(styleText(Sid::evenHeaderC), String(u"Header Center"));
+    // Left header columns are not overwritten by the importer because no
+    // header line was tagged LEFT in the fixture. The defaults that ship
+    // with MuseScore (e.g. evenHeaderL = "$p") must therefore survive.
+    EXPECT_NE(styleText(Sid::oddHeaderL),  String(u"Header Right"));
+    EXPECT_NE(styleText(Sid::oddHeaderL),  String(u"Header Center"));
+    EXPECT_NE(styleText(Sid::evenHeaderL), String(u"Header Right"));
+    EXPECT_NE(styleText(Sid::evenHeaderL), String(u"Header Center"));
+
+    EXPECT_EQ(styleText(Sid::oddFooterC),  String(u"Footer Center"));
+    EXPECT_EQ(styleText(Sid::evenFooterC), String(u"Footer Center"));
+    EXPECT_EQ(styleText(Sid::oddFooterR),  String(u"Footer Right"));
+    EXPECT_EQ(styleText(Sid::evenFooterR), String(u"Footer Right"));
+    EXPECT_NE(styleText(Sid::oddFooterL),  String(u"Footer Center"));
+    EXPECT_NE(styleText(Sid::oddFooterL),  String(u"Footer Right"));
+    EXPECT_NE(styleText(Sid::evenFooterL), String(u"Footer Center"));
+    EXPECT_NE(styleText(Sid::evenFooterL), String(u"Footer Right"));
+
+    delete score;
+}
+
 // ===========================================================================
 // FEATURE: Chord symbols (Harmony elements)
 // ===========================================================================
@@ -926,6 +2097,119 @@ TEST_F(Tst_EncoreFeatures, multiple_voices_loaded)
         }
     }
     EXPECT_TRUE(foundVoice1) << "opeco_vochoj.enc should have notes in voice 2";
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: End-to-end coverage on the encore_symbols reference file.
+// The user authored encore_symbols.enc to exercise every visible symbol
+// Encore can place. This test pins the per-category counts that the
+// importer is expected to recover -- a regression on any of the symbol
+// families decoded in this directory will trip this case immediately.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, encore_symbols_full_coverage)
+{
+    MasterScore* score = readEncoreScore("encore_symbols.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int dynamics = 0;
+    int fermatas = 0;
+    int markers = 0;     // Segno / Coda / TOCODA / FINE
+    int jumps = 0;       // D.C. / D.S. variants
+    int staccatos = 0;
+    int tenutos = 0;
+    int accents = 0;
+    int marcatos = 0;
+    int staccatissimos = 0;
+    int trills = 0;
+    int mordents = 0;
+    int fingerings = 0;
+    int arpeggios = 0;
+    int tremolos = 0;
+    int hairpins = 0;
+    int dotted_barlines = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        Measure* m = toMeasure(mb);
+        for (EngravingItem* e : m->el()) {
+            if (e && e->isMarker()) ++markers;
+            if (e && e->isJump()) ++jumps;
+        }
+        // Dotted end barline
+        Segment* endBar = m->findSegment(SegmentType::EndBarLine, m->endTick());
+        if (endBar) {
+            for (size_t s = 0; s < score->nstaves(); ++s) {
+                EngravingItem* el = endBar->element(s * VOICES);
+                if (el && el->isBarLine() && toBarLine(el)->barLineType() == BarLineType::DOTTED) {
+                    ++dotted_barlines;
+                    break;
+                }
+            }
+        }
+        for (Segment* s = m->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isDynamic()) ++dynamics;
+                if (e && e->isFermata()) ++fermatas;
+            }
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            Chord* c = toChord(el);
+            if (c->arpeggio()) ++arpeggios;
+            if (c->tremoloSingleChord()) ++tremolos;
+            for (Articulation* a : c->articulations()) {
+                using mu::engraving::SymId;
+                switch (a->symId()) {
+                case SymId::articStaccatoAbove: case SymId::articStaccatoBelow:
+                    ++staccatos; break;
+                case SymId::articTenutoAbove: case SymId::articTenutoBelow:
+                    ++tenutos; break;
+                case SymId::articAccentAbove: case SymId::articAccentBelow:
+                    ++accents; break;
+                case SymId::articMarcatoAbove: case SymId::articMarcatoBelow:
+                    ++marcatos; break;
+                case SymId::articStaccatissimoAbove: case SymId::articStaccatissimoBelow:
+                    ++staccatissimos; break;
+                case SymId::ornamentTrill:
+                    ++trills; break;
+                case SymId::ornamentShortTrill:  // <inverted-mordent>
+                case SymId::ornamentMordent:
+                    ++mordents; break;
+                default: break;
+                }
+            }
+            for (Note* n : c->notes()) {
+                for (EngravingItem* nel : n->el()) {
+                    if (nel && nel->isFingering()) ++fingerings;
+                }
+            }
+        }
+    }
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (sp->isHairpin()) ++hairpins;
+    }
+    EXPECT_GE(dynamics,      13) << "all 13 Encore dynamics expected";
+    EXPECT_GE(fermatas,       2);
+    EXPECT_GE(markers,        3) << "Segno + Coda(s) + To Coda + Fine";
+    EXPECT_GE(jumps,          1) << "at least one D.C. / D.S. variant";
+    EXPECT_GE(staccatos,      7);
+    EXPECT_GE(tenutos,        9);
+    EXPECT_GE(accents,        7);
+    EXPECT_GE(marcatos,       6);
+    EXPECT_GE(staccatissimos, 6);
+    EXPECT_GE(trills,         6) << "trill-marks from per-note bytes + ORN 0x36/0x37";
+    EXPECT_GE(mordents,       4) << "mordent + inverted-mordent";
+    EXPECT_GE(fingerings,     6) << "fingering 1..5 + open-string";
+    EXPECT_GE(arpeggios,      1);
+    EXPECT_GE(tremolos,       4);
+    EXPECT_GE(hairpins,       2);
+    EXPECT_GE(dotted_barlines, 1);
     delete score;
 }
 

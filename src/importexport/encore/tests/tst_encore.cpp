@@ -102,6 +102,22 @@ TEST_F(Tst_Encore, chord_parsing)
     delete score;
 }
 
+TEST_F(Tst_Encore, encore_symbols)
+{
+    // 24-measure reference file the user authored to exercise every
+    // visible symbol Encore can place: dynamics, fermatas, tremolos,
+    // mordent / trill family, fingerings, technical markings, the four
+    // articulation combos, Segno / Coda / To Coda, D.C. / D.S. variants,
+    // dotted barlines, multiple bar styles and the full lyric machinery.
+    // Provided by the user as a derivative-free demo file.
+    MasterScore* score = readEncoreScore("encore_symbols.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_GT(score->nmeasures(), 0);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Score has corrupted measures: " << ret.text();
+    delete score;
+}
+
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // Synthetic files covering behaviors from the Encore 5.0 example files.
@@ -257,3 +273,38 @@ TEST_F(Tst_Encore, rest_in_tuplet_does_not_double_count_placed_ticks)
     EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
     delete score;
 }
+
+// Cross-cutting sanity coverage for the alMezuro-based spanner endpoint
+// resolution (hairpins + slurs) and the partial-tuplet TDuration guard.
+// The dedicated behavior tests live in tst_encore_features.cpp; these
+// entries make sure each fixture stays green under the simpler "load +
+// nmeasures > 0 + sanityCheck" gate that the rest of Tst_Encore uses.
+ENC_SANITY_TEST(multi_measure_hairpin,      "synthetic_v0c4_multi_measure_hairpin.enc")
+ENC_SANITY_TEST(multi_measure_slur,         "synthetic_v0c4_multi_measure_slur.enc")
+ENC_SANITY_TEST(partial_quarter_triplet,    "synthetic_v0c4_partial_quarter_triplet.enc")
+ENC_SANITY_TEST(lyrics_attach,              "synthetic_v0c4_lyrics.enc")
+ENC_SANITY_TEST(lyrics_variable_length,     "synthetic_v0c4_lyrics_variable.enc")
+ENC_SANITY_TEST(lyrics_two_verses,          "synthetic_v0c4_lyrics_two_verses.enc")
+ENC_SANITY_TEST(lyrics_hyphenated_words,    "synthetic_v0c4_lyrics_hyphenated_words.enc")
+ENC_SANITY_TEST(tie_start_flag_byte6,       "synthetic_v0c4_tie_start_flag_byte6.enc")
+ENC_SANITY_TEST(articulations_extended,     "synthetic_v0c4_articulations.enc")
+ENC_SANITY_TEST(articulations_combo,        "synthetic_v0c4_articulations_combo.enc")
+ENC_SANITY_TEST(trill_mordent,              "synthetic_v0c4_trill_mordent.enc")
+ENC_SANITY_TEST(tremolos,                   "synthetic_v0c4_tremolos.enc")
+ENC_SANITY_TEST(fermatas,                   "synthetic_v0c4_fermatas.enc")
+ENC_SANITY_TEST(technical,                  "synthetic_v0c4_technical.enc")
+ENC_SANITY_TEST(trill_spanner,              "synthetic_v0c4_trill_spanner.enc")
+ENC_SANITY_TEST(staccato_orn,               "synthetic_v0c4_staccato_orn.enc")
+ENC_SANITY_TEST(section_markers,            "synthetic_v0c4_section_markers.enc")
+ENC_SANITY_TEST(jump_marks,                 "synthetic_v0c4_jump_marks.enc")
+ENC_SANITY_TEST(jump_marks_all,             "synthetic_v0c4_jump_marks_all.enc")
+ENC_SANITY_TEST(tie_direction_fc,           "synthetic_v0c4_tie_dir_fc.enc")
+ENC_SANITY_TEST(keychange_to_c,             "synthetic_v0c4_keychange_to_c.enc")
+ENC_SANITY_TEST(staff_text,                 "synthetic_v0c4_staff_text.enc")
+ENC_SANITY_TEST(titl_headers_footers,       "synthetic_v0c4_titl_headers_footers.enc")
+ENC_SANITY_TEST(arpeggio,                   "synthetic_v0c4_arpeggio.enc")
+ENC_SANITY_TEST(staff_text_placement,       "synthetic_v0c4_staff_text_placement.enc")
+ENC_SANITY_TEST(dynamics_size16,            "synthetic_v0c4_dynamics.enc")
+ENC_SANITY_TEST(dynamics_full,              "synthetic_v0c4_dynamics_full.enc")
+ENC_SANITY_TEST(wedgestart_at_measure_end,  "synthetic_v0c4_wedgestart_at_measure_end.enc")
+ENC_SANITY_TEST(double_barline_multi_staff, "synthetic_v0c4_double_barline_multi_staff.enc")
