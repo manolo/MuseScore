@@ -24,9 +24,11 @@
 #define MU_IMPORTEXPORT_ENCOREMAPPING_H
 
 #include <QString>
+#include <vector>
 
 #include "engraving/dom/clef.h"
 
+#include "engraving/types/symid.h"
 #include "encoreelements.h"
 
 namespace mu::engraving {
@@ -50,6 +52,26 @@ void addRepeatMark(mu::engraving::Score* score, mu::engraving::Measure* measure,
 
 QString normalizeEncoreInstrName(const QString& name);
 const mu::engraving::InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName);
+
+// Map an Encore articulation byte (the value of EncNote::articulationUp /
+// articulationDown) to MuseScore SymIds. Encore frequently packs more than
+// one glyph into a single byte (e.g. 0x24 = tenuto + staccato). The returned
+// vector lists every articulation the byte represents; an empty vector means
+// the byte has no known articulation mapping (e.g. an accidental indicator
+// that the importer renders elsewhere).
+std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte);
+
+// Map an Encore articulation byte to a fingering number (1..5), or 0
+// when the byte is not a fingering. Encore stores per-note fingering
+// glyphs in the same articulation slot as articulations and ornaments;
+// the importer creates a `Fingering` element with the number as text.
+int encArticByteToFingerNumber(quint8 articByte);
+
+// True when the articulation byte indicates a per-note open-string
+// marker. MuseScore lacks a dedicated SymId for it, so the importer
+// emits a `Fingering` with `TextStyleType::STRING_NUMBER` and text "0"
+// (the MusicXML exporter then writes `<open-string/>`).
+bool encArticByteIsOpenString(quint8 articByte);
 
 } // namespace mu::iex::encore
 
