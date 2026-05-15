@@ -84,6 +84,20 @@
 using namespace mu::engraving;
 
 namespace mu::iex::encore {
+// Encore packs the note/rest duration in the low nibble of faceValue: 1=whole,
+// 2=half ... 8=256th. Values 0 and 9..15 are invalid; the high nibble carries
+// unrelated flags.
+static inline bool isValidFaceValue(quint8 faceValue)
+{
+    const quint8 fv = faceValue & 0x0F;
+    return fv > 0 && fv <= 8;
+}
+
+static inline void applyConcertPitch(Note* n, int semitone)
+{
+    n->setPitch(semitone);
+    n->setTpcFromPitch();
+}
 
 static void buildScore(MasterScore* score, const EncFile& enc)
 {
@@ -92,15 +106,54 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     score->chordList()->read(u"chords.xml");
 
     // --------------- Setup: parts and staves ---------------
+    // Per-staff chromatic offset to apply when calling Note::setPitch().
+    // Encore stores the WRITTEN pitch in EncNote::semiTonePitch and plays
+    // it shifted by the per-instrument "Key" field from the Staff Sheet
+    // (signed semitones in the .enc binary; see EncInstrument::
+    // keyTransposeSemitones). MuseScore plays at m_pitch directly, so the
+    // importer adds that offset on every note placement to keep playback
+    // aligned with the source.
+    std::vector<int> staffPitchOffset;
+    // Per-staff template clefs (concert + transposing). Encore stores plain
+    // G / F clefs for many octave-transposing instruments while the
+    // MuseScore template carries an octave-bassa concert clef and a plain
+    // transposing clef (bass-guitar: F8_VB / F). pickStaffClef below picks
+    // the appropriate one when the Encore Key matches the concert clef's
+    // octave decoration; otherwise the Encore clef wins.
+    // ClefType::INVALID marks staves with no matched template.
+    std::vector<ClefType> staffTemplateConcertClef;
+    std::vector<ClefType> staffTemplateTransposingClef;
     int totalStaves = 0;
     for (const auto& instr : enc.instruments) {
         int ns = instr.nstaves > 0 ? instr.nstaves : 1;
         Part* part = new Part(score);
 
         // Find the best matching instrument template.
-        // Strategy: name matching first, then MIDI program (v0xC4 only).
-        const InstrumentTemplate* tmpl = findEncoreInstrumentTemplate(instr.name);
-        if (!tmpl && instr.midiProgram > 0) {
+        // Strategy: combined name + MIDI score first, then a drum-kit shortcut
+        // for percussion tracks, then a pure MIDI lookup (v0xC4 only).
+        // When the instrument name is too short to be reliable (e.g. "S",
+        // "C", "T", "B" used as SATB choir labels) the name match returns
+        // nullptr and the MIDI program field is usually unreliable too on
+        // such files (compact TK blocks invalidate the PRG_BASE + n*PRG_STEP
+        // formula). Skip both name-keyword and MIDI fallbacks in that case
+        // and let the chain fall through to Grand Piano so the user can
+        // pick the right voice from the instrument browser afterwards.
+        const int encMidi = instr.midiProgram > 0 ? instr.midiProgram - 1 : -1;
+        const bool nameTooShort = instr.name.trimmed().size() < 4;
+        const InstrumentTemplate* tmpl = findEncoreInstrumentTemplate(instr.name, encMidi);
+        if (!tmpl && !nameTooShort) {
+            // Encore percussion tracks usually leave midiProgram at 1 (Grand
+            // Piano), which makes the MIDI fallback below pick the wrong
+            // instrument (and the wrong playback sound). Recognise the name
+            // and route to a drum-kit template directly.
+            const QString lname = instr.name.toLower();
+            if (lname.contains(QStringLiteral("percus"))
+                || lname.contains(QStringLiteral("drum"))
+                || lname.contains(QStringLiteral("bater"))) {
+                tmpl = searchTemplate(String(u"drumset"));
+            }
+        }
+        if (!tmpl && !nameTooShort && instr.midiProgram > 0) {
             // MIDI program is stored 1-indexed; searchTemplateForMidiProgram
             // expects 0-indexed (GM bank 0).
             tmpl = searchTemplateForMidiProgram(0, instr.midiProgram - 1, false);
@@ -136,9 +189,20 @@ static void buildScore(MasterScore* score, const EncFile& enc)
             part->setShow(false);
         }
 
+        const int pitchOffset = static_cast<int>(instr.keyTransposeSemitones);
         for (int s = 0; s < ns; ++s) {
             Staff* staff = Factory::createStaff(part);
             score->appendStaff(staff);
+            staffPitchOffset.push_back(pitchOffset);
+            ClefType cClef = ClefType::INVALID;
+            ClefType tClef = ClefType::INVALID;
+            if (tmpl) {
+                const ClefTypeList ctl = tmpl->clefType(static_cast<staff_idx_t>(s));
+                cClef = ctl.concertClef;
+                tClef = ctl.transposingClef;
+            }
+            staffTemplateConcertClef.push_back(cClef);
+            staffTemplateTransposingClef.push_back(tClef);
             ++totalStaves;
         }
         score->appendPart(part);
@@ -202,7 +266,13 @@ static void buildScore(MasterScore* score, const EncFile& enc)
         for (int si = 0; si < static_cast<int>(firstLine.staffData.size()) && si < totalStaves; ++si) {
             const auto& sd = firstLine.staffData[si];
             addInitialKeySig(score, si, sd.key);
-            addInitialClef(score, si, sd.clef);
+            const ClefType cClef = si < static_cast<int>(staffTemplateConcertClef.size())
+                                   ? staffTemplateConcertClef[si] : ClefType::INVALID;
+            const ClefType tClef = si < static_cast<int>(staffTemplateTransposingClef.size())
+                                   ? staffTemplateTransposingClef[si] : ClefType::INVALID;
+            const int keyOffset = si < static_cast<int>(staffPitchOffset.size())
+                                  ? staffPitchOffset[si] : 0;
+            addInitialClef(score, si, pickStaffClef(sd.clef, cClef, tClef, keyOffset));
         }
     }
 
@@ -379,7 +449,7 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                     int safety = tt.actualN + 1;
                     while (tt.placedTicks < expectedTup && safety-- > 0
                            && static_cast<int>(tt.currentTuplet->elements().size())
-                              < tt.actualN
+                           < tt.actualN
                            && cumTick[trackKey] + perNote <= measure->ticks()) {
                         Fraction restTick = measure->tick() + cumTick[trackKey];
                         Segment* seg = measure->getSegment(SegmentType::ChordRest, restTick);
@@ -561,15 +631,20 @@ static void buildScore(MasterScore* score, const EncFile& enc)
             // tremolos, technical markings, ...) with voice=4 (one slot
             // above the four real voices). MuseScore has no voice 4, but
             // these marks anchor visually to voice 0 of the same staff.
-            // Map any out-of-range voice down to 0 for ORNAMENT elements;
-            // every other element type (NOTE/REST/LYRIC/CHORD/TIE) keeps
-            // the strict drop -- they have no meaning past voice 3.
+            //
+            // Some Encore files also write regular NOTE / REST / BEAM
+            // elements with voice=4 on a specific staff (observed on the
+            // bass staff of a 4-voice mixed choral file where 176 of the
+            // 184 bass notes carry voice=4 while the matching LYRIC
+            // elements stay on voice=0). The notes are real content and
+            // belong on voice 0 of that staff so the LYRIC anchoring
+            // (which walks voice-0 chord segments) can pick them up;
+            // otherwise the bass staff imports empty. Map every out-of-
+            // range voice down to 0 and let the multi-stream / chord-
+            // extension machinery handle any conflict with existing
+            // voice-0 content the same way it does for normal voices.
             if (voice >= static_cast<int>(VOICES)) {
-                if (et == EncElemType::ORNAMENT) {
-                    voice = 0;
-                } else {
-                    continue;
-                }
+                voice = 0;
             }
 
             // Determine which MuseScore voice to use for this Encore (staffIdx, voice) slot.
@@ -643,6 +718,59 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                     elemTick = lastChordPos.count(trackKey) ? lastChordPos.at(trackKey)
                                : measTick;
                 } else {
+                    // Honor implicit gaps encoded by Encore's absolute tick: when
+                    // the binary places a NOTE/REST significantly later than the
+                    // cumulative sum of face-value advances AND the tick lands on
+                    // the user's notation grid (a multiple of the element's face
+                    // value in Encore ticks), snap cumTick to the Encore tick.
+                    //
+                    // Encore does NOT always emit explicit REST elements for
+                    // leading or interior silences (e.g. a 3/4 measure encoded
+                    // as two NOTE elements at ticks 240 and 480, with the
+                    // leading quarter rest implicit). Without the snap, those
+                    // notes get squashed to beats 1-2 instead of 2-3 and the
+                    // trailing rest moves to the end, altering the timing.
+                    //
+                    // The face-grid gate avoids interfering with live-recorded
+                    // files where every NOTE drifts by a few ticks from its
+                    // notated position and the cumTick approach is what aligns
+                    // the playback grid. Live recordings carry sub-grid ticks
+                    // like 41, 105, 199 that never match `tick % faceTicks ==
+                    // 0`, so the snap stays off and the cumulative-face
+                    // placement keeps the multi-stream and implied-tuplet
+                    // bookkeeping intact.
+                    //
+                    // The 8-Encore-tick threshold (= CHORD_MIDI_THRESHOLD)
+                    // ignores micro-drift inside a chord cluster while still
+                    // catching any intentional silence: the smallest non-
+                    // degenerate face-value advance is the 64th (15 Encore
+                    // ticks), so a real grid-aligned silence is always strictly
+                    // above the threshold.
+                    if (isNoteOrRest) {
+                        quint8 elemFv = 0;
+                        if (et == EncElemType::NOTE) {
+                            elemFv = static_cast<const EncNote*>(e)->faceValue;
+                        } else if (et == EncElemType::REST) {
+                            elemFv = static_cast<const EncRest*>(e)->faceValue;
+                        }
+                        const int faceTicks = faceValue2ticks(elemFv);
+                        const bool onFaceGrid = faceTicks > 0
+                                                && ((int)e->tick % faceTicks) == 0;
+                        if (onFaceGrid) {
+                            const int encQTicks = encMeas.beatTicks
+                                                  ? encMeas.beatTicks : 240;
+                            const Fraction encTickFrac((int)e->tick, 4 * encQTicks);
+                            if (encTickFrac > cumTick[trackKey]) {
+                                const Fraction gap = encTickFrac - cumTick[trackKey];
+                                const int gapEncTicks
+                                    = (gap.numerator() * 4 * encQTicks)
+                                      / std::max(1, gap.denominator());
+                                if (gapEncTicks > CHORD_MIDI_THRESHOLD) {
+                                    cumTick[trackKey] = encTickFrac;
+                                }
+                            }
+                        }
+                    }
                     elemTick = measTick + cumTick[trackKey];
                     if (isNoteOrRest) {
                         lastChordPos[trackKey] = elemTick;
@@ -673,8 +801,9 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                 // bytes set. faceValue < 4 with grace bytes is a known Encore quirk
                 // and must be treated as a normal note.
                 {
-                    quint8 safeFvGrace = en->faceValue & 0x0F;
-                    if (safeFvGrace > 0 && safeFvGrace <= 8 && safeFvGrace >= 4
+                    // Grace requires eighth-or-shorter (low nibble >= 4) in addition
+                    // to the standard face-value range check.
+                    if (isValidFaceValue(en->faceValue) && (en->faceValue & 0x0F) >= 4
                         && en->graceType() != EncGraceType::NORMAL) {
                         // Roll back per-track tick state so the next note is not
                         // detected as a chord extension of this grace.
@@ -701,8 +830,7 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                                         ? NoteType::ACCIACCATURA : NoteType::APPOGGIATURA);
 
                         Note* gnote = Factory::createNote(gc);
-                        gnote->setPitch(en->semiTonePitch);
-                        gnote->setTpcFromPitch();
+                        applyConcertPitch(gnote, en->semiTonePitch + staffPitchOffset[staffIdx]);
                         gc->add(gnote);
 
                         // Articulation on a grace is rare but Encore can encode it.
@@ -722,11 +850,10 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                     }
                 }
 
-                // Skip notes with invalid faceValue (0 or > 8).
-                quint8 safeFv = en->faceValue & 0x0F;
-                if (safeFv == 0 || safeFv > 8) {
+                if (!isValidFaceValue(en->faceValue)) {
                     continue;
                 }
+                const quint8 safeFv = en->faceValue & 0x0F;
                 // Skip MIDI tie-continuation artifacts (very short realDuration < 15 ticks).
                 // Exceptions for 64th/128th notes (fvBase ≤ 15):
                 //   (a) Tie-start notes (TIE element with 0xfe direction at this tick):
@@ -1063,8 +1190,7 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                 }
 
                 Note* note = Factory::createNote(chord);
-                note->setPitch(en->semiTonePitch);
-                note->setTpcFromPitch();
+                applyConcertPitch(note, en->semiTonePitch + staffPitchOffset[staffIdx]);
                 chord->add(note);
 
                 // Fingering glyphs and the open-string marker travel in the
@@ -1131,7 +1257,7 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                 Segment* chordSeg = chord->segment();
                 for (int slot = 0; slot < 2; ++slot) {
                     const quint8 ab = slot == 0 ? en->articulationUp
-                                                : en->articulationDown;
+                                      : en->articulationDown;
                     const bool isAbove = slot == 0;
                     for (SymId sid : encArticulation2SymIds(ab)) {
                         if (sid == SymId::noSym) {
@@ -1147,15 +1273,15 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                             SymId resolved = sid;
                             if (sid == SymId::fermataAbove || sid == SymId::fermataBelow) {
                                 resolved = isAbove ? SymId::fermataAbove
-                                                   : SymId::fermataBelow;
+                                           : SymId::fermataBelow;
                             } else if (sid == SymId::fermataShortAbove
                                        || sid == SymId::fermataShortBelow) {
                                 resolved = isAbove ? SymId::fermataShortAbove
-                                                   : SymId::fermataShortBelow;
+                                           : SymId::fermataShortBelow;
                             }
                             ferm->setSymId(resolved);
                             ferm->setPlacement(isAbove ? mu::engraving::PlacementV::ABOVE
-                                                      : mu::engraving::PlacementV::BELOW);
+                                               : mu::engraving::PlacementV::BELOW);
                             ferm->setPropertyFlags(mu::engraving::Pid::PLACEMENT,
                                                    mu::engraving::PropertyFlags::UNSTYLED);
                             chordSeg->add(ferm);
@@ -1166,8 +1292,8 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                         // <ornaments>. Plain articulations stay as
                         // Articulation under <articulations>.
                         Articulation* art = isOrnamentSymId(sid)
-                            ? static_cast<Articulation*>(Factory::createOrnament(chord))
-                            : Factory::createArticulation(chord);
+                                            ? static_cast<Articulation*>(Factory::createOrnament(chord))
+                                            : Factory::createArticulation(chord);
                         art->setSymId(sid);
                         chord->add(art);
                     }
@@ -1204,10 +1330,14 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                     TremoloSingleChord* trem = Factory::createTremoloSingleChord(chord);
                     TremoloType type = TremoloType::R8;
                     switch (strokes) {
-                    case 1: type = TremoloType::R8;  break;
-                    case 2: type = TremoloType::R16; break;
-                    case 3: type = TremoloType::R32; break;
-                    case 4: type = TremoloType::R64; break;
+                    case 1: type = TremoloType::R8;
+                        break;
+                    case 2: type = TremoloType::R16;
+                        break;
+                    case 3: type = TremoloType::R32;
+                        break;
+                    case 4: type = TremoloType::R64;
+                        break;
                     default: break;
                     }
                     trem->setTremoloType(type);
@@ -1233,8 +1363,7 @@ static void buildScore(MasterScore* score, const EncFile& enc)
             // -- Rests --
             if (et == EncElemType::REST) {
                 const EncRest* er = static_cast<const EncRest*>(e);
-                quint8 safeFvR = er->faceValue & 0x0F;
-                if (safeFvR == 0 || safeFvR > 8) {
+                if (!isValidFaceValue(er->faceValue)) {
                     continue;
                 }
                 if (er->realDuration > 0 && er->realDuration < 15) {
@@ -1553,19 +1682,32 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                     // selects the DynamicType.
                     DynamicType dt = DynamicType::OTHER;
                     switch (eo->ornType()) {
-                    case EncOrnamentType::DYN_PPP:  dt = DynamicType::PPP;  break;
-                    case EncOrnamentType::DYN_PP:   dt = DynamicType::PP;   break;
-                    case EncOrnamentType::DYN_P:    dt = DynamicType::P;    break;
-                    case EncOrnamentType::DYN_MP:   dt = DynamicType::MP;   break;
-                    case EncOrnamentType::DYN_MF:   dt = DynamicType::MF;   break;
-                    case EncOrnamentType::DYN_F:    dt = DynamicType::F;    break;
-                    case EncOrnamentType::DYN_FF:   dt = DynamicType::FF;   break;
-                    case EncOrnamentType::DYN_FFF:  dt = DynamicType::FFF;  break;
-                    case EncOrnamentType::DYN_SFZ:  dt = DynamicType::SFZ;  break;
-                    case EncOrnamentType::DYN_SFFZ: dt = DynamicType::SFFZ; break;
-                    case EncOrnamentType::DYN_FP:   dt = DynamicType::FP;   break;
-                    case EncOrnamentType::DYN_FZ:   dt = DynamicType::FZ;   break;
-                    case EncOrnamentType::DYN_SF:   dt = DynamicType::SF;   break;
+                    case EncOrnamentType::DYN_PPP:  dt = DynamicType::PPP;
+                        break;
+                    case EncOrnamentType::DYN_PP:   dt = DynamicType::PP;
+                        break;
+                    case EncOrnamentType::DYN_P:    dt = DynamicType::P;
+                        break;
+                    case EncOrnamentType::DYN_MP:   dt = DynamicType::MP;
+                        break;
+                    case EncOrnamentType::DYN_MF:   dt = DynamicType::MF;
+                        break;
+                    case EncOrnamentType::DYN_F:    dt = DynamicType::F;
+                        break;
+                    case EncOrnamentType::DYN_FF:   dt = DynamicType::FF;
+                        break;
+                    case EncOrnamentType::DYN_FFF:  dt = DynamicType::FFF;
+                        break;
+                    case EncOrnamentType::DYN_SFZ:  dt = DynamicType::SFZ;
+                        break;
+                    case EncOrnamentType::DYN_SFFZ: dt = DynamicType::SFFZ;
+                        break;
+                    case EncOrnamentType::DYN_FP:   dt = DynamicType::FP;
+                        break;
+                    case EncOrnamentType::DYN_FZ:   dt = DynamicType::FZ;
+                        break;
+                    case EncOrnamentType::DYN_SF:   dt = DynamicType::SF;
+                        break;
                     default: break;
                     }
                     Segment* seg = measure->getSegment(SegmentType::ChordRest, elemTick);
@@ -1600,15 +1742,38 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                     if (!seg) {
                         seg = measure->getSegment(SegmentType::ChordRest, measTick);
                     }
-                    StaffText* st = Factory::createStaffText(seg);
-                    st->setTrack(track);
-                    st->setXmlText(String(text));
                     // Encore stores text y-offset with Cartesian sign (positive =
                     // upward). When yoffset is below the staff baseline (negative
                     // in that convention) the text was placed under the system in
                     // Encore, e.g. "ten" markers in Beethoven Plectro m3. Mirror
                     // that into MuseScore's PlacementV.
-                    if (eo->yoffset < 0) {
+                    const bool placeBelow = (eo->yoffset < 0);
+
+                    // Promote standard Italian tempo terms (Allegro, Andante,
+                    // "a tempo", ...) to a TempoText so MuseScore tracks them
+                    // as tempo rather than free-form staff text.
+                    const double tempoBps = encTextToTempoBps(text);
+                    if (tempoBps >= 0.0) {
+                        TempoText* tt2 = Factory::createTempoText(seg);
+                        tt2->setTrack(track);
+                        tt2->setXmlText(String(text));
+                        if (tempoBps > 0.0) {
+                            tt2->setTempo(BeatsPerSecond(tempoBps));
+                            tt2->setFollowText(true);
+                            score->setTempo(elemTick, BeatsPerSecond(tempoBps));
+                        }
+                        if (placeBelow) {
+                            tt2->setPlacement(mu::engraving::PlacementV::BELOW);
+                            tt2->setPropertyFlags(mu::engraving::Pid::PLACEMENT, mu::engraving::PropertyFlags::UNSTYLED);
+                        }
+                        seg->add(tt2);
+                        break;
+                    }
+
+                    StaffText* st = Factory::createStaffText(seg);
+                    st->setTrack(track);
+                    st->setXmlText(String(text));
+                    if (placeBelow) {
                         st->setPlacement(mu::engraving::PlacementV::BELOW);
                         st->setPropertyFlags(mu::engraving::Pid::PLACEMENT, mu::engraving::PropertyFlags::UNSTYLED);
                     }
@@ -1824,6 +1989,55 @@ static void buildScore(MasterScore* score, const EncFile& enc)
         }
 
         ++measIdx;
+    }
+
+    // Apply per-measure tempo from the MEAS header BPM field. Encore stores
+    // a BPM value in every measure's 54-byte header (offset 0, quarter-note
+    // BPM regardless of the time signature); the importer previously read
+    // the field into EncMeasure::bpm but never used it, so an imported
+    // score always defaulted to MuseScore's 120 quarter-BPM.
+    //
+    // Emit a TempoText only on the first measure and on every measure
+    // whose BPM differs from the previous applied value, so back-to-back
+    // identical measures do not get redundant tempo markings. Skip the
+    // tempo update entirely when a TempoText already lives at the target
+    // segment (an ORN TEMPO subtype 0x32 or a STAFFTEXT promoted from an
+    // Italian tempo term has already set both the visible mark and the
+    // tempo map; trust that instance).
+    {
+        quint16 lastBpm = 0;
+        for (size_t mi = 0; mi < enc.measures.size() && mi < measuresByIdx.size(); ++mi) {
+            const quint16 bpm = enc.measures[mi].bpm;
+            if (bpm == 0) {
+                continue;
+            }
+            if (mi > 0 && bpm == lastBpm) {
+                continue;
+            }
+            Measure* m = measuresByIdx[mi];
+            const Fraction measTick = m->tick();
+            Segment* seg = m->getSegment(SegmentType::ChordRest, measTick);
+            if (!seg) {
+                continue;
+            }
+            bool hasExisting = false;
+            for (EngravingItem* e : seg->annotations()) {
+                if (e && e->isTempoText()) {
+                    hasExisting = true;
+                    break;
+                }
+            }
+            if (!hasExisting) {
+                const double bps = bpm / 60.0;
+                TempoText* tt = Factory::createTempoText(seg);
+                tt->setTrack(0);
+                tt->setTempo(BeatsPerSecond(bps));
+                tt->setXmlText(String(u"♩ = %1").arg(bpm));
+                seg->add(tt);
+                score->setTempo(measTick, BeatsPerSecond(bps));
+            }
+            lastBpm = bpm;
+        }
     }
 
     // Discard any grace chords still queued after the final measure (no main chord

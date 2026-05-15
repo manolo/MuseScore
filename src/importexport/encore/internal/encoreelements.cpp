@@ -25,7 +25,6 @@
 #include <algorithm>
 
 namespace mu::iex::encore {
-
 // ---------------------------------------------------------------------------
 // EncMeasureElem and derived element types
 // ---------------------------------------------------------------------------
@@ -594,9 +593,12 @@ static EncHeaderFooter readTitleLine(QDataStream& ds, EncCharSize cs)
     EncHeaderFooter out;
     out.text = item;
     switch (alignByte) {
-    case static_cast<quint8>(EncTextAlign::CENTER): out.align = EncTextAlign::CENTER; break;
-    case static_cast<quint8>(EncTextAlign::RIGHT):  out.align = EncTextAlign::RIGHT;  break;
-    default:                                        out.align = EncTextAlign::LEFT;   break;
+    case static_cast<quint8>(EncTextAlign::CENTER): out.align = EncTextAlign::CENTER;
+        break;
+    case static_cast<quint8>(EncTextAlign::RIGHT):  out.align = EncTextAlign::RIGHT;
+        break;
+    default:                                        out.align = EncTextAlign::LEFT;
+        break;
     }
     return out;
 }
@@ -618,6 +620,17 @@ bool EncTitle::read(QDataStream& ds, quint32 vs, EncCharSize cs)
     if (vs >= 10000) {
         cs = EncCharSize::TWO_BYTES;
     }
+    // Some Encore files (e.g. Mamae_eu_quero-Bateria.enc) save TWO TITL
+    // blocks with identical content.  Clear the slot vectors at the start
+    // of every read() so a second pass replaces the first one's data
+    // instead of doubling every line.
+    subtitle.clear();
+    instruction.clear();
+    author.clear();
+    header.clear();
+    footer.clear();
+    copyright.clear();
+
     ds.skipRawData(2);
     title = readTextItem(ds, cs);
     for (int i = 0; i < 2; ++i) {
@@ -759,11 +772,17 @@ QString findNextKnownMagic(QDataStream& ds)
         ds >> ch;
         magic.append(QChar(ch));
     }
-    while (!isKnownMagic(magic) && !ds.atEnd()) {
+    // Cap the byte-by-byte resync window. The largest Encore block (TKxx) is
+    // ~2 KiB; 1 MiB of junk between magics indicates a corrupt file and we
+    // stop fishing rather than walking the entire payload.
+    constexpr int kMaxScanBytes = 1 << 20;
+    int scanned = 0;
+    while (!isKnownMagic(magic) && !ds.atEnd() && scanned < kMaxScanBytes) {
         magic.remove(0, 1);
         quint8 ch;
         ds >> ch;
         magic.append(QChar(ch));
+        ++scanned;
     }
     if (!isKnownMagic(magic)) {
         magic.clear();
@@ -930,6 +949,33 @@ bool EncFile::read(QDataStream& ds)
                 instruments[n].midiProgram = static_cast<int>(prg);
             }
         }
+
+        // Read the per-instrument "Key" transposition byte. Encore's Staff
+        // Sheet exposes a Key dropdown that ranges from "2 Octaves Higher"
+        // (+24 semitones) to "Major 20th Lower" (-33 semitones); the value
+        // is stored on disk as a SIGNED int8 in semitones, 23 bytes BEFORE
+        // the MIDI-program byte (= PRG_BASE - 23 + n * PRG_STEP). The note
+        // pitch in the binary is the WRITTEN pitch and Encore plays it
+        // shifted by this Key; the importer mirrors that by adding the
+        // value to EncNote::semiTonePitch before calling Note::setPitch.
+        // Confirmed by binary-diffing a controlled re-save where only the
+        // Bandurria 1 Key was changed from "Sounds as Written" (0x00) to
+        // "Octave Lower" (0xf4 = -12); a single byte flipped at the
+        // formula-derived offset.
+        static constexpr qint64 KEY_OFFSET_FROM_PRG = -23;
+        for (size_t n = 0; n < instruments.size(); ++n) {
+            const qint64 off = PRG_BASE + KEY_OFFSET_FROM_PRG
+                               + static_cast<qint64>(n) * PRG_STEP;
+            if (off < 0 || off >= static_cast<qint64>(ds.device()->size())) {
+                continue;
+            }
+            if (!ds.device()->seek(off)) {
+                continue;
+            }
+            quint8 raw;
+            ds >> raw;
+            instruments[n].keyTransposeSemitones = static_cast<qint8>(raw);
+        }
     }
 
     if (!lines.empty()) {
@@ -953,5 +999,4 @@ bool EncFile::read(QDataStream& ds)
     addSpannerEnds(measures);
     return true;
 }
-
 } // namespace mu::iex::encore

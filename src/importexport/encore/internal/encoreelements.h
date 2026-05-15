@@ -363,6 +363,12 @@ struct EncInstrument {
     int nstaves   { 0 };
     int midiProgram { 0 };   // 1-indexed GM program (0 = not configured)
     bool showStaff { true }; // false = hidden in score (Encore "Show" flag)
+    // "Key" transposition from Encore's Staff Sheet -- a signed chromatic
+    // offset in semitones applied at playback. 0 = "Sounds as Written";
+    // -12 = "Octave Lower" (laud, classical guitar, bass guitar); +12 =
+    // "Octave Higher". The dropdown covers ±33 semitones. Stored on disk
+    // as a signed int8 at PRG_BASE - 23 + n * PRG_STEP (v0xC4 only).
+    qint8 keyTransposeSemitones { 0 };
 
     EncCharSize charSize() const { return (offset > 250) ? EncCharSize::TWO_BYTES : EncCharSize::ONE_BYTE; }
 
