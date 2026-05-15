@@ -74,15 +74,32 @@ TEST(Tst_EncoreRhythm, realDurationToDurationType)
     EXPECT_EQ(realDuration2DurationType(720, 1), DurationType::V_HALF);
     EXPECT_EQ(realDuration2DurationType(360, 3), DurationType::V_QUARTER);
     EXPECT_EQ(realDuration2DurationType(180, 4), DurationType::V_EIGHTH);
-    // v0xA6 triplet mappings.
-    EXPECT_EQ(realDuration2DurationType(160, 4), DurationType::V_QUARTER);
+    // Triplet rdur values fall back to faceValue: a triplet 8th (rdur=80
+    // for fv=eighth=120) is still notated as an eighth, with the 3:2 ratio
+    // expressed via the tuplet wrapper rather than by upgrading the type.
+    EXPECT_EQ(realDuration2DurationType(160, 4), DurationType::V_EIGHTH);
     EXPECT_EQ(realDuration2DurationType(80, 4), DurationType::V_EIGHTH);
+    EXPECT_EQ(realDuration2DurationType(80, 5), DurationType::V_16TH);
+    EXPECT_EQ(realDuration2DurationType(40, 5), DurationType::V_16TH);
     // realDur <= 0 falls back to faceValue2DurationType.
     EXPECT_EQ(realDuration2DurationType(0, 5), DurationType::V_16TH);
     EXPECT_EQ(realDuration2DurationType(-1, 4), DurationType::V_EIGHTH);
     // Unknown realDur also falls back to faceValue2DurationType.
     EXPECT_EQ(realDuration2DurationType(99, 4), DurationType::V_EIGHTH);
     EXPECT_EQ(realDuration2DurationType(31000, 3), DurationType::V_QUARTER);
+    // Inflated dotted ratios: when calculateRealDurations sets rdur to the
+    // gap-to-next-event spacing for a note that has no following event in
+    // its voice, rdur can land on a dotted-multiple of a LONGER face value.
+    // The face is authoritative in that case (rdur > faceTicks AND not a
+    // real dotted multiple of the face): a face=quarter note with rdur=720
+    // (chord-only voice with implicit trailing silence) stays a quarter,
+    // not a dotted half.
+    EXPECT_EQ(realDuration2DurationType(720, 3), DurationType::V_QUARTER);
+    EXPECT_EQ(realDuration2DurationType(360, 4), DurationType::V_EIGHTH);
+    EXPECT_EQ(realDuration2DurationType(180, 5), DurationType::V_16TH);
+    // But a face=quarter + rdur=360 IS a real dotted quarter (calcDots>0),
+    // so the dotted mapping still applies.
+    EXPECT_EQ(realDuration2DurationType(360, 3), DurationType::V_QUARTER);
 }
 
 TEST(Tst_EncoreRhythm, dotCalculation)

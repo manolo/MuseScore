@@ -58,6 +58,21 @@ DurationType faceValue2DurationType(quint8 fv)
     }
 }
 
+// Reject a dotted rdur mapping when it would promote the face value to a
+// longer duration AND the rdur does not actually match a dotted multiple
+// of the face's tick count. This happens when `EncMeasure::calculateRealDurations`
+// inflates rdur to the gap-to-next-event spacing -- e.g. a face=quarter note
+// alone in a 3/4 measure ends up with rdur=720 (the dotted-half ratio) and
+// would otherwise be rendered as a dotted half instead of a quarter.
+// When rdur is <= the face's tick count (truncated by a following event)
+// or the rdur really is a dotted multiple of the face (real dotted note),
+// the standard mapping still applies.
+static bool inflatedDottedPromotion(qint16 realDur, quint8 fv)
+{
+    int faceTicks = faceValue2ticks(fv);
+    return faceTicks > 0 && realDur > faceTicks && calcDots(realDur, fv) == 0;
+}
+
 // Maps the actual MIDI duration to the best MuseScore DurationType.
 DurationType realDuration2DurationType(qint16 realDur, quint8 fv)
 {
@@ -73,19 +88,16 @@ DurationType realDuration2DurationType(qint16 realDur, quint8 fv)
     case  30: return DurationType::V_32ND;
     case  15: return DurationType::V_64TH;
     // Dotted values
-    case 720: return DurationType::V_HALF;
-    case 360: return DurationType::V_QUARTER;
-    case 180: return DurationType::V_EIGHTH;
-    case  90: return DurationType::V_16TH;
-    case  45: return DurationType::V_32ND;
-    // Triplet values (v0xA6 format)
-    case 640: return DurationType::V_WHOLE;
-    case 320: return DurationType::V_HALF;
-    case 160: return DurationType::V_QUARTER;
-    case  80: return DurationType::V_EIGHTH;
-    case  40: return DurationType::V_16TH;
-    case  20: return DurationType::V_32ND;
-    case  10: return DurationType::V_64TH;
+    case 720: return inflatedDottedPromotion(720, fv) ? faceValue2DurationType(fv) : DurationType::V_HALF;
+    case 360: return inflatedDottedPromotion(360, fv) ? faceValue2DurationType(fv) : DurationType::V_QUARTER;
+    case 180: return inflatedDottedPromotion(180, fv) ? faceValue2DurationType(fv) : DurationType::V_EIGHTH;
+    case  90: return inflatedDottedPromotion(90,  fv) ? faceValue2DurationType(fv) : DurationType::V_16TH;
+    case  45: return inflatedDottedPromotion(45,  fv) ? faceValue2DurationType(fv) : DurationType::V_32ND;
+    // Triplet rdur values (160/80/40...) intentionally fall through. The
+    // implied-tuplet detector at `detectImpliedTuplet` already classifies
+    // them as 3:2 groups using the faceValue, and mapping them to the next
+    // longer DurationType (e.g. 80 -> V_EIGHTH for fv=16th) misrepresents
+    // notations that are not in a tuplet context.
     default:  return faceValue2DurationType(fv);
     }
 }
