@@ -39,6 +39,7 @@
 #include "engraving/dom/marker.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/stafftext.h"
+#include "engraving/dom/tempotext.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/note.h"
 #include "engraving/dom/part.h"
@@ -905,6 +906,417 @@ TEST_F(Tst_EncoreFeatures, lyrics_attached_to_chords)
 }
 
 // ===========================================================================
+// FIX: EncLyric::read() detects per-element encoding instead of assuming
+// UTF-16 LE. Real v0xC4 corpora (e.g. milesdepartituras/
+// Fe_cega_faca_amolada_tk.enc) store lyric text as one byte per char in
+// Latin-1; the previous decoder read pairs of bytes as a single QChar and
+// produced spurious CJK code units.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, lyrics_latin1_text_decoded_as_one_byte_per_char)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_lyrics_latin1.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Lyrics* ly : toChord(el)->lyrics()) {
+                seen.push_back(ly->plainText());
+            }
+        }
+    }
+    ASSERT_EQ(seen.size(), 2u);
+    EXPECT_EQ(seen[0], String(u"txã"));
+    EXPECT_EQ(seen[1], String(u"nã"));
+    delete score;
+}
+
+// ===========================================================================
+// FIX: findEncoreInstrumentTemplate scores name + MIDI program together so
+// "Bass" + GM program 32 (Acoustic Bass) wins over the choral Bass voice
+// template that matches the name exactly but ships with a Choir Aahs
+// channel (program 52).
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, instrument_name_midi_tiebreaks_to_acoustic_bass)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_instr_bass_midi_tiebreak.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->id(), String(u"acoustic-bass"))
+        << "Bass + program 32 must reach the instrumental template, not the choral voice";
+    delete score;
+}
+
+// ===========================================================================
+// FIX: percussion tracks store midiProgram=1 (Grand Piano) regardless of
+// the actual instrument, so the MIDI fallback assigned them to a piano.
+// buildScore now recognises Spanish/Portuguese/English names ("Percusión",
+// "Bateria", "Drum") and routes to the locale-independent "drumset" template.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, instrument_name_routes_percussion_to_drumset)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_instr_percussion_drumset.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->id(), String(u"drumset"))
+        << "Encore 'Percusión' must reach the drum-kit template, not the MIDI piano fallback";
+    delete score;
+}
+
+// ===========================================================================
+// FIX: instrument matching is now diacritics-insensitive. The Spanish
+// folk lute template id="laud" ships with trackName="Laúd"; an Encore file
+// that writes the name without the accent (real corpora frequently do)
+// must still resolve to it.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, instrument_name_diacritics_insensitive_match)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_instr_laud_accent.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->id(), String(u"laud"))
+        << "Encore 'Laud' must match the laud template whose trackName carries the diacritic";
+    delete score;
+}
+
+// ===========================================================================
+// FIX: STAFFTEXT whose payload matches a standard Italian tempo term
+// (Allegro, Adagio, ...) is promoted to a TempoText so the score's tempo
+// map updates. Relative markings ("a tempo") become TempoText too but
+// don't carry an absolute BPS - they defer to the previous tempo.
+// Non-tempo strings ("ten.", "cresc.") keep the StaffText path.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, staff_text_promoted_to_tempo_for_italian_terms)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_stafftext_tempo_promotion.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> tempoTexts;
+    std::vector<String> staffTexts;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (!e) {
+                    continue;
+                }
+                if (e->isTempoText()) {
+                    tempoTexts.push_back(toTempoText(e)->plainText());
+                } else if (e->isStaffText()) {
+                    staffTexts.push_back(toStaffText(e)->plainText());
+                }
+            }
+        }
+    }
+    EXPECT_EQ(tempoTexts, (std::vector<String>{ u"Allegro", u"a tempo" }))
+        << "Allegro and 'a tempo' must reach the score as TempoText, not StaffText";
+    EXPECT_EQ(staffTexts, (std::vector<String>{ u"ten." }))
+        << "Non-tempo words remain plain StaffText";
+    delete score;
+}
+
+TEST_F(Tst_EncoreFeatures, staff_text_promoted_to_tempo_sets_tempo_map)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_stafftext_tempo_promotion.enc");
+    ASSERT_NE(score, nullptr);
+
+    // "Allegro" lives at the start of measure 0; the tempo map there must
+    // pick up the palette default of 144 BPM (= 2.4 BPS).
+    const Fraction tick0(0, 1);
+    EXPECT_NEAR(score->tempo(tick0).val, 144.0 / 60.0, 1e-6)
+        << "Allegro at tick 0 must set the tempo to 144 BPM";
+    delete score;
+}
+
+// ===========================================================================
+// FIX: Encore header/footer text can carry `#`-prefixed tokens (`#P` page,
+// `#D` date, `#T` time). The importer rewrites them to the matching
+// MuseScore macros (`$P`/`$D`/`$m`) before assigning the text to the page
+// header/footer style slots. Without the rewrite the literal characters
+// would print on every page instead of expanding at render time.
+// ===========================================================================
+// ===========================================================================
+// FIX: TITL slot categories (subtitle 1-2, instruction 1-3, author 1-4,
+// copyright 1-6, header 1-2, footer 1-2) carry multi-line content as one
+// slot per visible line. The importer joins all non-empty slots of the same
+// category with `\n` for the VBox text and Score Properties metadata.
+// Headers and footers also stack when multiple slots share the same
+// alignment byte (left / center / right): same-aligned lines are joined
+// with `\n` into a single Sid value. Mirrors the multi-author block in
+// Mamae_eu_quero-Bateria.enc (composer = author1 + author2 + author3) that
+// Encore's own MusicXML exporter writes as a single <creator> with
+// newline-separated lines.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, multi_slot_text_joined_with_newlines)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_multi_slot_stacked_text.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    EXPECT_EQ(score->metaTag(u"composer"),
+              u"Vicente Paiva e Jararáca\nAdapt.: Sgt Solano\nBanda de Música do CRPO/VRS")
+        << "the three author slots must join into one newline-separated string";
+    // Two center-aligned header lines must stack into a single Sid value.
+    EXPECT_EQ(score->style().styleSt(mu::engraving::Sid::oddHeaderC),
+              u"Top line one\nTop line two");
+    EXPECT_EQ(score->style().styleSt(mu::engraving::Sid::evenHeaderC),
+              u"Top line one\nTop line two");
+    // The two footers have different alignments (left + right) and must
+    // therefore stay on separate Sids.
+    EXPECT_EQ(score->style().styleSt(mu::engraving::Sid::oddFooterL),  u"Left footer");
+    EXPECT_EQ(score->style().styleSt(mu::engraving::Sid::oddFooterR),  u"Right footer");
+    EXPECT_EQ(score->style().styleSt(mu::engraving::Sid::evenFooterL), u"Left footer");
+    EXPECT_EQ(score->style().styleSt(mu::engraving::Sid::evenFooterR), u"Right footer");
+    delete score;
+}
+
+// ===========================================================================
+// FIX: some Encore files (e.g. Mamae_eu_quero-Bateria.enc) write the TITL
+// block twice with identical content. `EncTitle::read()` clears its slot
+// vectors at the start of every pass so the second block replaces the
+// first instead of doubling every line in the resulting composer, header,
+// footer, etc.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, duplicate_titl_block_does_not_double_lines)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_duplicate_titl_block.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    // The fixture writes the same TITL block twice; the composer must
+    // appear exactly once.
+    EXPECT_EQ(score->metaTag(u"composer"), u"Sole Composer")
+        << "second TITL block must replace the first instead of appending";
+    EXPECT_EQ(score->metaTag(u"workTitle"), u"Duped TITL");
+    delete score;
+}
+
+// ===========================================================================
+// FIX: each Encore MEAS header carries a quarter-note BPM at offset 0 that
+// the importer previously read into `EncMeasure::bpm` but never used. As a
+// result every imported score played at MuseScore's 120 quarter-BPM default
+// instead of the tempo the user set in Encore. A post-measure pass now
+// emits a TempoText for the first measure plus every measure whose BPM
+// differs from the previous applied value, and calls Score::setTempo so
+// playback follows the new tempo map.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, measure_header_bpm_drives_initial_tempo_and_changes)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_tempo_changes.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    // Collect every TempoText in the score with its host measure index.
+    struct Found { int measureIdx; double bps; String text; };
+    std::vector<Found> seen;
+    int mi = -1;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        ++mi;
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isTempoText()) {
+                    TempoText* tt = toTempoText(e);
+                    seen.push_back({ mi, tt->tempo().val, tt->plainText() });
+                }
+            }
+        }
+    }
+    // Fixture writes [100, 60, 100, 60, 200, 200]. The importer emits a
+    // TempoText for: m1 (initial 100), m2 (change to 60), m3 (back to 100),
+    // m4 (back to 60), m5 (change to 200). m6 carries the same BPM as m5
+    // and produces no extra mark.
+    ASSERT_EQ(seen.size(), 5u);
+    EXPECT_EQ(seen[0].measureIdx, 0);
+    EXPECT_NEAR(seen[0].bps, 100.0 / 60.0, 1e-6);
+    EXPECT_EQ(seen[0].text, u"♩ = 100");
+    EXPECT_EQ(seen[1].measureIdx, 1);
+    EXPECT_NEAR(seen[1].bps, 60.0 / 60.0, 1e-6);
+    EXPECT_EQ(seen[2].measureIdx, 2);
+    EXPECT_NEAR(seen[2].bps, 100.0 / 60.0, 1e-6);
+    EXPECT_EQ(seen[3].measureIdx, 3);
+    EXPECT_NEAR(seen[3].bps, 60.0 / 60.0, 1e-6);
+    EXPECT_EQ(seen[4].measureIdx, 4);
+    EXPECT_NEAR(seen[4].bps, 200.0 / 60.0, 1e-6);
+
+    // The tempo map must reflect the same changes (sampled at the start of
+    // each measure).
+    Measure* m = score->firstMeasure();
+    std::vector<int> expected = { 100, 60, 100, 60, 200, 200 };
+    for (int i = 0; i < 6 && m; ++i, m = m->nextMeasure()) {
+        EXPECT_NEAR(score->tempo(m->tick()).val, expected[i] / 60.0, 1e-6)
+            << "measure " << i << " expected " << expected[i] << " BPM";
+    }
+    delete score;
+}
+
+TEST_F(Tst_EncoreFeatures, header_footer_tokens_translated_to_mscore_macros)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_header_footer_tokens.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    // header[0] right-aligned -> oddHeaderR + evenHeaderR.
+    EXPECT_EQ(score->style().styleSt(mu::engraving::Sid::oddHeaderR), u"Page $P")
+        << "#P must be rewritten to $P (page number on every page)";
+    EXPECT_EQ(score->style().styleSt(mu::engraving::Sid::evenHeaderR), u"Page $P");
+    // header[1] center-aligned -> oddHeaderC + evenHeaderC.
+    EXPECT_EQ(score->style().styleSt(mu::engraving::Sid::oddHeaderC), u"Created $D")
+        << "#D must be rewritten to $D (creation date)";
+    EXPECT_EQ(score->style().styleSt(mu::engraving::Sid::evenHeaderC), u"Created $D");
+    // footer[0] left-aligned -> oddFooterL + evenFooterL.
+    EXPECT_EQ(score->style().styleSt(mu::engraving::Sid::oddFooterL), u"Time $m")
+        << "#T must be rewritten to $m (best MuseScore equivalent for 'time')";
+    EXPECT_EQ(score->style().styleSt(mu::engraving::Sid::evenFooterL), u"Time $m");
+    delete score;
+}
+
+// ===========================================================================
+// FIX: Encore encodes leading and interior silences implicitly via the
+// element's absolute tick offset rather than via REST elements. The importer
+// snaps cumTick to the Encore tick when the gap exceeds CHORD_MIDI_THRESHOLD,
+// so a measure encoded as "NOTE at tick 240, NOTE at tick 480" in a 3/4
+// bar renders as "quarter rest, quarter, quarter" instead of squashing the
+// notes to beats 1-2 with the rest pushed to the end (which would shift the
+// song's timing).
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, implicit_leading_rest_keeps_note_positions)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_implicit_leading_rest.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->ticks(), Fraction(3, 4)) << "measure must be 3/4";
+
+    // Voice 0 should produce: quarter rest @ beat 1, quarter note @ beat 2,
+    // quarter note @ beat 3. Same order as Encore -- no reordering.
+    std::vector<Fraction> ticks;
+    std::vector<bool> isRest;
+    std::vector<int> pitches;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el) {
+            continue;
+        }
+        ticks.push_back(s->tick() - m->tick());
+        if (el->isRest()) {
+            isRest.push_back(true);
+            pitches.push_back(-1);
+        } else if (el->isChord()) {
+            isRest.push_back(false);
+            pitches.push_back(toChord(el)->upNote()->pitch());
+        }
+    }
+    ASSERT_EQ(ticks.size(), 3u) << "voice 0 must contain rest + 2 notes";
+    EXPECT_TRUE(isRest[0]) << "beat 1 must be a rest, not a note";
+    EXPECT_EQ(ticks[0], Fraction(0, 1));
+    EXPECT_FALSE(isRest[1]);
+    EXPECT_EQ(ticks[1], Fraction(1, 4));
+    EXPECT_EQ(pitches[1], 72);
+    EXPECT_FALSE(isRest[2]);
+    EXPECT_EQ(ticks[2], Fraction(2, 4));
+    EXPECT_EQ(pitches[2], 74);
+    delete score;
+}
+
+// ===========================================================================
+// FIX: When a voice carries a single NOTE/chord with no following events,
+// EncMeasure::calculateRealDurations inflates rdur to the gap-to-measure-end
+// (e.g. 720 in 3/4). That value lands on the dotted-half mapping bucket of
+// realDuration2DurationType, which would falsely promote a face=quarter note
+// to a dotted half. The importer rejects the promotion when rdur exceeds the
+// face's tick count AND it isn't a real dotted multiple of the face.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, inflated_rdur_keeps_face_value_quarter_chord)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_inflated_rdur_quarter_chord.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    // Voice 1 (MuseScore track 1 of staff 0) holds the encVoice=1 chord.
+    Chord* chord = nullptr;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(1);
+        if (el && el->isChord()) {
+            chord = toChord(el);
+            break;
+        }
+    }
+    ASSERT_NE(chord, nullptr) << "encVoice=1 chord must land on MuseScore voice 1";
+    EXPECT_EQ(chord->durationType().type(), DurationType::V_QUARTER)
+        << "Face=3 (quarter) must win over rdur=720 (inflated to dotted-half ratio)";
+    EXPECT_EQ(chord->durationType().dots(), 0)
+        << "rdur=720 is not a real dotted multiple of quarter; no dot";
+    EXPECT_EQ(chord->notes().size(), 2u)
+        << "the two NOTE elements at tick 0 are merged into one chord";
+    delete score;
+}
+
+// ===========================================================================
+// FIX: realDuration2DurationType no longer promotes triplet-spaced rdur
+// (80, 40, ...) past the face value, so a notated 16th whose MIDI gap to
+// the next note happens to be 80 ticks stays a 16th instead of becoming an
+// eighth and overflowing the measure.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, note_rdur_80_stays_16th_face_value)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_rdur_80_stays_16th.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<DurationType> types;
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) {
+            types.push_back(toChord(el)->durationType().type());
+        }
+    }
+    ASSERT_GE(types.size(), 2u);
+    EXPECT_EQ(types[0], DurationType::V_16TH)
+        << "First note had rdur=80 (was V_EIGHTH under the old triplet table); must stay 16th";
+    EXPECT_EQ(types[1], DurationType::V_16TH);
+    delete score;
+}
+
+// ===========================================================================
 // FIX: Articulations beyond fermata (P2.5).
 // Four quarter notes carry staccato (0x1D), accent (0x12), tenuto (0x1C),
 // marcato (0x13) in articulationUp. The importer maps each known glyph byte
@@ -965,7 +1377,9 @@ TEST_F(Tst_EncoreFeatures, staff_text_resolved_via_text_block)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    std::vector<String> expected = { u"Allegretto", u"cresc.", u"dimin.", u"ten." };
+    // "Allegretto" is now promoted to a TempoText (see the
+    // staff_text_promoted_to_tempo* tests); the rest stays as StaffText.
+    std::vector<String> expected = { u"cresc.", u"dimin.", u"ten." };
     std::vector<String> seen;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
         if (!mb->isMeasure()) {
