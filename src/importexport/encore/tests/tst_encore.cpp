@@ -25,11 +25,16 @@
 #include "engraving/dom/chord.h"
 #include "engraving/dom/clef.h"
 #include "engraving/dom/instrument.h"
+#include "engraving/dom/marker.h"
+#include "engraving/dom/tremolosinglechord.h"
+#include "engraving/dom/tuplet.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/note.h"
 #include "engraving/dom/part.h"
 #include "engraving/dom/segment.h"
+#include "engraving/dom/spanner.h"
+#include "engraving/dom/volta.h"
 
 #include "testbase.h"
 
@@ -305,6 +310,538 @@ TEST_F(Tst_Encore, v0c4_octave_lower_implicit_silences)
     ASSERT_EQ(v1Chord->notes().size(), 2u);
     std::set<int> pitches{ v1Chord->notes()[0]->pitch(), v1Chord->notes()[1]->pitch() };
     EXPECT_EQ(pitches, (std::set<int>{ 64 - 12, 73 - 12 }));
+    delete score;
+}
+
+// End-to-end regression for the full v0xA6 fix chain. A boda-like
+// synthetic combines every failure mode the real-world v0xA6 file
+// exercised:
+//   - 4 instruments at the v0xA6 TK strides (header end 0xA6, TK
+//     blocks at 0xA6 / 0xE6 / 0x126 / 0x166)
+//   - per-instrument Key bytes [0, 0, -12, -12] at content +42
+//   - NOTE MIDI pitch at byte +11 (absolute, not signed offset)
+//   - tuplet byte at element +7 (where v0xC4 has grace2)
+//   - duplicate REST on one staff (m107-like pattern)
+//   - sixteenth-triplet groups on another staff (m131-like)
+// Asserts the whole pipeline lands the right pitches per staff,
+// preserves both triplet groups, collapses the duplicate REST, and
+// produces no spurious fingering / tremolo / fermata glyphs.
+TEST_F(Tst_Encore, v0xa6_boda_like_full_pipeline)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0xa6_boda_like.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_boda_like.enc";
+
+    ASSERT_EQ(score->nstaves(), 4u) << "fixture has 4 instruments";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    auto staffPitches = [m](int staffIdx) {
+        std::vector<int> out;
+        const track_idx_t base = staffIdx * VOICES;
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(base);
+            if (el && el->isChord()) {
+                for (Note* n : toChord(el)->notes()) {
+                    out.push_back(n->pitch());
+                }
+            }
+        }
+        return out;
+    };
+    auto staffElementCount = [m](int staffIdx) {
+        int count = 0;
+        const track_idx_t base = staffIdx * VOICES;
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            if (s->element(base)) {
+                ++count;
+            }
+        }
+        return count;
+    };
+    auto staffTupletGroups = [m](int staffIdx) {
+        std::set<const Tuplet*> seen;
+        const track_idx_t base = staffIdx * VOICES;
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(base);
+            if (el && el->isChord()) {
+                if (const Tuplet* t = toChord(el)->tuplet()) {
+                    seen.insert(t);
+                }
+            }
+        }
+        return seen.size();
+    };
+
+    // Staff 0 (B1, Key=0): eighth + 2 triplet groups, 7 notes total.
+    EXPECT_EQ(staffTupletGroups(0), 2u) << "B1 must hold 2 triplet groups";
+    EXPECT_EQ(staffPitches(0), (std::vector<int>{ 88, 88, 89, 88, 86, 88, 86 }))
+        << "B1 pitches survive without Key shift";
+
+    // Staff 1 (B2, Key=0): rest + 2 eighths, no shift.
+    EXPECT_EQ(staffElementCount(1), 3) << "B2 must hold rest + 2 chords";
+    EXPECT_EQ(staffPitches(1), (std::vector<int>{ 76, 77 }))
+        << "B2 pitches survive without Key shift";
+
+    // Staff 2 (Laud, Key=-12): duplicate REST collapsed, m_pitch = binary -12.
+    EXPECT_EQ(staffElementCount(2), 3)
+        << "Laud must hold exactly rest + 2 chords after duplicate-REST dedupe";
+    EXPECT_EQ(staffPitches(2), (std::vector<int>{ 76 - 12, 77 - 12 }))
+        << "Laud pitches must drop by Key = -12";
+
+    // Staff 3 (Bajo, Key=-12): 3 eighth notes shifted by -12.
+    EXPECT_EQ(staffElementCount(3), 3) << "Bajo holds 3 notes";
+    EXPECT_EQ(staffPitches(3), (std::vector<int>{ 57 - 12, 60 - 12, 64 - 12 }))
+        << "Bajo pitches must drop by Key = -12";
+
+    // No staff should carry spillover into voice 1.
+    int v1Count = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        for (size_t st = 0; st < 4; ++st) {
+            if (s->element(st * VOICES + 1)) {
+                ++v1Count;
+            }
+        }
+    }
+    EXPECT_EQ(v1Count, 0) << "no v1 spillover after dedup + correct tuplet handling";
+
+    // Spurious-glyph audit (artic byte zero-out + tuplet override).
+    int tremCount = 0;
+    int fingerCount = 0;
+    int fermataCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* ann : s->annotations()) {
+                if (ann && ann->isFermata()) {
+                    ++fermataCount;
+                }
+            }
+            for (size_t v = 0; v < score->nstaves() * VOICES; ++v) {
+                EngravingItem* el = s->element(v);
+                if (el && el->isChord()) {
+                    Chord* c = toChord(el);
+                    if (c->tremoloSingleChord() || c->tremoloTwoChord()) {
+                        ++tremCount;
+                    }
+                    for (Note* nt : c->notes()) {
+                        for (EngravingItem* sub : nt->el()) {
+                            if (sub && sub->isFingering()) {
+                                ++fingerCount;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_EQ(tremCount, 0) << "no spurious tremolo glyphs";
+    EXPECT_EQ(fingerCount, 0) << "no spurious fingering glyphs";
+    EXPECT_EQ(fermataCount, 0) << "no spurious fermata glyphs";
+
+    delete score;
+}
+
+// Regression: the explicit tuplet byte lives at element offset +7 in
+// v0xA6 NOTE slots (where v0xC4 has grace2). The v0xC4-shaped EncNote::
+// read picks up byte +13 which lands in the padding region for v0xA6
+// (= 0). Without an override the importer never sees the 0x32 (3:2)
+// triplet marker on real Encore 2.x triplets, so 6 sixteenth-triplets
+// collapse to 4 plain sixteenths and the excess notes spill into a
+// second MuseScore voice. The fixture is a 2/8 measure carrying six
+// 16th notes with tuplet = 0x32 at +7; the imported measure must hold
+// six notes split into two Tuplet(3:2) groups.
+TEST_F(Tst_Encore, v0xa6_triplet_byte_at_offset_7)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0xa6_triplet_byte_at_offset_7.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_triplet_byte_at_offset_7.enc";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    int tupletCount = 0;
+    int noteCount = 0;
+    std::vector<int> pitches;
+    std::set<const Tuplet*> seenTuplets;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) {
+            Chord* c = toChord(el);
+            ++noteCount;
+            for (Note* nt : c->notes()) {
+                pitches.push_back(nt->pitch());
+            }
+            const Tuplet* t = c->tuplet();
+            if (t && seenTuplets.insert(t).second) {
+                ++tupletCount;
+                EXPECT_EQ(t->ratio().numerator(), 3) << "triplet actualNotes";
+                EXPECT_EQ(t->ratio().denominator(), 2) << "triplet normalNotes";
+            }
+        }
+    }
+    EXPECT_EQ(noteCount, 6) << "6 triplet sixteenths must survive import";
+    EXPECT_EQ(tupletCount, 2) << "two 3:2 triplet groups expected";
+    const std::vector<int> expected{64, 65, 64, 62, 64, 62};
+    EXPECT_EQ(pitches, expected) << "pitches must match the binary in order";
+
+    // Voice 1 must be empty (no spillover).
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EXPECT_EQ(s->element(1), nullptr) << "voice 1 should stay empty";
+    }
+    delete score;
+}
+
+// Regression: v0xA6 sometimes stores two byte-identical REST elements
+// back-to-back at the same tick / staff / voice / faceValue (observed
+// roughly once per 500 rests in real Encore 2.x files). Encore renders
+// the pair as a single rest, so the importer must drop the second one.
+// Without the dedupe the second REST advanced cumTick past the measure
+// end and the following note spilled into a second MuseScore voice,
+// producing "rest, rest, note(v1)+note(v2)" instead of the user's
+// "rest, note, note". The fixture is a 3/8 measure with two byte-
+// identical 8th rests at tick 0 followed by two 8th notes (MIDI 64);
+// after the import the first measure must hold exactly three voice-0
+// elements in the right order.
+TEST_F(Tst_Encore, v0xa6_duplicate_rest_collapse)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0xa6_duplicate_rest_collapse.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_duplicate_rest_collapse.enc";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    std::vector<std::pair<Fraction, bool> > positions;   // (tick, isRest)
+    std::vector<int> pitches;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el) {
+            continue;
+        }
+        positions.emplace_back(s->tick() - m->tick(), el->isRest());
+        if (el->isChord()) {
+            pitches.push_back(toChord(el)->notes()[0]->pitch());
+        }
+    }
+    ASSERT_EQ(positions.size(), 3u) << "measure must hold 3 elements after dedupe";
+    EXPECT_TRUE(positions[0].second) << "beat 1: rest";
+    EXPECT_EQ(positions[0].first, Fraction(0, 1));
+    EXPECT_FALSE(positions[1].second) << "beat 2: chord";
+    EXPECT_EQ(positions[1].first, Fraction(1, 8));
+    EXPECT_FALSE(positions[2].second) << "beat 3: chord";
+    EXPECT_EQ(positions[2].first, Fraction(2, 8));
+    ASSERT_EQ(pitches.size(), 2u);
+    EXPECT_EQ(pitches[0], 64);
+    EXPECT_EQ(pitches[1], 64);
+
+    // Voice 1 must be empty (no spillover).
+    int v1Count = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        if (s->element(1)) {
+            ++v1Count;
+        }
+    }
+    EXPECT_EQ(v1Count, 0) << "voice 1 must be empty after dedupe";
+    delete score;
+}
+
+// Regression: v0xA6 file header ends at 0xA6 (174 bytes), not 0xC2 (194
+// bytes) as in v0xC2 / v0xC4. EncHeader::read used to skip
+// unconditionally to 0xC2, swallowing the TK00 block on every real
+// v0xA6 file (its proper position is exactly 0xA6). The fixture places
+// TK00 at 0xA6 with Key = -12 and the legacy 0xC2 slot kept untouched.
+// With the buggy header end the importer skips past TK00@0xA6, fails to
+// find any usable instrument metadata, and the imported pitch stays at
+// the binary value (60 = C4). With the fix, TK00@0xA6 is read first,
+// Key = -12 is applied, and the imported m_pitch drops to 48 (C3).
+TEST_F(Tst_Encore, v0xa6_header_ends_at_0xa6)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0xa6_header_ends_at_0xa6.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_header_ends_at_0xa6.enc";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Chord* firstChord = nullptr;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) {
+            firstChord = toChord(el);
+            break;
+        }
+    }
+    ASSERT_NE(firstChord, nullptr);
+    ASSERT_EQ(firstChord->notes().size(), 1u);
+    EXPECT_EQ(firstChord->notes()[0]->pitch(), 48)
+        << "TK00 at the v0xA6 file offset 0xA6 must be parsed so its "
+           "Key = -12 actually lowers C4 (60) to C3 (48)";
+    delete score;
+}
+
+// Regression: v0xA6 (Encore 2.x) files have a 174-byte (= 0xA6) file
+// header (vs 194 = 0xC2 for v0xC2/v0xC4) and 64-byte TK blocks (vs
+// 2158-byte TK blocks in later formats). Two independent bugs combined
+// to break the per-instrument Key transposition pipeline:
+//   1. EncHeader::read unconditionally skipped to 0xC2, swallowing the
+//      first TK block on v0xA6 files. Every per-instrument metadata
+//      field was off-by-one: instr[0] got TK01's data, etc.
+//   2. The v0xC4 Key reader uses the formula PRG_BASE + n * PRG_STEP
+//      which does not apply to the compact v0xA6 TK layout; instead
+//      v0xA6 stores the signed-int8 Key byte at TK content offset +42.
+// The fixture is a single-instrument v0xA6 file with Key = -12 patched
+// at the v0xA6 location. The single note (pitch_offset = 0 -> binary
+// C4 = 60) must import at m_pitch = 48 (C3) once the offset is applied.
+TEST_F(Tst_Encore, v0xa6_key_transposition_octave_lower)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0xa6_key_transposition.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_key_transposition.enc";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Chord* firstChord = nullptr;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) {
+            firstChord = toChord(el);
+            break;
+        }
+    }
+    ASSERT_NE(firstChord, nullptr);
+    ASSERT_EQ(firstChord->notes().size(), 1u);
+    EXPECT_EQ(firstChord->notes()[0]->pitch(), 48)
+        << "v0xA6 Key = -12 must lower C4 (60) to C3 (48)";
+    delete score;
+}
+
+// Regression: v0xA6 NOTE elements are 10 bytes long but EncNote::read
+// consumes 27 bytes from elemStart to reach articulationUp /
+// articulationDown. The extra 17 bytes are read straight out of the next
+// slot's preamble (tick, typeVoice, size, faceValue, ...). Whatever lands
+// in those two byte slots is then fed to fingering, articulation,
+// tremolo, fermata and open-string lookups. Real-world v0xA6 scores
+// generated thousands of spurious fingerings ("4" glyphs above every
+// note) and tremolos. v0xA6 NOTEs carry NO articulation data; EncNote
+// must zero the fields when the slot size is too small to actually hold
+// them. The fixture is two consecutive quarter notes in a v0xA6 2/4
+// measure, the simplest layout where the next slot's faceValue (= 3)
+// lands on the previous note's articulationUp byte; the imported score
+// must hold zero fingerings, zero articulations, and zero tremolos.
+TEST_F(Tst_Encore, v0xa6_no_spurious_articulation_glyphs)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0xa6_no_spurious_tremolo.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_no_spurious_tremolo.enc";
+
+    int tremCount = 0;
+    int fingerCount = 0;
+    int articCount = 0;
+    int fermataCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* ann : s->annotations()) {
+                if (ann && ann->isFermata()) {
+                    ++fermataCount;
+                }
+            }
+            for (size_t v = 0; v < score->nstaves() * VOICES; ++v) {
+                EngravingItem* el = s->element(v);
+                if (el && el->isChord()) {
+                    Chord* c = toChord(el);
+                    if (c->tremoloSingleChord() || c->tremoloTwoChord()) {
+                        ++tremCount;
+                    }
+                    articCount += static_cast<int>(c->articulations().size());
+                    for (Note* n : c->notes()) {
+                        for (EngravingItem* sub : n->el()) {
+                            if (sub && sub->isFingering()) {
+                                ++fingerCount;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_EQ(tremCount, 0)
+        << "v0xA6 NOTEs do not carry tremolo data";
+    EXPECT_EQ(fingerCount, 0)
+        << "v0xA6 NOTEs do not carry fingering or open-string data";
+    EXPECT_EQ(articCount, 0)
+        << "v0xA6 NOTEs do not carry articulation glyphs";
+    EXPECT_EQ(fermataCount, 0)
+        << "v0xA6 NOTEs do not carry fermata data";
+    delete score;
+}
+
+// Regression: the implicit-silence gap snap used to convert each element's
+// Encore tick to a Fraction with denominator `4 * beatTicks`. That formula
+// assumed beatTicks always equalled 240 (the quarter), which is true only
+// for x/4 meters. Real Encore files in x/8 store beatTicks = 120 (the
+// eighth); 4 * 120 = 480 gave a whole-note denominator half the correct
+// value, the snap pushed cumTick to twice the intended Fraction, and the
+// measure overflowed by one beat. Fix: wholeTicks = beatTicks * timeSigDen
+// (= 960 across the corpus). The fixture is a 3/8 measure with beatTicks
+// = 120 and a single NOTE at Encore tick 240 (beat 3) with no preceding
+// REST -- the implicit-silence pattern that triggers the snap. The
+// imported measure must carry the leading-silence shape (rest, rest,
+// note) without spilling past the bar line.
+TEST_F(Tst_Encore, v0c4_gap_snap_eighth_meter)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_gap_snap_eighth_meter.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_gap_snap_eighth_meter.enc";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    std::vector<Fraction> ticks;
+    std::vector<bool> isRest;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el) {
+            continue;
+        }
+        ticks.push_back(s->tick() - m->tick());
+        isRest.push_back(el->isRest());
+    }
+    ASSERT_GE(ticks.size(), 3u);
+    EXPECT_EQ(ticks[0], Fraction(0, 1));
+    EXPECT_TRUE(isRest[0]) << "beat 1 must be a rest";
+    EXPECT_EQ(ticks[1], Fraction(1, 8));
+    EXPECT_TRUE(isRest[1]) << "beat 2 must be a rest";
+    EXPECT_EQ(ticks[2], Fraction(2, 8));
+    EXPECT_FALSE(isRest[2]) << "beat 3 must carry the chord";
+    delete score;
+}
+
+// Regression: compact-TK files (TK varsize = 112, e.g. v0xC4 SATB choir
+// scores saved by Encore 5.0.2) do NOT follow the
+// PRG_BASE + n * PRG_STEP layout the importer uses to locate per-staff
+// MIDI program and Key transposition bytes. Any non-zero byte at the
+// formula-derived Key offset would mis-shift every pitch on that staff.
+// The fixture leaves the byte at PRG_BASE - 23 set to +8 and asserts the
+// imported pitch stays at the binary value, not 76 + 8 = 84.
+TEST_F(Tst_Encore, v0c4_compact_tk_ignores_key_byte)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_compact_tk_ignores_key_byte.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_compact_tk_ignores_key_byte.enc";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Chord* firstChord = nullptr;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) {
+            firstChord = toChord(el);
+            break;
+        }
+    }
+    ASSERT_NE(firstChord, nullptr);
+    ASSERT_EQ(firstChord->notes().size(), 1u);
+    EXPECT_EQ(firstChord->notes()[0]->pitch(), 76)
+        << "compact-TK file: garbage Key byte at formula offset must be "
+           "ignored; imported pitch stays at binary 76 (not 76+8=84)";
+    delete score;
+}
+
+// Regression: Encore can leave trailing MEAS blocks in the file from
+// prior edits that it does not render. The rendered count lives in the
+// file header measureCount field at offset 0x34. Mamae_eu_quero-Bateria
+// stores 56 MEAS blocks but rendered measureCount = 36; importing all 56
+// produced 20 ghost measures of stale content past the real end of the
+// piece. The importer must stop appending MEAS blocks once it has loaded
+// header.measureCount of them. The fixture writes measureCount = 2 with
+// 6 MEAS blocks on disk and asserts the imported score has exactly 2
+// measures.
+TEST_F(Tst_Encore, v0c4_header_measure_count_truncates_ghost_measures)
+{
+    MasterScore* score = readEncoreScore(
+        "synthetic_v0c4_header_measure_count_truncates_ghost_measures.enc");
+    ASSERT_NE(score, nullptr)
+        << "Failed to load header_measure_count_truncates_ghost_measures.enc";
+    int measureCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (mb->isMeasure()) {
+            ++measureCount;
+        }
+    }
+    EXPECT_EQ(measureCount, 2)
+        << "ghost MEAS blocks past header.measureCount must be dropped";
+    delete score;
+}
+
+// Regression: Encore tags every measure inside a volta with the same
+// repeatAlternative bitmask (m1=0x01, m2=0x01, m3=0x02). The importer
+// previously created one Volta per measure (3 voltas), and never set
+// begin-text on them, so the bracket rendered without "1." or "2." above.
+// Two fixes coalesce equal-bitmask runs into one Volta and set begin-text
+// from the endings list. The fixture exercises both: 3 measures with alt
+// bits 1/1/2 must import as exactly 2 voltas whose texts are "1." and "2."
+TEST_F(Tst_Encore, v0c4_volta_coalesce_and_numbered_text)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_volta_coalesce_and_text.enc");
+    ASSERT_NE(score, nullptr)
+        << "Failed to load synthetic_v0c4_volta_coalesce_and_text.enc";
+
+    std::vector<Volta*> voltas;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isVolta()) {
+            voltas.push_back(toVolta(sp));
+        }
+    }
+    std::sort(voltas.begin(), voltas.end(),
+              [](Volta* a, Volta* b) { return a->tick() < b->tick(); });
+    ASSERT_EQ(voltas.size(), 2u)
+        << "consecutive measures with the same repeatAlternative bitmask "
+           "must collapse into one Volta";
+    EXPECT_EQ(voltas[0]->beginText(), String(u"1."))
+        << "first ending must render the number '1.'";
+    EXPECT_EQ(voltas[1]->beginText(), String(u"2."))
+        << "second ending must render the number '2.'";
+    // The first volta covers two measures (m1 + m2), the second covers one.
+    EXPECT_GT(voltas[0]->tick2() - voltas[0]->tick(), Fraction(4, 4))
+        << "first Volta must span both alt-1 measures, not just one";
+    delete score;
+}
+
+// Regression: Encore stores the source measure of "To Coda" with coda-
+// byte = 0x85 (CODA1) and the destination measure carrying the Coda
+// glyph with coda-byte = 0x89 (CODA2). The importer used to map both to
+// MarkerType::CODA, losing the distinction so the user saw a duplicate
+// Coda glyph where Encore showed the "To Coda" text label. The fixture
+// places 0x85 on m1 and 0x89 on m2 and asserts the imported markers are
+// TOCODA then CODA in order.
+TEST_F(Tst_Encore, v0c4_to_coda_distinct_from_coda)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_to_coda_vs_coda_marker.enc");
+    ASSERT_NE(score, nullptr)
+        << "Failed to load synthetic_v0c4_to_coda_vs_coda_marker.enc";
+
+    std::vector<MarkerType> orderedTypes;
+    int measureIdx = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        ++measureIdx;
+        for (EngravingItem* el : toMeasure(mb)->el()) {
+            if (el && el->isMarker()) {
+                orderedTypes.push_back(toMarker(el)->markerType());
+            }
+        }
+    }
+    ASSERT_EQ(orderedTypes.size(), 2u)
+        << "expected one marker per of the two coda-bearing measures";
+    EXPECT_EQ(orderedTypes[0], MarkerType::TOCODA)
+        << "CODA1 (0x85) must import as TOCODA, not CODA";
+    EXPECT_EQ(orderedTypes[1], MarkerType::CODA)
+        << "CODA2 (0x89) must import as CODA";
     delete score;
 }
 

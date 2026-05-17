@@ -90,9 +90,18 @@ re-save the file as `SCOW` from Encore 5.
 | 0x30   | 2    | number of pages                              |
 | 0x32   | 1    | number of instrument blocks expected         |
 | 0x33   | 1    | number of staves per system                  |
-| 0x34   | 2    | total number of measure blocks               |
+| 0x34   | 2    | rendered measure count (see notes)           |
 
 Bytes 0x36..0xC1 are padding and known-but-uninteresting.
+
+**Rendered measure count vs MEAS blocks on disk.** The `0x34` field
+holds the number of measures Encore actually displays. Real files
+can carry additional MEAS blocks past that count -- "ghost" measures
+left over from a prior edit or saved truncation. Encore never
+renders or plays them, but they remain in the file. The importer
+must stop appending after `header.measureCount` MEAS blocks even if
+more are present (observed: rendered 36 / on-disk 56 in one Encore 5
+file).
 
 ## Instrument block
 
@@ -156,9 +165,22 @@ by a `0xFFFF` tick.
 | 0x09   | 1    | time signature denominator                                 |
 | 0x0C   | 1    | start barline type (see ladder below)                      |
 | 0x0D   | 1    | end barline type (same ladder)                             |
-| 0x0F   | 1    | repeat alternative number                                  |
+| 0x0F   | 1    | repeat-alternative bitmask (see notes)                     |
 | 0x1A   | 4    | repeat-mark field. The LOW byte (`value & 0xFF`) carries the repeat type (see ladder below). The remaining three bytes encode position and styling. |
 | 0x10..0x35 | 38 | layout/position: measure width, x-offsets, "Writer" UTF-16 tag |
+
+#### Repeat alternative (volta) bitmask
+
+The `0x0F` byte is a bitmask, NOT a number. Bit `n` set means the
+measure belongs to ending `n + 1`. A value of `0x01` is "1st
+ending", `0x02` is "2nd ending", `0x03` would be "1st + 2nd
+ending" (rare). Encore tags **every measure** inside the ending
+with the same bitmask, not just the first one (e.g. a 2-measure
+1st ending stores `0x01` on both measures, then the next measure
+that starts the 2nd ending stores `0x02`). The importer collapses
+consecutive measures with the same bitmask into one MuseScore
+`Volta` spanning them and sets the begin-text to "1.", "2.",
+"1., 2.", ... so the number renders above the bracket.
 
 #### Barline types
 
@@ -177,22 +199,35 @@ by a `0xFFFF` tick.
 The full set of values that appear in the LOW byte of the
 repeat-mark field:
 
-| Byte | Meaning                |
-|------|------------------------|
-| 0x80 | D.C. al Coda           |
-| 0x81 | D.S. al Coda           |
-| 0x82 | D.C. al Fine           |
-| 0x83 | D.S. al Fine           |
-| 0x84 | D.S.                   |
-| 0x85 | Coda marker            |
-| 0x86 | Fine                   |
-| 0x87 | D.C.                   |
-| 0x88 | Segno marker           |
-| 0x89 | Coda marker (alt.)     |
+| Byte | Meaning                                                  |
+|------|----------------------------------------------------------|
+| 0x80 | D.C. al Coda                                             |
+| 0x81 | D.S. al Coda                                             |
+| 0x82 | D.C. al Fine                                             |
+| 0x83 | D.S. al Fine                                             |
+| 0x84 | D.S.                                                     |
+| 0x85 | "To Coda" source measure (text label, player jumps from) |
+| 0x86 | Fine                                                     |
+| 0x87 | D.C.                                                     |
+| 0x88 | Segno marker                                             |
+| 0x89 | Coda destination measure (glyph, player jumps to)        |
 
-"To Coda" is NOT part of this ladder; it is encoded as a separate
-ornament element of subtype `0xA5` attached to the source measure
-(see the Ornament element below).
+Encore pairs the two coda bytes:
+- `0x85` (CODA1) is the source measure that displays "To Coda".
+- `0x89` (CODA2) is the destination measure that displays the Coda
+  glyph. The player jumps from the 0x85 measure to the 0x89 measure
+  on the repeat.
+
+Both bytes were historically labelled "Coda marker" in earlier
+versions of this spec; mapping both to `MarkerType::CODA` collapsed
+the pair and made the importer render two identical Coda glyphs.
+The reader now imports `0x85` as `MarkerType::TOCODA` and `0x89` as
+`MarkerType::CODA`.
+
+The ornament-based `0xA5` ("To Coda" attached to a measure as an
+ornament element) and the repeat-mark `0x85` byte are two parallel
+encodings of the same musical idea -- some Encore versions use one,
+some the other, some both. Both must produce a `TOCODA` marker.
 
 #### BPM field semantics
 
@@ -491,8 +526,21 @@ Field offsets from the element start:
 | +24    | 1    | articulation byte (above slot)                       |
 | +26    | 1    | articulation byte (below slot)                       |
 
-v0xA6 notes are 10 bytes long and store the pitch at offset +9
-(signed offset from C4=60).
+v0xA6 notes are 10 bytes long. The MIDI pitch (absolute,
+0..127) lives at element offset +11 -- the first byte of the
+slot's padding region. Byte +9 in real Encore 2.x files holds a
+related but distinct field (staff-position / diatonic line
+count): for example a B4 chord on a treble-clef staff resolves
+to byte +9 = 11 (= six diatonic steps above middle C in
+treble-clef-position counting) while byte +11 = 71 (the
+playable MIDI value).
+
+The explicit tuplet byte (0x32 = 3:2, 0x54 = 5:4, etc.) lives
+at byte +7 in v0xA6 NOTE slots -- the position v0xC4 uses for
+`grace2`. v0xC4 stores the tuplet byte at +13 instead, which
+lands in v0xA6's padding region and reads as 0; the importer
+must override the field for size==10 NOTE elements so explicit
+triplets / quintuplets are recognised.
 
 ### Articulation bytes
 
@@ -750,8 +798,20 @@ the analysed corpus.
 - The TITL block's own version field is unreliable; the actual
   encoding (Latin-1 vs UTF-16) follows the block varsize.
 - v0xA6 (Encore 2.x) is a different layout: notes are 10 bytes,
-  the pitch is at +9, and the element offset within a measure
-  is 0x1A instead of 0x36.
+  the absolute MIDI pitch is at byte +11 (NOT +9, which holds a
+  staff-position field), and the element offset within a measure
+  is 0x1A instead of 0x36. v0xA6 occasionally stores two byte-
+  identical REST elements back-to-back at the same tick / staff /
+  voice / faceValue; Encore renders the pair as a single rest, so
+  the importer dedupes consecutive duplicates. The file header
+  also ends at 0xA6
+  (right where TK00 begins) instead of 0xC2, and TK blocks are
+  64 bytes wide (8-byte header + 56-byte content) instead of
+  2158 bytes. The per-instrument Key transposition byte still
+  exists -- as a signed int8 in semitones (-33..+24, same UI
+  range as later formats) -- but its location moves to TK
+  content offset +42 (i.e. file offset TK_start + 8 + 42),
+  unrelated to the v0xC4 PRG_BASE + n * PRG_STEP formula.
 - Encore percussion tracks always report MIDI program 1 (GM
   Grand Piano) regardless of the actual kit; the instrument is
   identifiable only from the track name.
