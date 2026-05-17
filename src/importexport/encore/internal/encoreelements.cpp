@@ -73,6 +73,17 @@ bool EncNote::read(QDataStream& ds)
         semiTonePitch = tuplet;
         tuplet = 0;
     }
+    // articulationUp/Down sit near the end of the NOTE slot. v0xA6 NOTEs are
+    // 10 bytes long, well before that offset, so the reads above consume
+    // bytes from the next slot's preamble (tick, typeVoice, size,
+    // faceValue, ...). Zero the fields out for the formats that don't
+    // actually carry them; downstream creates fingerings, articulations,
+    // tremolos, fermatas, open-string markers off these bytes and would
+    // otherwise sprinkle thousands of spurious glyphs across the score.
+    if (size < 22) {
+        articulationUp   = 0;
+        articulationDown = 0;
+    }
     return true;
 }
 
@@ -378,17 +389,63 @@ bool EncMeasure::read(QDataStream& ds, const quint32 vs, bool /*oldFormat*/, boo
         elem->read(ds);
         EncMeasureElem* elemRaw = elem.get();
 
-        // In v0xA6 (size=10), MIDI pitch is not at the standard semiTonePitch
-        // offset (+15); it is stored as a signed offset from C4=60 at byte +9.
+        // In v0xA6 (size=10), MIDI pitch is at byte +11 (absolute MIDI
+        // number, not an offset). Real Encore 2.x files store the
+        // playable MIDI pitch there directly. Earlier code assumed byte
+        // +9 carried a signed offset from C4=60; that turned out to be
+        // a staff-position-like field on real files (e.g. 11 for B4 in
+        // treble clef -- diatonic line count rather than chromatic).
         if (veryOldFormat && static_cast<EncElemType>(tp) == EncElemType::NOTE) {
             EncNote* en = static_cast<EncNote*>(elemRaw);
             if (en->size == 10) {
                 qint64 savedPos = ds.device()->pos();
-                ds.device()->seek(elemStart + 9);
+                ds.device()->seek(elemStart + 11);
                 quint8 pitchByte;
                 ds >> pitchByte;
-                en->semiTonePitch = static_cast<quint8>(60 + static_cast<qint8>(pitchByte));
+                en->semiTonePitch = pitchByte;
+                // v0xA6 also stores the tuplet byte at +7 (where v0xC4 has
+                // grace2). The v0xC4-shaped EncNote::read picks up byte
+                // +13 which lands in padding for v0xA6 (= 0). Override
+                // with the real byte so explicit triplets (0x32) are
+                // recognised.
+                ds.device()->seek(elemStart + 7);
+                quint8 tupByte;
+                ds >> tupByte;
+                en->tuplet = tupByte;
                 ds.device()->seek(savedPos);
+            }
+        }
+
+        // v0xA6 occasionally stores two identical REST elements back-to-
+        // back at the same tick/staff/voice/faceValue (observed once per
+        // ~500 rests on real Encore 2.x files). Encore renders the pair
+        // as a single rest, so the importer must dedupe them; otherwise
+        // the second rest pushes cumTick past the measure end and the
+        // following note spills into a second MuseScore voice. Only
+        // consecutive duplicates from the same staff/voice/fv collapse;
+        // genuine multi-voice rests on different voices stay.
+        if (static_cast<EncElemType>(tp) == EncElemType::REST && veryOldFormat
+            && !elements.empty()) {
+            const EncMeasureElem* prev = elements.back().get();
+            const EncRest* prevR = dynamic_cast<const EncRest*>(prev);
+            const EncRest* curR  = dynamic_cast<const EncRest*>(elemRaw);
+            if (prevR && curR
+                && prev->tick == curR->tick
+                && prev->staffIdx == curR->staffIdx
+                && prev->voice == curR->voice
+                && prevR->faceValue == curR->faceValue) {
+                // drop this duplicate
+                if (elemRaw->size > 0) {
+                    qint64 spacing = elemRaw->size * 2;
+                    ds.device()->seek(elemStart + spacing);
+                } else {
+                    ds.device()->seek(ds.device()->pos() + 1);
+                }
+                if (ds.device()->pos() >= measEnd - 4) {
+                    break;
+                }
+                ds >> tick;
+                continue;
             }
         }
 
@@ -677,7 +734,12 @@ bool EncHeader::read(QDataStream& ds)
     ds.skipRawData(0x28 - 5);
     ds >> chuVersio >> nekon1 >> fiksa1 >> lineCount >> pageCount;
     ds >> instrumentCount >> staffPerSystem >> measureCount;
-    ds.skipRawData(0xC2 - 0x36);
+    // v0xA6 (Encore 2.x) has a shorter file header that ends at 0xA6,
+    // right where TK00 begins. v0xC2 and v0xC4 share the longer 0xC2
+    // header layout. Skipping past 0xC2 on a v0xA6 file would consume
+    // TK00 and shift every per-instrument metadata field by one slot.
+    const qint64 headerEnd = isVeryOldFormat() ? 0xA6 : 0xC2;
+    ds.skipRawData(headerEnd - 0x36);
     return true;
 }
 
@@ -845,6 +907,16 @@ bool EncFile::read(QDataStream& ds)
             EncMeasure meas;
             meas.read(ds, varSize, header.isOldFormat(), header.isVeryOldFormat());
             meas.calculateRealDurations();
+            // The file header carries a measureCount field that Encore uses to
+            // decide how many MEAS blocks are part of the rendered score. The
+            // file itself can contain trailing "ghost" MEAS blocks left over
+            // from prior edits (observed in Mamae_eu_quero-Bateria with 36
+            // rendered + 20 ghost). Stop appending past the header count so
+            // the import matches what Encore displays.
+            if (header.measureCount > 0
+                && static_cast<int>(measures.size()) >= header.measureCount) {
+                continue;
+            }
             measures.push_back(std::move(meas));
         } else if (nextId == "TITL") {
             titleBlock.read(ds, varSize, charsize);
@@ -852,6 +924,25 @@ bool EncFile::read(QDataStream& ds)
             textBlock.read(ds, varSize);
         } else if (isInstrumentMagic(nextId)) {
             EncInstrument instr;
+            // v0xA6 (Encore 2.x) TK blocks are 56-byte content slots that
+            // carry the per-instrument Key transposition byte at content
+            // offset +42 (signed int8 semitones; -12 = "Octave Lower").
+            // Read it BEFORE EncInstrument::read so we can restore the
+            // stream position and let the existing reader walk the
+            // block. v0xC4 stores the same field in the formula-based
+            // table outside the TK block, handled later.
+            if (header.isVeryOldFormat()) {
+                const qint64 contentStart = ds.device()->pos();
+                if (ds.device()->seek(contentStart + 42)) {
+                    quint8 raw = 0;
+                    ds >> raw;
+                    const qint8 signedRaw = static_cast<qint8>(raw);
+                    if (signedRaw >= -33 && signedRaw <= 24) {
+                        instr.keyTransposeSemitones = signedRaw;
+                    }
+                    ds.device()->seek(contentStart);
+                }
+            }
             // Probe encoding for v0xC4 files: Encore 5.0.2 writes names
             // in UTF-16 LE even when offset ≤ 250.  Older v0xC4 files
             // (e.g. bazo.enc) use ONE_BYTE; the probe distinguishes them.
@@ -958,23 +1049,40 @@ bool EncFile::read(QDataStream& ds)
         // pitch in the binary is the WRITTEN pitch and Encore plays it
         // shifted by this Key; the importer mirrors that by adding the
         // value to EncNote::semiTonePitch before calling Note::setPitch.
-        // Confirmed by binary-diffing a controlled re-save where only the
-        // Bandurria 1 Key was changed from "Sounds as Written" (0x00) to
+        // Confirmed by binary-diffing a controlled re-save where only one
+        // staff's Key was changed from "Sounds as Written" (0x00) to
         // "Octave Lower" (0xf4 = -12); a single byte flipped at the
         // formula-derived offset.
-        static constexpr qint64 KEY_OFFSET_FROM_PRG = -23;
-        for (size_t n = 0; n < instruments.size(); ++n) {
-            const qint64 off = PRG_BASE + KEY_OFFSET_FROM_PRG
-                               + static_cast<qint64>(n) * PRG_STEP;
-            if (off < 0 || off >= static_cast<qint64>(ds.device()->size())) {
-                continue;
+        //
+        // Compact-TK files (TK varsize <= 250, e.g. v0xC4 saved by Encore
+        // 5.0.2 with offset = 112) do NOT follow the PRG_BASE + n * PRG_STEP
+        // layout: the formula reads garbage and any non-zero byte would
+        // mis-shift every pitch on that staff. Skip the Key read entirely
+        // in that case; defaulting to 0 is correct because such files lack
+        // the staff-sheet "Key" feature anyway. The sanity bound on the
+        // value (-33..+24, the UI range) catches the remaining edge cases
+        // (regular-TK files where the byte still lands on random data).
+        const bool compactTk = !instruments.empty()
+                               && instruments[0].offset <= 250;
+        if (!compactTk) {
+            static constexpr qint64 KEY_OFFSET_FROM_PRG = -23;
+            for (size_t n = 0; n < instruments.size(); ++n) {
+                const qint64 off = PRG_BASE + KEY_OFFSET_FROM_PRG
+                                   + static_cast<qint64>(n) * PRG_STEP;
+                if (off < 0 || off >= static_cast<qint64>(ds.device()->size())) {
+                    continue;
+                }
+                if (!ds.device()->seek(off)) {
+                    continue;
+                }
+                quint8 raw;
+                ds >> raw;
+                const qint8 signedRaw = static_cast<qint8>(raw);
+                if (signedRaw < -33 || signedRaw > 24) {
+                    continue;
+                }
+                instruments[n].keyTransposeSemitones = signedRaw;
             }
-            if (!ds.device()->seek(off)) {
-                continue;
-            }
-            quint8 raw;
-            ds >> raw;
-            instruments[n].keyTransposeSemitones = static_cast<qint8>(raw);
         }
     }
 

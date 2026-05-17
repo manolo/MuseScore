@@ -336,6 +336,14 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     };
     std::vector<PendingMarker> pendingMarkers;
 
+    // Active Volta being extended across consecutive measures that share the
+    // same repeatAlternative bitmask. Encore stores the alt bits on every
+    // measure inside the ending (e.g. m16=0x01, m17=0x01, m18=0x02), not just
+    // the first one. We coalesce equal-bitmask runs into one Volta spanning
+    // their combined tick range.
+    Volta* activeVolta = nullptr;
+    quint8 activeVoltaBits = 0;
+
     // Tuplet state per (staffIdx, msVoice) — keyed by MuseScore voice/track
     std::map<std::pair<int, int>, TupletTracker> tuplets;
 
@@ -505,22 +513,46 @@ static void buildScore(MasterScore* score, const EncFile& enc)
             addRepeatMark(score, measure, rt);
         }
 
-        // Volta (first/second endings) from repeatAlternative bitmask
+        // Volta (first/second endings) from repeatAlternative bitmask. Encore
+        // tags every measure inside the ending with the bitmask; runs of equal
+        // bitmask collapse into a single Volta that spans them.
         if (encMeas.repeatAlternative != 0) {
-            Volta* volta = Factory::createVolta(score->dummy());
-            volta->setVoltaType(Volta::Type::CLOSED);
-            volta->setTrack(0);
-            volta->setTrack2(0);
-            volta->setTick(measTick);
-            volta->setTick2(measTick + measure->ticks());
-            std::vector<int> endings;
-            for (int b = 0; b < 8; ++b) {
-                if (encMeas.repeatAlternative & (1 << b)) {
-                    endings.push_back(b + 1);
+            if (activeVolta && activeVoltaBits == encMeas.repeatAlternative) {
+                // Extend the open Volta to cover the current measure.
+                activeVolta->setTick2(measTick + measure->ticks());
+            } else {
+                Volta* volta = Factory::createVolta(score->dummy());
+                volta->setVoltaType(Volta::Type::CLOSED);
+                volta->setTrack(0);
+                volta->setTrack2(0);
+                volta->setTick(measTick);
+                volta->setTick2(measTick + measure->ticks());
+                std::vector<int> endings;
+                for (int b = 0; b < 8; ++b) {
+                    if (encMeas.repeatAlternative & (1 << b)) {
+                        endings.push_back(b + 1);
+                    }
                 }
+                volta->setEndings(endings);
+                // Set the visible label ("1.", "2.", "1., 2.", ...) so the
+                // number shows above the bracket. Without it the bracket
+                // renders blank even though setEndings is correct semantically.
+                String voltaText;
+                for (int number : endings) {
+                    if (!voltaText.empty()) {
+                        voltaText += u", ";
+                    }
+                    voltaText += String::number(number);
+                }
+                voltaText += u".";
+                volta->setText(voltaText);
+                score->addElement(volta);
+                activeVolta = volta;
+                activeVoltaBits = encMeas.repeatAlternative;
             }
-            volta->setEndings(endings);
-            score->addElement(volta);
+        } else {
+            activeVolta = nullptr;
+            activeVoltaBits = 0;
         }
 
         // Sort elements by tick, then by type (ornaments/non-notes before notes),
@@ -757,13 +789,24 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                         const bool onFaceGrid = faceTicks > 0
                                                 && ((int)e->tick % faceTicks) == 0;
                         if (onFaceGrid) {
-                            const int encQTicks = encMeas.beatTicks
-                                                  ? encMeas.beatTicks : 240;
-                            const Fraction encTickFrac((int)e->tick, 4 * encQTicks);
+                            // wholeTicks = ticks per whole note. Encore stores
+                            // beatTicks per time-signature beat (= 240 for x/4,
+                            // 120 for x/8, etc.), so wholeTicks = beatTicks *
+                            // timeSigDen. Using `4 * beatTicks` only works when
+                            // the denominator is 4; in x/8 it returned half the
+                            // correct value and the snap pushed cumTick well
+                            // beyond the measure end (regression on v0xA6 3/8
+                            // and 6/8 scores). Fall back to 960 (= 240 * 4)
+                            // when the header carries no time signature.
+                            const int wholeTicks
+                                = (encMeas.beatTicks && encMeas.timeSigDen)
+                                  ? encMeas.beatTicks * encMeas.timeSigDen
+                                  : 960;
+                            const Fraction encTickFrac((int)e->tick, wholeTicks);
                             if (encTickFrac > cumTick[trackKey]) {
                                 const Fraction gap = encTickFrac - cumTick[trackKey];
                                 const int gapEncTicks
-                                    = (gap.numerator() * 4 * encQTicks)
+                                    = (gap.numerator() * wholeTicks)
                                       / std::max(1, gap.denominator());
                                 if (gapEncTicks > CHORD_MIDI_THRESHOLD) {
                                     cumTick[trackKey] = encTickFrac;
