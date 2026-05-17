@@ -368,7 +368,19 @@ void addRepeatMark(Score* /*score*/, Measure* measure, EncRepeatType rt)
         measure->add(m);
         break;
     }
-    case EncRepeatType::CODA1:
+    case EncRepeatType::CODA1: {
+        // CODA1 (0x85) is the "To Coda" marker placed on the source measure
+        // (the player jumps FROM here on the repeat). Encore distinguishes
+        // it from CODA2 (0x89), the destination measure that carries the
+        // Coda glyph itself. Mapping both to MarkerType::CODA loses the
+        // pair distinction and Encore's "To Coda" text becomes a duplicate
+        // Coda symbol.
+        Marker* m = Factory::createMarker(measure);
+        m->setMarkerType(MarkerType::TOCODA);
+        m->setTrack(0);
+        measure->add(m);
+        break;
+    }
     case EncRepeatType::CODA2: {
         Marker* m = Factory::createMarker(measure);
         m->setMarkerType(MarkerType::CODA);

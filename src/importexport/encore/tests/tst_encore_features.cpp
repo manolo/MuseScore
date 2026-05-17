@@ -1665,10 +1665,13 @@ TEST_F(Tst_EncoreFeatures, all_encore_navigation_options)
     }
     // Segno comes from ORN 0xA2 AND coda byte 0x88; both add a Marker.
     EXPECT_GE(segnoMarkers, 1) << "ORN 0xA2 must produce a Segno Marker";
-    // Coda comes from ORN 0xA6 AND coda bytes 0x85/0x89; all add a Marker.
+    // Coda glyph comes from ORN 0xA6 AND coda byte 0x89 (CODA2). Coda byte
+    // 0x85 (CODA1) is the source measure for "To Coda" and produces a
+    // TOCODA marker instead, so codaMarkers counts the two coda-glyph
+    // sources only.
     EXPECT_GE(codaMarkers, 1) << "ORN 0xA6 must produce a Coda Marker";
-    // To Coda comes from ORN 0xA5.
-    EXPECT_EQ(toCodaMarkers, 1) << "ORN 0xA5 must produce a TOCODA Marker";
+    // "To Coda" comes from ORN 0xA5 AND coda byte 0x85 (CODA1).
+    EXPECT_GE(toCodaMarkers, 1) << "ORN 0xA5 must produce a TOCODA Marker";
     // Fine comes from coda byte 0x86.
     EXPECT_EQ(fineMarkers, 1) << "coda byte 0x86 must produce a FINE Marker";
     // Every Jump variant must appear at least once.
@@ -2796,9 +2799,13 @@ TEST_F(Tst_EncoreFeatures, very_old_format_v0xa6_sanity_check)
 
 TEST_F(Tst_EncoreFeatures, very_old_format_v0xa6_pitch_encoding)
 {
-    // v0xA6 pitch is a signed byte at elemStart+9 meaning semitones from C4=60.
-    // Measure 1 encodes offsets 0,+2,+4,+7 → MIDI 60,62,64,67 (C D E G).
-    // Before the fix, all notes got pitch=64 from the padding byte at +15.
+    // v0xA6 pitch is the absolute MIDI value (0..127) at elemStart+11
+    // -- the first byte of the 20-byte slot's padding region. The
+    // synthetic helper writes MIDI 60+pitch_offset there; for offsets
+    // 0,+2,+4,+7 the imported pitches must be 60,62,64,67 (C D E G).
+    // The earlier reader looked at byte +9 with a signed-offset +60
+    // formula; on real Encore 2.x files +9 holds a staff-position
+    // field, so that produced wrong sounding pitches.
     MasterScore* score = readEncoreScore("synthetic_v0xa6_basic.enc");
     ASSERT_NE(score, nullptr);
 

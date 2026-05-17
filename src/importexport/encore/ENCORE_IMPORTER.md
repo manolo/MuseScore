@@ -166,11 +166,24 @@ emit "quarter, quarter, quarter rest".
 
 At the start of `elemTick` computation, the importer compares
 the element's absolute Encore tick (converted to a Fraction via
-`Fraction(e->tick, 4 * encMeas.beatTicks)`) against the current
+`Fraction(e->tick, wholeTicks)`) against the current
 `cumTick[trackKey]`. When the difference is strictly greater
 than `CHORD_MIDI_THRESHOLD` (= 8 Encore ticks), `cumTick` is
 snapped forward to the Encore tick; `checkMeasure` later inserts
 the necessary fill rests during the per-staff gap pass.
+
+`wholeTicks` is the number of Encore ticks in a whole note. The
+file header stores `beatTicks` (the duration of one beat in the
+current time signature: 240 for x/4 meters, 120 for x/8 meters,
+480 for x/2 meters, etc.), so
+`wholeTicks = beatTicks * timeSigDen` (= 960 across the corpus).
+An earlier version of this code used `4 * beatTicks` on the
+implicit assumption that `beatTicks` always equals 240. That
+held for x/4 meters but produced a denominator half the correct
+value in x/8 meters: every gap-snap fire then pushed `cumTick`
+twice as far as intended and the measure overflowed. v0xA6
+scores in 3/8 / 6/8 (where `beatTicks = 120` always) tripped this
+on every measure.
 
 The 8-tick threshold matches the same constant used for chord-
 extension detection, so the snap behaves consistently with the
@@ -195,6 +208,34 @@ semitones, 23 bytes before the MIDI program byte in the same
 fixed-offset table (`PRG_BASE - 23 + n * PRG_STEP`), and
 `EncFile::read` populates `EncInstrument::keyTransposeSemitones`
 right next to the MIDI-program read.
+
+Compact-TK files (TK varsize <= 250, e.g. SATB choir scores saved
+by Encore 5.0.2 with `offset = 112`) do NOT follow the
+`PRG_BASE + n * PRG_STEP` layout: the formula reads garbage and
+any non-zero byte would mis-shift every pitch on that staff. The
+reader skips the Key lookup entirely for those files (the staff-
+sheet "Key" feature is absent there anyway) and falls back to a
+sanity bound (`-33..+24`, Encore's UI range) on regular-TK files
+where the formula offset still happens to land on unrelated data.
+
+v0xA6 files (Encore 2.x, e.g. files saved by Encore 2 before
+Encore 3 / 4 / 5 added the longer TK block layout) store the same
+Key field, but its location is different. v0xA6 uses 64-byte TK
+blocks (8-byte header + 56-byte content); the Key byte sits at
+TK content offset +42 (= file offset `TK_start + 8 + 42`). Two
+adjustments are made for these files:
+
+- `EncHeader::read` ends at file offset `0xA6` (174 bytes) for
+  v0xA6, not `0xC2` (194). Skipping past `0xC2` would consume the
+  first TK block (whose magic sits at `0xA6` in real v0xA6 files)
+  and shift every per-instrument metadata field by one slot.
+- The per-instrument loop in `EncFile::read` reads the v0xA6 Key
+  byte directly from the in-flight TK block content, BEFORE
+  delegating to `EncInstrument::read`. The byte is sanity-bound
+  to `-33..+24` and stored on the same `EncInstrument::
+  keyTransposeSemitones` field used for v0xC4. Downstream
+  `applyConcertPitch` then shifts m_pitch per staff regardless of
+  source format.
 
 Encore puts the WRITTEN staff-position MIDI value into
 `EncNote::semiTonePitch` and shifts the audible pitch by the Key
@@ -492,10 +533,47 @@ EncRepeatType repeatMark() const {
 The prior `(coda >> 8) & 0xFF` accessor silently dropped every
 D.C./D.S./Fine on every Encore file. `addRepeatMark` in
 `encoremapping.cpp` then routes each EncRepeatType to the right
-`Jump` or `Marker`. "To Coda" is handled separately because it
-arrives as ORN tipo `0xA5` (see Ornament element in
-ENCORE_FORMAT.md), and is routed to `MarkerType::TOCODA` via the
-pending-markers post-pass alongside SEGNO (0xA2) and CODA (0xA6).
+`Jump` or `Marker`.
+
+**CODA1 vs CODA2.** Encore distinguishes the source measure of
+"To Coda" from the destination measure carrying the Coda glyph by
+two different repeat-mark bytes: `0x85` (CODA1) is the source and
+`0x89` (CODA2) is the destination. The importer maps `0x85` to
+`MarkerType::TOCODA` and `0x89` to `MarkerType::CODA`. Mapping
+both to CODA collapsed the pair and made MuseScore render two
+Coda glyphs where Encore showed "To Coda" + Coda. The ornament-
+based `0xA5` ("To Coda" attached as an ornament element) is the
+parallel encoding for the same direction and also routes to
+TOCODA via the pending-markers post-pass.
+
+## Volta coalescing and numbered text
+
+Encore stores the `repeatAlternative` bitmask on every measure
+inside a volta (`0x01` on each measure of the 1st ending, `0x02`
+on each measure of the 2nd ending, ...). A naive 1-Volta-per-
+measure import produces N voltas of 1 measure each, none of which
+shows a number above the bracket because MuseScore reads the
+visible label from `Volta::beginText`, not from the endings list.
+
+The importer keeps an `activeVolta` pointer across the measure
+loop. When the current measure shares its bitmask with the
+previous one it extends the active Volta's `tick2` to cover the
+new measure. When the bitmask changes (or drops to 0) the active
+Volta is closed and a new one is opened on the next non-zero
+measure. The `beginText` is set from the endings list ("1.",
+"2.", "1., 2.", ...) so the bracket label renders.
+
+## Ghost MEAS blocks past header.measureCount
+
+Encore 5 occasionally leaves trailing MEAS blocks in the file
+from prior edits that the user truncated; the file header's
+`measureCount` field at offset 0x34 is authoritative and reflects
+what Encore actually displays. `EncFile::read` stops appending
+once `measures.size() == header.measureCount` so the imported
+score matches what the user saw in Encore. Without this cap an
+Encore 5 file with rendered count 36 and 56 MEAS blocks on disk
+produces a 56-measure MuseScore score with 20 measures of stale
+content past the real end of the piece.
 
 ## Barlines per staff
 
