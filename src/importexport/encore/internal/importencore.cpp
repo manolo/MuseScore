@@ -295,8 +295,32 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     struct PendingSlur {
         Fraction startTick;
         track_idx_t track;
+        int startMeasIdx;
         int endMeasIdx;
+        int alMezuro;
+        int slurXoffset;
+        int slurXoffset2;
+        int staffIdx;
+        int encVoice;
     };
+
+    // WEDGESTART intents collected during the measure pass, resolved after the
+    // pass so the hairpin can end at the next Dynamic on the same track
+    // (Encore renders a `mf<f>mf` chain with each hairpin terminating
+    // exactly at the next dynamic glyph, not at the end of its alMezuro
+    // target measure). Without the post-pass two adjacent hairpins
+    // overlap because both extend to the bar line.
+    struct PendingHairpin {
+        Fraction startTick;
+        Fraction maxEndTick;     // end of alMezuro target measure (upper bound)
+        track_idx_t track;
+        HairpinType type;
+        int endMeasIdx;          // alMezuro target measure index
+        int hairpinXoffset2;     // xoffset2 in target measure layout
+        int staffIdx;
+        int encVoice;
+    };
+    std::vector<PendingHairpin> pendingHairpins;
     std::vector<PendingSlur> pendingSlurs;
 
     // ARPEGGIO intents collected during the measure pass. The ORN element
@@ -650,7 +674,22 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                 continue;
             }
             if (et == EncElemType::ORNAMENT && e->tick > encMeas.durTicks) {
-                continue;
+                // Dynamics and STAFFTEXT ornaments stored at a tick past the
+                // measure end are Encore's "end-of-measure" markers (observed
+                // in sirena.enc m21: a 2/4 measure with the 1st-volta "pp"
+                // dynamic + "la 2ª" stafftext at tick=960 instead of 480).
+                // Let them through; the per-case clamp later attaches them
+                // to the last existing segment of the current measure.
+                const EncOrnament* eoFilt = static_cast<const EncOrnament*>(e);
+                const EncOrnamentType ot = eoFilt->ornType();
+                const bool isDyn = (ot >= EncOrnamentType::DYN_PPP
+                                    && ot <= EncOrnamentType::DYN_FP)
+                                   || ot == EncOrnamentType::DYN_FZ
+                                   || ot == EncOrnamentType::DYN_SF;
+                const bool isText = (ot == EncOrnamentType::STAFFTEXT);
+                if (!isDyn && !isText) {
+                    continue;
+                }
             }
 
             int staffIdx = static_cast<int>(e->staffIdx);
@@ -1593,6 +1632,95 @@ static void buildScore(MasterScore* score, const EncFile& enc)
             if (et == EncElemType::ORNAMENT) {
                 const EncOrnament* eo = static_cast<const EncOrnament*>(e);
 
+                // Snap an attached ornament's tick back to the chord-rest
+                // whose layout xoffset matches the ornament's drawn position.
+                // Encore stores the ornament at the CHORD-REST AT OR AFTER
+                // its visible position but records the visible position in
+                // `eo->xoffset`. When the ornament's xoff is less than the
+                // stored chord-rest's xoff, the rendered position belongs to
+                // the previous chord-rest (Encore visually pulls the glyph
+                // back). The importer otherwise placed dynamics and hairpins
+                // one chord later than the user saw in Encore. We only snap
+                // when stored tick > 0 so measure-start dynamics (where
+                // Encore's xoff is irrelevant and may be large for layout
+                // padding) stay anchored on the bar line.
+                auto snapTickByXoffset = [&](Fraction defaultTick) -> Fraction {
+                    if (defaultTick <= measTick) {
+                        return defaultTick;
+                    }
+                    const Fraction relTick = defaultTick - measTick;
+                    if (encMeas.beatTicks == 0 || encMeas.timeSigDen == 0) {
+                        return defaultTick;
+                    }
+                    const int wholeTicks = encMeas.beatTicks * encMeas.timeSigDen;
+                    const int defaultEncTick = (relTick.numerator() * wholeTicks)
+                                               / std::max(1, relTick.denominator());
+                    const int ornXoff = static_cast<int>(eo->xoffset);
+                    // Locate the chord-rest at the default tick and read its
+                    // xoffset. If the ornament's xoffset is not strictly less
+                    // than it, keep the default tick.
+                    int defaultCrXoff = -1;
+                    for (const auto& elem : encMeas.elements) {
+                        const EncMeasureElem* em = elem.get();
+                        if (em->type != static_cast<quint8>(EncElemType::NOTE)
+                            && em->type != static_cast<quint8>(EncElemType::REST)) {
+                            continue;
+                        }
+                        if (em->staffIdx != staffIdx || em->voice != voice) {
+                            continue;
+                        }
+                        if (static_cast<int>(em->tick) != defaultEncTick) {
+                            continue;
+                        }
+                        if (em->type == static_cast<quint8>(EncElemType::NOTE)) {
+                            defaultCrXoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
+                        } else {
+                            defaultCrXoff = static_cast<int>(static_cast<const EncRest*>(em)->xoffset);
+                        }
+                        break;
+                    }
+                    if (defaultCrXoff >= 0 && ornXoff >= defaultCrXoff) {
+                        return defaultTick;
+                    }
+                    // Find the latest NOTE/REST strictly before the default
+                    // tick whose xoffset is <= the ornament's xoff. Also
+                    // fires when defaultCrXoff < 0 (no chord-rest at the
+                    // default tick, e.g. a WEDGESTART placed exactly at
+                    // durTicks = the bar line). In that case the scan finds
+                    // the last note in the measure and anchors the hairpin
+                    // start there instead of spilling over the bar line.
+                    int bestTick = -1;
+                    for (const auto& elem : encMeas.elements) {
+                        const EncMeasureElem* em = elem.get();
+                        if (em->type != static_cast<quint8>(EncElemType::NOTE)
+                            && em->type != static_cast<quint8>(EncElemType::REST)) {
+                            continue;
+                        }
+                        if (em->staffIdx != staffIdx || em->voice != voice) {
+                            continue;
+                        }
+                        if (static_cast<int>(em->tick) >= defaultEncTick) {
+                            continue;
+                        }
+                        int xoff = 0;
+                        if (em->type == static_cast<quint8>(EncElemType::NOTE)) {
+                            xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
+                        } else {
+                            xoff = static_cast<int>(static_cast<const EncRest*>(em)->xoffset);
+                        }
+                        if (xoff > ornXoff) {
+                            continue;
+                        }
+                        if (static_cast<int>(em->tick) > bestTick) {
+                            bestTick = static_cast<int>(em->tick);
+                        }
+                    }
+                    if (bestTick < 0) {
+                        return defaultTick;
+                    }
+                    return measTick + Fraction(bestTick, wholeTicks);
+                };
+
                 switch (eo->ornType()) {
                 case EncOrnamentType::SLURSTART: {
                     // Encore .enc binaries do NOT emit SLURSTOP. alMezuro is the
@@ -1603,7 +1731,17 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                     if (endIdx < 0 || endIdx >= static_cast<int>(measuresByIdx.size())) {
                         endIdx = measIdx;
                     }
-                    pendingSlurs.push_back({ elemTick, track, endIdx });
+                    PendingSlur ps;
+                    ps.startTick = elemTick;
+                    ps.track = track;
+                    ps.startMeasIdx = measIdx;
+                    ps.endMeasIdx = endIdx;
+                    ps.alMezuro = static_cast<int>(eo->alMezuro);
+                    ps.slurXoffset = static_cast<int>(eo->xoffset);
+                    ps.slurXoffset2 = static_cast<int>(eo->xoffset2);
+                    ps.staffIdx = staffIdx;
+                    ps.encVoice = voice;
+                    pendingSlurs.push_back(ps);
                     break;
                 }
                 case EncOrnamentType::SLURSTOP:
@@ -1611,32 +1749,49 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                     // endpoint is encoded inside the SLURSTART (see above).
                     break;
                 case EncOrnamentType::WEDGESTART: {
-                    // Encore .enc files do NOT emit a separate WEDGESTOP element.
-                    // The endpoint lives inside the WEDGESTART itself: alMezuro is
-                    // the count of measures forward to the end measure. Resolve
-                    // the end tick now (anchored at the end of the target measure)
-                    // instead of waiting for a stop event that never arrives.
+                    // Encore .enc files do NOT emit a separate WEDGESTOP
+                    // element. alMezuro carries the count of measures
+                    // forward to the end measure (upper bound on the
+                    // span). The actual visual endpoint is at the next
+                    // Dynamic on the same track inside that span; we
+                    // collect the hairpin here and resolve the precise
+                    // tick2 in a post-pass once every Dynamic is placed.
                     int endIdx = measIdx + static_cast<int>(eo->alMezuro);
                     if (endIdx < 0 || endIdx >= static_cast<int>(measuresByIdx.size())) {
                         endIdx = measIdx;
                     }
                     Measure* endMeas = measuresByIdx[endIdx];
-                    Fraction endTick = endMeas->tick() + endMeas->ticks();
-                    if (endTick <= elemTick) {
-                        // Zero or negative span: drop cleanly rather than
-                        // asserting in Spanner::setTicks().
+                    Fraction maxEnd = endMeas->tick() + endMeas->ticks();
+                    // Snap the hairpin start to the chord-rest whose
+                    // xoffset matches Encore's drawn position. Without it
+                    // the hairpin attaches one chord later than the user
+                    // saw in Encore (real-file case: a half note + eighth
+                    // pair where Encore renders the crescendo under the
+                    // half note but the binary tags the eighth).
+                    const Fraction snappedStart = snapTickByXoffset(elemTick);
+                    if (maxEnd <= snappedStart) {
                         break;
                     }
-                    Hairpin* hp = Factory::createHairpin(score->dummy()->segment());
-                    hp->setTrack(track);
-                    hp->setTrack2(track);
-                    hp->setTick(elemTick);
-                    hp->setTick2(endTick);
-                    // speguleco: 0=crescendo, other=diminuendo (from enc2ly)
-                    hp->setHairpinType(eo->speguleco == 0
-                                       ? HairpinType::CRESC_HAIRPIN
-                                       : HairpinType::DIM_HAIRPIN);
-                    score->addElement(hp);
+                    // speguleco direction: bit 0 selects diminuendo vs
+                    // crescendo. Encore 5 also sets bit 1 on the same byte
+                    // (so real files show 0x02 for crescendo and 0x03 for
+                    // diminuendo, not the legacy 0x00 / 0x01 pair). The old
+                    // `== 0` check treated every Encore 5 hairpin as
+                    // diminuendo and flipped every cresc/dim pair on disk.
+                    const HairpinType hpType
+                        = ((eo->speguleco & 0x01) == 0)
+                          ? HairpinType::CRESC_HAIRPIN
+                          : HairpinType::DIM_HAIRPIN;
+                    PendingHairpin ph;
+                    ph.startTick = snappedStart;
+                    ph.maxEndTick = maxEnd;
+                    ph.track = track;
+                    ph.type = hpType;
+                    ph.endMeasIdx = endIdx;
+                    ph.hairpinXoffset2 = static_cast<int>(eo->xoffset2);
+                    ph.staffIdx = staffIdx;
+                    ph.encVoice = voice;
+                    pendingHairpins.push_back(ph);
                     break;
                 }
                 case EncOrnamentType::WEDGESTOP:
@@ -1723,6 +1878,17 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                     // carries the tipo byte reliably (later fields run past
                     // the element boundary in the parser); the tipo alone
                     // selects the DynamicType.
+                    //
+                    // Staff displacement: Encore stores a dynamic on staff N
+                    // but draws it above that staff (yoffset > 0) when the
+                    // user has dragged it up onto the staff above. The binary
+                    // staffByte points to staff N but the glyph visually
+                    // belongs to staff N-1. Reroute to N-1 so MuseScore
+                    // places it on the correct instrument.
+                    if (eo->yoffset > 0 && staffIdx > 0) {
+                        staffIdx -= 1;
+                        track = static_cast<track_idx_t>(staffIdx * VOICES + msVoice);
+                    }
                     DynamicType dt = DynamicType::OTHER;
                     switch (eo->ornType()) {
                     case EncOrnamentType::DYN_PPP:  dt = DynamicType::PPP;
@@ -1753,9 +1919,47 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                         break;
                     default: break;
                     }
-                    Segment* seg = measure->getSegment(SegmentType::ChordRest, elemTick);
+                    // Snap the dynamic's stored tick back to the chord-rest
+                    // whose xoffset matches Encore's drawn position; Encore
+                    // tags the chord at or after the visible glyph, but
+                    // the rendered position belongs to the preceding chord
+                    // when the dynamic's xoffset is smaller. Without this
+                    // a dynamic placed under the 2nd eighth of a measure
+                    // attaches one chord later in MuseScore.
+                    Fraction placeTick = snapTickByXoffset(elemTick);
+                    // Section-end dynamics (e.g. the "pp" that applies on
+                    // the repeat of a 1st-volta measure) are stored at the
+                    // measure's last tick (measureDurTicks). cumTick has
+                    // already been advanced to fill the measure by the
+                    // time we reach the ORN, so the snap result still
+                    // lands at the next measure's first segment; clamp
+                    // such overflow back to the last existing ChordRest
+                    // segment inside the current measure.
+                    if (placeTick >= measTick + measure->ticks()) {
+                        Segment* last = measure->last(SegmentType::ChordRest);
+                        placeTick = last ? last->tick() : measTick;
+                    }
+                    Segment* seg = measure->getSegment(SegmentType::ChordRest, placeTick);
                     if (!seg) {
                         seg = measure->getSegment(SegmentType::ChordRest, measTick);
+                    }
+                    // Encore can write the same dynamic twice on the same
+                    // (staff, voice) at the same tick (real-file case: two
+                    // MF ORNs at tick=120 with xoff 37/38). Encore renders
+                    // only one; skip the duplicate so MuseScore does not
+                    // stack two Dynamics on the same segment.
+                    bool dupDyn = false;
+                    for (EngravingItem* ann : seg->annotations()) {
+                        if (!ann || !ann->isDynamic() || ann->track() != track) {
+                            continue;
+                        }
+                        if (toDynamic(ann)->dynamicType() == dt) {
+                            dupDyn = true;
+                            break;
+                        }
+                    }
+                    if (dupDyn) {
+                        break;
                     }
                     Dynamic* dyn = Factory::createDynamic(seg);
                     dyn->setTrack(track);
@@ -1781,7 +1985,16 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                     if (text.isEmpty()) {
                         break;
                     }
-                    Segment* seg = measure->getSegment(SegmentType::ChordRest, elemTick);
+                    // Same clamp as the dynamic case above: STAFFTEXT
+                    // ornaments stored at the measure's final tick must
+                    // attach to the last existing segment in the current
+                    // measure rather than spill over the bar line.
+                    Fraction placeTick = elemTick;
+                    if (placeTick >= measTick + measure->ticks()) {
+                        Segment* last = measure->last(SegmentType::ChordRest);
+                        placeTick = last ? last->tick() : measTick;
+                    }
+                    Segment* seg = measure->getSegment(SegmentType::ChordRest, placeTick);
                     if (!seg) {
                         seg = measure->getSegment(SegmentType::ChordRest, measTick);
                     }
@@ -2105,17 +2318,93 @@ static void buildScore(MasterScore* score, const EncFile& enc)
             continue;
         }
         Measure* endMeas = measuresByIdx[ps.endMeasIdx];
-        Segment* lastSeg = nullptr;
-        for (Segment* s = endMeas->first(SegmentType::ChordRest); s;
-             s = s->next(SegmentType::ChordRest)) {
-            if (s->element(ps.track)) {
-                lastSeg = s;
+        Fraction endTick;
+        bool resolved = false;
+
+        // Pixel-span heuristic for same-measure slurs. Encore's slur
+        // layout x at the start (slurXoffset) and end (slurXoffset2) are
+        // a constant offset from the first/last note's xoffset along the
+        // measure ruler; the constants are not equal but their DIFFERENCE
+        // (slurXoffset2 - slurXoffset) matches the pixel distance between
+        // the first and last covered notes on disk. So
+        //   target_end_xoff = first_note_xoff + (slurXoffset2 - slurXoffset)
+        // and the end note is the one in the target measure whose xoff is
+        // closest to target_end_xoff. Confirmed against real Encore
+        // exports: same-measure slurs whose XML stop sits on the 3rd note
+        // produce a target inside ~3 layout units of that note's xoff.
+        // For alMezuro > 0 (cross-measure spans) the heuristic does not
+        // apply -- xoffsets reset at the bar line -- so we fall back to
+        // the last existing ChordRest on the same track.
+        if (ps.alMezuro == 0 && ps.startMeasIdx >= 0
+            && ps.startMeasIdx < static_cast<int>(enc.measures.size())) {
+            const EncMeasure& startEncMeas = enc.measures[ps.startMeasIdx];
+            int firstNoteXoff = -1;
+            // Walk the EncMeasure elements for the first NOTE on the slur's
+            // (staffIdx, encVoice) whose tick matches the slur's start
+            // tick (relative to measure start).
+            const Fraction relStartTick = ps.startTick - measuresByIdx[ps.startMeasIdx]->tick();
+            const int startEncTick = (relStartTick.numerator() * startEncMeas.beatTicks
+                                      * startEncMeas.timeSigDen)
+                                     / std::max(1, relStartTick.denominator());
+            for (const auto& elem : startEncMeas.elements) {
+                const EncMeasureElem* em = elem.get();
+                if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
+                    continue;
+                }
+                if (em->staffIdx != ps.staffIdx || em->voice != ps.encVoice) {
+                    continue;
+                }
+                if (static_cast<int>(em->tick) != startEncTick) {
+                    continue;
+                }
+                firstNoteXoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
+                break;
+            }
+            if (firstNoteXoff >= 0) {
+                const int pixelSpan = ps.slurXoffset2 - ps.slurXoffset;
+                const int targetEndXoff = firstNoteXoff + pixelSpan;
+                int bestDist = std::numeric_limits<int>::max();
+                int bestEncTick = -1;
+                for (const auto& elem : startEncMeas.elements) {
+                    const EncMeasureElem* em = elem.get();
+                    if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
+                        continue;
+                    }
+                    if (em->staffIdx != ps.staffIdx || em->voice != ps.encVoice) {
+                        continue;
+                    }
+                    const int xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
+                    const int dist = std::abs(xoff - targetEndXoff);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestEncTick = static_cast<int>(em->tick);
+                    }
+                }
+                if (bestEncTick >= 0 && bestEncTick > startEncTick) {
+                    // Snap the chosen end Encore tick to its ChordRest
+                    // segment in the MuseScore measure.
+                    const Fraction endRel(bestEncTick,
+                                          startEncMeas.beatTicks * startEncMeas.timeSigDen);
+                    endTick = measuresByIdx[ps.startMeasIdx]->tick() + endRel;
+                    resolved = true;
+                }
             }
         }
-        if (!lastSeg) {
-            continue;
+
+        if (!resolved) {
+            Segment* lastSeg = nullptr;
+            for (Segment* s = endMeas->first(SegmentType::ChordRest); s;
+                 s = s->next(SegmentType::ChordRest)) {
+                if (s->element(ps.track)) {
+                    lastSeg = s;
+                }
+            }
+            if (!lastSeg) {
+                continue;
+            }
+            endTick = lastSeg->tick();
         }
-        Fraction endTick = lastSeg->tick();
+
         if (endTick <= ps.startTick) {
             continue;   // zero or negative span: drop
         }
@@ -2125,6 +2414,103 @@ static void buildScore(MasterScore* score, const EncFile& enc)
         slur->setTick(ps.startTick);
         slur->setTick2(endTick);
         score->addElement(slur);
+    }
+
+    // Resolve WEDGESTART intents. Encore renders a chain like `mf<f>mf`
+    // with each hairpin terminating exactly at the next dynamic glyph
+    // on the same track AND at the position recorded in `xoffset2`
+    // within the alMezuro target measure. Two distinct cases:
+    //
+    //   - same-measure (`mf<f>` chain): the next Dynamic on the track
+    //     marks the visible endpoint; the alMezuro upper bound is the
+    //     bar line.
+    //   - cross-measure dim before a downbeat dynamic: `xoffset2` in
+    //     the target measure can be SMALLER than the first note's
+    //     xoffset, meaning Encore draws the hairpin ending right at
+    //     the bar line (before any rendered content of the target
+    //     measure). Without honouring `xoffset2` the hairpin extends
+    //     visibly into the target measure and overlaps with the next
+    //     hairpin starting there.
+    //
+    // The resolved endpoint is the minimum of the next-dynamic tick
+    // and the xoffset2-derived tick; if neither produces a valid
+    // bound, fall back to the alMezuro upper bound.
+    for (const PendingHairpin& ph : pendingHairpins) {
+        Fraction endTick = ph.maxEndTick;
+
+        // (1) next-dynamic-on-track endpoint. Priority over the xoffset2
+        // bar-line clamp: if a Dynamic (mf, f, ...) exists after the
+        // hairpin start and before the alMezuro upper bound, the hairpin
+        // ends exactly there. This handles chains like mf<f>mf where each
+        // hairpin terminates at the next dynamic.
+        bool foundNextDynamic = false;
+        for (Segment* s = score->firstSegment(SegmentType::ChordRest); s; s = s->next1(SegmentType::ChordRest)) {
+            if (s->tick() <= ph.startTick) {
+                continue;
+            }
+            if (s->tick() > ph.maxEndTick) {
+                break;
+            }
+            bool stopHere = false;
+            for (EngravingItem* ann : s->annotations()) {
+                if (ann && ann->isDynamic() && ann->track() == ph.track) {
+                    stopHere = true;
+                    break;
+                }
+            }
+            if (stopHere) {
+                endTick = std::min(endTick, s->tick());
+                foundNextDynamic = true;
+                break;
+            }
+        }
+
+        // (2) xoffset2 bar-line clamp (fallback when no next-dynamic found).
+        // Encore stores the hairpin's layout end position in `xoffset2`
+        // within the alMezuro target measure. When xoffset2 is smaller
+        // than the first NOTE's xoffset in that measure, Encore draws the
+        // hairpin ending right before any visible content (= at the bar
+        // line). Only apply when no Dynamic was found in step (1), so a
+        // cross-measure hairpin that ends at a mf/f does NOT get clamped
+        // to the bar line just because its xoffset2 is also small.
+        if (!foundNextDynamic
+            && ph.endMeasIdx >= 0
+            && ph.endMeasIdx < static_cast<int>(enc.measures.size())) {
+            const EncMeasure& endEncMeas = enc.measures[ph.endMeasIdx];
+            if (endEncMeas.beatTicks && endEncMeas.timeSigDen) {
+                const int xoff2 = ph.hairpinXoffset2;
+                int firstNoteXoff = -1;
+                for (const auto& elem : endEncMeas.elements) {
+                    const EncMeasureElem* em = elem.get();
+                    if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
+                        continue;
+                    }
+                    if (em->staffIdx != ph.staffIdx || em->voice != ph.encVoice) {
+                        continue;
+                    }
+                    const int xoff = static_cast<int>(
+                        static_cast<const EncNote*>(em)->xoffset);
+                    if (xoff > 0 && (firstNoteXoff < 0 || xoff < firstNoteXoff)) {
+                        firstNoteXoff = xoff;
+                    }
+                }
+                if (firstNoteXoff > 0 && xoff2 < firstNoteXoff) {
+                    Fraction targetMeasTick = measuresByIdx[ph.endMeasIdx]->tick();
+                    endTick = std::min(endTick, targetMeasTick);
+                }
+            }
+        }
+
+        if (endTick <= ph.startTick) {
+            continue;
+        }
+        Hairpin* hp = Factory::createHairpin(score->dummy()->segment());
+        hp->setTrack(ph.track);
+        hp->setTrack2(ph.track);
+        hp->setTick(ph.startTick);
+        hp->setTick2(endTick);
+        hp->setHairpinType(ph.type);
+        score->addElement(hp);
     }
 
     // Resolve ARPEGGIO intents collected during the measure pass. The
