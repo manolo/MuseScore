@@ -408,6 +408,17 @@ Each size-16 ornament carries a small payload (subtype at +5,
 one byte at +10 that varies between samples, and a signed 16-bit
 field at +12 that looks like a Y-offset).
 
+**End-of-measure ornament ticks.** Encore can place a dynamic
+(`DYN_*`) or staff text (`STAFFTEXT`) at a tick that exceeds the
+measure's `durTicks`. These are typically section-end markers
+attached to a repeat directive (e.g. a 2/4 measure that carries
+the 1st-volta `f` at tick 0 and the 2nd-volta `pp` at tick 960).
+The importer keeps these ornaments and pins them to the last
+existing ChordRest segment of the source measure so they render
+just before the bar line; dropping them with a strict
+`tick > durTicks` filter silently loses every section-end repeat
+hint.
+
 **Undecoded subtype values.** Real `.enc` files emit additional
 size-16 ornament subtype bytes whose semantics are not yet
 known: `0xAF`, `0xC0`, `0xC4`, `0xC5`, `0xC6`, `0xC8`, `0xEE`,
@@ -440,6 +451,67 @@ count of measures forward to the end measure, and the word at
 +20 gives the horizontal position within that end measure.
 Encore `.enc` files do not emit a separate hairpin-stop or
 slur-stop element in the measure stream.
+
+The `+20` horizontal position is a layout x within the target
+measure, not a tick. For hairpins the visible endpoint always
+coincides with the next Dynamic on the same track inside the
+alMezuro window, so the importer walks the score forward from
+the WEDGESTART for the first Dynamic annotation and clamps the
+hairpin to that tick (falling back to the end of the alMezuro
+target measure when no Dynamic is found).
+
+For slurs the absolute layout x at the start (`xoffset` at +10)
+and end (`xoffset2` at +20) carry per-element drawing offsets
+that are NOT equal to the underlying note's xoffset, but their
+DIFFERENCE matches the pixel distance between the first and the
+last covered notes on disk:
+
+```
+slurXoffset2 - slurXoffset
+    == endNote.xoffset - firstNote.xoffset
+```
+
+The importer recovers the end tick by computing
+`target = firstNote.xoffset + (slurXoffset2 - slurXoffset)` and
+snapping to the note in the start measure whose xoffset is closest
+to `target`. Confirmed against legacy MusicXML exports: same-measure
+slurs that visually cover three notes produce a target within a few
+layout units of the third note's xoffset. The heuristic only
+applies when `alMezuro == 0` (same measure); cross-measure slurs
+fall back to the last ChordRest of the alMezuro target measure
+because xoffsets reset at the bar line and per-measure pixel
+calibrations would be required to bridge them.
+
+**Hairpin direction (bit 0 of speguleco).** WEDGESTART direction
+lives in bit 0 of the `speguleco` field at +26: 0 = crescendo,
+1 = diminuendo. Encore 5 also sets bit 1 on the same byte
+(crescendo reads as `0x02`, diminuendo as `0x03`); the legacy
+`0x00` / `0x01` pair still appears on older files. A naive
+`speguleco == 0` test treats every Encore 5 hairpin as diminuendo
+and flips every cresc/dim pair on disk.
+
+**Dynamic staff displacement (yoffset > 0).** A dynamic ORN
+normally has a negative `yoffset` (Encore's Cartesian convention:
+negative = below the staff). When the user has dragged the glyph
+upward in Encore onto the staff above, the `yoffset` becomes
+positive while `staffByte` still points to the original lower
+staff. Encore renders the glyph on the staff above. The correct
+target staff is `staffIdx - 1` when `yoffset > 0`.
+
+**Snap-back-by-xoffset.** Encore tags an attached ornament
+(`DYN_*`, `WEDGESTART`) at the CHORD-REST AT OR AFTER its
+rendered position but records the visible layout x in the
+ornament's `xoffset` field. When the ornament's xoffset is
+SMALLER than the tagged chord-rest's xoffset, Encore visually
+pulls the glyph back to the previous chord-rest. The importer
+must compare the ornament's xoffset against the tagged chord-
+rest's xoffset and, when strictly less, walk backwards on the
+same `(staffIdx, voice)` for the latest NOTE/REST whose xoffset
+is `<= ornament.xoffset` and re-anchor to that tick. Skipping
+this step plants the glyph one chord later than what Encore
+showed (real-file case: a half-note + eighth pair where the
+binary tags the wedge at the eighth but the wedge's xoffset
+falls inside the half note's drawn region).
 
 **Spanner anchored on the bar line.** Encore lets the user place
 a hairpin's visible start exactly on the bar line; the binary
@@ -690,15 +762,48 @@ Block layout (after the 8 bytes magic + varsize):
 
 Each entry:
 
-| Offset       | Size | Description                                  |
-|--------------|------|----------------------------------------------|
-| +0           | 2    | payload size (size of the rest of this entry)|
-| +2           | 14   | header (14 bytes of fields, not fully decoded)|
-| +16..end-4   | ...  | text (UTF-16 LE characters)                  |
-| end-3..end   | 4    | terminator (`0x04 0x00 0x00 0x00`)           |
+| Offset       | Size | Description                                                       |
+|--------------|------|-------------------------------------------------------------------|
+| +0           | 2    | payload size (size of the rest of this entry)                     |
+| +2           | 14   | header (14 bytes of fields, not fully decoded)                    |
+| +16..term-1  | ...  | text (UTF-16 LE or Latin-1, see notes)                            |
+| term..term+3 | 4    | terminator `0x04 0x00 0x00 0x00` (may be followed by 0..N padding)|
 
 A staff-text ornament (subtype 0x1E) carries no inline text; the
 byte at element offset +32 indexes directly into this entry list.
+
+**Per-entry encoding.** Modern Encore 5.0.2 writes the text in
+UTF-16 LE, but legacy files (notably Spanish/Portuguese scores)
+store text as single-byte Latin-1. The reader probes the first
+two text bytes of each entry: a printable ASCII byte followed by
+`0x00` is UTF-16 LE; otherwise the payload is Latin-1. Forcing
+UTF-16 on a Latin-1 entry combines pairs of single-byte characters
+into one BMP code unit and produces Chinese-looking gibberish
+("la 1ª vez" -> "慬ㄠ₪敶").
+
+**Encoding probe consistency.** The same bidirectional probe is
+applied to every text-bearing field in the format:
+
+| Field                                | Detection                              |
+|--------------------------------------|----------------------------------------|
+| TK block instrument name             | byte 0/1 probe, both directions        |
+| TK block name recovery (NAME_BASE)   | byte 0/1 probe, both directions        |
+| LYRIC element text                   | byte 0/1 probe, both directions        |
+| TEXT block STAFFTEXT entries         | byte 14/15 probe, terminator-bounded   |
+| CHORD-symbol element text            | byte 0/1 probe, both directions        |
+| TITL block title/subtitle/footer/... | varsize gates: <5000 = ONE_BYTE, >=10000 = TWO_BYTES |
+
+The TITL block uses varsize rather than a byte probe because its
+20 fixed-size lines (96 bytes each in ONE_BYTE, 1056 in TWO_BYTES)
+make the two layouts an order of magnitude apart on disk. The
+remaining fields read a variable-length payload and probe the
+first byte pair to decide.
+
+**Text length.** The text byte count is bounded by the `0x04 0x00`
+terminator, NOT by `payload_size - 14 - 4`. Some entries carry
+trailing padding bytes between the terminator and the next entry
+header; computing the text length from `payload_size` alone drops
+the entry's last text byte when padding is present.
 
 Dynamic markings (`p`, `pp`, `ff`, `mf`, ...) are NOT in the TEXT
 block; they are encoded as their own ornament subtypes in the

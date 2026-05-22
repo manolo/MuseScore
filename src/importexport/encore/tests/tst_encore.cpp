@@ -24,8 +24,13 @@
 
 #include "engraving/dom/chord.h"
 #include "engraving/dom/clef.h"
+#include "engraving/dom/dynamic.h"
+#include "engraving/dom/hairpin.h"
+#include "engraving/dom/harmony.h"
 #include "engraving/dom/instrument.h"
 #include "engraving/dom/marker.h"
+#include "engraving/dom/part.h"
+#include "engraving/dom/stafftext.h"
 #include "engraving/dom/tremolosinglechord.h"
 #include "engraving/dom/tuplet.h"
 #include "engraving/dom/masterscore.h"
@@ -33,6 +38,7 @@
 #include "engraving/dom/note.h"
 #include "engraving/dom/part.h"
 #include "engraving/dom/segment.h"
+#include "engraving/dom/slur.h"
 #include "engraving/dom/spanner.h"
 #include "engraving/dom/volta.h"
 
@@ -842,6 +848,498 @@ TEST_F(Tst_Encore, v0c4_to_coda_distinct_from_coda)
         << "CODA1 (0x85) must import as TOCODA, not CODA";
     EXPECT_EQ(orderedTypes[1], MarkerType::CODA)
         << "CODA2 (0x89) must import as CODA";
+    delete score;
+}
+
+// Regression: legacy Spanish/Portuguese Encore files store TEXT block
+// payloads as single-byte Latin-1 rather than the UTF-16 LE encoding
+// modern Encore 5 uses by default. Forcing UTF-16 LE on a Latin-1 payload
+// turns "la 1ª vez" into "慬ㄠ₪敶" (Chinese-looking gibberish that is
+// two Latin-1 bytes mis-interpreted as one UTF-16 code unit). The reader
+// probes byte 14/15 of each entry to detect the encoding, so the imported
+// StaffText must carry the readable Latin-1 string.
+TEST_F(Tst_Encore, v0c4_text_block_latin1_decoding)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_text_block_latin1_decoding.enc");
+    ASSERT_NE(score, nullptr)
+        << "Failed to load synthetic_v0c4_text_block_latin1_decoding.enc";
+
+    StaffText* found = nullptr;
+    for (MeasureBase* mb = score->first(); mb && !found; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* ann : s->annotations()) {
+                if (ann && ann->isStaffText()) {
+                    found = toStaffText(ann);
+                    break;
+                }
+            }
+        }
+    }
+    ASSERT_NE(found, nullptr) << "expected at least one StaffText from a Latin-1 TEXT entry";
+    EXPECT_EQ(found->plainText(), String(u"la 1ª vez"))
+        << "Latin-1 TEXT payload must decode as readable text, not UTF-16 gibberish";
+    delete score;
+}
+
+// Regression: Encore can place two dynamics + their stafftext annotations
+// inside the same measure when the measure carries two repeat directives
+// (e.g. f for the 1st volta, pp for the 2nd). The second pair is stored
+// at a tick past the measure's durTicks (sirena.enc m21 is 2/4 with
+// durTicks=480 and the 1st-volta "pp" sits at tick=960). The reader used
+// to drop every ORN whose tick exceeded durTicks; the user saw only the
+// first dynamic in MuseScore. Section-end DYN_* and STAFFTEXT ornaments
+// now pass the filter and the per-case placement clamps them to the last
+// existing ChordRest segment of the measure.
+TEST_F(Tst_Encore, v0c4_two_dynamics_in_one_measure)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_two_dynamics_in_one_measure.enc");
+    ASSERT_NE(score, nullptr)
+        << "Failed to load synthetic_v0c4_two_dynamics_in_one_measure.enc";
+
+    Measure* first = score->firstMeasure();
+    ASSERT_NE(first, nullptr);
+    std::vector<DynamicType> dynTypes;
+    std::vector<String> textValues;
+    for (Segment* s = first->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        for (EngravingItem* ann : s->annotations()) {
+            if (!ann) {
+                continue;
+            }
+            if (ann->isDynamic()) {
+                dynTypes.push_back(toDynamic(ann)->dynamicType());
+            } else if (ann->isStaffText()) {
+                textValues.push_back(toStaffText(ann)->plainText());
+            }
+        }
+    }
+    ASSERT_EQ(dynTypes.size(), 2u)
+        << "both the start-of-measure F and the end-of-measure PP must import";
+    EXPECT_EQ(dynTypes[0], DynamicType::F);
+    EXPECT_EQ(dynTypes[1], DynamicType::PP);
+    ASSERT_EQ(textValues.size(), 2u)
+        << "both volta-specific stafftext labels must import";
+    EXPECT_EQ(textValues[0], String(u"la 1ª vez"));
+    EXPECT_EQ(textValues[1], String(u"la 2ª"));
+    delete score;
+}
+
+// Regression: chord-symbol elements (CHORD, type=7) carry a 36-byte
+// text slot the reader used to decode unconditionally as UTF-16 LE.
+// Legacy Spanish/Portuguese Encore files store the chord name as
+// single-byte Latin-1 (byte 0 printable, byte 1 not 0x00). The reader
+// now applies the same per-element probe used elsewhere so the chord
+// name reads as "Am" instead of the merged BMP code unit "敁" or similar.
+TEST_F(Tst_Encore, v0c4_chord_sym_latin1)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_chord_sym_latin1.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_chord_sym_latin1.enc";
+
+    Harmony* found = nullptr;
+    for (MeasureBase* mb = score->first(); mb && !found; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* ann : s->annotations()) {
+                if (ann && ann->isHarmony()) {
+                    found = toHarmony(ann);
+                    break;
+                }
+            }
+        }
+    }
+    ASSERT_NE(found, nullptr) << "expected one Harmony from the chord-symbol element";
+    EXPECT_EQ(found->harmonyName(), String(u"Am"))
+        << "Latin-1 chord text must decode as 'Am', not as UTF-16 gibberish";
+    delete score;
+}
+
+// Regression: TITL block encoding came from the TK00-derived charSize
+// heuristic. Files where TK00 offset > 250 (yielding TWO_BYTES) but the
+// TITL block content was stored as single-byte Latin-1 had their title
+// mis-decoded. The reader now uses the TITL block's own varsize to
+// decide encoding both ways (varsize < 5000 => ONE_BYTE; varsize >=
+// 10000 => TWO_BYTES). The fixture appends a Latin-1 TITL with
+// varsize=2426 (the fixed ONE_BYTE layout).
+TEST_F(Tst_Encore, v0c4_titl_latin1_small_varsize)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_titl_latin1_small_varsize.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_titl_latin1_small_varsize.enc";
+
+    EXPECT_EQ(score->metaTag(u"workTitle"), String(u"Romeria"))
+        << "small-varsize TITL must decode as Latin-1, not as TWO_BYTES UTF-16";
+    delete score;
+}
+
+// Regression: when a TK block leaves the instrument name empty, the
+// importer falls back to the formula offset (NAME_BASE + n * NAME_STEP)
+// to recover a label. The fallback probed UTF-16 only and discarded
+// every Latin-1 name silently; the part fell through to the generic GM
+// template name. The reader now treats `byte 1 != 0x00 && printable`
+// as a Latin-1 marker and reads the name byte-by-byte.
+TEST_F(Tst_Encore, v0c4_recovered_name_latin1)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_recovered_name_latin1.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_recovered_name_latin1.enc";
+
+    ASSERT_GE(score->parts().size(), 1u);
+    const Part* part = score->parts()[0];
+    ASSERT_NE(part, nullptr);
+    EXPECT_EQ(part->partName(), String(u"Tropa"))
+        << "Latin-1 name at NAME_BASE must be recovered when TK block name is empty";
+    delete score;
+}
+
+// Regression: WEDGESTART direction lives in bit 0 of the speguleco
+// field. Encore 5 also sets bit 1 on the same byte, so real files show
+// crescendo as 0x02 and diminuendo as 0x03 (the legacy 0x00 / 0x01
+// pair still occurs but is no longer the only encoding). The previous
+// `speguleco == 0` check treated every Encore 5 hairpin as diminuendo,
+// flipping every cresc/dim pair on disk. The fixture's first hairpin
+// uses 0x02 and the second 0x03; their imported types must be CRESC
+// and DIM in that order.
+TEST_F(Tst_Encore, v0c4_hairpin_speguleco_bit0)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_hairpin_speguleco_bit0.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_hairpin_speguleco_bit0.enc";
+
+    std::vector<HairpinType> seenTypes;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isHairpin()) {
+            seenTypes.push_back(toHairpin(sp)->hairpinType());
+        }
+    }
+    ASSERT_EQ(seenTypes.size(), 2u);
+    EXPECT_EQ(seenTypes[0], HairpinType::CRESC_HAIRPIN)
+        << "speguleco=0x02 must import as crescendo";
+    EXPECT_EQ(seenTypes[1], HairpinType::DIM_HAIRPIN)
+        << "speguleco=0x03 must import as diminuendo";
+    delete score;
+}
+
+// Regression: Encore renders a `mf<f>mf` chain with each hairpin
+// terminating exactly at the next dynamic glyph on the same track,
+// not at the bar line of its alMezuro target measure. The pre-fix
+// importer extended every hairpin to the end of its alMezuro measure,
+// so adjacent hairpins overlapped visually. The post-fix resolver
+// scans forward for the first Dynamic on the same track within the
+// alMezuro window and stops the hairpin there. Fixture: 4/4 measure
+// with mf at tick=0, crescendo from tick=240 (alMezuro=0), f at
+// tick=720; the crescendo must stop at tick=720, not at the bar
+// line at tick=960.
+TEST_F(Tst_Encore, v0c4_hairpin_ends_at_next_dynamic)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_hairpin_ends_at_next_dynamic.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_hairpin_ends_at_next_dynamic.enc";
+
+    Hairpin* found = nullptr;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isHairpin()) {
+            found = toHairpin(sp);
+            break;
+        }
+    }
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->tick(), Fraction(1, 4))
+        << "hairpin must start at the WEDGESTART tick";
+    EXPECT_EQ(found->tick2(), Fraction(3, 4))
+        << "hairpin must end at the next Dynamic (tick=720, beat 4), "
+           "not at the bar line of its alMezuro target measure";
+    delete score;
+}
+
+// Regression: SLURSTART carries a pair of layout-x fields (`xoffset`
+// at the start, `xoffset2` at the end) that map onto the same ruler
+// as note xoffsets. Their difference equals the pixel distance between
+// the first and last covered notes; the importer used to ignore them
+// and anchor every slur on the last ChordRest of the alMezuro target
+// measure, so a 3-note slur grew to cover every remaining note in the
+// measure. The post-pass now resolves the end tick by snapping
+// `firstNote.xoffset + slurXoffset2 - slurXoffset` to the closest note
+// xoffset in the start measure.
+TEST_F(Tst_Encore, v0c4_slur_pixel_span)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_slur_pixel_span.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_slur_pixel_span.enc";
+
+    Slur* found = nullptr;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isSlur()) {
+            found = toSlur(sp);
+            break;
+        }
+    }
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->tick(), Fraction(0, 1))
+        << "slur start at the SLURSTART tick (beat 1)";
+    EXPECT_EQ(found->tick2(), Fraction(1, 2))
+        << "slur end snaps to note 3 at tick=480 (target xoff 70 matches "
+           "note xoff 70 exactly); not the last note of the measure";
+    delete score;
+}
+
+// Regression: the slur pixel-span heuristic deliberately skips
+// cross-measure slurs (alMezuro >= 1) because xoffsets reset at each
+// bar line; bridging the two layout-x rulers would need a per-measure
+// pixel calibration. This test pins down the fallback behaviour so a
+// future refactor of the pixel-span path does not accidentally apply
+// it across the bar: a slur with alMezuro=1 must anchor on the last
+// ChordRest of the target measure (here m2 tick=720, beat 4).
+TEST_F(Tst_Encore, v0c4_slur_cross_measure_fallback)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_slur_cross_measure_fallback.enc");
+    ASSERT_NE(score, nullptr)
+        << "Failed to load synthetic_v0c4_slur_cross_measure_fallback.enc";
+
+    Slur* found = nullptr;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isSlur()) {
+            found = toSlur(sp);
+            break;
+        }
+    }
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->tick(), Fraction(0, 1))
+        << "slur start at the SLURSTART tick (m1 beat 1)";
+    // m2 begins at tick=1 (one full 4/4 measure after m1); its last
+    // ChordRest is the 4th quarter, at m2.tick + 3/4 = 7/4.
+    EXPECT_EQ(found->tick2(), Fraction(7, 4))
+        << "cross-measure slur must fall back to the last ChordRest of "
+           "the alMezuro target measure (m2 beat 4 = absolute tick 7/4)";
+    delete score;
+}
+
+// Regression: Encore tags an attached ornament (dynamic, wedge) at
+// the CHORD-REST AT OR AFTER its rendered position but records the
+// visible layout x in the ornament's xoffset. When the ornament's
+// xoffset is smaller than the tagged chord-rest's xoffset, Encore
+// visually pulls the glyph back to the previous chord-rest. The
+// importer used to plant the dynamic on the tagged tick, so users saw
+// it one chord later than in Encore. Fixture: dynamic at the tick of
+// note B but with xoffset matching note A's region; the importer must
+// place the dynamic at note A's tick.
+TEST_F(Tst_Encore, v0c4_dyn_snap_back_by_xoffset)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_dyn_snap_back_by_xoffset.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_dyn_snap_back_by_xoffset.enc";
+
+    Measure* m1 = score->firstMeasure();
+    ASSERT_NE(m1, nullptr);
+    Dynamic* found = nullptr;
+    Fraction foundTick;
+    for (Segment* s = m1->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        for (EngravingItem* ann : s->annotations()) {
+            if (ann && ann->isDynamic()) {
+                found = toDynamic(ann);
+                foundTick = s->tick();
+                break;
+            }
+        }
+        if (found) {
+            break;
+        }
+    }
+    ASSERT_NE(found, nullptr) << "expected one Dynamic in the measure";
+    EXPECT_EQ(foundTick, Fraction(1, 8))
+        << "dynamic must snap from the tagged eighth (tick 1/4) back to "
+           "the previous eighth (tick 1/8) because its xoffset matches "
+           "that note's region";
+    delete score;
+}
+
+// Regression: same snap-back convention applies to WEDGESTART. A half
+// note + eighth pair where the binary tags the wedge at the eighth but
+// the wedge's xoffset falls inside the half note's region. The
+// importer must anchor the hairpin start on the half note.
+TEST_F(Tst_Encore, v0c4_wedge_snap_back_by_xoffset)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_wedge_snap_back_by_xoffset.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_wedge_snap_back_by_xoffset.enc";
+
+    Hairpin* found = nullptr;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isHairpin()) {
+            found = toHairpin(sp);
+            break;
+        }
+    }
+    ASSERT_NE(found, nullptr) << "expected one Hairpin";
+    EXPECT_EQ(found->tick(), Fraction(0, 1))
+        << "hairpin must snap back from the tagged eighth (tick 1/2) to "
+           "the start of the half note (tick 0) because its xoffset is "
+           "less than the eighth's xoffset";
+    delete score;
+}
+
+// Regression: when xoffset2 of a cross-measure hairpin is smaller than
+// the first NOTE's xoffset in the target measure, Encore draws the
+// hairpin ending right before any visible note content (= at the bar
+// line). Without this clamp the dim from m1 bleeds into m2 and
+// overlaps the cresc that starts there. The dim must end at the target
+// measure's start tick (= bar line between m1 and m2).
+TEST_F(Tst_Encore, v0c4_hairpin_barline_clamp)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_hairpin_barline_clamp.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_hairpin_barline_clamp.enc";
+
+    std::vector<Hairpin*> hairpins;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isHairpin()) {
+            hairpins.push_back(toHairpin(sp));
+        }
+    }
+    std::sort(hairpins.begin(), hairpins.end(),
+              [](Hairpin* a, Hairpin* b) { return a->tick() < b->tick(); });
+    ASSERT_GE(hairpins.size(), 2u);
+    // dim from m1: must end at m2 start (= tick 1/1), not extend into m2.
+    EXPECT_EQ(hairpins[0]->hairpinType(), HairpinType::DIM_HAIRPIN);
+    EXPECT_EQ(hairpins[0]->tick2(), Fraction(1, 1))
+        << "dim hairpin with xoffset2 < firstNoteXoff must end at bar line";
+    // cresc inside m2: starts at some tick in m2.
+    EXPECT_EQ(hairpins[1]->hairpinType(), HairpinType::CRESC_HAIRPIN);
+    EXPECT_GE(hairpins[1]->tick(), Fraction(1, 1))
+        << "cresc hairpin must start inside m2, not before bar line";
+    delete score;
+}
+
+// Regression: Encore can write the same dynamic twice on the same
+// (staff, voice) at the same tick with slightly different xoffsets
+// (observed as duplicate MF ornaments in real plectro band scores).
+// Encore renders only one. The importer must drop the second when it
+// would land on the same segment as the first.
+TEST_F(Tst_Encore, v0c4_dyn_dedup)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_dyn_dedup.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_dyn_dedup.enc";
+
+    Measure* m1 = score->firstMeasure();
+    ASSERT_NE(m1, nullptr);
+    int dynCount = 0;
+    for (Segment* s = m1->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        for (EngravingItem* ann : s->annotations()) {
+            if (ann && ann->isDynamic()) {
+                ++dynCount;
+            }
+        }
+    }
+    EXPECT_EQ(dynCount, 1)
+        << "two identical MF ORNs at the same tick must collapse to one "
+           "Dynamic on the segment";
+    delete score;
+}
+
+// Regression: a dynamic ORN with yoffset > 0 was rendered by the user
+// above its stored staff, meaning it visually belongs to the staff ABOVE
+// (staffIdx - 1). Encore stores it on staff N but renders it on N-1.
+// The importer must reroute it so the Dynamic lands on the correct
+// instrument in MuseScore. Fixture: MF ornament on staff 1 with
+// yoffset=+16; imported Dynamic must appear on staff 0.
+TEST_F(Tst_Encore, v0c4_dyn_displaced_to_staff_above)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_dyn_displaced_to_staff_above.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_dyn_displaced_to_staff_above.enc";
+
+    // Dynamic must be on staff 0 track 0, not staff 1.
+    const track_idx_t trackStaff0 = 0;
+    const track_idx_t trackStaff1 = static_cast<track_idx_t>(VOICES);
+    bool foundOnStaff0 = false;
+    bool foundOnStaff1 = false;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) continue;
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* ann : s->annotations()) {
+                if (!ann || !ann->isDynamic()) continue;
+                if (ann->track() == trackStaff0) foundOnStaff0 = true;
+                if (ann->track() == trackStaff1) foundOnStaff1 = true;
+            }
+        }
+    }
+    EXPECT_TRUE(foundOnStaff0)
+        << "MF with yoffset > 0 must be rerouted to staff 0 (the staff above)";
+    EXPECT_FALSE(foundOnStaff1)
+        << "the displaced MF must NOT remain on staff 1";
+    delete score;
+}
+
+// Regression: a WEDGESTART placed at tick == durTicks (= the bar line)
+// has no chord-rest element at that tick in the source measure. The snap-
+// start lambda used to return the default tick (= start of the next
+// measure) making the hairpin zero-span after endpoint clamping. The fix
+// extends the backwards scan to also fire when no chord-rest is found at
+// the default tick, so the scan finds the latest note in m1 with
+// xoffset <= the ornament's xoffset and anchors the start there.
+// Fixture: notes at xoffs 30/60/90/120 (ticks 0/240/480/720), WEDGE at
+// tick=960 xoffset=110 alMezuro=1, MF in m2. The dim must start at
+// tick=720 (note xoff=120 is the latest with xoff <= 110... wait, 120>110.
+// Latest with xoff<=110 is tick=480 xoff=90). The dim must NOT be dropped.
+TEST_F(Tst_Encore, v0c4_hairpin_snapstart_at_barline)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_hairpin_snapstart_at_barline.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_hairpin_snapstart_at_barline.enc";
+
+    // Find the DIM hairpin (the one crossing the bar line)
+    Hairpin* dim = nullptr;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isHairpin() && toHairpin(sp)->hairpinType() == HairpinType::DIM_HAIRPIN) {
+            dim = toHairpin(sp);
+            break;
+        }
+    }
+    ASSERT_NE(dim, nullptr) << "dim hairpin starting at end of m1 must not be dropped";
+    // The hairpin must start INSIDE m1 (< m2.tick = 1/1), not at the bar line.
+    // WEDGE xoffset=110: backwards scan finds latest note with xoff<=110.
+    // m1 notes: xoff=30(t=0), 60(t=240), 90(t=480), 120(t=720).
+    // Latest with xoff <= 110: tick=480 (xoff=90). Start = Fraction(1,2).
+    EXPECT_LT(dim->tick(), Fraction(1, 1))
+        << "hairpin start must be inside m1 (snap from bar-line tick to last "
+           "note with xoff <= ornament.xoffset)";
+    EXPECT_EQ(dim->tick(), Fraction(1, 2))
+        << "start must snap to tick=480 (xoff=90, latest note with xoff<=110)";
+    // MF in m2 at tick=240 xoffset=70 (>= note@240 xoff=60 -> no snap-back)
+    // stays at tagged tick. next-dynamic finds MF at m2 + 1/4.
+    EXPECT_EQ(dim->tick2(), Fraction(1, 1) + Fraction(1, 4))
+        << "dim must end at the MF dynamic in m2 (next-dynamic endpoint)";
+    delete score;
+}
+
+// Regression: when a cross-measure hairpin has xoffset2 < firstNoteXoff
+// in the target measure AND a Dynamic exists within the alMezuro window,
+// the Dynamic endpoint must win. The bar-line clamp (xoffset2 heuristic)
+// must only apply when NO Dynamic is found. Fixture: dim alMezuro=1 with
+// xoffset2=5 (small, would clamp to bar line) and MF at m2.240. The dim
+// must end at m2.240, not at m2.0.
+TEST_F(Tst_Encore, v0c4_hairpin_endpoint_dynamic_wins)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_hairpin_endpoint_dynamic_wins.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_hairpin_endpoint_dynamic_wins.enc";
+
+    Hairpin* dim = nullptr;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isHairpin() && toHairpin(sp)->hairpinType() == HairpinType::DIM_HAIRPIN) {
+            dim = toHairpin(sp);
+            break;
+        }
+    }
+    ASSERT_NE(dim, nullptr) << "dim hairpin must be present";
+    const Fraction m2tick = Fraction(1, 1);
+    EXPECT_GT(dim->tick2(), m2tick)
+        << "hairpin must end at MF dynamic in m2 (after bar line), not at m2.tick; "
+           "next-dynamic endpoint must win over bar-line clamp";
+    // Specifically at m2 + 1/4 (= where MF is placed after snap-back)
+    EXPECT_EQ(dim->tick2(), m2tick + Fraction(1, 4))
+        << "hairpin must end at the MF dynamic tick (m2 + 1/4)";
     delete score;
 }
 

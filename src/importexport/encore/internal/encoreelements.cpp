@@ -112,22 +112,40 @@ bool EncChordSym::read(QDataStream& ds)
     ds >> radiko >> baso;
     const bool hasText = (tipo & 1);
     if (hasText) {
-        bool done = false;
-        for (int j = 0; j < 2 * 18;) {
-            quint8 lower, upper;
-            ds >> lower;
-            ++j;
-            ds >> upper;
-            ++j;
-            QChar ch = QChar(char16_t((upper << 8) + lower));
-            if (ch == '\0') {
-                done = true;
-            }
-            if (!done) {
-                teksto.append(ch);
+        // The chord text occupies a fixed 36-byte slot. Encoding is detected
+        // per element to match the LYRIC / TK-name / TEXT-block convention:
+        // a printable ASCII byte followed by 0x00 means UTF-16 LE (the
+        // modern Encore 5 default); otherwise Latin-1 (single byte per
+        // char, present in legacy Spanish/Portuguese scores). Forcing
+        // UTF-16 on a Latin-1 payload merges byte pairs into one BMP code
+        // unit and produces Chinese-looking gibberish.
+        QByteArray payload(36, 0);
+        const int got = ds.readRawData(payload.data(), 36);
+        if (got > 0) {
+            const quint8 b0 = static_cast<quint8>(payload[0]);
+            const quint8 b1 = got >= 2 ? static_cast<quint8>(payload[1]) : 0;
+            const bool isUtf16 = (b0 >= 0x20 && b0 < 0x7F && b1 == 0x00);
+            if (isUtf16) {
+                for (int j = 0; j + 1 < got; j += 2) {
+                    const quint8 lo = static_cast<quint8>(payload[j]);
+                    const quint8 hi = static_cast<quint8>(payload[j + 1]);
+                    const QChar ch = QChar(char16_t((hi << 8) | lo));
+                    if (ch == u'\0') {
+                        break;
+                    }
+                    teksto.append(ch);
+                }
+            } else {
+                for (int j = 0; j < got; ++j) {
+                    const quint8 b = static_cast<quint8>(payload[j]);
+                    if (b == 0) {
+                        break;
+                    }
+                    teksto.append(QChar(char16_t(b)));
+                }
             }
         }
-        int toSkip = static_cast<int>(size) - 5 - 9 - 2 * 18;
+        int toSkip = static_cast<int>(size) - 5 - 9 - 36;
         if (toSkip > 0) {
             ds.skipRawData(toSkip);
         }
@@ -515,20 +533,27 @@ void EncMeasure::calculateRealDurations()
 bool EncInstrument::read(QDataStream& ds, quint32 vs, bool probeEncoding)
 {
     offset = vs & 0xFFFF;
-    // Detect UTF-16 LE by probing: if the first byte of the name is a
-    // printable ASCII character and the second byte is 0x00 (the high
-    // byte of a UTF-16 LE code unit), the name is encoded as UTF-16.
-    // This correctly handles v0xC4 files saved by Encore 5.0.2 which
-    // write instrument names in UTF-16 even when the offset field is
-    // ≤ 250 (otherwise charSize() would return ONE_BYTE).
+    // Detect the actual encoding by probing the first two bytes:
+    //   printable b0 + b1 == 0x00          -> UTF-16 LE
+    //   printable b0 + printable non-zero b1 -> Latin-1 (single byte)
+    // The probe overrides the offset-based `charSize()` heuristic in
+    // both directions. Encore 5.0.2 saves v0xC4 files where TK00
+    // offset <= 250 (default ONE_BYTE) but the name is UTF-16; legacy
+    // files do the opposite (offset > 250 -> default TWO_BYTES but
+    // the name is single-byte Latin-1). Without bidirectional probing
+    // a Latin-1 name like "Tropa" reads as "牔燯a" (UTF-16 mis-decode)
+    // and a UTF-16 name leaks every second byte as a stray glyph.
     EncCharSize cs = charSize();
-    if (probeEncoding && cs == EncCharSize::ONE_BYTE) {
+    if (probeEncoding) {
         const qint64 savedPos = ds.device()->pos();
         quint8 b0 = 0, b1 = 0;
         ds >> b0 >> b1;
         ds.device()->seek(savedPos);
-        if (b0 >= 0x20 && b0 < 0x7F && b1 == 0x00) {
+        const bool printable = (b0 >= 0x20 && b0 < 0x7F);
+        if (printable && b1 == 0x00) {
             cs = EncCharSize::TWO_BYTES;
+        } else if (printable && b1 != 0x00 && b1 >= 0x20 && b1 < 0xFF) {
+            cs = EncCharSize::ONE_BYTE;
         }
     }
     int nread = 8;
@@ -668,14 +693,20 @@ QString readTextItem(QDataStream& ds, EncCharSize cs)
 bool EncTitle::read(QDataStream& ds, quint32 vs, EncCharSize cs)
 {
     // Determine encoding from the block's own varsize rather than from the
-    // TK00-derived cs parameter.  Encore 5.0.2 (v0xC4) can produce files
-    // where TK00 offset <= 250 (→ ONE_BYTE) but the TITL block content is
-    // always UTF-16 LE (TWO_BYTES).  Fixed sizes:
-    //   ONE_BYTE  items: 2 + 20×96  + 504 = 2 426
-    //   TWO_BYTE  items: 2 + 20×1056 + 120 = 21 242
-    // Any varsize well above 2426 unambiguously indicates TWO_BYTE.
+    // TK00-derived `cs` parameter. The block carries 20 fixed-size text
+    // lines plus a header (2 bytes) and trailing per-block tail (504 for
+    // ONE_BYTE, 120 for TWO_BYTES). Layouts:
+    //   ONE_BYTE  items: 2 + 20×96   + 504 =  2 426
+    //   TWO_BYTES items: 2 + 20×1056 + 120 = 21 242
+    // The two values are an order of magnitude apart, so the varsize
+    // alone resolves the encoding both ways. Trusting the TK00-derived
+    // `cs` instead would mis-decode any file whose TK and TITL blocks
+    // disagree on encoding (e.g. Encore 5.0.2 writing UTF-16 in the TITL
+    // even when TK offset <= 250).
     if (vs >= 10000) {
         cs = EncCharSize::TWO_BYTES;
+    } else if (vs > 0 && vs < 5000) {
+        cs = EncCharSize::ONE_BYTE;
     }
     // Some Encore files (e.g. Mamae_eu_quero-Bateria.enc) save TWO TITL
     // blocks with identical content.  Clear the slot vectors at the start
@@ -787,17 +818,45 @@ bool EncTextBlock::read(QDataStream& ds, quint32 varSize)
             break;
         }
         consumed += entrySize;
-        // Text is in payload[14..entrySize-4] as UTF-16 LE.
+        // Text starts at payload[14] and ends at the first `0x04 0x00`
+        // terminator. Encoding is detected per entry: a printable ASCII
+        // byte at offset 14 followed by 0x00 at offset 15 means UTF-16 LE
+        // (Encore 5.0.2 default for newly-typed text); otherwise the
+        // payload is Latin-1 (single byte per char, common in legacy
+        // Spanish/Portuguese files like sirena.enc where "la 1ª vez"
+        // would otherwise decode as Chinese gibberish).
+        //
+        // The earlier reader applied a fixed `textBytes = entrySize - 14
+        // - 4` formula and forced UTF-16. That mis-decoded every Latin-1
+        // file and also dropped the last byte of any entry whose trailing
+        // padding fell inside the assumed-terminator slot.
         QString text;
-        if (entrySize >= 18) {
-            const int textBytes = entrySize - 14 - 4;
-            text = QString::fromUtf16(
-                reinterpret_cast<const char16_t*>(payload.constData() + 14),
-                textBytes / 2);
-            // Strip trailing nulls.
-            int nullIdx = text.indexOf(QChar(QChar::Null));
-            if (nullIdx >= 0) {
-                text = text.left(nullIdx);
+        if (entrySize >= 16) {
+            const quint8 b14 = static_cast<quint8>(payload[14]);
+            const quint8 b15 = static_cast<quint8>(payload[15]);
+            const bool isUtf16 = (b14 >= 0x20 && b14 < 0x7F && b15 == 0x00);
+            // Scan for the `04 00` terminator starting at offset 14.
+            int textEnd = entrySize;
+            for (int i = 14; i + 1 < entrySize; ++i) {
+                if (static_cast<quint8>(payload[i]) == 0x04
+                    && static_cast<quint8>(payload[i + 1]) == 0x00) {
+                    textEnd = i;
+                    break;
+                }
+            }
+            const int textBytes = textEnd - 14;
+            if (textBytes > 0) {
+                if (isUtf16) {
+                    text = QString::fromUtf16(
+                        reinterpret_cast<const char16_t*>(payload.constData() + 14),
+                        textBytes / 2);
+                } else {
+                    text = QString::fromLatin1(payload.constData() + 14, textBytes);
+                }
+                int nullIdx = text.indexOf(QChar(QChar::Null));
+                if (nullIdx >= 0) {
+                    text = text.left(nullIdx);
+                }
             }
         }
         entries.push_back(text);
@@ -993,24 +1052,50 @@ bool EncFile::read(QDataStream& ds)
             if (!ds.device()->seek(off)) {
                 break;
             }
-            // Probe: UTF-16 LE if b0 is printable ASCII and b1 == 0x00
+            // Probe: a printable ASCII byte followed by 0x00 means
+            // UTF-16 LE; a printable byte followed by another non-NUL
+            // printable byte means Latin-1 (legacy Spanish/Portuguese
+            // scores). Anything else (b0 itself non-printable) is treated
+            // as "no readable name at this offset" and the slot stays
+            // empty so the importer can fall back to the GM template
+            // name later.
             quint8 b0 = 0, b1 = 0;
             ds >> b0 >> b1;
-            if (b0 < 0x20 || b0 >= 0x7F || b1 != 0x00) {
-                continue;   // no readable UTF-16 name at this position
+            if (b0 < 0x20 || b0 >= 0x7F) {
+                continue;
+            }
+            const bool isUtf16 = (b1 == 0x00);
+            const bool isLatin1 = (b1 != 0x00 && b1 >= 0x20 && b1 < 0xFF);
+            if (!isUtf16 && !isLatin1) {
+                continue;
             }
             if (!ds.device()->seek(off)) {
                 break;
             }
             QString recoveredName;
-            while (!ds.atEnd()) {
-                quint8 lo = 0, hi = 0;
-                ds >> lo >> hi;
-                const QChar ch = QChar(char16_t((hi << 8) + lo));
-                if (ch == u'\0') {
-                    break;
+            if (isUtf16) {
+                while (!ds.atEnd()) {
+                    quint8 lo = 0, hi = 0;
+                    ds >> lo >> hi;
+                    const QChar ch = QChar(char16_t((hi << 8) + lo));
+                    if (ch == u'\0') {
+                        break;
+                    }
+                    recoveredName.append(ch);
                 }
-                recoveredName.append(ch);
+            } else {
+                // Latin-1: bytes 0x00..0xFF map directly to U+0000..U+00FF.
+                // Stop at NUL or at the first non-printable byte to avoid
+                // bleeding into the next field (no terminator byte after
+                // the name is guaranteed).
+                while (!ds.atEnd()) {
+                    quint8 b = 0;
+                    ds >> b;
+                    if (b == 0 || b < 0x20) {
+                        break;
+                    }
+                    recoveredName.append(QChar(char16_t(b)));
+                }
             }
             instruments[n].name = recoveredName;
         }

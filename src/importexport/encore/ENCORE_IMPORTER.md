@@ -575,6 +575,204 @@ Encore 5 file with rendered count 36 and 56 MEAS blocks on disk
 produces a 56-measure MuseScore score with 20 measures of stale
 content past the real end of the piece.
 
+## Text encoding probes (unified table)
+
+Every text-bearing path in the format applies an encoding probe so
+both modern (UTF-16 LE) and legacy (Latin-1) files decode
+correctly without manual hints:
+
+| Site                              | File / Function                           | Probe |
+|-----------------------------------|-------------------------------------------|-------|
+| TK block instrument name          | `EncInstrument::read`                     | byte 0 printable + byte 1 == 0x00 -> UTF-16; printable b0 + non-NUL printable b1 -> Latin-1 |
+| TK block name recovery (NAME_BASE)| `EncFile::read` formula-offset fallback   | same as TK name; iterates per instrument |
+| LYRIC element                     | `EncLyric::read`                          | byte 0/1 probe at payload start |
+| TEXT block entry                  | `EncTextBlock::read`                      | byte 14/15 probe (header offset); reads until `0x04 0x00` terminator |
+| CHORD-symbol text                 | `EncChordSym::read`                       | byte 0/1 probe across 36-byte slot |
+| TITL block (title, subtitle, ...) | `EncTitle::read`                          | varsize gates: <5000 -> ONE_BYTE, >=10000 -> TWO_BYTES |
+
+Every probe is bidirectional: detect UTF-16 LE when seen, fall
+back to Latin-1 otherwise (or vice versa for the offset-derived
+defaults). Forcing one encoding turns legacy Latin-1 payloads
+into Chinese-looking gibberish (two Latin-1 bytes merged into one
+BMP code unit) and silently drops the second half of every byte
+on a modern UTF-16 file when the heuristic guesses the other
+direction.
+
+## TEXT block per-entry encoding probe
+
+The TEXT block carries the payload of every STAFFTEXT ornament.
+Modern Encore 5 files write text in UTF-16 LE, but legacy files
+(notably Spanish/Portuguese scores) write it as single-byte
+Latin-1. Forcing UTF-16 on a Latin-1 entry combines pairs of
+single-byte chars into one BMP code unit and produces Chinese-
+looking gibberish (sirena.enc m21 "la 1ª vez" becomes
+"慬ㄠ₪敶⁺").
+
+`EncTextBlock::read` probes bytes 14 and 15 of each entry: a
+printable ASCII byte followed by `0x00` means UTF-16 LE; anything
+else (e.g. accented Latin-1 bytes like `0xAA` for `ª`) means
+Latin-1. The text byte range is bounded by the first `0x04 0x00`
+terminator inside the entry payload, NOT by `payload_size - 14 - 4`;
+some entries carry trailing padding after the terminator and the
+old length formula clipped the last character of those entries.
+
+## End-of-measure dynamics and staff text
+
+Encore can place a dynamic or staff-text ornament at a tick that
+exceeds the measure's `durTicks` (sirena.enc m21 is 2/4 with
+durTicks=480 but stores the 1st-volta `pp` + "la 2ª" pair at
+tick=960). These are repeat-aware section-end markers Encore
+renders just before the bar line of the source measure. The
+reader keeps DYN_* and STAFFTEXT ornaments whose tick is past
+durTicks (the original `tick > durTicks` filter dropped them and
+the user saw only one of two dynamics in MuseScore); the per-
+case placement code then clamps `elemTick` to the last existing
+ChordRest segment of the current measure so the marker ends up
+inside the right bar.
+
+## Dynamic deduplication
+
+Encore occasionally stores the same dynamic twice on the same
+`(staff, voice)` at the same tick with slightly differing xoffsets
+(observed as duplicate MF ORNs, xoff 37 and 38, in real plectro
+band scores where the user dragged a dynamic and left the original
+in place). Encore renders only one. Before adding a Dynamic to a
+segment, the importer checks whether a Dynamic of the same type
+already exists on that `(segment, track)` and drops the duplicate.
+
+## Dynamic staff displacement (yoffset > 0)
+
+A dynamic ORN normally has `yoffset < 0` (below the staff, Encore's
+Cartesian convention). When the user drags the glyph upward in Encore
+onto the staff above, `yoffset` becomes positive while `staffByte`
+still names the lower staff. The importer remaps the dynamic to
+`staffIdx - 1` when `yoffset > 0` so it lands on the correct
+instrument.
+
+## Cross-measure hairpin snap-start and endpoint
+
+**Snap-start when WEDGE is at the bar line.** A WEDGESTART at
+`tick == durTicks` (= measure end / bar line) has no chord-rest
+element at that tick. The `snapTickByXoffset` lambda used to return
+the default tick (= start of the next measure, m+1.tick) in that
+case, giving a zero-span hairpin after endpoint clamping. The fix:
+the backwards scan also fires when no chord-rest is found at the
+default tick, finding the latest note/rest in the source measure with
+`xoffset <= ornament.xoffset` and anchoring the start there.
+
+**Endpoint priority.** Two possible endpoint signals exist:
+
+1. **Next-dynamic**: first Dynamic annotation on the same track after
+   the start tick and within the `alMezuro` upper bound. This is the
+   primary resolver and handles `mf<f>mf` chains where each hairpin
+   terminates at the next visible glyph.
+
+2. **`xoffset2` bar-line clamp** (fallback only). When `xoffset2`
+   is smaller than the first NOTE's `xoffset` in the target measure
+   and NO Dynamic was found via step 1, Encore drew the hairpin tip
+   right before any note content (= at the bar line). The importer
+   clamps the endpoint to the target measure's start tick in that
+   case.
+
+The clamp fires only when no Dynamic is found so a cross-measure dim
+that ends at a `mf` dynamic is not incorrectly pinned to the bar line.
+The clamp is also guarded against synthetic fixtures where notes have
+`xoffset == 0` (generator default), which would always trigger it.
+
+## Slur endpoint resolution (pixel-span heuristic)
+
+## Slur endpoint resolution (pixel-span heuristic)
+
+SLURSTART carries two layout-x fields: `xoffset` at the start and
+`xoffset2` at the end. Each one is offset from the underlying
+note's xoffset by a per-element drawing constant, so neither one
+matches a note xoffset directly. Their DIFFERENCE, however, is
+the pixel distance between the first and last covered notes:
+
+```
+slurXoffset2 - slurXoffset == endNote.xoffset - firstNote.xoffset
+```
+
+`PendingSlur` therefore captures `startTick`, `startMeasIdx`,
+`alMezuro`, `slurXoffset`, `slurXoffset2`, plus `staffIdx` and
+`encVoice`. The post-pass:
+
+1. Finds the first NOTE in the start measure at the slur start
+   tick on the same (staffIdx, encVoice) and reads its
+   `xoffset`.
+2. Computes `target = firstNote.xoffset + (slurXoffset2 -
+   slurXoffset)`.
+3. Walks the same measure's NOTEs on the same (staffIdx,
+   encVoice) and picks the one whose xoffset is closest to
+   `target`.
+4. Anchors the slur's `tick2` on that note.
+
+If `alMezuro > 0` (cross-measure span) the heuristic is skipped:
+xoffsets reset at the bar line and a per-measure pixel
+calibration would be needed to bridge them, so the importer falls
+back to the last existing ChordRest on the same track in the
+alMezuro target measure (the previous behaviour).
+
+Without the heuristic the importer extended every slur to the
+last note in the alMezuro target measure, which on real legacy
+files (e.g. a 3-note slur in instrument 2 of a Spanish plectro
+score) grew to cover every remaining note in the bar.
+
+## Snap-back-by-xoffset for attached ornaments
+
+Encore tags an attached ornament (dynamic or hairpin start) at the
+CHORD-REST AT OR AFTER its visible position but records the
+rendered layout x in the ornament's `xoffset` field. When the
+ornament's xoffset is SMALLER than the tagged chord-rest's
+xoffset, Encore visually pulls the glyph back to the previous
+chord-rest. The importer used to plant the glyph on the tagged
+tick, so users saw it one chord later than in Encore.
+
+The fix lives in a `snapTickByXoffset` lambda shared by the
+`DYN_*` and `WEDGESTART` cases:
+
+1. If the default tick is the measure start, skip the snap so
+   bar-line dynamics stay at the bar (their xoffset is layout
+   padding, not a real position).
+2. Locate the NOTE/REST at the default tick on the same
+   `(staffIdx, voice)` and read its xoffset.
+3. If `ornament.xoffset >= note.xoffset`, keep the default tick.
+4. Otherwise walk the EncMeasure elements backward on the same
+   `(staffIdx, voice)` and return the largest tick whose NOTE/REST
+   has `xoffset <= ornament.xoffset`. Fall back to the default
+   when nothing qualifies.
+
+The same convention applies to STAFFTEXT but is not snapped
+because text positions stayed accurate in the corpus; revisit if
+a real file shows the same off-by-one chord drift.
+
+## Hairpin direction and endpoint resolution
+
+WEDGESTART direction is bit 0 of `speguleco`: 0 = crescendo,
+1 = diminuendo. Encore 5 also sets bit 1 on the same byte
+(crescendo reads as `0x02`, diminuendo as `0x03`); the legacy
+`0x00` / `0x01` pair still appears on older files. Testing
+`speguleco == 0` treats every Encore 5 hairpin as diminuendo and
+flips every cresc/dim pair on disk. The importer uses
+`(speguleco & 0x01) == 0` so both encodings agree.
+
+WEDGESTART endpoints are not resolved at parse time. Encore
+renders a `mf<f>mf` chain with each hairpin terminating exactly
+at the next Dynamic glyph on the same track, even though
+`alMezuro` nominally points at a whole measure. The importer
+collects every WEDGESTART into a `PendingHairpin` (start tick,
+upper bound = end of `alMezuro` target measure, track, direction)
+and resolves the tick2 in a post-pass once every Dynamic has
+been placed: walk forward from the start tick on the same track,
+stop at the first Dynamic at or before the upper bound, and use
+that tick as the hairpin's end. If no Dynamic is found inside
+the window, fall back to the upper bound so a lone trailing
+hairpin still spans its measure.
+
+Without the post-pass two adjacent hairpins (e.g. `mf<f` and
+`f>mf` on the same beat) overlapped visually because both
+extended to the bar line of their measure.
+
 ## Barlines per staff
 
 `Measure::setEndBarLineType` takes a `track_idx_t`. Passing `false`
