@@ -132,6 +132,18 @@ enum class EncOrnamentType : quint8 {
     // visible staccato in the score; users like to see them in MuseScore.
     STACCATO    = 0xC9,
     TEMPO      = 0x32,
+    // Single-chord tremolo ornaments (rapid repeated-note marking for
+    // plectro string instruments). Stored as size-16 ORN tipo bytes.
+    // Confirmed by cross-referencing two plectro scores where the user
+    // reports visible tremolo slashes on long notes:
+    //   0xAF: standard triple tremolo (3 slashes = 32nd-note speed);
+    //         most common in Beethoven Plectro (248 occurrences) and
+    //         on half/quarter notes in multi-instrument band scores.
+    //   0xEF: alternate triple tremolo encoding observed on half notes
+    //         when the ORN is stored at tick >= measure durTicks.
+    // Both map to TremoloSingleChord / R32 in MuseScore.
+    TREMOLO_32 = 0xAF,
+    TREMOLO_32B = 0xEF,
     SLURSTOP   = 0x41,
     WEDGESTOP  = 0x4D,
     // Size-16 dynamic markings. The mapping was confirmed by walking

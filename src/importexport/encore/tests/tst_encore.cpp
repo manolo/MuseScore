@@ -26,6 +26,7 @@
 #include "engraving/dom/clef.h"
 #include "engraving/dom/dynamic.h"
 #include "engraving/dom/hairpin.h"
+#include "engraving/dom/rest.h"
 #include "engraving/dom/harmony.h"
 #include "engraving/dom/instrument.h"
 #include "engraving/dom/marker.h"
@@ -1340,6 +1341,198 @@ TEST_F(Tst_Encore, v0c4_hairpin_endpoint_dynamic_wins)
     // Specifically at m2 + 1/4 (= where MF is placed after snap-back)
     EXPECT_EQ(dim->tick2(), m2tick + Fraction(1, 4))
         << "hairpin must end at the MF dynamic tick (m2 + 1/4)";
+    delete score;
+}
+
+// Regression: Encore stores single-chord tremolos as size-16 ORN elements
+// with tipo=0xAF (standard triple tremolo for plectro instruments) separate
+// from the articulation-byte encoding already supported. The ORN can appear
+// at the chord's tick (normal case) or at tick == durTicks (Encore places
+// it at the measure end on long notes). Both must attach a
+// TremoloSingleChord / R32 to the corresponding chord.
+TEST_F(Tst_Encore, v0c4_tremolo_orn_normal_and_barline_tick)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_tremolo_orn.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_tremolo_orn.enc";
+
+    // Collect all TremoloSingleChord elements across all chords.
+    std::vector<std::pair<Fraction, TremoloType>> trems;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) continue;
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) continue;
+            Chord* c = toChord(el);
+            if (c->tremoloSingleChord()) {
+                trems.push_back({ s->tick(), c->tremoloSingleChord()->tremoloType() });
+            }
+        }
+    }
+    ASSERT_EQ(trems.size(), 2u)
+        << "expected exactly 2 TremoloSingleChord: one at m1.0 (normal tick) "
+           "and one at m2.beat-4 (from ORN at measure end tick)";
+    // m1 tremolo: at tick=0 (half note, tipo=0xAF at same tick)
+    EXPECT_EQ(trems[0].first, Fraction(0, 1));
+    EXPECT_EQ(trems[0].second, TremoloType::R32);
+    // m2 tremolo: at tick of last quarter (beat 4 = m2.tick + 3/4)
+    EXPECT_EQ(trems[1].first, Fraction(1, 1) + Fraction(3, 4));
+    EXPECT_EQ(trems[1].second, TremoloType::R32);
+    delete score;
+}
+
+// Regression: the m87 pattern from real boda.enc. A leading grace
+// (g1=0x20) followed by regular notes whose Encore ticks land exactly
+// on the face grid of their face value (tick=150 on 30-tick grid for
+// 32nd, tick=180 on 60-tick grid for 16th, tick=240 on 120-tick grid
+// for 8th). Without the stolenTicks snap guard, the snap fires for each
+// of these notes (gap = 30 ticks = grace face value), inserting spurious
+// 32nd rests BETWEEN the regular notes (the "fs" extra note the user saw
+// between the 32nd and 16th). The fix suppresses the snap for every note
+// whose gap <= stolenTicks. A trailing rest equal to the stolen ticks
+// remains at measure end (unavoidable; Encore renders this as silence).
+TEST_F(Tst_Encore, v0xa6_grace_ongrid_snap_suppressed)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0xa6_grace_ongrid_snap_suppressed.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_grace_ongrid_snap_suppressed.enc";
+
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "sanityCheck failed: " << ret.text();
+
+    Measure* m1 = score->firstMeasure();
+    ASSERT_NE(m1, nullptr);
+
+    bool hasSpuriousInterNoteRest = false;
+    bool prevWasChord = false;
+    int graceCount = 0;
+    for (Segment* s = m1->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el) continue;
+        if (el->isRest()) {
+            // A rest immediately after a chord (and not the last element)
+            // is suspicious -- it means the snap fired creating an inter-note gap.
+            if (prevWasChord && s->next(SegmentType::ChordRest)) {
+                hasSpuriousInterNoteRest = true;
+            }
+            prevWasChord = false;
+        } else if (el->isChord()) {
+            Chord* c = toChord(el);
+            graceCount += static_cast<int>(c->graceNotes().size());
+            prevWasChord = true;
+        }
+    }
+    EXPECT_FALSE(hasSpuriousInterNoteRest)
+        << "spurious rest between regular notes detected; "
+           "stolenTicks snap suppression likely missing for post-grace notes on face grid";
+    EXPECT_EQ(graceCount, 1) << "expected exactly 1 grace (leading 32nd)";
+    delete score;
+}
+
+// Regression: the m57 pattern from real boda.enc: a v0xA6 grace group
+// with a LEADING grace (g1=0x20) followed by an INNER grace (g1=0x10)
+// that is shorter (higher faceValue) than the leader. Without inner-
+// grace detection the inner note was treated as a regular note, producing:
+//   - a spurious gap rest before the leading grace (face-grid snap fired
+//     while the grace queue was non-empty)
+//   - the inner note rendered as a regular chord rather than a grace
+// The corrupted structure caused a SIGSEGV in the MuseScore GUI layout.
+// sanityCheck() must pass AND no spurious rests may appear in the measure.
+TEST_F(Tst_Encore, v0xa6_inner_grace_group)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0xa6_inner_grace_group.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_inner_grace_group.enc";
+
+    // sanityCheck catches the corrupted structure that previously caused SIGSEGV.
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "sanityCheck failed (would crash in GUI): " << ret.text();
+
+    Measure* m1 = score->firstMeasure();
+    ASSERT_NE(m1, nullptr);
+
+    int graceCount = 0;
+    bool hasSpuriousPreGraceRest = false;
+    bool prevWasChord = false;
+    std::vector<DurationType> regularTypes;
+    for (Segment* s = m1->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el) continue;
+        if (el->isRest()) {
+            // A rest that appears RIGHT BEFORE a grace-note chord is spurious:
+            // it was created by the face-grid snap firing while graces were
+            // pending. This particular structure caused the SIGSEGV.
+            Segment* nx = s->next(SegmentType::ChordRest);
+            if (nx) {
+                EngravingItem* nxEl = nx->element(0);
+                if (nxEl && nxEl->isChord() && !toChord(nxEl)->graceNotes().empty()) {
+                    hasSpuriousPreGraceRest = true;
+                }
+            }
+        } else if (el->isChord()) {
+            Chord* c = toChord(el);
+            for (Chord* gc : c->graceNotes()) {
+                ++graceCount;
+                (void)gc;
+            }
+            regularTypes.push_back(c->durationType().type());
+            prevWasChord = true;
+        }
+        (void)prevWasChord;
+    }
+    // No rest immediately before the grace group (= the crash-inducing structure).
+    EXPECT_FALSE(hasSpuriousPreGraceRest)
+        << "Rest found immediately before grace-note chord; "
+           "this corrupted structure crashes the MuseScore GUI layout";
+    // Both leading (32nd) and inner (64th) graces must be recognised.
+    EXPECT_EQ(graceCount, 2)
+        << "expected 2 graces (32nd leader + 64th inner)";
+    // Regular notes: 8th at start and 8th at end.
+    ASSERT_GE(regularTypes.size(), 2u);
+    EXPECT_EQ(regularTypes.front(), DurationType::V_EIGHTH);
+    EXPECT_EQ(regularTypes.back(), DurationType::V_EIGHTH);
+    delete score;
+}
+
+// Regression: v0xA6 grace notes are stored at their actual tick positions,
+// which shifts subsequent real notes forward and leaves the last real
+// note in the measure with realDuration < faceValue. calculateRealDurations
+// now detects that the deficit equals the total face value of grace notes
+// that preceded the real note and restores the real note to its face duration.
+// Fixture: 3/8 measure with [8th, grace-32nd, 16th, 16th, 8th]. Without the
+// fix the last 8th renders as 16th + rest because rawGap = 90 < face = 120.
+TEST_F(Tst_Encore, v0xa6_grace_restores_face_value)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0xa6_grace_restores_face_value.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_grace_restores_face_value.enc";
+
+    Measure* m1 = score->firstMeasure();
+    ASSERT_NE(m1, nullptr);
+
+    std::vector<std::pair<DurationType, bool>> elements;
+    for (Segment* s = m1->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el) continue;
+        if (el->isRest()) {
+            elements.push_back({ toRest(el)->durationType().type(), false });
+        } else if (el->isChord()) {
+            Chord* c = toChord(el);
+            if (!c->graceNotes().empty()) {
+                for (Chord* gc : c->graceNotes()) {
+                    elements.push_back({ gc->durationType().type(), true });
+                }
+            }
+            elements.push_back({ c->durationType().type(), false });
+        }
+    }
+    // Expected: 8th (regular), 32nd (grace), 16th, 16th, 8th — no rests
+    ASSERT_EQ(elements.size(), 5u)
+        << "grace time-borrowing correction must restore the last 8th and "
+           "eliminate spurious rests; got " << elements.size() << " elements";
+    EXPECT_EQ(elements[0].second, false); EXPECT_EQ(elements[0].first, DurationType::V_EIGHTH);
+    EXPECT_EQ(elements[1].second, true);  EXPECT_EQ(elements[1].first, DurationType::V_32ND);
+    EXPECT_EQ(elements[2].second, false); EXPECT_EQ(elements[2].first, DurationType::V_16TH);
+    EXPECT_EQ(elements[3].second, false); EXPECT_EQ(elements[3].first, DurationType::V_16TH);
+    EXPECT_EQ(elements[4].second, false); EXPECT_EQ(elements[4].first, DurationType::V_EIGHTH)
+        << "last note must be an eighth (face value), not a 16th from rawGap=90";
     delete score;
 }
 

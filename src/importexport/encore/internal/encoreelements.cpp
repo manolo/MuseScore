@@ -24,6 +24,8 @@
 
 #include <algorithm>
 
+#include "encorerhythm.h"
+
 namespace mu::iex::encore {
 // ---------------------------------------------------------------------------
 // EncMeasureElem and derived element types
@@ -519,6 +521,38 @@ void EncMeasure::calculateRealDurations()
             }
             qint16 nextTick = (j < elems.size()) ? elems[j]->tick : durTicks;
             qint16 dur = nextTick - elems[i]->tick;
+            // v0xA6 grace-note time-borrowing correction. Encore stores grace
+            // notes at their actual tick positions, which shifts subsequent
+            // notes forward and shortens the last real note's gap to the
+            // measure end. When realDuration < faceValue for a v0xA6 note,
+            // sum all grace-note face values that appear BEFORE this note in
+            // the group. If that sum equals the deficit (faceValue - rawGap),
+            // the grace notes collectively stole exactly the missing time and
+            // the real note must be restored to its face value.
+            const EncNote* enCur = dynamic_cast<const EncNote*>(elems[i]);
+            if (enCur && enCur->size == 10 && dur > 0) {
+                const qint16 faceTicks = faceValue2ticks(enCur->faceValue);
+                if (faceTicks > dur && faceTicks <= durTicks) {
+                    qint16 totalGraceFace = 0;
+                    for (size_t k = 0; k < i; ++k) {
+                        const EncNote* en = dynamic_cast<const EncNote*>(elems[k]);
+                        if (en && en->graceType() != EncGraceType::NORMAL) {
+                            totalGraceFace += faceValue2ticks(en->faceValue);
+                        }
+                    }
+                    if (totalGraceFace == faceTicks - dur) {
+                        // m75 pattern: grace shortened the last note's gap.
+                        dur = faceTicks;
+                    } else if (dur > faceTicks
+                               && totalGraceFace > 0
+                               && (dur - faceTicks) <= totalGraceFace) {
+                        // m57 pattern: grace(s) between the previous real note
+                        // and this one left extra ticks in the real duration that
+                        // Encore ignores (the note still renders as face value).
+                        dur = faceTicks;
+                    }
+                }
+            }
             if (dur > 0) {
                 elems[i]->realDuration = dur;
             }
