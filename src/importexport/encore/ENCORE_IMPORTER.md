@@ -336,6 +336,109 @@ Sinfonia 7 II Allegretto Plectro corpus (`Beethoven_S7M2_Plectro.enc`):
 About a third of outgoing ties (50 of 157) use the secondary +6
 flag with arc-only +5. Ignoring the +6 byte loses those ties.
 
+## v0xA6 grace groups (inner graces and snap suppression)
+
+Encore v0xA6 files can contain grace-note groups with multiple notes:
+a LEADING grace (grace1 bit-field & 0x30 == 0x20 = APPOGGIATURA) and
+one or more INNER graces (bit-field & 0x30 == 0x10). Inner graces are
+always shorter (higher faceValue number) than the leading grace.
+
+Detection rule for inner graces: the note must satisfy
+
+```
+en->size == 10                             // v0xA6 note slot
+(en->grace1 & 0x30) == 0x10               // inner-grace flag
+pendingGraces[trackKey] non-empty          // a leading grace is queued
+(en->faceValue & 0x0F) > leadingGraceFv   // shorter than the leader
+```
+
+where `leadingGraceFv` is the maximum faceValue seen in the current
+grace queue (tracked in `v0xA6LeadingGraceFv` per `trackKey`, cleared
+when the queue flushes). Notes with g1=0x10 whose faceValue is LOWER
+(= longer duration) than the leader are regular notes following the
+group (boda.enc distinguishes: m57 has a 64th inner grace after a 32nd
+leader; m75 has regular 16ths after the same 32nd leader).
+
+**Face-grid snap suppression.** The implicit-silence snap that advances
+`cumTick` for notes whose Encore tick is on the face grid must be
+suppressed when a grace note is pending. In v0xA6, grace notes occupy
+real tick positions and push subsequent notes onto the grid, which
+would otherwise produce a spurious gap rest (equal to the grace's face
+duration) between the regular note and the grace. The condition
+`!gracePending` is added to the snap guard.
+
+**Crash implication.** The combination of spurious pre-grace rest,
+inner grace as regular note, and the resulting irregular timing
+produced a score structure that passed the CLI `-o` export path but
+crashed the MuseScore GUI layout engine (SIGSEGV). The `sanityCheck()`
+call in `v0xa6_inner_grace_group` test detects this before layout.
+
+## v0xA6 grace note time-borrowing
+
+Encore v0xA6 stores grace notes at their real tick positions. This
+shifts subsequent notes forward in the measure timeline. The last real
+note in a grace-containing group ends up with a raw gap to the measure
+end that is SMALLER than its face value, because the grace notes
+"borrowed" that time.
+
+Example (boda.enc m75, 3/8 measure, beatTicks=120, durTicks=360):
+
+```
+tick=  0  8th  (regular)     faceValue=120
+tick=120  32nd (grace)       faceValue=30  → steals 30 ticks
+tick=150  16th (regular)     faceValue=60
+tick=210  16th (regular)     faceValue=60
+tick=270  8th  (regular)     rawGap=360-270=90  SHOULD be 120
+```
+
+`calculateRealDurations` detects this by summing the face values of
+all grace notes in the same `(staffIdx, voice)` group that precede
+the real note. If `∑ grace_face_values == face_value - rawGap`, the
+grace notes collectively stole that time and the real note is restored
+to its face value (`realDuration = face_value`). Without this the 8th
+at tick=270 maps to a 16th and a rest fills the remaining 30 ticks.
+
+The check only fires for v0xA6 notes (`size == 10`).
+
+## Grace note ordering (multi-grace groups)
+
+MuseScore's `Chord::add(gc)` inserts grace notes at
+`m_graceNotes.begin() + gc->graceIndex()`. The default `graceIndex=0`
+prepends each new grace, reversing the group order for multi-grace
+sequences. The importer sets `gc->setGraceIndex(chord->graceNotes().size())`
+before each add so grace chords are appended in tick order (first to
+last = left to right in the score, matching Encore's visual order).
+
+## ORN-based single-chord tremolos (tipo 0xAF / 0xEF)
+
+Encore stores single-chord tremolos in two ways:
+
+1. **Articulation-byte encoding** (existing): stroke count packed into the
+   `articulationUp` / `articulationDown` bytes of the NOTE element
+   (values `0x41` = 1 stroke, `0x42` = 2, `0x43` = 3).
+
+2. **ORN elemento encoding** (added): a size-16 ORN element with
+   tipo `0xAF` (standard triple tremolo for plectro string instruments)
+   or `0xEF` (alternate encoding when Encore places the ORN at
+   `tick == durTicks`, after the last note of a long passage). Both map
+   to `TremoloSingleChord` / R32 (3 slashes = 32nd-note speed), the
+   standard bandurria / plectro tremolo. Confirmed by 248 occurrences
+   in a Beethoven plectro score where tremolo is ubiquitous.
+
+Resolution is deferred via `PendingOrnTremolo` (tick, measTick,
+staffIdx, msVoice, tremType). The post-pass:
+
+1. Tries `score->tick2measure(pt.tick)` and `m->findSegment(ChordRest,
+   pt.tick)` for the exact-tick case.
+2. When the ORN was at `tick == durTicks` the tick falls in the NEXT
+   (filler) measure which has only a whole rest. The fallback re-anchors
+   to `pt.measTick` (the source measure) and takes the LAST chord-rest
+   segment there.
+
+Tipo `0xBE` appears rarely (3 times in Beethoven Plectro) on quarter
+notes at measure starts, always with `byte+14 = 0xF4`. Its semantics
+are not yet decoded; it is currently silently ignored.
+
 ## Articulations, technical markings, tremolos
 
 `encArticulation2SymIds` (in `encoremapping.cpp`) maps the byte
