@@ -333,6 +333,20 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     };
     std::vector<PendingArpeggio> pendingArpeggios;
 
+    // ORN-based single-chord tremolos (tipo 0xAF / 0xEF). The ORN element
+    // precedes or follows the chord in MEAS order, so attachment is deferred.
+    // Tick may be at or past the measure's durTicks when Encore places the
+    // tremolo at the end of a tied or long note; the post-pass falls back to
+    // the latest chord before that tick.
+    struct PendingOrnTremolo {
+        Fraction tick;
+        Fraction measTick;
+        int staffIdx;
+        int msVoice;
+        TremoloType tremType;
+    };
+    std::vector<PendingOrnTremolo> pendingOrnTremolos;
+
     // Chord-level Trill ornaments (ORN tipo 0x35/0x36/0x37). Same pattern
     // as PendingArpeggio: the chord does not exist yet when the ornament
     // is parsed, so the attachment is deferred to a post-measure pass.
@@ -424,6 +438,20 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     // This map persists across measures: once stream 2 starts on msVoice=1, it continues
     // on msVoice=1 in all subsequent measures.
     std::map<std::pair<int, int>, int> streamOffset;  // key=(staffIdx,encVoice), val=extra offset
+
+    // v0xA6 inner-grace tracking: when a leading grace (g1=0x20) is placed
+    // its faceValue is stored here. Inner graces (g1=0x10) with a higher fv
+    // (= shorter note) are then classified as graces too. Cleared when the
+    // grace queue is flushed (non-grace chord follows).
+    std::map<std::pair<int, int>, quint8> v0xA6LeadingGraceFv;
+
+    // Total face ticks of the grace group most recently flushed on each
+    // trackKey. After the flush the face-grid snap also checks this so
+    // notes whose Encore tick is offset by exactly the grace duration do
+    // not produce a spurious gap rest (boda.enc m87: grace 32nd borrowed
+    // 30 ticks, shifting note4 onto the 30-tick grid but leaving a
+    // 30-tick gap in cumTick).
+    std::map<std::pair<int, int>, int> v0xA6GraceStolenTicks;
 
     int measIdx = 0;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
@@ -518,6 +546,7 @@ static void buildScore(MasterScore* score, const EncFile& enc)
         prevMidiTick.clear();
         prevEncVoice.clear();
         lastChordPos.clear();
+        v0xA6GraceStolenTicks.clear();
 
         // Drop any grace chords left unattached from the previous measure (no main
         // chord followed them within the measure). They are not in the score tree,
@@ -827,7 +856,24 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                         const int faceTicks = faceValue2ticks(elemFv);
                         const bool onFaceGrid = faceTicks > 0
                                                 && ((int)e->tick % faceTicks) == 0;
-                        if (onFaceGrid) {
+                        // Suppress the gap-snap when a grace note is queued.
+                        // In v0xA6, grace notes occupy real tick positions that
+                        // push subsequent notes forward; their ticks often land
+                        // on the face grid and would otherwise trigger a gap rest
+                        // equal to the grace's face value. The grace is visual
+                        // only -- no real time passes -- so cumTick should NOT
+                        // advance here.
+                        const bool gracePending = !pendingGraces[trackKey].empty();
+                        // Also suppress when the gap matches stolen grace ticks:
+                        // after a grace group flushes onto the first regular note,
+                        // the NEXT regular note may be on the face grid with a gap
+                        // equal to the grace duration. Without this, the snap
+                        // creates a spurious rest = grace face value (boda.enc m87:
+                        // 32nd grace steals 30 ticks, note4 (16th at tick=180) is
+                        // on the 30-tick grid, snap fires → Rest 32nd inserted).
+                        const int stolenTicks = v0xA6GraceStolenTicks.count(trackKey)
+                                                ? v0xA6GraceStolenTicks.at(trackKey) : 0;
+                        if (onFaceGrid && !gracePending) {
                             // wholeTicks = ticks per whole note. Encore stores
                             // beatTicks per time-signature beat (= 240 for x/4,
                             // 120 for x/8, etc.), so wholeTicks = beatTicks *
@@ -847,7 +893,14 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                                 const int gapEncTicks
                                     = (gap.numerator() * wholeTicks)
                                       / std::max(1, gap.denominator());
-                                if (gapEncTicks > CHORD_MIDI_THRESHOLD) {
+                                // Suppress if the gap matches recently stolen grace ticks.
+                                // Keep stolenTicks for ALL subsequent notes (don't erase)
+                                // so each note displaced by the grace gets the suppression.
+                                // The remaining time deficit shows as a trailing rest at
+                                // measure end (less disruptive than an inter-note rest).
+                                const bool gapIsGraceArtifact
+                                    = (stolenTicks > 0 && gapEncTicks <= stolenTicks);
+                                if (gapEncTicks > CHORD_MIDI_THRESHOLD && !gapIsGraceArtifact) {
                                     cumTick[trackKey] = encTickFrac;
                                 }
                             }
@@ -885,8 +938,21 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                 {
                     // Grace requires eighth-or-shorter (low nibble >= 4) in addition
                     // to the standard face-value range check.
+                    // v0xA6 inner-grace detection: after a leading grace
+                    // (g1=0x20 = APPOGGIATURA) Encore places additional
+                    // inner grace notes marked with g1=0x10. Inner graces
+                    // are shorter (higher fv number) than the leading grace.
+                    // Regular notes following the group are longer (lower fv)
+                    // and must NOT be classified as graces (boda.enc: m57
+                    // has a 64th inner grace after a 32nd leading grace, while
+                    // m75 has regular 16ths after a 32nd leading grace).
+                    const bool isV0xA6InnerGrace
+                        = (en->size == 10)
+                          && ((en->grace1 & 0x30) == 0x10)
+                          && v0xA6LeadingGraceFv.count(trackKey)
+                          && ((en->faceValue & 0x0F) > v0xA6LeadingGraceFv.at(trackKey));
                     if (isValidFaceValue(en->faceValue) && (en->faceValue & 0x0F) >= 4
-                        && en->graceType() != EncGraceType::NORMAL) {
+                        && (en->graceType() != EncGraceType::NORMAL || isV0xA6InnerGrace)) {
                         // Roll back per-track tick state so the next note is not
                         // detected as a chord extension of this grace.
                         if (savedPrevMidiTick >= 0) {
@@ -928,6 +994,16 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                         }
 
                         pendingGraces[trackKey].push_back(gc);
+                        // Track the leading grace fv for inner-grace detection.
+                        const quint8 curFv = en->faceValue & 0x0F;
+                        auto it = v0xA6LeadingGraceFv.find(trackKey);
+                        if (it == v0xA6LeadingGraceFv.end()) {
+                            v0xA6LeadingGraceFv[trackKey] = curFv;
+                        } else {
+                            it->second = std::max(it->second, curFv);
+                        }
+                        // Accumulate stolen ticks for the post-flush snap guard.
+                        v0xA6GraceStolenTicks[trackKey] += faceValue2ticks(curFv);
                         continue;
                     }
                 }
@@ -1266,9 +1342,19 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                 {
                     auto& pg = pendingGraces[trackKey];
                     for (Chord* gc : pg) {
-                        chord->add(gc);     // sets parent, inserts into m_graceNotes
+                        // Insert at the END of the grace-note list so graces
+                        // appear in the same left-to-right order they were
+                        // queued (= ascending tick order). The default
+                        // graceIndex=0 would prepend each one, reversing the
+                        // group when there are multiple grace notes.
+                        gc->setGraceIndex(chord->graceNotes().size());
+                        chord->add(gc);
                     }
+                    // stolen ticks accumulated when graces were pushed.
                     pg.clear();
+                    v0xA6LeadingGraceFv.erase(trackKey);
+                    // DO NOT erase v0xA6GraceStolenTicks yet: the snap guard
+                    // for the NEXT regular note needs to read it.
                 }
 
                 Note* note = Factory::createNote(chord);
@@ -1821,6 +1907,23 @@ static void buildScore(MasterScore* score, const EncFile& enc)
                     // Queue the intent; a post-measure pass resolves it once
                     // the chord segment is populated.
                     pendingArpeggios.push_back({ elemTick, track });
+                    break;
+                }
+                case EncOrnamentType::TREMOLO_32:
+                case EncOrnamentType::TREMOLO_32B: {
+                    // Single-chord tremolo ORN (3 slashes = 32nd-note speed).
+                    // The ORN tick may equal the chord tick (most cases) or
+                    // fall at durTicks (Encore stores it after the last note
+                    // on long tied passages). Both are resolved in the post-
+                    // pass which searches backwards when no chord is found at
+                    // the exact tick.
+                    PendingOrnTremolo pt;
+                    pt.tick = elemTick;
+                    pt.measTick = measTick;
+                    pt.staffIdx = staffIdx;
+                    pt.msVoice = msVoice;
+                    pt.tremType = TremoloType::R32;
+                    pendingOrnTremolos.push_back(pt);
                     break;
                 }
                 case EncOrnamentType::TRILL_START:
@@ -2537,6 +2640,56 @@ static void buildScore(MasterScore* score, const EncFile& enc)
         arp->setTrack(pa.track);
         arp->setArpeggioType(ArpeggioType::NORMAL);
         c->add(arp);
+    }
+
+    // Resolve ORN-based single-chord tremolos (tipo 0xAF / 0xEF).
+    // Find the chord at the stored tick; if none, search backwards in the
+    // source measure for the latest chord (handles Encore placement at
+    // tick == durTicks on long notes).
+    for (const PendingOrnTremolo& pt : pendingOrnTremolos) {
+        const track_idx_t trTrack = static_cast<track_idx_t>(pt.staffIdx * VOICES + pt.msVoice);
+        // Try exact tick match first.
+        Measure* m = score->tick2measure(pt.tick);
+        if (!m) {
+            m = score->tick2measure(pt.measTick);
+        }
+        if (!m) {
+            continue;
+        }
+        Segment* seg = m->findSegment(SegmentType::ChordRest, pt.tick);
+        if (!seg || !seg->element(trTrack) || !seg->element(trTrack)->isChord()) {
+            // Fall back: search backwards in the measure that owns the source
+            // ORN tick (pt.measTick). Encore can place the tremolo ORN at
+            // tick == durTicks (after the last note), so the tick2measure
+            // lookup above can land in the NEXT measure (which has only a
+            // whole-rest filler and no chord). Re-anchor the search in the
+            // source measure using pt.measTick.
+            Measure* srcMeas = score->tick2measure(pt.measTick);
+            if (!srcMeas) {
+                srcMeas = m;
+            }
+            seg = nullptr;
+            for (Segment* s = srcMeas->first(SegmentType::ChordRest); s;
+                 s = s->next(SegmentType::ChordRest)) {
+                if (s->element(trTrack) && s->element(trTrack)->isChord()) {
+                    seg = s;   // keep updating: we want the LAST chord
+                }
+            }
+        }
+        if (!seg || !seg->element(trTrack)) {
+            continue;
+        }
+        EngravingItem* el = seg->element(trTrack);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        Chord* c = toChord(el);
+        if (c->tremoloSingleChord()) {
+            continue;   // already has a tremolo from the articulation byte
+        }
+        TremoloSingleChord* trem = Factory::createTremoloSingleChord(c);
+        trem->setTremoloType(pt.tremType);
+        c->add(trem);
     }
 
     // Resolve SEGNO / CODA section markers on their measures.
