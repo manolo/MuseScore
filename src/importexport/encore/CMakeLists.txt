@@ -31,6 +31,17 @@ target_sources(iex_encore PRIVATE
     internal/importer/import.cpp
     internal/importer/import.h
     internal/importer/import-options.h
+    internal/parser/parsers-encoding.h
+    internal/parser/parsers-encoding.cpp
+    internal/parser/ticks.h
+    internal/parser/ticks.cpp
+    internal/parser/elem.h
+    internal/parser/elem-enums.h
+    internal/parser/elem-note.h
+    internal/parser/elem-ornament.h
+    internal/parser/elem-text.h
+    internal/parser/elem-measure.h
+    internal/parser/elem-root.h
 )
 
 target_link_libraries(iex_encore PRIVATE engraving)
