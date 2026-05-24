@@ -84,6 +84,10 @@ QString normalizeEncoreInstrName(const QString& name);
 const mu::engraving::InstrumentTemplate* findEncoreInstrumentTemplate(
     const QString& encName, int encMidiProgram = -1);
 
+// Same scoring but restricted to useDrumset templates, so localized names
+// ("Batería", "Batterie", "Drumset") drive the match without hardcoded keywords.
+const mu::engraving::InstrumentTemplate* findDrumsetTemplate(const QString& encName);
+
 // Returns beats-per-second if `text` matches a standard Italian tempo
 // marking (Allegro, Andante, ...). Returns 0 for relative markings
 // (a tempo, Tempo I) that defer to previous context. Returns -1 when
