@@ -42,5 +42,11 @@ muse::Ret NotationEncoreReader::read(MasterScore* score, const muse::io::path_t&
     opts.overfillMeasureStrategy              = encoreConfiguration()->overfillMeasureStrategy();
     opts.firstMeasureIsPickup                 = encoreConfiguration()->firstMeasureIsPickup();
     Err err = importEncore(score, path.toQString(), opts);
+    if (err == Err::FileBadFormat) {
+        // Replace the generic "Bad format" text with a message that identifies why the file
+        // could not be read (encrypted container, unsupported/damaged Encore file, or not an
+        // Encore file at all) and how to recover.
+        return make_ret(err, encoreLoadErrorMessage(path.toQString()));
+    }
     return make_ret(err, path);
 }

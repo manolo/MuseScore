@@ -42,6 +42,24 @@ target_sources(iex_encore PRIVATE
     internal/parser/elem-text.h
     internal/parser/elem-measure.h
     internal/parser/elem-root.h
+    internal/parser/readers.h
+    internal/parser/readers.cpp
+    internal/parser/readers-v0xa6.h
+    internal/parser/readers-v0xa6.cpp
+    internal/parser/readers-v0xc2.h
+    internal/parser/readers-v0xc2.cpp
+    internal/parser/readers-v0xc4-base.h
+    internal/parser/readers-v0xc4-base.cpp
+    internal/parser/readers-v0xc4.h
+    internal/parser/readers-v0xc4.cpp
+    internal/parser/parsers-root.cpp
+    internal/parser/parsers-measure.cpp
+    internal/parser/parsers-note.cpp
+    internal/parser/parsers-chord.cpp
+    internal/parser/parsers-ornament.cpp
+    internal/parser/parsers-text.cpp
+    internal/parser/parsers-lyric-tie.cpp
+    internal/parser/parsers-metadata.cpp
 )
 
 target_link_libraries(iex_encore PRIVATE engraving)
