@@ -310,34 +310,34 @@ static int clefGlyphFamily(ClefType ct)
     }
 }
 
-ClefType pickStaffClef(EncClefType encClef, ClefType concertClef, ClefType transposingClef,
+ClefType pickStaffClef(EncClefType encClef, ClefType /*concertClef*/, ClefType /*transposingClef*/,
                       int keyOffsetSemitones)
 {
     const ClefType base = encClef2MuseScore(encClef);
-    if (concertClef == ClefType::INVALID || concertClef == base) {
+    if (keyOffsetSemitones == 0 || clefGlyphFamily(base) == 0) {
         return base;
     }
-    // The whole override is gated by the concert clef carrying an octave
-    // decoration that matches the staff Key offset and sharing the same
-    // glyph family as the Encore clef.
-    if (clefGlyphFamily(base) == 0 || clefGlyphFamily(base) != clefGlyphFamily(concertClef)) {
-        return base;
+    // Derive the MuseScore clef directly from the Encore clef's glyph family
+    // and the Key transposition offset. When the Key is exactly ±one or two
+    // octaves (±12 / ±24 semitones) and a clef with a matching octave
+    // decoration exists in the same glyph family, use that clef so the staff
+    // visually communicates the transposition without relying on instrument
+    // template data. Non-octave offsets (e.g. ±3, ±7) have no corresponding
+    // octave-decorated clef variant and fall through to the plain base clef;
+    // the pitch offset applied to every note already handles the transposition.
+    static const std::array<ClefType, 8> kCandidates = {
+        ClefType::G8_VB, ClefType::G8_VA,
+        ClefType::G15_MB, ClefType::G15_MA,
+        ClefType::F8_VB, ClefType::F_8VA,
+        ClefType::F15_MB, ClefType::F_15MA,
+    };
+    const int family = clefGlyphFamily(base);
+    for (ClefType c : kCandidates) {
+        if (clefGlyphFamily(c) == family && clefOctaveOffset(c) == keyOffsetSemitones) {
+            return c;
+        }
     }
-    if (clefOctaveOffset(concertClef) != keyOffsetSemitones) {
-        return base;
-    }
-    // Prefer the transposing clef when it is distinct from the concert
-    // clef and carries no octave decoration. The instrument's
-    // transposeChromatic still moves the noteheads to the same staff
-    // position the concert clef would render them at, but the clef GLYPH
-    // stays identical to what Encore stored (e.g. plain F for bass-guitar).
-    if (transposingClef != ClefType::INVALID
-        && transposingClef != concertClef
-        && clefOctaveOffset(transposingClef) == 0
-        && clefGlyphFamily(transposingClef) == clefGlyphFamily(base)) {
-        return transposingClef;
-    }
-    return concertClef;
+    return base;
 }
 
 void addInitialClef(MasterScore* score, int staffIdx, EncClefType ct)
@@ -588,6 +588,67 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
                 || (score == bestScore && nameStrength > bestNameStrength)) {
                 bestScore = score;
                 bestNameStrength = nameStrength;
+                best = it;
+            }
+        }
+    }
+    return best;
+}
+
+// Find the best drumset template for an Encore instrument name.
+//
+// Same scoring as findEncoreInstrumentTemplate but restricted to templates
+// with useDrumset=true. This lets MuseScore's own localized template names
+// ("Batería", "Batterie", "Drumset", ...) drive the match so no hardcoded
+// keyword list is needed.
+const InstrumentTemplate* findDrumsetTemplate(const QString& encName)
+{
+    if (encName.trimmed().size() < 4) {
+        return nullptr;
+    }
+
+    const QString norm = normalizeEncoreInstrName(encName);
+    QStringList needles;
+    auto addNeedle = [&](const QString& s) {
+        const QString n = normalizeForCompare(s);
+        if (!n.isEmpty() && !needles.contains(n)) {
+            needles << n;
+        }
+    };
+    addNeedle(encName);
+    addNeedle(norm);
+    for (const QString& word : norm.split(u' ', Qt::SkipEmptyParts)) {
+        if (word.length() >= 4) {
+            addNeedle(word);
+        }
+    }
+    if (needles.isEmpty()) {
+        return nullptr;
+    }
+
+    // Use exact-match scoring only (no substring) so that a generic label
+    // like "Drums" does not accidentally match compound names such as
+    // "Automobile Brake Drums" before reaching the canonical Drumset template.
+    const InstrumentTemplate* best = nullptr;
+    int bestScore = 0;
+    for (const InstrumentGroup* g : instrumentGroups) {
+        for (const InstrumentTemplate* it : g->instrumentTemplates) {
+            if (!it->useDrumset) {
+                continue;
+            }
+            const QString nt = normalizeForCompare(it->trackName.toQString());
+            const QString nl = normalizeForCompare(
+                it->instrumentName.longName().toQString());
+            const QString ns = normalizeForCompare(
+                it->instrumentName.shortName().toQString());
+            int score = 0;
+            for (const QString& needle : needles) {
+                if (nt == needle) { score += 4; }
+                if (nl == needle) { score += 2; }
+                if (ns == needle) { score += 1; }
+            }
+            if (score > bestScore) {
+                bestScore = score;
                 best = it;
             }
         }

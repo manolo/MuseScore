@@ -960,10 +960,45 @@ TEST_F(Tst_EncoreFeatures, instrument_name_midi_tiebreaks_to_acoustic_bass)
 }
 
 // ===========================================================================
+// FEATURE: percussion detection — primary path (PERC clef).
+// An instrument with EncClefType::PERC on its first staff must be routed to
+// the drumset template regardless of its name or midiProgram. This is the
+// language-agnostic, binary-level detection that requires no keyword list.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, instrument_perc_clef_routes_to_drumset)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_instr_perc_clef_drumset.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->id(), String(u"drumset"))
+        << "PERC clef must override name+MIDI and route to drumset (primary path)";
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: percussion detection — keyword fallback path.
+// An instrument named "Drums" (English) with midiProgram=1 must reach the
+// drumset template. The word "drum" triggers the keyword fallback (step 4),
+// which routes it to the canonical drumset template.
+// ===========================================================================
+TEST_F(Tst_EncoreFeatures, instrument_name_drums_english_routes_to_drumset)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_instr_drums_name_drumset.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->id(), String(u"drumset"))
+        << "'Drums' must reach drumset via findDrumsetTemplate, not fall back to piano";
+    delete score;
+}
+
+// ===========================================================================
 // FIX: percussion tracks store midiProgram=1 (Grand Piano) regardless of
-// the actual instrument, so the MIDI fallback assigned them to a piano.
-// buildScore now recognises Spanish/Portuguese/English names ("Percusión",
-// "Bateria", "Drum") and routes to the locale-independent "drumset" template.
+// the actual instrument. Spanish "Percusión" must reach the drumset template
+// via findDrumsetTemplate (localized name match), not the MIDI fallback.
 // ===========================================================================
 TEST_F(Tst_EncoreFeatures, instrument_name_routes_percussion_to_drumset)
 {
