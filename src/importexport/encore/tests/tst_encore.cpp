@@ -1538,6 +1538,62 @@ TEST_F(Tst_Encore, v0xa6_grace_restores_face_value)
 
 // Regression: many octave-transposing instruments (laud, classical guitar,
 // electric bass, ...) are written in Encore with a plain G clef even
+// Binary-driven clef rule: G clef + Key=+12 → G8_VA. No template required.
+TEST_F(Tst_Encore, v0c4_g_clef_8va_from_key)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_g_clef_8va_from_key.enc");
+    ASSERT_NE(score, nullptr);
+    Measure* m = score->firstMeasure(); ASSERT_NE(m, nullptr);
+    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick()); ASSERT_NE(seg, nullptr);
+    EngravingItem* el = seg->element(0); ASSERT_TRUE(el && el->isClef());
+    EXPECT_EQ(toClef(el)->clefType(), ClefType::G8_VA)
+        << "G clef + Key=+12 must yield G8_VA";
+    delete score;
+}
+
+// Binary-driven clef rule: F clef + Key=-12 → F8_VB. No template required.
+TEST_F(Tst_Encore, v0c4_f_clef_8vb_from_key)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_f_clef_8vb_from_key.enc");
+    ASSERT_NE(score, nullptr);
+    Measure* m = score->firstMeasure(); ASSERT_NE(m, nullptr);
+    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick()); ASSERT_NE(seg, nullptr);
+    EngravingItem* el = seg->element(0); ASSERT_TRUE(el && el->isClef());
+    EXPECT_EQ(toClef(el)->clefType(), ClefType::F8_VB)
+        << "F clef + Key=-12 must yield F8_VB";
+    delete score;
+}
+
+// Binary-driven clef rule: F clef + Key=+12 → F_8VA. No template required.
+TEST_F(Tst_Encore, v0c4_f_clef_8va_from_key)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_f_clef_8va_from_key.enc");
+    ASSERT_NE(score, nullptr);
+    Measure* m = score->firstMeasure(); ASSERT_NE(m, nullptr);
+    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick()); ASSERT_NE(seg, nullptr);
+    EngravingItem* el = seg->element(0); ASSERT_TRUE(el && el->isClef());
+    EXPECT_EQ(toClef(el)->clefType(), ClefType::F_8VA)
+        << "F clef + Key=+12 must yield F_8VA";
+    delete score;
+}
+
+// Binary-driven clef rule: G clef + Key=-7 (non-octave) → plain G.
+// No octave-decorated variant exists for -7 semitones; keep the Encore clef.
+TEST_F(Tst_Encore, v0c4_non_octave_key_keeps_clef)
+{
+    MasterScore* score = readEncoreScore("synthetic_v0c4_non_octave_key_keeps_clef.enc");
+    ASSERT_NE(score, nullptr);
+    Measure* m = score->firstMeasure(); ASSERT_NE(m, nullptr);
+    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick()); ASSERT_NE(seg, nullptr);
+    EngravingItem* el = seg->element(0); ASSERT_TRUE(el && el->isClef());
+    EXPECT_EQ(toClef(el)->clefType(), ClefType::G)
+        << "G clef + Key=-7 (non-octave) must keep plain G";
+    delete score;
+}
+
+// Regression: octave-transposing instruments (laud, classical guitar, …)
+// are written in Encore with a plain G clef but Key = -12. The binary-
+// driven rule maps G + Key=-12 → G8_VB. The fixture is a Laud staff.
 // though their MuseScore instrument template carries the octave-bassa
 // variant (G8_VB). When the Encore Key transposition matches the template
 // clef's octave decoration, the importer overrides the staff clef with
@@ -1584,13 +1640,10 @@ TEST_F(Tst_Encore, v0c4_octave_bassa_clef_override)
     delete score;
 }
 
-// Regression: when the matched MuseScore template has a DISTINCT pair of
-// clefs (concertClef = F8_VB, transposingClef = F + transposeChromatic =
-// -12, e.g. the bass-guitar / 5-string-electric-bass templates), the
-// importer prefers the PLAIN transposing clef over the octave-decorated
-// concert clef. The instrument's transposeChromatic still places the
-// noteheads at the same staff position the concert clef would render
-// them at, but the staff carries Encore's plain-F glyph.
+// Regression: bass guitar with Encore F clef and Key = -12. The binary-
+// driven clef rule maps F + Key=-12 → F8_VB regardless of the instrument
+// template. The staff must carry F8_VB, not the plain F transposing clef
+// the template would previously have preferred.
 TEST_F(Tst_Encore, v0c4_bass_guitar_transposing_clef)
 {
     MasterScore* score = readEncoreScore("synthetic_v0c4_bass_guitar_transposing_clef.enc");
@@ -1612,9 +1665,9 @@ TEST_F(Tst_Encore, v0c4_bass_guitar_transposing_clef)
     EngravingItem* clefEl = clefSeg->element(0);
     ASSERT_NE(clefEl, nullptr);
     ASSERT_TRUE(clefEl->isClef());
-    EXPECT_EQ(toClef(clefEl)->clefType(), ClefType::F)
-        << "staff must carry the template's plain transposing F clef, "
-           "NOT the F8_VB concert clef";
+    EXPECT_EQ(toClef(clefEl)->clefType(), ClefType::F8_VB)
+        << "F clef + Key=-12 must yield F8_VB (binary-driven rule); "
+           "template transposing clef (plain F) is no longer preferred";
 
     Chord* firstChord = nullptr;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {

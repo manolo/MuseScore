@@ -52,12 +52,30 @@ template:
 - "common" genre tiebreaker so the everyday classical guitar wins
   over the soprano variant when both share GM program 24.
 
-**Percussion shortcut.** Encore percussion tracks always report
-`midiProgram = 1` (see ENCORE_FORMAT.md), so a strict MIDI-program
-lookup routes percussion to a piano. Before the combined scoring,
-`importencore.cpp` checks the lowercased track name for `percus`,
-`drum` or `bater` (English, Spanish, Portuguese) and routes
-matches directly to the locale-independent "drumset" template.
+**Percussion detection — four-level chain.** Encore percussion tracks
+always report `midiProgram = 1` (see ENCORE_FORMAT.md), so a strict
+MIDI-program lookup would route them to Grand Piano. The importer uses
+a prioritized chain instead:
+
+1. **PERC clef (primary, language-agnostic).** If the first staff of
+   the instrument carries `EncClefType::PERC` in the binary LINE block,
+   the instrument is unconditionally routed to the `drumset` template.
+   This check runs before any name or MIDI inspection and never produces
+   false positives.
+
+2. **Name + MIDI scoring over non-drumset templates** (`findEncoreInstrumentTemplate`).
+   This is the main path for melodic instruments and is not restricted to
+   non-percussion, so a correctly-named drum instrument still passes
+   through here if the clef check was inconclusive.
+
+3. **Name scoring over drumset templates** (`findDrumsetTemplate`). Uses
+   the same diacritics-insensitive scoring as step 2 but restricted to
+   templates with `useDrumset = true`. MuseScore's own localized template
+   names ("Batería", "Batterie", "Drumset", …) drive the match, so no
+   hardcoded keyword list is needed and any UI language is supported.
+
+4. **MIDI program lookup** (`searchTemplateForMidiProgram`). Last resort
+   for melodic instruments whose name did not match any template.
 
 **Short-name guard.** Instrument names shorter than four characters
 (typically SATB choir labels `S` / `A` / `T` / `B` and the Spanish
@@ -249,36 +267,28 @@ parts and adds it to every NOTE pitch at the two
 applyConcertPitch(note, en->semiTonePitch + staffPitchOffset[staffIdx]);
 ```
 
-Visual alignment via the staff clef. With the pitch offset alone
-the noteheads land at the SOUNDING staff position, which for
-`Key = -12` staves is one octave lower than the user saw in
-Encore. The importer recovers the original visual by also picking
-the staff clef from the matched MuseScore instrument template
-when its octave decoration matches the Key (see `pickStaffClef`
-in `encoremapping.cpp`):
+Visual alignment via the staff clef (`pickStaffClef` in `encoremapping.cpp`).
+The clef is derived directly from the **binary Encore clef + Key offset**,
+without requiring a matched instrument template:
 
-- Encore byte: plain G / F clef (no decoration option in Encore's UI)
-- Template `concertClef`: `G8_VB` / `F8_VB` (octave bassa) when
-  the instrument is octave-transposing (laud, classical guitar,
-  electric bass, ...)
-- Override fires only when the template concert clef's octave
-  decoration matches `keyTransposeSemitones` (-12 for `G8_VB` /
-  `F8_VB`, +12 for `G8_VA` / `F_8VA`, etc.) AND both clefs share
-  the same glyph family (G / F)
-- When the override fires AND the template has a distinct
-  `transposingClef` with no octave decoration (bass-guitar,
-  double-bass: `concertClef = F8_VB`, `transposingClef = F`,
-  `transposeChromatic = -12`), the importer picks the
-  `transposingClef`. The instrument's `transposeChromatic` then
-  places the noteheads at the same staff position the concert
-  clef would render them at, but the GLYPH stays identical to
-  what Encore stored (plain F).
-- When the template has a single clef (laud, classical guitar:
-  `concertClef = transposingClef = G8_VB`), there is no choice;
-  the concert clef wins.
+| Encore clef | Key (semitones) | MuseScore clef |
+|-------------|----------------|----------------|
+| G (treble)  | -12            | G8_VB          |
+| G           | +12            | G8_VA          |
+| G           | -24            | G15_MB         |
+| G           | +24            | G15_MA         |
+| F (bass)    | -12            | F8_VB          |
+| F           | +12            | F_8VA          |
+| F           | -24            | F15_MB         |
+| F           | +24            | F_15MA         |
+| any         | 0              | Encore clef    |
+| any         | non-octave (e.g. -7) | Encore clef (notes shift, not clef) |
 
-Different-glyph mismatches, exact matches, and staves without a
-matched template keep Encore's stored clef.
+The rule: when `|keyOffsetSemitones|` is a multiple of 12 (one or two
+octaves), look for a MuseScore clef in the same glyph family (G or F)
+whose `clefOctaveOffset()` equals `keyOffsetSemitones`. If found, use it.
+C clefs, percussion and tablature carry no octave variants and always
+keep the Encore clef regardless of Key.
 
 ## Per-measure tempo (MEAS header BPM)
 
