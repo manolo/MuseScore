@@ -124,35 +124,71 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     std::vector<ClefType> staffTemplateConcertClef;
     std::vector<ClefType> staffTemplateTransposingClef;
     int totalStaves = 0;
+    int cumStaffIdx = 0;  // running index into enc.lines[0].staffData
     for (const auto& instr : enc.instruments) {
         int ns = instr.nstaves > 0 ? instr.nstaves : 1;
         Part* part = new Part(score);
 
         // Find the best matching instrument template.
-        // Strategy: combined name + MIDI score first, then a drum-kit shortcut
-        // for percussion tracks, then a pure MIDI lookup (v0xC4 only).
-        // When the instrument name is too short to be reliable (e.g. "S",
-        // "C", "T", "B" used as SATB choir labels) the name match returns
-        // nullptr and the MIDI program field is usually unreliable too on
-        // such files (compact TK blocks invalidate the PRG_BASE + n*PRG_STEP
-        // formula). Skip both name-keyword and MIDI fallbacks in that case
-        // and let the chain fall through to Grand Piano so the user can
-        // pick the right voice from the instrument browser afterwards.
+        //
+        // Detection order (most reliable → least reliable):
+        //
+        // 1. PERC clef in the binary staff data — language-agnostic and
+        //    unambiguous: if the first staff of this instrument uses the
+        //    percussion clef, it is a drum/percussion track regardless of
+        //    the name or MIDI program stored in the file.
+        //
+        // 2. Name + MIDI scoring across non-drumset templates (the main path
+        //    for melodic instruments).
+        //
+        // 3. Name scoring across drumset templates — uses MuseScore's own
+        //    localized template names ("Batería", "Batterie", "Drumset", …)
+        //    so no hardcoded keyword list is needed.
+        //
+        // 4. MIDI program lookup (v0xC4 only — compact TK blocks are
+        //    unreliable).
+        //
+        // 5. Grand Piano fallback (user picks the right instrument later).
+        //
+        // When the instrument name is too short (1–3 chars: "S", "A", "T",
+        // "B" choir labels) steps 2–4 are skipped; the clef check (step 1)
+        // still applies.
         const int encMidi = instr.midiProgram > 0 ? instr.midiProgram - 1 : -1;
         const bool nameTooShort = instr.name.trimmed().size() < 4;
-        const InstrumentTemplate* tmpl = findEncoreInstrumentTemplate(instr.name, encMidi);
+
+        // Step 1: PERC clef → drumset
+        const bool isPercByClef = !enc.lines.empty()
+            && cumStaffIdx < static_cast<int>(enc.lines[0].staffData.size())
+            && enc.lines[0].staffData[cumStaffIdx].clef == EncClefType::PERC;
+
+        const InstrumentTemplate* tmpl = nullptr;
+        if (isPercByClef) {
+            tmpl = searchTemplate(String(u"drumset"));
+        }
+
+        // Step 2: name + MIDI scoring (non-drumset templates)
+        if (!tmpl) {
+            tmpl = findEncoreInstrumentTemplate(instr.name, encMidi);
+        }
+
+        // Step 3: name scoring over drumset templates (localized names)
         if (!tmpl && !nameTooShort) {
-            // Encore percussion tracks usually leave midiProgram at 1 (Grand
-            // Piano), which makes the MIDI fallback below pick the wrong
-            // instrument (and the wrong playback sound). Recognise the name
-            // and route to a drum-kit template directly.
+            tmpl = findDrumsetTemplate(instr.name);
+        }
+
+        // Step 4: generic percussion keywords — last resort for labels like
+        // "Percusión" or "Drums" that are too generic to match any specific
+        // template name but contain recognizable roots across languages.
+        if (!tmpl && !nameTooShort) {
             const QString lname = instr.name.toLower();
-            if (lname.contains(QStringLiteral("percus"))
+            if (lname.contains(QStringLiteral("perc"))
                 || lname.contains(QStringLiteral("drum"))
                 || lname.contains(QStringLiteral("bater"))) {
                 tmpl = searchTemplate(String(u"drumset"));
             }
         }
+
+        // Step 5: MIDI program lookup
         if (!tmpl && !nameTooShort && instr.midiProgram > 0) {
             // MIDI program is stored 1-indexed; searchTemplateForMidiProgram
             // expects 0-indexed (GM bank 0).
@@ -206,6 +242,7 @@ static void buildScore(MasterScore* score, const EncFile& enc)
             ++totalStaves;
         }
         score->appendPart(part);
+        cumStaffIdx += ns;
     }
     if (totalStaves == 0) {
         Part* part = new Part(score);
