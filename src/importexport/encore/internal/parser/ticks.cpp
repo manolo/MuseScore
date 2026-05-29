@@ -20,7 +20,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "encorerhythm.h"
+#include "ticks.h"
 
 #include <cstdlib>
 
@@ -58,15 +58,9 @@ DurationType faceValue2DurationType(quint8 fv)
     }
 }
 
-// Reject a dotted rdur mapping when it would promote the face value to a
-// longer duration AND the rdur does not actually match a dotted multiple
-// of the face's tick count. This happens when `EncMeasure::calculateRealDurations`
-// inflates rdur to the gap-to-next-event spacing -- e.g. a face=quarter note
-// alone in a 3/4 measure ends up with rdur=720 (the dotted-half ratio) and
-// would otherwise be rendered as a dotted half instead of a quarter.
-// When rdur is <= the face's tick count (truncated by a following event)
-// or the rdur really is a dotted multiple of the face (real dotted note),
-// the standard mapping still applies.
+// Guard against rdur inflated by gap-to-next-event (e.g. a quarter note alone
+// in 3/4 gets rdur=720 which looks like dotted half). Reject if rdur > faceTicks
+// but is not a real dotted multiple of the face value.
 static bool inflatedDottedPromotion(qint16 realDur, quint8 fv)
 {
     int faceTicks = faceValue2ticks(fv);
@@ -93,11 +87,8 @@ DurationType realDuration2DurationType(qint16 realDur, quint8 fv)
     case 180: return inflatedDottedPromotion(180, fv) ? faceValue2DurationType(fv) : DurationType::V_EIGHTH;
     case  90: return inflatedDottedPromotion(90,  fv) ? faceValue2DurationType(fv) : DurationType::V_16TH;
     case  45: return inflatedDottedPromotion(45,  fv) ? faceValue2DurationType(fv) : DurationType::V_32ND;
-    // Triplet rdur values (160/80/40...) intentionally fall through. The
-    // implied-tuplet detector at `detectImpliedTuplet` already classifies
-    // them as 3:2 groups using the faceValue, and mapping them to the next
-    // longer DurationType (e.g. 80 -> V_EIGHTH for fv=16th) misrepresents
-    // notations that are not in a tuplet context.
+    // Triplet rdur (160/80/40...) falls through; detectImpliedTuplet handles them.
+    // Mapping to longer type misrepresents notes not in a tuplet context.
     default:  return faceValue2DurationType(fv);
     }
 }

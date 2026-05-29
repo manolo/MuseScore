@@ -20,8 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef MU_IMPORTEXPORT_ENCOREELEMENTS_H
-#define MU_IMPORTEXPORT_ENCOREELEMENTS_H
+#ifndef MU_IMPORTEXPORT_ENC_PARSER_ELEMENTS_H
+#define MU_IMPORTEXPORT_ENC_PARSER_ELEMENTS_H
 
 #include <memory>
 #include <map>
@@ -107,54 +107,29 @@ enum class EncOrnamentType : quint8 {
     STAFFTEXT  = 0x1E,
     SLURSTART  = 0x21,
     ARPEGGIO   = 0x22,
-    // Trill-line ornaments. encore-symbols.enc m22 carries three size-28
-    // ORN tipos for two adjacent trill+wavy-line spans: 0x36 starts the
-    // first trill, 0x37 starts the second, and 0x35 is the end-of-line
-    // marker (does NOT add a trill-mark itself). A follow-up commit will
-    // promote 0x36/0x37 to proper Trill spanners with the wavy-line
-    // companion once alMezuro semantics are confirmed.
+    // Trill-line ornaments (size-28): 0x36 starts first trill, 0x37 starts second,
+    // 0x35 is the end marker (adds no trill mark itself).
     TRILL_END   = 0x35,
     TRILL_START = 0x36,
     TRILL_ALT   = 0x37,
-    // Section navigation markers stored as size-16 ORN tipos.
-    // 0xA2 = segno, 0xA5 = to coda, 0xA6 = coda. The position within
-    // the measure matches Encore's visual placement (start vs end of
-    // measure).
+    // Section navigation markers (size-16): 0xA2=segno, 0xA5=to coda, 0xA6=coda.
     SEGNO       = 0xA2,
     TO_CODA     = 0xA5,
     CODA        = 0xA6,
-    // Per-chord staccato. Encore emits one size-16 ORN tipo=0xC9 next to
-    // every staccato'd chord (voice 0, staff in the low byte). The dot
-    // is rendered by Encore's display engine but its own MusicXML
-    // exporter drops 0xC9 entirely, so the reference XML shows only the
-    // rare cases where the artic byte (0x1D) holds the glyph directly.
-    // 1813 occurrences in Beethoven Plectro account for nearly every
-    // visible staccato in the score; users like to see them in MuseScore.
+    // Per-chord staccato (size-16). Encore's own MusicXML exporter drops 0xC9 entirely;
+    // we import it because it accounts for nearly all staccatos in plectro scores.
     STACCATO    = 0xC9,
     TEMPO      = 0x32,
-    // Single-chord tremolo ornaments (rapid repeated-note marking for
-    // plectro string instruments). Stored as size-16 ORN tipo bytes.
-    // Confirmed by cross-referencing two plectro scores where the user
-    // reports visible tremolo slashes on long notes:
-    //   0xAF: standard triple tremolo (3 slashes = 32nd-note speed);
-    //         most common in Beethoven Plectro (248 occurrences) and
-    //         on half/quarter notes in multi-instrument band scores.
-    //   0xEF: alternate triple tremolo encoding observed on half notes
-    //         when the ORN is stored at tick >= measure durTicks.
-    // Both map to TremoloSingleChord / R32 in MuseScore.
+    // Single-chord tremolo (plectro), size-16. Both map to TremoloSingleChord/R32.
+    // 0xAF: standard encoding (248 occurrences in Beethoven Plectro).
+    // 0xEF: alternate encoding seen on half notes at tick >= measure durTicks.
     TREMOLO_32 = 0xAF,
     TREMOLO_32B = 0xEF,
     SLURSTOP   = 0x41,
     WEDGESTOP  = 0x4D,
-    // Size-16 dynamic markings. The mapping was confirmed by walking
-    // encore-symbols.enc measure by measure against Encore's own MusicXML
-    // export (`encore-symbols.xml`):
-    //   m1 0x80 0x81 0x82 0x83 ... 0x84 -> ppp, pp, p, mp, mf
-    //   m2 0x85 0x86 ... 0x87 0x88 0x89 -> f,  ff, fff, sfz, sffz
-    //   m3 0x8a ...                     -> fp
-    // The remaining dynamics in the reference (fz, sf) must live in
-    // tipos not yet observed; they stay decoded as the general dynamic
-    // pattern via the OTHER fallback in the importer.
+    // Dynamic markings (size-16), confirmed against encore-symbols.xml:
+    //   ppp=0x80, pp=0x81, p=0x82, mp=0x83, mf=0x84
+    //   f=0x85, ff=0x86, fff=0x87, sfz=0x88, sffz=0x89, fp=0x8A
     DYN_PPP    = 0x80,
     DYN_PP     = 0x81,
     DYN_P      = 0x82,
@@ -166,8 +141,7 @@ enum class EncOrnamentType : quint8 {
     DYN_SFZ    = 0x88,
     DYN_SFFZ   = 0x89,
     DYN_FP     = 0x8A,
-    // High-range dynamic tipos seen only in encore-symbols.enc m3
-    // ([fp, fz, sf] -> [0x8A, 0xAA, 0xAB]):
+    // High-range: fp=0x8A, fz=0xAA, sf=0xAB (from encore-symbols.enc m3).
     DYN_FZ     = 0xAA,
     DYN_SF     = 0xAB
 };
@@ -304,15 +278,9 @@ struct EncGenericElem : EncMeasureElem {
     bool read(QDataStream& ds) override;
 };
 
-// TIE element: marks that the note(s) at (staffIdx, voice, tick) tie forward.
-// The element has no pitch field; ties are matched by (staffIdx, voice, tick).
-//
-// The byte at elemStart+2 encodes the tie arc direction:
-//   0xfe  — outgoing tie: the note at this tick SENDS a tie to the next same-pitch note
-//            (TIE-START).  Added to tieStartSet during the pre-scan.
-//   other — arc-only marker: visual ornament for an incoming tie arc endpoint; the note
-//            at this tick receives a tie from a previous note but does NOT start a new
-//            outgoing tie.  NOT added to tieStartSet.
+// TIE element: marks notes at (staffIdx, voice, tick) that tie forward.
+// Byte at elemStart+2: 0xfe = outgoing tie (TIE-START, added to tieStartSet);
+// any other value = incoming arc endpoint only, NOT a new outgoing tie.
 struct EncTie : EncMeasureElem {
     bool isTieStart { false };   // true when elemStart+2 == 0xfe (outgoing tie)
 
@@ -321,10 +289,7 @@ struct EncTie : EncMeasureElem {
     bool read(QDataStream& ds) override;
 };
 
-// ---------------------------------------------------------------------------
-// Chord-cluster threshold: notes within this many Encore ticks of each other are
-// treated as simultaneous (live-recorded MIDI timing drift).  Used in both
-// calculateRealDurations() and the tie/chord-extension logic in buildScore().
+// Notes within this many Encore ticks treated as simultaneous (MIDI timing drift).
 inline constexpr int CHORD_CLUSTER_THRESHOLD = 4;   // Encore ticks (~8ms at 120bpm)
 
 // ---------------------------------------------------------------------------
@@ -361,7 +326,7 @@ struct EncMeasure {
     EncBarlineType endBarline() const { return static_cast<EncBarlineType>(barTypeEnd); }
     EncRepeatType repeatMark() const { return static_cast<EncRepeatType>(coda & 0xFF); }
 
-    bool read(QDataStream& ds, const quint32 vs, bool oldFormat, bool veryOldFormat);
+    bool read(QDataStream& ds, const quint32 vs, const struct EncFormatReader& fmt);
     void calculateRealDurations();
 };
 
@@ -375,11 +340,8 @@ struct EncInstrument {
     int nstaves   { 0 };
     int midiProgram { 0 };   // 1-indexed GM program (0 = not configured)
     bool showStaff { true }; // false = hidden in score (Encore "Show" flag)
-    // "Key" transposition from Encore's Staff Sheet -- a signed chromatic
-    // offset in semitones applied at playback. 0 = "Sounds as Written";
-    // -12 = "Octave Lower" (laud, classical guitar, bass guitar); +12 =
-    // "Octave Higher". The dropdown covers ±33 semitones. Stored on disk
-    // as a signed int8 at PRG_BASE - 23 + n * PRG_STEP (v0xC4 only).
+    // Signed chromatic offset from Encore's Staff Sheet "Key" field.
+    // 0=written, -12=octave lower, +12=octave higher. v0xC4 only.
     qint8 keyTransposeSemitones { 0 };
 
     EncCharSize charSize() const { return (offset > 250) ? EncCharSize::TWO_BYTES : EncCharSize::ONE_BYTE; }
@@ -512,4 +474,4 @@ struct EncFile {
 
 } // namespace mu::iex::encore
 
-#endif // MU_IMPORTEXPORT_ENCOREELEMENTS_H
+#endif // MU_IMPORTEXPORT_ENC_PARSER_ELEMENTS_H

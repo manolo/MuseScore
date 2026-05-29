@@ -170,7 +170,7 @@
 #include "importexport/bb/bbmodule.h"
 #endif
 #ifdef MUE_BUILD_IMPEXP_ENCORE_MODULE
-#include "importexport/encore/encoremodule.h"
+#include "importexport/encore/enc-module.h"
 #endif
 #ifdef MUE_BUILD_IMPEXP_BWW_MODULE
 #include "importexport/bww/bwwmodule.h"

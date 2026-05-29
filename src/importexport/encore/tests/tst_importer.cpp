@@ -22,6 +22,7 @@
 
 #include <gtest/gtest.h>
 
+#include "engraving/dom/barline.h"
 #include "engraving/dom/chord.h"
 #include "engraving/dom/clef.h"
 #include "engraving/dom/dynamic.h"
@@ -54,7 +55,7 @@ using namespace mu::engraving;
 // and produce a non-empty score
 // ---------------------------------------------------------------------------
 
-class Tst_Encore : public ::testing::Test, public MTest
+class Tst_Importer : public ::testing::Test, public MTest
 {
 protected:
     void SetUp() override
@@ -63,7 +64,7 @@ protected:
     }
 };
 
-TEST_F(Tst_Encore, bazo)
+TEST_F(Tst_Importer, bazo)
 {
     MasterScore* score = readEncoreScore("bazo.enc");
     ASSERT_NE(score, nullptr);
@@ -71,7 +72,7 @@ TEST_F(Tst_Encore, bazo)
     delete score;
 }
 
-TEST_F(Tst_Encore, akordo)
+TEST_F(Tst_Importer, akordo)
 {
     MasterScore* score = readEncoreScore("akordo.enc");
     ASSERT_NE(score, nullptr);
@@ -79,7 +80,7 @@ TEST_F(Tst_Encore, akordo)
     delete score;
 }
 
-TEST_F(Tst_Encore, ripetoj)
+TEST_F(Tst_Importer, ripetoj)
 {
     MasterScore* score = readEncoreScore("ripetoj.enc");
     ASSERT_NE(score, nullptr);
@@ -87,7 +88,7 @@ TEST_F(Tst_Encore, ripetoj)
     delete score;
 }
 
-TEST_F(Tst_Encore, opeco_vochoj)
+TEST_F(Tst_Importer, opeco_vochoj)
 {
     MasterScore* score = readEncoreScore("opeco_vochoj.enc");
     ASSERT_NE(score, nullptr);
@@ -95,7 +96,7 @@ TEST_F(Tst_Encore, opeco_vochoj)
     delete score;
 }
 
-TEST_F(Tst_Encore, bando)
+TEST_F(Tst_Importer, bando)
 {
     MasterScore* score = readEncoreScore("bando.enc");
     ASSERT_NE(score, nullptr);
@@ -103,7 +104,7 @@ TEST_F(Tst_Encore, bando)
     delete score;
 }
 
-TEST_F(Tst_Encore, kordorkestro)
+TEST_F(Tst_Importer, kordorkestro)
 {
     MasterScore* score = readEncoreScore("kordorkestro.enc");
     ASSERT_NE(score, nullptr);
@@ -111,7 +112,7 @@ TEST_F(Tst_Encore, kordorkestro)
     delete score;
 }
 
-TEST_F(Tst_Encore, chord_parsing)
+TEST_F(Tst_Importer, chord_parsing)
 {
     MasterScore* score = readEncoreScore("chord_parsing.enc");
     ASSERT_NE(score, nullptr);
@@ -121,7 +122,7 @@ TEST_F(Tst_Encore, chord_parsing)
     delete score;
 }
 
-TEST_F(Tst_Encore, encore_symbols)
+TEST_F(Tst_Importer, encore_symbols)
 {
     // 24-measure reference file the user authored to exercise every
     // visible symbol Encore can place: dynamics, fermatas, tremolos,
@@ -137,45 +138,16 @@ TEST_F(Tst_Encore, encore_symbols)
     delete score;
 }
 
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// Synthetic files covering behaviors from the Encore 5.0 example files.
-// The original example files (Beethoven.enc, Opus27.enc, etc.) are distributed
-// with Encore software and cannot be included in an open-source repository.
-// ---------------------------------------------------------------------------
-
-#define ENC_SANITY_TEST(testName, fileName) \
-    TEST_F(Tst_Encore, testName) { \
-        MasterScore* score = readEncoreScore(fileName); \
-        ASSERT_NE(score, nullptr) << "Failed to load " << fileName; \
-        EXPECT_GT(score->nmeasures(), 0); \
-        muse::Ret ret = score->sanityCheck(); \
-        EXPECT_TRUE(ret) << "Corrupted: " << ret.text(); \
-        delete score; \
-    }
-
-// Covers: tuplet=0xFF (degenerate), faceValue=0 (invalid), voice>=4, open SLURSTART
-// (previously tested by Beethoven.enc and Opus 27 First Movement.enc)
-ENC_SANITY_TEST(corrupted_elements,         "synthetic_v0c4_corrupted.enc")
-
 // Covers: tiny realDuration (<15 ticks) skipped, dotted rest, 2/4 time sig
 // (previously tested by Well, Licky Hear.enc)
 // No sanityCheck: swing timing files produce slight measure shortfalls (by design).
-TEST_F(Tst_Encore, swing_timing)
+TEST_F(Tst_Importer, swing_timing)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_swing.enc");
+    MasterScore* score = readEncoreScore("notes_swing.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_GT(score->nmeasures(), 0);
     delete score;
 }
-
-// Covers: explicit 3:2 triplets, 3/4 time sig, multi-measure
-// (previously tested by Chansonette.enc and other 3/4 files)
-ENC_SANITY_TEST(explicit_triplets_3_4,      "synthetic_v0c4_triplets.enc")
-
-// Covers: grace note filtering (fv>=4 only), ACCIACCATURA
-// (previously tested by Grace.enc and Beethoven.enc)
-ENC_SANITY_TEST(grace_notes,                "synthetic_v0c4_grace.enc")
 
 // Regression for the beam-layout crash on grace + adjacent beamed eighths.
 // The old importer attached grace chords to a Segment, so beam layout pulled
@@ -184,10 +156,10 @@ ENC_SANITY_TEST(grace_notes,                "synthetic_v0c4_grace.enc")
 // so just loading this fixture proves the path is crash-free. We also assert
 // the grace lives under a main chord's graceNotes() and the segment-attached
 // chord is NORMAL, which is the structural invariant the fix establishes.
-TEST_F(Tst_Encore, grace_with_beamed_eighths_no_layout_crash)
+TEST_F(Tst_Importer, grace_with_beamed_eighths_no_layout_crash)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_grace_beam.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_grace_beam.enc";
+    MasterScore* score = readEncoreScore("importer_grace_beam.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_grace_beam.enc";
     EXPECT_GT(score->nmeasures(), 0);
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
@@ -222,10 +194,10 @@ TEST_F(Tst_Encore, grace_with_beamed_eighths_no_layout_crash)
 // importer would happily place a note in a target voice that was already full
 // (e.g. occupied by a half rest), overrunning the measure. The loop fix keeps
 // switching until it finds a voice with remaining space.
-TEST_F(Tst_Encore, multi_stream_switch_skips_voice_filled_by_rest)
+TEST_F(Tst_Importer, multi_stream_switch_skips_voice_filled_by_rest)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_full_voice_skipped.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_full_voice_skipped.enc";
+    MasterScore* score = readEncoreScore("importer_full_voice_skipped.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_full_voice_skipped.enc";
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
     delete score;
@@ -241,10 +213,10 @@ TEST_F(Tst_Encore, multi_stream_switch_skips_voice_filled_by_rest)
 //   Assertion failed: (rtick2 > rtick1), function strongestSubbeatLevelInRange
 // The face-grid gate (snap only when e->tick % faceTicks == 0) makes the
 // snap a no-op for drift-shifted ticks, so the file imports cleanly.
-TEST_F(Tst_Encore, v0c2_multi_stream_drift_imports_cleanly)
+TEST_F(Tst_Importer, v0c2_multi_stream_drift_imports_cleanly)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c2_multi_stream_drift.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c2_multi_stream_drift.enc";
+    MasterScore* score = readEncoreScore("importer_v0c2_multi_stream_drift.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_v0c2_multi_stream_drift.enc";
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
     delete score;
@@ -263,10 +235,10 @@ TEST_F(Tst_Encore, v0c2_multi_stream_drift_imports_cleanly)
 //     instead of promoting it to a dotted half ratio (720).
 // Combined with Key=-12, every imported pitch sits 12 semitones below the
 // binary value so MuseScore plays at the same pitch Encore does.
-TEST_F(Tst_Encore, v0c4_octave_lower_implicit_silences)
+TEST_F(Tst_Importer, v0c4_octave_lower_implicit_silences)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_octave_lower_implicit_silences.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_octave_lower_implicit_silences.enc";
+    MasterScore* score = readEncoreScore("structure_octave_lower_implicit_silences.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load structure_octave_lower_implicit_silences.enc";
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
 
@@ -333,10 +305,10 @@ TEST_F(Tst_Encore, v0c4_octave_lower_implicit_silences)
 // Asserts the whole pipeline lands the right pitches per staff,
 // preserves both triplet groups, collapses the duplicate REST, and
 // produces no spurious fingering / tremolo / fermata glyphs.
-TEST_F(Tst_Encore, v0xa6_boda_like_full_pipeline)
+TEST_F(Tst_Importer, v0xa6_boda_like_full_pipeline)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0xa6_boda_like.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_boda_like.enc";
+    MasterScore* score = readEncoreScore("importer_v0xa6_boda_like.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_v0xa6_boda_like.enc";
 
     ASSERT_EQ(score->nstaves(), 4u) << "fixture has 4 instruments";
 
@@ -460,10 +432,10 @@ TEST_F(Tst_Encore, v0xa6_boda_like_full_pipeline)
 // second MuseScore voice. The fixture is a 2/8 measure carrying six
 // 16th notes with tuplet = 0x32 at +7; the imported measure must hold
 // six notes split into two Tuplet(3:2) groups.
-TEST_F(Tst_Encore, v0xa6_triplet_byte_at_offset_7)
+TEST_F(Tst_Importer, v0xa6_triplet_byte_at_offset_7)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0xa6_triplet_byte_at_offset_7.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_triplet_byte_at_offset_7.enc";
+    MasterScore* score = readEncoreScore("importer_v0xa6_triplet_byte_at_offset_7.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_v0xa6_triplet_byte_at_offset_7.enc";
 
     Measure* m = score->firstMeasure();
     ASSERT_NE(m, nullptr);
@@ -511,10 +483,10 @@ TEST_F(Tst_Encore, v0xa6_triplet_byte_at_offset_7)
 // identical 8th rests at tick 0 followed by two 8th notes (MIDI 64);
 // after the import the first measure must hold exactly three voice-0
 // elements in the right order.
-TEST_F(Tst_Encore, v0xa6_duplicate_rest_collapse)
+TEST_F(Tst_Importer, v0xa6_duplicate_rest_collapse)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0xa6_duplicate_rest_collapse.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_duplicate_rest_collapse.enc";
+    MasterScore* score = readEncoreScore("importer_v0xa6_duplicate_rest_collapse.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_v0xa6_duplicate_rest_collapse.enc";
 
     Measure* m = score->firstMeasure();
     ASSERT_NE(m, nullptr);
@@ -562,10 +534,10 @@ TEST_F(Tst_Encore, v0xa6_duplicate_rest_collapse)
 // find any usable instrument metadata, and the imported pitch stays at
 // the binary value (60 = C4). With the fix, TK00@0xA6 is read first,
 // Key = -12 is applied, and the imported m_pitch drops to 48 (C3).
-TEST_F(Tst_Encore, v0xa6_header_ends_at_0xa6)
+TEST_F(Tst_Importer, v0xa6_header_ends_at_0xa6)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0xa6_header_ends_at_0xa6.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_header_ends_at_0xa6.enc";
+    MasterScore* score = readEncoreScore("importer_v0xa6_header_ends_at_0xa6.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_v0xa6_header_ends_at_0xa6.enc";
 
     Measure* m = score->firstMeasure();
     ASSERT_NE(m, nullptr);
@@ -598,10 +570,10 @@ TEST_F(Tst_Encore, v0xa6_header_ends_at_0xa6)
 // The fixture is a single-instrument v0xA6 file with Key = -12 patched
 // at the v0xA6 location. The single note (pitch_offset = 0 -> binary
 // C4 = 60) must import at m_pitch = 48 (C3) once the offset is applied.
-TEST_F(Tst_Encore, v0xa6_key_transposition_octave_lower)
+TEST_F(Tst_Importer, v0xa6_key_transposition_octave_lower)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0xa6_key_transposition.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_key_transposition.enc";
+    MasterScore* score = readEncoreScore("importer_v0xa6_key_transposition.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_v0xa6_key_transposition.enc";
 
     Measure* m = score->firstMeasure();
     ASSERT_NE(m, nullptr);
@@ -633,10 +605,10 @@ TEST_F(Tst_Encore, v0xa6_key_transposition_octave_lower)
 // measure, the simplest layout where the next slot's faceValue (= 3)
 // lands on the previous note's articulationUp byte; the imported score
 // must hold zero fingerings, zero articulations, and zero tremolos.
-TEST_F(Tst_Encore, v0xa6_no_spurious_articulation_glyphs)
+TEST_F(Tst_Importer, v0xa6_no_spurious_articulation_glyphs)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0xa6_no_spurious_tremolo.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_no_spurious_tremolo.enc";
+    MasterScore* score = readEncoreScore("importer_v0xa6_no_spurious_tremolo.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_v0xa6_no_spurious_tremolo.enc";
 
     int tremCount = 0;
     int fingerCount = 0;
@@ -694,10 +666,10 @@ TEST_F(Tst_Encore, v0xa6_no_spurious_articulation_glyphs)
 // REST -- the implicit-silence pattern that triggers the snap. The
 // imported measure must carry the leading-silence shape (rest, rest,
 // note) without spilling past the bar line.
-TEST_F(Tst_Encore, v0c4_gap_snap_eighth_meter)
+TEST_F(Tst_Importer, v0c4_gap_snap_eighth_meter)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_gap_snap_eighth_meter.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_gap_snap_eighth_meter.enc";
+    MasterScore* score = readEncoreScore("importer_gap_snap_eighth_meter.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_gap_snap_eighth_meter.enc";
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
 
@@ -731,10 +703,10 @@ TEST_F(Tst_Encore, v0c4_gap_snap_eighth_meter)
 // formula-derived Key offset would mis-shift every pitch on that staff.
 // The fixture leaves the byte at PRG_BASE - 23 set to +8 and asserts the
 // imported pitch stays at the binary value, not 76 + 8 = 84.
-TEST_F(Tst_Encore, v0c4_compact_tk_ignores_key_byte)
+TEST_F(Tst_Importer, v0c4_compact_tk_ignores_key_byte)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_compact_tk_ignores_key_byte.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_compact_tk_ignores_key_byte.enc";
+    MasterScore* score = readEncoreScore("instruments_compact_tk_ignores_key_byte.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load instruments_compact_tk_ignores_key_byte.enc";
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
 
@@ -765,12 +737,12 @@ TEST_F(Tst_Encore, v0c4_compact_tk_ignores_key_byte)
 // header.measureCount of them. The fixture writes measureCount = 2 with
 // 6 MEAS blocks on disk and asserts the imported score has exactly 2
 // measures.
-TEST_F(Tst_Encore, v0c4_header_measure_count_truncates_ghost_measures)
+TEST_F(Tst_Importer, v0c4_header_measure_count_truncates_ghost_measures)
 {
     MasterScore* score = readEncoreScore(
-        "synthetic_v0c4_header_measure_count_truncates_ghost_measures.enc");
+        "importer_header_measure_count_truncates_ghost_measures.enc");
     ASSERT_NE(score, nullptr)
-        << "Failed to load header_measure_count_truncates_ghost_measures.enc";
+        << "Failed to load importer_header_measure_count_truncates_ghost_measures.enc";
     int measureCount = 0;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
         if (mb->isMeasure()) {
@@ -789,11 +761,11 @@ TEST_F(Tst_Encore, v0c4_header_measure_count_truncates_ghost_measures)
 // Two fixes coalesce equal-bitmask runs into one Volta and set begin-text
 // from the endings list. The fixture exercises both: 3 measures with alt
 // bits 1/1/2 must import as exactly 2 voltas whose texts are "1." and "2."
-TEST_F(Tst_Encore, v0c4_volta_coalesce_and_numbered_text)
+TEST_F(Tst_Importer, v0c4_volta_coalesce_and_numbered_text)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_volta_coalesce_and_text.enc");
+    MasterScore* score = readEncoreScore("importer_volta_coalesce_and_text.enc");
     ASSERT_NE(score, nullptr)
-        << "Failed to load synthetic_v0c4_volta_coalesce_and_text.enc";
+        << "Failed to load importer_volta_coalesce_and_text.enc";
 
     std::vector<Volta*> voltas;
     for (const auto& kv : score->spanner()) {
@@ -824,19 +796,17 @@ TEST_F(Tst_Encore, v0c4_volta_coalesce_and_numbered_text)
 // Coda glyph where Encore showed the "To Coda" text label. The fixture
 // places 0x85 on m1 and 0x89 on m2 and asserts the imported markers are
 // TOCODA then CODA in order.
-TEST_F(Tst_Encore, v0c4_to_coda_distinct_from_coda)
+TEST_F(Tst_Importer, v0c4_to_coda_distinct_from_coda)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_to_coda_vs_coda_marker.enc");
+    MasterScore* score = readEncoreScore("importer_to_coda_vs_coda_marker.enc");
     ASSERT_NE(score, nullptr)
-        << "Failed to load synthetic_v0c4_to_coda_vs_coda_marker.enc";
+        << "Failed to load importer_to_coda_vs_coda_marker.enc";
 
     std::vector<MarkerType> orderedTypes;
-    int measureIdx = 0;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
         if (!mb->isMeasure()) {
             continue;
         }
-        ++measureIdx;
         for (EngravingItem* el : toMeasure(mb)->el()) {
             if (el && el->isMarker()) {
                 orderedTypes.push_back(toMarker(el)->markerType());
@@ -859,11 +829,11 @@ TEST_F(Tst_Encore, v0c4_to_coda_distinct_from_coda)
 // two Latin-1 bytes mis-interpreted as one UTF-16 code unit). The reader
 // probes byte 14/15 of each entry to detect the encoding, so the imported
 // StaffText must carry the readable Latin-1 string.
-TEST_F(Tst_Encore, v0c4_text_block_latin1_decoding)
+TEST_F(Tst_Importer, v0c4_text_block_latin1_decoding)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_text_block_latin1_decoding.enc");
+    MasterScore* score = readEncoreScore("text_text_block_latin1_decoding.enc");
     ASSERT_NE(score, nullptr)
-        << "Failed to load synthetic_v0c4_text_block_latin1_decoding.enc";
+        << "Failed to load text_text_block_latin1_decoding.enc";
 
     StaffText* found = nullptr;
     for (MeasureBase* mb = score->first(); mb && !found; mb = mb->next()) {
@@ -894,11 +864,11 @@ TEST_F(Tst_Encore, v0c4_text_block_latin1_decoding)
 // first dynamic in MuseScore. Section-end DYN_* and STAFFTEXT ornaments
 // now pass the filter and the per-case placement clamps them to the last
 // existing ChordRest segment of the measure.
-TEST_F(Tst_Encore, v0c4_two_dynamics_in_one_measure)
+TEST_F(Tst_Importer, v0c4_two_dynamics_in_one_measure)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_two_dynamics_in_one_measure.enc");
+    MasterScore* score = readEncoreScore("importer_two_dynamics_in_one_measure.enc");
     ASSERT_NE(score, nullptr)
-        << "Failed to load synthetic_v0c4_two_dynamics_in_one_measure.enc";
+        << "Failed to load importer_two_dynamics_in_one_measure.enc";
 
     Measure* first = score->firstMeasure();
     ASSERT_NE(first, nullptr);
@@ -933,10 +903,10 @@ TEST_F(Tst_Encore, v0c4_two_dynamics_in_one_measure)
 // single-byte Latin-1 (byte 0 printable, byte 1 not 0x00). The reader
 // now applies the same per-element probe used elsewhere so the chord
 // name reads as "Am" instead of the merged BMP code unit "敁" or similar.
-TEST_F(Tst_Encore, v0c4_chord_sym_latin1)
+TEST_F(Tst_Importer, v0c4_chord_sym_latin1)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_chord_sym_latin1.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_chord_sym_latin1.enc";
+    MasterScore* score = readEncoreScore("text_chord_sym_latin1.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load text_chord_sym_latin1.enc";
 
     Harmony* found = nullptr;
     for (MeasureBase* mb = score->first(); mb && !found; mb = mb->next()) {
@@ -965,10 +935,10 @@ TEST_F(Tst_Encore, v0c4_chord_sym_latin1)
 // decide encoding both ways (varsize < 5000 => ONE_BYTE; varsize >=
 // 10000 => TWO_BYTES). The fixture appends a Latin-1 TITL with
 // varsize=2426 (the fixed ONE_BYTE layout).
-TEST_F(Tst_Encore, v0c4_titl_latin1_small_varsize)
+TEST_F(Tst_Importer, v0c4_titl_latin1_small_varsize)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_titl_latin1_small_varsize.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_titl_latin1_small_varsize.enc";
+    MasterScore* score = readEncoreScore("text_titl_latin1_small_varsize.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load text_titl_latin1_small_varsize.enc";
 
     EXPECT_EQ(score->metaTag(u"workTitle"), String(u"Romeria"))
         << "small-varsize TITL must decode as Latin-1, not as TWO_BYTES UTF-16";
@@ -981,10 +951,10 @@ TEST_F(Tst_Encore, v0c4_titl_latin1_small_varsize)
 // every Latin-1 name silently; the part fell through to the generic GM
 // template name. The reader now treats `byte 1 != 0x00 && printable`
 // as a Latin-1 marker and reads the name byte-by-byte.
-TEST_F(Tst_Encore, v0c4_recovered_name_latin1)
+TEST_F(Tst_Importer, v0c4_recovered_name_latin1)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_recovered_name_latin1.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_recovered_name_latin1.enc";
+    MasterScore* score = readEncoreScore("text_recovered_name_latin1.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load text_recovered_name_latin1.enc";
 
     ASSERT_GE(score->parts().size(), 1u);
     const Part* part = score->parts()[0];
@@ -1002,10 +972,10 @@ TEST_F(Tst_Encore, v0c4_recovered_name_latin1)
 // flipping every cresc/dim pair on disk. The fixture's first hairpin
 // uses 0x02 and the second 0x03; their imported types must be CRESC
 // and DIM in that order.
-TEST_F(Tst_Encore, v0c4_hairpin_speguleco_bit0)
+TEST_F(Tst_Importer, v0c4_hairpin_speguleco_bit0)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_hairpin_speguleco_bit0.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_hairpin_speguleco_bit0.enc";
+    MasterScore* score = readEncoreScore("importer_hairpin_speguleco_bit0.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_hairpin_speguleco_bit0.enc";
 
     std::vector<HairpinType> seenTypes;
     for (const auto& kv : score->spanner()) {
@@ -1032,10 +1002,10 @@ TEST_F(Tst_Encore, v0c4_hairpin_speguleco_bit0)
 // with mf at tick=0, crescendo from tick=240 (alMezuro=0), f at
 // tick=720; the crescendo must stop at tick=720, not at the bar
 // line at tick=960.
-TEST_F(Tst_Encore, v0c4_hairpin_ends_at_next_dynamic)
+TEST_F(Tst_Importer, v0c4_hairpin_ends_at_next_dynamic)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_hairpin_ends_at_next_dynamic.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_hairpin_ends_at_next_dynamic.enc";
+    MasterScore* score = readEncoreScore("importer_hairpin_ends_at_next_dynamic.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_hairpin_ends_at_next_dynamic.enc";
 
     Hairpin* found = nullptr;
     for (const auto& kv : score->spanner()) {
@@ -1063,10 +1033,10 @@ TEST_F(Tst_Encore, v0c4_hairpin_ends_at_next_dynamic)
 // measure. The post-pass now resolves the end tick by snapping
 // `firstNote.xoffset + slurXoffset2 - slurXoffset` to the closest note
 // xoffset in the start measure.
-TEST_F(Tst_Encore, v0c4_slur_pixel_span)
+TEST_F(Tst_Importer, v0c4_slur_pixel_span)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_slur_pixel_span.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_slur_pixel_span.enc";
+    MasterScore* score = readEncoreScore("importer_slur_pixel_span.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_slur_pixel_span.enc";
 
     Slur* found = nullptr;
     for (const auto& kv : score->spanner()) {
@@ -1092,11 +1062,11 @@ TEST_F(Tst_Encore, v0c4_slur_pixel_span)
 // future refactor of the pixel-span path does not accidentally apply
 // it across the bar: a slur with alMezuro=1 must anchor on the last
 // ChordRest of the target measure (here m2 tick=720, beat 4).
-TEST_F(Tst_Encore, v0c4_slur_cross_measure_fallback)
+TEST_F(Tst_Importer, v0c4_slur_cross_measure_fallback)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_slur_cross_measure_fallback.enc");
+    MasterScore* score = readEncoreScore("importer_slur_cross_measure_fallback.enc");
     ASSERT_NE(score, nullptr)
-        << "Failed to load synthetic_v0c4_slur_cross_measure_fallback.enc";
+        << "Failed to load importer_slur_cross_measure_fallback.enc";
 
     Slur* found = nullptr;
     for (const auto& kv : score->spanner()) {
@@ -1126,10 +1096,10 @@ TEST_F(Tst_Encore, v0c4_slur_cross_measure_fallback)
 // it one chord later than in Encore. Fixture: dynamic at the tick of
 // note B but with xoffset matching note A's region; the importer must
 // place the dynamic at note A's tick.
-TEST_F(Tst_Encore, v0c4_dyn_snap_back_by_xoffset)
+TEST_F(Tst_Importer, v0c4_dyn_snap_back_by_xoffset)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_dyn_snap_back_by_xoffset.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_dyn_snap_back_by_xoffset.enc";
+    MasterScore* score = readEncoreScore("importer_dyn_snap_back_by_xoffset.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_dyn_snap_back_by_xoffset.enc";
 
     Measure* m1 = score->firstMeasure();
     ASSERT_NE(m1, nullptr);
@@ -1159,10 +1129,10 @@ TEST_F(Tst_Encore, v0c4_dyn_snap_back_by_xoffset)
 // note + eighth pair where the binary tags the wedge at the eighth but
 // the wedge's xoffset falls inside the half note's region. The
 // importer must anchor the hairpin start on the half note.
-TEST_F(Tst_Encore, v0c4_wedge_snap_back_by_xoffset)
+TEST_F(Tst_Importer, v0c4_wedge_snap_back_by_xoffset)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_wedge_snap_back_by_xoffset.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_wedge_snap_back_by_xoffset.enc";
+    MasterScore* score = readEncoreScore("importer_wedge_snap_back_by_xoffset.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_wedge_snap_back_by_xoffset.enc";
 
     Hairpin* found = nullptr;
     for (const auto& kv : score->spanner()) {
@@ -1186,10 +1156,10 @@ TEST_F(Tst_Encore, v0c4_wedge_snap_back_by_xoffset)
 // line). Without this clamp the dim from m1 bleeds into m2 and
 // overlaps the cresc that starts there. The dim must end at the target
 // measure's start tick (= bar line between m1 and m2).
-TEST_F(Tst_Encore, v0c4_hairpin_barline_clamp)
+TEST_F(Tst_Importer, v0c4_hairpin_barline_clamp)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_hairpin_barline_clamp.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_hairpin_barline_clamp.enc";
+    MasterScore* score = readEncoreScore("importer_hairpin_barline_clamp.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_hairpin_barline_clamp.enc";
 
     std::vector<Hairpin*> hairpins;
     for (const auto& kv : score->spanner()) {
@@ -1217,10 +1187,10 @@ TEST_F(Tst_Encore, v0c4_hairpin_barline_clamp)
 // (observed as duplicate MF ornaments in real plectro band scores).
 // Encore renders only one. The importer must drop the second when it
 // would land on the same segment as the first.
-TEST_F(Tst_Encore, v0c4_dyn_dedup)
+TEST_F(Tst_Importer, v0c4_dyn_dedup)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_dyn_dedup.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_dyn_dedup.enc";
+    MasterScore* score = readEncoreScore("importer_dyn_dedup.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_dyn_dedup.enc";
 
     Measure* m1 = score->firstMeasure();
     ASSERT_NE(m1, nullptr);
@@ -1244,10 +1214,10 @@ TEST_F(Tst_Encore, v0c4_dyn_dedup)
 // The importer must reroute it so the Dynamic lands on the correct
 // instrument in MuseScore. Fixture: MF ornament on staff 1 with
 // yoffset=+16; imported Dynamic must appear on staff 0.
-TEST_F(Tst_Encore, v0c4_dyn_displaced_to_staff_above)
+TEST_F(Tst_Importer, v0c4_dyn_displaced_to_staff_above)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_dyn_displaced_to_staff_above.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_dyn_displaced_to_staff_above.enc";
+    MasterScore* score = readEncoreScore("importer_dyn_displaced_to_staff_above.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_dyn_displaced_to_staff_above.enc";
 
     // Dynamic must be on staff 0 track 0, not staff 1.
     const track_idx_t trackStaff0 = 0;
@@ -1283,10 +1253,10 @@ TEST_F(Tst_Encore, v0c4_dyn_displaced_to_staff_above)
 // tick=960 xoffset=110 alMezuro=1, MF in m2. The dim must start at
 // tick=720 (note xoff=120 is the latest with xoff <= 110... wait, 120>110.
 // Latest with xoff<=110 is tick=480 xoff=90). The dim must NOT be dropped.
-TEST_F(Tst_Encore, v0c4_hairpin_snapstart_at_barline)
+TEST_F(Tst_Importer, v0c4_hairpin_snapstart_at_barline)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_hairpin_snapstart_at_barline.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_hairpin_snapstart_at_barline.enc";
+    MasterScore* score = readEncoreScore("importer_hairpin_snapstart_at_barline.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_hairpin_snapstart_at_barline.enc";
 
     // Find the DIM hairpin (the one crossing the bar line)
     Hairpin* dim = nullptr;
@@ -1320,10 +1290,10 @@ TEST_F(Tst_Encore, v0c4_hairpin_snapstart_at_barline)
 // must only apply when NO Dynamic is found. Fixture: dim alMezuro=1 with
 // xoffset2=5 (small, would clamp to bar line) and MF at m2.240. The dim
 // must end at m2.240, not at m2.0.
-TEST_F(Tst_Encore, v0c4_hairpin_endpoint_dynamic_wins)
+TEST_F(Tst_Importer, v0c4_hairpin_endpoint_dynamic_wins)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_hairpin_endpoint_dynamic_wins.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_hairpin_endpoint_dynamic_wins.enc";
+    MasterScore* score = readEncoreScore("importer_hairpin_endpoint_dynamic_wins.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_hairpin_endpoint_dynamic_wins.enc";
 
     Hairpin* dim = nullptr;
     for (const auto& kv : score->spanner()) {
@@ -1350,10 +1320,10 @@ TEST_F(Tst_Encore, v0c4_hairpin_endpoint_dynamic_wins)
 // at the chord's tick (normal case) or at tick == durTicks (Encore places
 // it at the measure end on long notes). Both must attach a
 // TremoloSingleChord / R32 to the corresponding chord.
-TEST_F(Tst_Encore, v0c4_tremolo_orn_normal_and_barline_tick)
+TEST_F(Tst_Importer, v0c4_tremolo_orn_normal_and_barline_tick)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_tremolo_orn.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_tremolo_orn.enc";
+    MasterScore* score = readEncoreScore("ornaments_tremolo_orn.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load ornaments_tremolo_orn.enc";
 
     // Collect all TremoloSingleChord elements across all chords.
     std::vector<std::pair<Fraction, TremoloType>> trems;
@@ -1391,10 +1361,10 @@ TEST_F(Tst_Encore, v0c4_tremolo_orn_normal_and_barline_tick)
 // between the 32nd and 16th). The fix suppresses the snap for every note
 // whose gap <= stolenTicks. A trailing rest equal to the stolen ticks
 // remains at measure end (unavoidable; Encore renders this as silence).
-TEST_F(Tst_Encore, v0xa6_grace_ongrid_snap_suppressed)
+TEST_F(Tst_Importer, v0xa6_grace_ongrid_snap_suppressed)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0xa6_grace_ongrid_snap_suppressed.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_grace_ongrid_snap_suppressed.enc";
+    MasterScore* score = readEncoreScore("importer_v0xa6_grace_ongrid_snap_suppressed.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_v0xa6_grace_ongrid_snap_suppressed.enc";
 
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "sanityCheck failed: " << ret.text();
@@ -1437,10 +1407,10 @@ TEST_F(Tst_Encore, v0xa6_grace_ongrid_snap_suppressed)
 //   - the inner note rendered as a regular chord rather than a grace
 // The corrupted structure caused a SIGSEGV in the MuseScore GUI layout.
 // sanityCheck() must pass AND no spurious rests may appear in the measure.
-TEST_F(Tst_Encore, v0xa6_inner_grace_group)
+TEST_F(Tst_Importer, v0xa6_inner_grace_group)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0xa6_inner_grace_group.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_inner_grace_group.enc";
+    MasterScore* score = readEncoreScore("importer_v0xa6_inner_grace_group.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_v0xa6_inner_grace_group.enc";
 
     // sanityCheck catches the corrupted structure that previously caused SIGSEGV.
     muse::Ret ret = score->sanityCheck();
@@ -1499,10 +1469,10 @@ TEST_F(Tst_Encore, v0xa6_inner_grace_group)
 // that preceded the real note and restores the real note to its face duration.
 // Fixture: 3/8 measure with [8th, grace-32nd, 16th, 16th, 8th]. Without the
 // fix the last 8th renders as 16th + rest because rawGap = 90 < face = 120.
-TEST_F(Tst_Encore, v0xa6_grace_restores_face_value)
+TEST_F(Tst_Importer, v0xa6_grace_restores_face_value)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0xa6_grace_restores_face_value.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0xa6_grace_restores_face_value.enc";
+    MasterScore* score = readEncoreScore("importer_v0xa6_grace_restores_face_value.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_v0xa6_grace_restores_face_value.enc";
 
     Measure* m1 = score->firstMeasure();
     ASSERT_NE(m1, nullptr);
@@ -1539,9 +1509,9 @@ TEST_F(Tst_Encore, v0xa6_grace_restores_face_value)
 // Regression: many octave-transposing instruments (laud, classical guitar,
 // electric bass, ...) are written in Encore with a plain G clef even
 // Binary-driven clef rule: G clef + Key=+12 → G8_VA. No template required.
-TEST_F(Tst_Encore, v0c4_g_clef_8va_from_key)
+TEST_F(Tst_Importer, v0c4_g_clef_8va_from_key)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_g_clef_8va_from_key.enc");
+    MasterScore* score = readEncoreScore("structure_g_clef_8va_from_key.enc");
     ASSERT_NE(score, nullptr);
     Measure* m = score->firstMeasure(); ASSERT_NE(m, nullptr);
     Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick()); ASSERT_NE(seg, nullptr);
@@ -1552,9 +1522,9 @@ TEST_F(Tst_Encore, v0c4_g_clef_8va_from_key)
 }
 
 // Binary-driven clef rule: F clef + Key=-12 → F8_VB. No template required.
-TEST_F(Tst_Encore, v0c4_f_clef_8vb_from_key)
+TEST_F(Tst_Importer, v0c4_f_clef_8vb_from_key)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_f_clef_8vb_from_key.enc");
+    MasterScore* score = readEncoreScore("structure_f_clef_8vb_from_key.enc");
     ASSERT_NE(score, nullptr);
     Measure* m = score->firstMeasure(); ASSERT_NE(m, nullptr);
     Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick()); ASSERT_NE(seg, nullptr);
@@ -1565,9 +1535,9 @@ TEST_F(Tst_Encore, v0c4_f_clef_8vb_from_key)
 }
 
 // Binary-driven clef rule: F clef + Key=+12 → F_8VA. No template required.
-TEST_F(Tst_Encore, v0c4_f_clef_8va_from_key)
+TEST_F(Tst_Importer, v0c4_f_clef_8va_from_key)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_f_clef_8va_from_key.enc");
+    MasterScore* score = readEncoreScore("structure_f_clef_8va_from_key.enc");
     ASSERT_NE(score, nullptr);
     Measure* m = score->firstMeasure(); ASSERT_NE(m, nullptr);
     Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick()); ASSERT_NE(seg, nullptr);
@@ -1579,9 +1549,9 @@ TEST_F(Tst_Encore, v0c4_f_clef_8va_from_key)
 
 // Binary-driven clef rule: G clef + Key=-7 (non-octave) → plain G.
 // No octave-decorated variant exists for -7 semitones; keep the Encore clef.
-TEST_F(Tst_Encore, v0c4_non_octave_key_keeps_clef)
+TEST_F(Tst_Importer, v0c4_non_octave_key_keeps_clef)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_non_octave_key_keeps_clef.enc");
+    MasterScore* score = readEncoreScore("structure_non_octave_key_keeps_clef.enc");
     ASSERT_NE(score, nullptr);
     Measure* m = score->firstMeasure(); ASSERT_NE(m, nullptr);
     Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick()); ASSERT_NE(seg, nullptr);
@@ -1600,10 +1570,10 @@ TEST_F(Tst_Encore, v0c4_non_octave_key_keeps_clef)
 // the template's so the notes sit at the same staff position the user saw
 // in Encore. The fixture is a Laud staff with Key = -12 and a plain G in
 // Encore; the imported staff must carry G8_VB.
-TEST_F(Tst_Encore, v0c4_octave_bassa_clef_override)
+TEST_F(Tst_Importer, v0c4_octave_bassa_clef_override)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_octave_bassa_clef_override.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_octave_bassa_clef_override.enc";
+    MasterScore* score = readEncoreScore("structure_octave_bassa_clef_override.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load structure_octave_bassa_clef_override.enc";
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
 
@@ -1644,10 +1614,10 @@ TEST_F(Tst_Encore, v0c4_octave_bassa_clef_override)
 // driven clef rule maps F + Key=-12 → F8_VB regardless of the instrument
 // template. The staff must carry F8_VB, not the plain F transposing clef
 // the template would previously have preferred.
-TEST_F(Tst_Encore, v0c4_bass_guitar_transposing_clef)
+TEST_F(Tst_Importer, v0c4_bass_guitar_transposing_clef)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_bass_guitar_transposing_clef.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_bass_guitar_transposing_clef.enc";
+    MasterScore* score = readEncoreScore("instruments_bass_guitar_transposing_clef.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load instruments_bass_guitar_transposing_clef.enc";
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
 
@@ -1694,10 +1664,10 @@ TEST_F(Tst_Encore, v0c4_bass_guitar_transposing_clef)
 // Lower (-12). Both staves play the same pitch A4 (binary 69) at m1 beat
 // 1; the importer must apply the offset PER STAFF, leaving staff 0 at 69
 // and shifting staff 1 to 57.
-TEST_F(Tst_Encore, v0c4_key_transposition_per_staff)
+TEST_F(Tst_Importer, v0c4_key_transposition_per_staff)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_key_per_staff.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_key_per_staff.enc";
+    MasterScore* score = readEncoreScore("structure_key_per_staff.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load structure_key_per_staff.enc";
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
 
@@ -1738,10 +1708,10 @@ TEST_F(Tst_Encore, v0c4_key_transposition_per_staff)
 // matcher and the MIDI-only fallback (both unreliable in compact-TK
 // files); every part falls through to the neutral Grand Piano template,
 // preserving the original Encore label as the part's long name.
-TEST_F(Tst_Encore, v0c4_satb_short_names_with_voice4_bass_lyrics)
+TEST_F(Tst_Importer, v0c4_satb_short_names_with_voice4_bass_lyrics)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_satb_short_names_voice4_lyrics.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_satb_short_names_voice4_lyrics.enc";
+    MasterScore* score = readEncoreScore("text_satb_short_names_voice4_lyrics.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load text_satb_short_names_voice4_lyrics.enc";
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
 
@@ -1791,10 +1761,10 @@ TEST_F(Tst_Encore, v0c4_satb_short_names_with_voice4_bass_lyrics)
 // to fit the remaining measure space. Without updating the chord's ticks the
 // voice overran by face - capped. The fix always sets the chord duration to
 // the capped value.
-TEST_F(Tst_Encore, isolated_explicit_tuplet_caps_chord_ticks)
+TEST_F(Tst_Importer, isolated_explicit_tuplet_caps_chord_ticks)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_isolated_explicit_tuplet_capped.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_isolated_explicit_tuplet_capped.enc";
+    MasterScore* score = readEncoreScore("importer_isolated_explicit_tuplet_capped.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_isolated_explicit_tuplet_capped.enc";
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
     delete score;
@@ -1806,9 +1776,9 @@ TEST_F(Tst_Encore, isolated_explicit_tuplet_caps_chord_ticks)
 // then silently replaced the rest's segment with the note's chord while
 // cumTick still carried the rest's contribution, producing voice/cumTick
 // mismatch and a measure that fails sanityCheck.
-TEST_F(Tst_Encore, rest_does_not_anchor_chord_extension)
+TEST_F(Tst_Importer, rest_does_not_anchor_chord_extension)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_rest_not_chord_anchor.enc");
+    MasterScore* score = readEncoreScore("importer_rest_not_chord_anchor.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
@@ -1820,9 +1790,9 @@ TEST_F(Tst_Encore, rest_does_not_anchor_chord_extension)
 // tuplet bytes); the second cap shortened the cumTick advance but left the
 // rest's ticks at the uncapped face value. cr->actualTicks() then exceeded
 // the actual cumTick advance and the voice overran the measure.
-TEST_F(Tst_Encore, rest_caps_its_ticks_when_advance_is_capped)
+TEST_F(Tst_Importer, rest_caps_its_ticks_when_advance_is_capped)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_rest_caps_in_open_tuplet.enc");
+    MasterScore* score = readEncoreScore("importer_rest_caps_in_open_tuplet.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
@@ -1837,47 +1807,412 @@ TEST_F(Tst_Encore, rest_caps_its_ticks_when_advance_is_capped)
 // first member is a quarter rest, followed by two eighth-note chords; total
 // content sums to 1/3 of the 2/4 measure (= 1/6 + 1/12 + 1/12) and the
 // tuplet must shrink to 1/3 so the remaining 1/6 can be filled by checkMeasure.
-TEST_F(Tst_Encore, rest_in_tuplet_does_not_double_count_placed_ticks)
+TEST_F(Tst_Importer, rest_in_tuplet_does_not_double_count_placed_ticks)
 {
-    MasterScore* score = readEncoreScore("synthetic_v0c4_rest_in_tuplet.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load synthetic_v0c4_rest_in_tuplet.enc";
+    MasterScore* score = readEncoreScore("importer_rest_in_tuplet.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_rest_in_tuplet.enc";
     EXPECT_GT(score->nmeasures(), 0);
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
     delete score;
 }
 
+// Lightweight test macro: load, measure-count > 0, sanityCheck.
+#define ENC_SANITY_TEST(testName, fileName) \
+    TEST_F(Tst_Importer, testName) { \
+        MasterScore* score = readEncoreScore(fileName); \
+        ASSERT_NE(score, nullptr) << "Failed to load " << fileName; \
+        EXPECT_GT(score->nmeasures(), 0); \
+        muse::Ret ret = score->sanityCheck(); \
+        EXPECT_TRUE(ret) << "Corrupted: " << ret.text(); \
+        delete score; \
+    }
+
 // Cross-cutting sanity coverage for the alMezuro-based spanner endpoint
 // resolution (hairpins + slurs) and the partial-tuplet TDuration guard.
-// The dedicated behavior tests live in tst_encore_features.cpp; these
-// entries make sure each fixture stays green under the simpler "load +
-// nmeasures > 0 + sanityCheck" gate that the rest of Tst_Encore uses.
-ENC_SANITY_TEST(multi_measure_hairpin,      "synthetic_v0c4_multi_measure_hairpin.enc")
-ENC_SANITY_TEST(multi_measure_slur,         "synthetic_v0c4_multi_measure_slur.enc")
-ENC_SANITY_TEST(partial_quarter_triplet,    "synthetic_v0c4_partial_quarter_triplet.enc")
-ENC_SANITY_TEST(lyrics_attach,              "synthetic_v0c4_lyrics.enc")
-ENC_SANITY_TEST(lyrics_variable_length,     "synthetic_v0c4_lyrics_variable.enc")
-ENC_SANITY_TEST(lyrics_two_verses,          "synthetic_v0c4_lyrics_two_verses.enc")
-ENC_SANITY_TEST(lyrics_hyphenated_words,    "synthetic_v0c4_lyrics_hyphenated_words.enc")
-ENC_SANITY_TEST(tie_start_flag_byte6,       "synthetic_v0c4_tie_start_flag_byte6.enc")
-ENC_SANITY_TEST(articulations_extended,     "synthetic_v0c4_articulations.enc")
-ENC_SANITY_TEST(articulations_combo,        "synthetic_v0c4_articulations_combo.enc")
-ENC_SANITY_TEST(trill_mordent,              "synthetic_v0c4_trill_mordent.enc")
-ENC_SANITY_TEST(tremolos,                   "synthetic_v0c4_tremolos.enc")
-ENC_SANITY_TEST(fermatas,                   "synthetic_v0c4_fermatas.enc")
-ENC_SANITY_TEST(technical,                  "synthetic_v0c4_technical.enc")
-ENC_SANITY_TEST(trill_spanner,              "synthetic_v0c4_trill_spanner.enc")
-ENC_SANITY_TEST(staccato_orn,               "synthetic_v0c4_staccato_orn.enc")
-ENC_SANITY_TEST(section_markers,            "synthetic_v0c4_section_markers.enc")
-ENC_SANITY_TEST(jump_marks,                 "synthetic_v0c4_jump_marks.enc")
-ENC_SANITY_TEST(jump_marks_all,             "synthetic_v0c4_jump_marks_all.enc")
-ENC_SANITY_TEST(tie_direction_fc,           "synthetic_v0c4_tie_dir_fc.enc")
-ENC_SANITY_TEST(keychange_to_c,             "synthetic_v0c4_keychange_to_c.enc")
-ENC_SANITY_TEST(staff_text,                 "synthetic_v0c4_staff_text.enc")
-ENC_SANITY_TEST(titl_headers_footers,       "synthetic_v0c4_titl_headers_footers.enc")
-ENC_SANITY_TEST(arpeggio,                   "synthetic_v0c4_arpeggio.enc")
-ENC_SANITY_TEST(staff_text_placement,       "synthetic_v0c4_staff_text_placement.enc")
-ENC_SANITY_TEST(dynamics_size16,            "synthetic_v0c4_dynamics.enc")
-ENC_SANITY_TEST(dynamics_full,              "synthetic_v0c4_dynamics_full.enc")
-ENC_SANITY_TEST(wedgestart_at_measure_end,  "synthetic_v0c4_wedgestart_at_measure_end.enc")
-ENC_SANITY_TEST(double_barline_multi_staff, "synthetic_v0c4_double_barline_multi_staff.enc")
+ENC_SANITY_TEST(multi_measure_hairpin,      "ornaments_multi_measure_hairpin.enc")
+ENC_SANITY_TEST(multi_measure_slur,         "ornaments_multi_measure_slur.enc")
+ENC_SANITY_TEST(partial_quarter_triplet,    "ornaments_partial_quarter_triplet.enc")
+ENC_SANITY_TEST(lyrics_attach,              "text_lyrics.enc")
+ENC_SANITY_TEST(lyrics_variable_length,     "text_lyrics_variable.enc")
+ENC_SANITY_TEST(lyrics_two_verses,          "text_lyrics_two_verses.enc")
+ENC_SANITY_TEST(lyrics_hyphenated_words,    "text_lyrics_hyphenated_words.enc")
+ENC_SANITY_TEST(tie_start_flag_byte6,       "notes_tie_start_flag_byte6.enc")
+ENC_SANITY_TEST(articulations_extended,     "ornaments_articulations.enc")
+ENC_SANITY_TEST(articulations_combo,        "ornaments_articulations_combo.enc")
+ENC_SANITY_TEST(trill_mordent,              "ornaments_trill_mordent.enc")
+ENC_SANITY_TEST(tremolos,                   "ornaments_tremolos.enc")
+ENC_SANITY_TEST(fermatas,                   "ornaments_fermatas.enc")
+ENC_SANITY_TEST(technical,                  "ornaments_technical.enc")
+ENC_SANITY_TEST(trill_spanner,              "ornaments_trill_spanner.enc")
+ENC_SANITY_TEST(staccato_orn,               "ornaments_staccato_orn.enc")
+ENC_SANITY_TEST(section_markers,            "structure_section_markers.enc")
+ENC_SANITY_TEST(jump_marks,                 "structure_jump_marks.enc")
+ENC_SANITY_TEST(jump_marks_all,             "structure_jump_marks_all.enc")
+ENC_SANITY_TEST(tie_direction_fc,           "notes_tie_dir_fc.enc")
+ENC_SANITY_TEST(keychange_to_c,             "structure_keychange_to_c.enc")
+ENC_SANITY_TEST(staff_text,                 "text_staff_text.enc")
+ENC_SANITY_TEST(titl_headers_footers,       "text_titl_headers_footers.enc")
+ENC_SANITY_TEST(arpeggio,                   "ornaments_arpeggio.enc")
+ENC_SANITY_TEST(staff_text_placement,       "text_staff_text_placement.enc")
+ENC_SANITY_TEST(dynamics_size16,            "ornaments_dynamics.enc")
+ENC_SANITY_TEST(dynamics_full,              "ornaments_dynamics_full.enc")
+ENC_SANITY_TEST(wedgestart_at_measure_end,  "ornaments_wedgestart_at_measure_end.enc")
+ENC_SANITY_TEST(double_barline_multi_staff, "ornaments_double_barline_multi_staff.enc")
+// ===========================================================================
+// FEATURE: Multi-staff score with correct voice assignments
+// ===========================================================================
+
+TEST_F(Tst_Importer, orchestra_loads_with_all_parts)
+{
+    MasterScore* score = readEncoreScore("kordorkestro.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_GT(score->parts().size(), 1u) << "Orchestra should have multiple parts";
+    EXPECT_GT(score->nstaves(), 1u) << "Orchestra should have multiple staves";
+    EXPECT_GT(score->nmeasures(), 0);
+    delete score;
+}
+
+TEST_F(Tst_Importer, orchestra_sanity_check)
+{
+    MasterScore* score = readEncoreScore("kordorkestro.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "kordorkestro should pass sanityCheck: " << ret.text();
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Title from TITL block
+// ===========================================================================
+
+TEST_F(Tst_Importer, title_frame_created)
+{
+    // kordorkestro has title "String Orchestra w/Piano"
+    MasterScore* score = readEncoreScore("kordorkestro.enc");
+    ASSERT_NE(score, nullptr);
+    // Title frame should be the first element
+    MeasureBase* first = score->first();
+    ASSERT_NE(first, nullptr);
+    EXPECT_TRUE(first->isVBox()) << "Score with title should start with a VBox frame";
+    delete score;
+}
+
+TEST_F(Tst_Importer, no_title_frame_when_empty)
+{
+    // bazo.enc has no title — should not have a VBox frame
+    MasterScore* score = readEncoreScore("bazo.enc");
+    ASSERT_NE(score, nullptr);
+    MeasureBase* first = score->first();
+    ASSERT_NE(first, nullptr);
+    EXPECT_TRUE(first->isMeasure()) << "Score without title should start with a measure";
+    delete score;
+}
+
+TEST_F(Tst_Importer, title_frame_instruction_and_copyright)
+{
+    // text_title_instruction_copyright.enc: TITL block with title,
+    // subtitle, instruction (arranger), author (composer), and copyright.
+    // instruction[0] must appear in the VBox as LYRICIST; copyright[0] must
+    // be stored in the score "copyright" metadata tag.
+    MasterScore* score = readEncoreScore("text_title_instruction_copyright.enc");
+    ASSERT_NE(score, nullptr);
+
+    MeasureBase* first = score->first();
+    ASSERT_NE(first, nullptr);
+    ASSERT_TRUE(first->isVBox()) << "TITL with content must produce a VBox frame";
+
+    std::map<TextStyleType, String> texts;
+    for (const EngravingItem* el : first->el()) {
+        if (el->isText()) {
+            const TextBase* tb = toTextBase(el);
+            texts[tb->textStyleType()] = tb->plainText();
+        }
+    }
+
+    // VBox visual text elements
+    EXPECT_EQ(texts[TextStyleType::TITLE],    String(u"Test Title"));
+    EXPECT_EQ(texts[TextStyleType::SUBTITLE], String(u"Test Subtitle"));
+    EXPECT_EQ(texts[TextStyleType::LYRICIST], String(u"Test Instruction"))
+        << "instruction[0] must be added as LYRICIST text";
+    EXPECT_EQ(texts[TextStyleType::COMPOSER], String(u"Test Composer"));
+
+    // Score Properties metadata (File > Score Properties dialog)
+    EXPECT_EQ(score->metaTag(u"workTitle"),  String(u"Test Title"))
+        << "title must be stored in workTitle metadata";
+    EXPECT_EQ(score->metaTag(u"subtitle"),   String(u"Test Subtitle"))
+        << "subtitle[0] must be stored in subtitle metadata";
+    EXPECT_EQ(score->metaTag(u"lyricist"),   String(u"Test Instruction"))
+        << "instruction[0] must be stored in lyricist metadata";
+    EXPECT_EQ(score->metaTag(u"composer"),   String(u"Test Composer"))
+        << "author[0] must be stored in composer metadata";
+    EXPECT_EQ(score->metaTag(u"copyright"),  String(u"(c) 2026 Test"))
+        << "copyright[0] must be stored in copyright metadata";
+
+    delete score;
+}
+
+TEST_F(Tst_Importer, title_frame_headers_footers)
+{
+    // text_titl_headers_footers.enc carries two header lines and
+    // two footer lines with non-trivial alignment bytes:
+    //   header[0] = "Header Right"   align=0x02 (RIGHT)
+    //   header[1] = "Header Center"  align=0x06 (CENTER)
+    //   footer[0] = "Footer Center"  align=0x06 (CENTER)
+    //   footer[1] = "Footer Right"   align=0x02 (RIGHT)
+    // The importer must apply the texts to BOTH the odd- and even-page Sids
+    // so they show on every page regardless of page parity, and place each
+    // text in the column the alignment byte selects.
+    MasterScore* score = readEncoreScore("text_titl_headers_footers.enc");
+    ASSERT_NE(score, nullptr);
+
+    auto styleText = [score](Sid sid) -> String {
+        return score->style().styleSt(sid);
+    };
+
+    EXPECT_EQ(styleText(Sid::oddHeaderR),  String(u"Header Right"));
+    EXPECT_EQ(styleText(Sid::evenHeaderR), String(u"Header Right"));
+    EXPECT_EQ(styleText(Sid::oddHeaderC),  String(u"Header Center"));
+    EXPECT_EQ(styleText(Sid::evenHeaderC), String(u"Header Center"));
+    // Left header columns are not overwritten by the importer because no
+    // header line was tagged LEFT in the fixture. The defaults that ship
+    // with MuseScore (e.g. evenHeaderL = "$p") must therefore survive.
+    EXPECT_NE(styleText(Sid::oddHeaderL),  String(u"Header Right"));
+    EXPECT_NE(styleText(Sid::oddHeaderL),  String(u"Header Center"));
+    EXPECT_NE(styleText(Sid::evenHeaderL), String(u"Header Right"));
+    EXPECT_NE(styleText(Sid::evenHeaderL), String(u"Header Center"));
+
+    EXPECT_EQ(styleText(Sid::oddFooterC),  String(u"Footer Center"));
+    EXPECT_EQ(styleText(Sid::evenFooterC), String(u"Footer Center"));
+    EXPECT_EQ(styleText(Sid::oddFooterR),  String(u"Footer Right"));
+    EXPECT_EQ(styleText(Sid::evenFooterR), String(u"Footer Right"));
+    EXPECT_NE(styleText(Sid::oddFooterL),  String(u"Footer Center"));
+    EXPECT_NE(styleText(Sid::oddFooterL),  String(u"Footer Right"));
+    EXPECT_NE(styleText(Sid::evenFooterL), String(u"Footer Center"));
+    EXPECT_NE(styleText(Sid::evenFooterL), String(u"Footer Right"));
+
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Chord symbols (Harmony elements)
+// ===========================================================================
+
+TEST_F(Tst_Importer, chord_symbols_present)
+{
+    // akordo.enc has chord symbols (Am, G7, etc.)
+    MasterScore* score = readEncoreScore("akordo.enc");
+    ASSERT_NE(score, nullptr);
+    bool foundHarmony = false;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e->isHarmony()) {
+                    foundHarmony = true;
+                    break;
+                }
+            }
+            if (foundHarmony) {
+                break;
+            }
+        }
+        if (foundHarmony) {
+            break;
+        }
+    }
+    EXPECT_TRUE(foundHarmony) << "akordo.enc should contain chord symbols";
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Multiple voices (opeco_vochoj)
+// ===========================================================================
+
+TEST_F(Tst_Importer, multiple_voices_loaded)
+{
+    // opeco_vochoj.enc has multiple voices per staff
+    MasterScore* score = readEncoreScore("opeco_vochoj.enc");
+    ASSERT_NE(score, nullptr);
+    bool foundVoice1 = false;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        Measure* m = toMeasure(mb);
+        for (Segment* s = m->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            // Check voice 1 (track 1 = staff 0, voice 1)
+            if (s->element(1) && s->element(1)->isChordRest()) {
+                foundVoice1 = true;
+                break;
+            }
+        }
+        if (foundVoice1) {
+            break;
+        }
+    }
+    EXPECT_TRUE(foundVoice1) << "opeco_vochoj.enc should have notes in voice 2";
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: End-to-end coverage on the encore_symbols reference file.
+// The user authored encore_symbols.enc to exercise every visible symbol
+// Encore can place. This test pins the per-category counts that the
+// importer is expected to recover -- a regression on any of the symbol
+// families decoded in this directory will trip this case immediately.
+// ===========================================================================
+TEST_F(Tst_Importer, encore_symbols_full_coverage)
+{
+    MasterScore* score = readEncoreScore("encore_symbols.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int dynamics = 0;
+    int fermatas = 0;
+    int markers = 0;     // Segno / Coda / TOCODA / FINE
+    int jumps = 0;       // D.C. / D.S. variants
+    int staccatos = 0;
+    int tenutos = 0;
+    int accents = 0;
+    int marcatos = 0;
+    int staccatissimos = 0;
+    int trills = 0;
+    int mordents = 0;
+    int fingerings = 0;
+    int arpeggios = 0;
+    int tremolos = 0;
+    int hairpins = 0;
+    int dotted_barlines = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        Measure* m = toMeasure(mb);
+        for (EngravingItem* e : m->el()) {
+            if (e && e->isMarker()) ++markers;
+            if (e && e->isJump()) ++jumps;
+        }
+        // Dotted end barline
+        Segment* endBar = m->findSegment(SegmentType::EndBarLine, m->endTick());
+        if (endBar) {
+            for (size_t s = 0; s < score->nstaves(); ++s) {
+                EngravingItem* el = endBar->element(s * VOICES);
+                if (el && el->isBarLine() && toBarLine(el)->barLineType() == BarLineType::DOTTED) {
+                    ++dotted_barlines;
+                    break;
+                }
+            }
+        }
+        for (Segment* s = m->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isDynamic()) ++dynamics;
+                if (e && e->isFermata()) ++fermatas;
+            }
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            Chord* c = toChord(el);
+            if (c->arpeggio()) ++arpeggios;
+            if (c->tremoloSingleChord()) ++tremolos;
+            for (Articulation* a : c->articulations()) {
+                using mu::engraving::SymId;
+                switch (a->symId()) {
+                case SymId::articStaccatoAbove: case SymId::articStaccatoBelow:
+                    ++staccatos; break;
+                case SymId::articTenutoAbove: case SymId::articTenutoBelow:
+                    ++tenutos; break;
+                case SymId::articAccentAbove: case SymId::articAccentBelow:
+                    ++accents; break;
+                case SymId::articMarcatoAbove: case SymId::articMarcatoBelow:
+                    ++marcatos; break;
+                case SymId::articStaccatissimoAbove: case SymId::articStaccatissimoBelow:
+                    ++staccatissimos; break;
+                case SymId::ornamentTrill:
+                    ++trills; break;
+                case SymId::ornamentShortTrill:  // <inverted-mordent>
+                case SymId::ornamentMordent:
+                    ++mordents; break;
+                default: break;
+                }
+            }
+            for (Note* n : c->notes()) {
+                for (EngravingItem* nel : n->el()) {
+                    if (nel && nel->isFingering()) ++fingerings;
+                }
+            }
+        }
+    }
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (sp->isHairpin()) ++hairpins;
+    }
+    EXPECT_GE(dynamics,      13) << "all 13 Encore dynamics expected";
+    EXPECT_GE(fermatas,       2);
+    EXPECT_GE(markers,        3) << "Segno + Coda(s) + To Coda + Fine";
+    EXPECT_GE(jumps,          1) << "at least one D.C. / D.S. variant";
+    EXPECT_GE(staccatos,      7);
+    EXPECT_GE(tenutos,        9);
+    EXPECT_GE(accents,        7);
+    EXPECT_GE(marcatos,       6);
+    EXPECT_GE(staccatissimos, 6);
+    EXPECT_GE(trills,         6) << "trill-marks from per-note bytes + ORN 0x36/0x37";
+    EXPECT_GE(mordents,       4) << "mordent + inverted-mordent";
+    EXPECT_GE(fingerings,     6) << "fingering 1..5 + open-string";
+    EXPECT_GE(arpeggios,      1);
+    EXPECT_GE(tremolos,       4);
+    EXPECT_GE(hairpins,       2);
+    EXPECT_GE(dotted_barlines, 1);
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Corrupt files load without crash (regression tests)
+// ===========================================================================
+
+TEST_F(Tst_Importer, beethoven_no_crash)
+{
+    MasterScore* score = readEncoreScore("notes_corrupted.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_GT(score->nmeasures(), 0);
+    delete score;
+}
+
+TEST_F(Tst_Importer, twelve_instrument_score_no_crash)
+{
+    MasterScore* score = readEncoreScore("notes_triplets.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_GT(score->nmeasures(), 0);
+    delete score;
+}
+
+TEST_F(Tst_Importer, swing_timing_file_no_crash)
+{
+    MasterScore* score = readEncoreScore("notes_swing.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_GT(score->nmeasures(), 0);
+    delete score;
+}
+
+// ===========================================================================
+// Run LAST: corrupted fixtures (open slurs, invalid voice, degenerate tuplets)
+// can leave global layout state dirty and must not precede assertion tests.
+// ===========================================================================
+
+// Covers: tuplet=0xFF (degenerate), faceValue=0 (invalid), voice>=4, open SLURSTART
+// (previously tested by Beethoven.enc and Opus 27 First Movement.enc)
+ENC_SANITY_TEST(corrupted_elements,         "notes_corrupted.enc")
+
+// Covers: explicit 3:2 triplets, 3/4 time sig, multi-measure
+// (previously tested by Chansonette.enc and other 3/4 files)
+ENC_SANITY_TEST(explicit_triplets_3_4,      "notes_triplets.enc")
+
+// Covers: grace note filtering (fv>=4 only), ACCIACCATURA
+// (previously tested by Grace.enc and Beethoven.enc)
+ENC_SANITY_TEST(grace_notes,                "notes_grace.enc")
