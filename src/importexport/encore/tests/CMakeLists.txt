@@ -24,9 +24,13 @@ set(MODULE_TEST_SRC
     ${CMAKE_CURRENT_LIST_DIR}/environment.cpp
     ${CMAKE_CURRENT_LIST_DIR}/testbase.cpp
     ${CMAKE_CURRENT_LIST_DIR}/testbase.h
-    ${CMAKE_CURRENT_LIST_DIR}/tst_encore.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/tst_encore_features.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/tst_encore_rhythm.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tst_importer.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tst_notes.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tst_ornaments.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tst_structure.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tst_text.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tst_instruments.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tst_parser_ticks.cpp
 )
 
 set(MODULE_TEST_LINK

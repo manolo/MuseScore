@@ -19,28 +19,17 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#include "encoremodule.h"
+#include "notationencreader.h"
 
-#include "modularity/ioc.h"
+#include "importer/import.h"
 
-#include "project/inotationreadersregister.h"
-#include "internal/notationencorereader.h"
+#include "engraving/engravingerrors.h"
 
-#include "log.h"
-
-using namespace muse::modularity;
 using namespace mu::iex::encore;
-using namespace mu::project;
+using namespace mu::engraving;
 
-std::string EncoreModule::moduleName() const
+muse::Ret NotationEncoreReader::read(MasterScore* score, const muse::io::path_t& path, const Options&)
 {
-    return "iex_encore";
-}
-
-void EncoreModule::resolveImports()
-{
-    auto readers = globalIoc()->resolve<INotationReadersRegister>(moduleName());
-    if (readers) {
-        readers->reg({ "enc" }, std::make_shared<NotationEncoreReader>());
-    }
+    Err err = importEncore(score, path.toQString());
+    return make_ret(err, path);
 }

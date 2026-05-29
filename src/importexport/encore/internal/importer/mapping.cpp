@@ -20,7 +20,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "encoremapping.h"
+#include "mapping.h"
 
 #include <QRegularExpression>
 
@@ -75,11 +75,7 @@ int encKeyToFifths(quint8 key)
 // MuseScore DOM construction
 // ---------------------------------------------------------------------------
 
-// Translate Encore header/footer tokens (#P, #D, #T) to the matching
-// MuseScore macros ($P, $D, $m). Without this rewrite MuseScore would
-// print the literal text "#P" on every page instead of expanding it to
-// the page number. Unknown "#X" sequences are left untouched so user
-// text that legitimately starts with "#" survives.
+// Translate Encore page tokens (#P, #D, #T) to MuseScore macros ($P, $D, $m).
 static String translateHeaderFooterTokens(const String& s)
 {
     String out = s;
@@ -91,13 +87,8 @@ static String translateHeaderFooterTokens(const String& s)
 
 void addTitleFrame(MasterScore* score, const EncTitle& titleBlock)
 {
-    // Encore's TITL block stores multi-line content as separate slots per
-    // category: subtitle1..2, instruction1..3, author1..4, copyright1..6 and
-    // header1..2 / footer1..2. Each slot is one visual line; non-empty slots
-    // of the same category render stacked. Encore's own MusicXML exporter
-    // joins them with newlines (e.g. composer of Mamae_eu_quero-Bateria.enc
-    // emits author1\nauthor2\nauthor3), so MuseScore should do the same when
-    // populating the VBox text fields and the Score Properties metadata.
+    // TITL stores multi-line content as separate slots (subtitle1..2, author1..4, etc.).
+    // Join non-empty slots with newline, same as Encore's MusicXML exporter does.
     auto joinSlots = [](const std::vector<QString>& items) -> QString {
         QStringList nonEmpty;
         for (const QString& s : items) {
@@ -165,14 +156,7 @@ void addTitleFrame(MasterScore* score, const EncTitle& titleBlock)
         vbox->add(t);
     }
 
-    // Encore's TITL block carries up to two header lines and two footer
-    // lines, each with its own horizontal alignment byte. Map them onto
-    // MuseScore's odd/even page header & footer style slots so the text
-    // appears in the same screen corner Encore showed it in. When multiple
-    // header (or footer) slots carry the SAME alignment, join their texts
-    // with a newline so both lines stack at that page corner (mirrors
-    // Encore's rendering and matches the slot-joining behavior used for
-    // composer/lyricist/copyright above).
+    // Header/footer: map alignment to odd/even Sid slots. Same-alignment slots joined with newline.
     auto applyHFGroup = [score](const std::vector<EncHeaderFooter>& items,
                                 mu::engraving::Sid sidL,
                                 mu::engraving::Sid sidC,
@@ -317,14 +301,8 @@ ClefType pickStaffClef(EncClefType encClef, ClefType /*concertClef*/, ClefType /
     if (keyOffsetSemitones == 0 || clefGlyphFamily(base) == 0) {
         return base;
     }
-    // Derive the MuseScore clef directly from the Encore clef's glyph family
-    // and the Key transposition offset. When the Key is exactly ±one or two
-    // octaves (±12 / ±24 semitones) and a clef with a matching octave
-    // decoration exists in the same glyph family, use that clef so the staff
-    // visually communicates the transposition without relying on instrument
-    // template data. Non-octave offsets (e.g. ±3, ±7) have no corresponding
-    // octave-decorated clef variant and fall through to the plain base clef;
-    // the pitch offset applied to every note already handles the transposition.
+    // When Key is +-12 or +-24 semitones, pick the matching octave-decorated clef
+    // in the same glyph family. Other offsets fall back to plain base clef.
     static const std::array<ClefType, 8> kCandidates = {
         ClefType::G8_VB, ClefType::G8_VA,
         ClefType::G15_MB, ClefType::G15_MA,
@@ -369,12 +347,7 @@ void addRepeatMark(Score* /*score*/, Measure* measure, EncRepeatType rt)
         break;
     }
     case EncRepeatType::CODA1: {
-        // CODA1 (0x85) is the "To Coda" marker placed on the source measure
-        // (the player jumps FROM here on the repeat). Encore distinguishes
-        // it from CODA2 (0x89), the destination measure that carries the
-        // Coda glyph itself. Mapping both to MarkerType::CODA loses the
-        // pair distinction and Encore's "To Coda" text becomes a duplicate
-        // Coda symbol.
+        // CODA1=0x85 is "To Coda" (jump source); CODA2=0x89 is the Coda destination.
         Marker* m = Factory::createMarker(measure);
         m->setMarkerType(MarkerType::TOCODA);
         m->setTrack(0);
@@ -457,10 +430,7 @@ QString normalizeEncoreInstrName(const QString& name)
     return s.trimmed();
 }
 
-// Lowercased, accent-stripped form used for the diacritics-insensitive pass.
-// Spanish/Portuguese Encore files routinely write "Laúd" or "Percusión", but
-// the localized templates ship the same words and case-folding alone does not
-// equate them; decomposing to NFD and dropping combining marks does.
+// Lowercase + accent-strip so "Laúd" matches "Laud" and "Percusión" matches "Percusion".
 static QString normalizeForCompare(const QString& s)
 {
     const QString d = s.normalized(QString::NormalizationForm_D);
@@ -474,35 +444,16 @@ static QString normalizeForCompare(const QString& s)
     return out;
 }
 
-// Find the best MuseScore instrument template for an Encore instrument name.
-//
-// One pass over every non-drumset template. Scoring combines diacritics-
-// insensitive name overlap (an Encore "Laud" matches the Spanish "Laúd"
-// template; "Guitarra B" matches "Guitarra clásica" by substring) with a
-// fixed MIDI-program bonus that flips ties between equally-named templates
-// (Spanish "Bajo" matches the choral Bass voice by trackName but the .enc
-// midiProgram = Acoustic Bass, which the bonus then promotes).
-//
-// Score per template (with needles = accent-stripped, lowercased variants
-// of the full name and each word of length >= 4):
-//   trackName  == needle: +4    | trackName  contains needle: +2
-//   longName   == needle: +2    | longName   contains needle: +1
-//   shortName  == needle: +1
-//   default channel program == encMidiProgram:                 +6
+// Find best non-drumset template by name+MIDI score.
+// Score: trackName==needle +4, contains +2; longName==needle +2, contains +1; shortName==needle +1.
+// MIDI program match: +6. "common" genre tag: +1 tiebreaker.
 const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, int encMidiProgram)
 {
     if (encName.isEmpty()) {
         return nullptr;
     }
 
-    // Reject very short names (e.g. "S", "A", "T", "B" used as SATB choir
-    // labels in a 4-voice mixed score). With a 1- to 3-character needle the
-    // substring scoring matches almost any template that happens to contain
-    // that letter (so "S" lands on Bass Clarinet, "C" on Piccolo, "T" on
-    // Contrabassoon, ...). Below the four-character threshold the caller
-    // falls back to MIDI program lookup and ultimately to the Grand Piano
-    // template, which is musically neutral until the user picks the right
-    // voice from the instrument browser.
+    // Names < 4 chars (e.g. SATB labels "S","A","T","B") match too broadly; skip.
     if (encName.trimmed().size() < 4) {
         return nullptr;
     }
@@ -563,8 +514,6 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
             }
             int midiBonus = 0;
             if (encMidiProgram >= 0) {
-                // Templates ship multiple channels (acoustic-bass has slap,
-                // pop, pizzicato, arco, tremolo); any program match counts.
                 for (const InstrChannel& ch : it->channel) {
                     if (ch.program() == encMidiProgram) {
                         midiBonus = 6;
@@ -572,10 +521,7 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
                     }
                 }
             }
-            // Tiebreaker for two equally-named templates that share a MIDI
-            // program (e.g. soprano-guitar and guitar-nylon both ship with
-            // GM program 24): prefer the one tagged as "common", which marks
-            // the everyday classical/nylon guitar over the soprano variant.
+            // "common" genre tag breaks ties between same-score templates (e.g. guitar-nylon vs soprano-guitar).
             int commonBonus = 0;
             for (const InstrumentGenre* gen : it->genres) {
                 if (gen && gen->id == "common") {
@@ -595,12 +541,7 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
     return best;
 }
 
-// Find the best drumset template for an Encore instrument name.
-//
-// Same scoring as findEncoreInstrumentTemplate but restricted to templates
-// with useDrumset=true. This lets MuseScore's own localized template names
-// ("Batería", "Batterie", "Drumset", ...) drive the match so no hardcoded
-// keyword list is needed.
+// Find best drumset template by name score (exact match only, no substring).
 const InstrumentTemplate* findDrumsetTemplate(const QString& encName)
 {
     if (encName.trimmed().size() < 4) {
@@ -626,9 +567,6 @@ const InstrumentTemplate* findDrumsetTemplate(const QString& encName)
         return nullptr;
     }
 
-    // Use exact-match scoring only (no substring) so that a generic label
-    // like "Drums" does not accidentally match compound names such as
-    // "Automobile Brake Drums" before reaching the canonical Drumset template.
     const InstrumentTemplate* best = nullptr;
     int bestScore = 0;
     for (const InstrumentGroup* g : instrumentGroups) {
@@ -686,10 +624,7 @@ double encTextToTempoBps(const QString& text)
             return e.bps;
         }
     }
-    // Relative markings: stay as TempoText (so MuseScore treats them as
-    // tempo for layout/positioning) but carry no absolute BPS - the layout
-    // engine and the user's expectation is that they fall back to the
-    // previous tempo.
+    // Relative markings: become TempoText with BPS=0 (falls back to previous tempo).
     static const char* kRelative[] = {
         "a tempo",
         "tempo i",
@@ -707,19 +642,10 @@ double encTextToTempoBps(const QString& text)
 std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
 {
     using mu::engraving::SymId;
-    // Encore packs articulation glyphs into a single byte. Simple bytes carry
-    // one glyph (0x1C = tenuto, 0x1D = staccato, ...); combo bytes carry two
-    // (0x24 = tenuto + staccato, 0x27 = marcato + tenuto, ...). The mapping
-    // was confirmed against `encore-symbols.enc` measure-by-measure: m8-m12
-    // each line up one byte per ChordRest with the per-note articulation
-    // list in Encore's MusicXML export, so each combo decomposes uniquely.
+    // Byte encodes one or two glyphs (e.g. 0x24=tenuto+staccato).
+    // Confirmed against encore-symbols.enc m8-m12 vs Encore's MusicXML export.
     switch (articByte) {
-    // 0x04..0x07: trill-mark glyphs.
-    // 0x0A, 0x0C:    inverted-mordent.
-    // 0x0B, 0x2F:    mordent.
-    // Mapping derived from encore-symbols.enc m16 (4 trill-marks at
-    // articUp 0x04..0x07 across 4 notes) and m17 (4 mordents at
-    // articUp 0x0a 0x0b 0x0c 0x2f).
+    // Trill/mordent from m16-m17: 0x04..0x07=trill, 0x0A/0x0C=inv-mordent, 0x0B/0x2F=mordent.
     case 0x04:
     case 0x05:
     case 0x06:
@@ -753,17 +679,8 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x2B: return { SymId::articAccentAbove, SymId::articStaccatissimoAbove };
     case 0x2C: return { SymId::articStaccatissimoAbove };
     case 0x2D: return { SymId::articTenutoAbove, SymId::articStaccatissimoAbove };
-    // String technical markings derived from encore-symbols.enc m3, m4, m18:
-    //   0x1E, 0x1F -> harmonic (natural and artificial variants share the
-    //                 same MuseScore Symbol because MuseScore only has one
-    //                 stringsHarmonic glyph; the artificial variant is
-    //                 emitted as <harmonic><artificial/></harmonic> by the
-    //                 MusicXML exporter when the note carries a separate
-    //                 sounding pitch which we do not yet read).
-    //   0x44, 0x45 -> thumb-position
-    //   0x46 is open-string and is handled separately in
-    //   encArticByteToOpenString() because MuseScore lacks a dedicated
-    //   SymId; it must be emitted as a Fingering with STRING_NUMBER text "0".
+    // String markings (m3, m4, m18): 0x1E/0x1F=harmonic, 0x44/0x45=thumb-position.
+    // 0x46=open-string: handled in encArticByteIsOpenString() (no SymId; uses Fingering "0").
     case 0x1E:
     case 0x1F: return { SymId::stringsHarmonic };
     case 0x44:
@@ -775,10 +692,7 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
 
 int encArticByteToFingerNumber(quint8 articByte)
 {
-    // Per-note fingering glyphs. Encore numbers the fingers 1..5 with the
-    // contiguous byte range 0x0D..0x11. Other low-byte values in the
-    // articulation slot belong to ornament glyphs (trill, mordent) and
-    // must not be confused for fingerings.
+    // Finger 1..5 map to bytes 0x0D..0x11.
     switch (articByte) {
     case 0x0D: return 1;
     case 0x0E: return 2;
@@ -791,10 +705,7 @@ int encArticByteToFingerNumber(quint8 articByte)
 
 bool encArticByteIsOpenString(quint8 articByte)
 {
-    // Encore stores open-string with byte 0x46 in the articulationUp slot.
-    // MuseScore has no dedicated SymId for open-string; the exporter emits
-    // <open-string/> when it sees a Fingering with TextStyleType
-    // STRING_NUMBER and text "0".
+    // 0x46=open-string; emitted as Fingering "0" (STRING_NUMBER style).
     return articByte == 0x46;
 }
 

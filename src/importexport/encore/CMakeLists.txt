@@ -21,20 +21,36 @@
 muse_create_module(iex_encore)
 
 target_sources(iex_encore PRIVATE
-    encoremodule.cpp
-    encoremodule.h
-    internal/encoreelements.cpp
-    internal/encoreelements.h
-    internal/encoremapping.cpp
-    internal/encoremapping.h
-    internal/encorerhythm.cpp
-    internal/encorerhythm.h
-    internal/encoretuplets.cpp
-    internal/encoretuplets.h
-    internal/notationencorereader.cpp
-    internal/notationencorereader.h
-    internal/importencore.cpp
-    internal/importencore.h
+    enc-module.cpp
+    enc-module.h
+    internal/parser/elements.cpp
+    internal/parser/elem-measure.cpp
+    internal/parser/elem-metadata.cpp
+    internal/parser/elem-text.cpp
+    internal/parser/elem-file.cpp
+    internal/parser/reader.h
+    internal/parser/reader.cpp
+    internal/parser/reader-v0xa6.h
+    internal/parser/reader-v0xa6.cpp
+    internal/parser/reader-v0xc4.h
+    internal/parser/reader-v0xc4.cpp
+    internal/parser/elements.h
+    internal/importer/mapping.cpp
+    internal/importer/mapping.h
+    internal/parser/ticks.cpp
+    internal/parser/ticks.h
+    internal/importer/tuplets.cpp
+    internal/importer/tuplets.h
+    internal/notationencreader.cpp
+    internal/notationencreader.h
+    internal/importer/import.cpp
+    internal/importer/ctx.h
+    internal/importer/builders.h
+    internal/importer/builders.cpp
+    internal/importer/noteloop.cpp
+    internal/importer/resolvers.h
+    internal/importer/resolvers.cpp
+    internal/importer/import.h
 )
 
 target_link_libraries(iex_encore PRIVATE engraving)
