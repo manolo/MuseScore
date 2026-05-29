@@ -22,7 +22,7 @@
 
 #include <gtest/gtest.h>
 
-#include "../internal/encorerhythm.h"
+#include "../internal/parser/ticks.h"
 
 using namespace mu::engraving;
 using namespace mu::iex::encore;

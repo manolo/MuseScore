@@ -19,17 +19,26 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#include "notationencorereader.h"
 
-#include "importencore.h"
+#include "reader.h"
+#include "reader-v0xa6.h"
+#include "reader-v0xc4.h"
 
-#include "engraving/engravingerrors.h"
+namespace mu::iex::encore {
 
-using namespace mu::iex::encore;
-using namespace mu::engraving;
-
-muse::Ret NotationEncoreReader::read(MasterScore* score, const muse::io::path_t& path, const Options&)
+// Factory — maps magic byte (chuMagio from EncHeader) to the right reader.
+// To add a new format: create encoreformat-vXXXX.cpp/h and add a case here.
+std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 magic)
 {
-    Err err = importEncore(score, path.toQString());
-    return make_ret(err, path);
+    switch (magic) {
+    case 0xA6:
+        return std::make_unique<EncFormatReader_V0xA6>();
+    case 0xC2:
+        return makeFormatReader_V0xC2();
+    case 0xC4:
+    default:
+        return makeFormatReader_V0xC4();
+    }
 }
+
+} // namespace mu::iex::encore

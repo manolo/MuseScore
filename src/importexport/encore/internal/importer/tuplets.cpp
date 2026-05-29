@@ -20,7 +20,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "encoretuplets.h"
+#include "tuplets.h"
 
 #include <map>
 #include <vector>
@@ -28,8 +28,8 @@
 #include "engraving/dom/factory.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/tuplet.h"
-
-#include "encorerhythm.h"
+#include "engraving/dom/mscore.h"
+#include "../parser/ticks.h"
 
 using namespace mu::engraving;
 

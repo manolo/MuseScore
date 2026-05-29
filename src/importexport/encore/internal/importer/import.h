@@ -19,18 +19,23 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#ifndef MU_IMPORTEXPORT_ENCOREMODULE_H
-#define MU_IMPORTEXPORT_ENCOREMODULE_H
 
-#include "modularity/imodulesetup.h"
+// Encore (.enc) file importer for MuseScore.
+// The binary format was reverse-engineered by Leon Vinken (Enc2MusicXML project,
+// https://github.com/lvinken/Enc2MusicXML, GPL v3+) building on enc2ly by Felipe Castro.
+// This importer is based on that work.
+
+#ifndef MU_IMPORTEXPORT_ENC_IMPORT_IMPORT_H
+#define MU_IMPORTEXPORT_ENC_IMPORT_IMPORT_H
+
+#include "engraving/engravingerrors.h"
+
+namespace mu::engraving {
+class MasterScore;
+}
 
 namespace mu::iex::encore {
-class EncoreModule : public muse::modularity::IModuleSetup
-{
-public:
-    std::string moduleName() const override;
-    void resolveImports() override;
-};
+mu::engraving::Err importEncore(mu::engraving::MasterScore* score, const QString& path);
 } // namespace mu::iex::encore
 
-#endif // MU_IMPORTEXPORT_ENCOREMODULE_H
+#endif // MU_IMPORTEXPORT_ENC_IMPORT_IMPORT_H

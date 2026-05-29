@@ -20,22 +20,23 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Encore (.enc) file importer for MuseScore.
-// The binary format was reverse-engineered by Leon Vinken (Enc2MusicXML project,
-// https://github.com/lvinken/Enc2MusicXML, GPL v3+) building on enc2ly by Felipe Castro.
-// This importer is based on that work.
+#ifndef MU_IMPORTEXPORT_ENC_PARSER_TICKS_H
+#define MU_IMPORTEXPORT_ENC_PARSER_TICKS_H
 
-#ifndef MU_IMPORTEXPORT_IMPORTENCORE_H
-#define MU_IMPORTEXPORT_IMPORTENCORE_H
+#include <QtGlobal>
 
-#include "engraving/engravingerrors.h"
-
-namespace mu::engraving {
-class MasterScore;
-}
+#include "engraving/dom/durationtype.h"
 
 namespace mu::iex::encore {
-mu::engraving::Err importEncore(mu::engraving::MasterScore* score, const QString& path);
+
+int faceValue2ticks(quint8 fv);
+mu::engraving::DurationType faceValue2DurationType(quint8 fv);
+mu::engraving::DurationType realDuration2DurationType(qint16 realDur, quint8 fv);
+int calcDots(qint16 realDur, quint8 fv);
+int calcDotsSnap(qint16 dur, quint8 fv);
+int detectImpliedTuplet(qint16 realDur, quint8 fv, int& normalNotes);
+mu::engraving::Fraction dottedAdvance(mu::engraving::DurationType durationType, int dots);
+
 } // namespace mu::iex::encore
 
-#endif // MU_IMPORTEXPORT_IMPORTENCORE_H
+#endif // MU_IMPORTEXPORT_ENC_PARSER_TICKS_H

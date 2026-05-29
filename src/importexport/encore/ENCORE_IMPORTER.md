@@ -17,14 +17,14 @@ Source tree: `src/importexport/encore/`.
 | `internal/encorerhythm.{h,cpp}`               | Face-value to ticks conversion, `realDuration2DurationType`, `calcDots / calcDotsSnap`, `detectImpliedTuplet`, and `dottedAdvance` (shared cap path between chords and rests). |
 | `internal/encoremapping.{h,cpp}`              | Clef/key conversions, DOM setup (`addTitleFrame`, `addInitialKeySig`, `addInitialTimeSig`, `addInitialClef`, `addRepeatMark`), instrument template matching (`normalizeEncoreInstrName`, `findEncoreInstrumentTemplate`), tempo-term lookup (`encTextToTempoBps`), articulation mapping (`encArticulation2SymIds`). |
 | `internal/encoretuplets.{h,cpp}`              | `TupletTracker` and `computeImpliedTupletMembers`. The most subtle pieces and the root cause of every past corruption fix. |
-| `internal/importencore.cpp`                   | Top-level `buildScore` orchestration. |
+| `internal/import/import.cpp`                   | Top-level `buildScore` orchestration. |
 | `tests/tst_encore.cpp`                        | End-to-end integration tests against real and synthetic `.enc` files. |
 | `tests/tst_encore_features.cpp`               | Per-feature unit tests with synthetic v0c4 fixtures. |
 | `tests/tst_encore_rhythm.cpp`                 | Rhythm helpers (face value, dot, tuplet, dotted advance). |
 
 ## Block dispatch and resync
 
-The top-level loop in `importencore.cpp` reads block magics and
+The top-level loop in `enc-import.cpp` reads block magics and
 dispatches per type. Unknown bytes between known magics are
 skipped by `findNextKnownMagic`, which scans byte by byte until
 the next recognised magic appears.
@@ -37,7 +37,7 @@ stops instead of walking the entire payload. This was added in
 
 ## Instrument routing
 
-`findEncoreInstrumentTemplate` (in `encoremapping.cpp`) combines
+`findEncoreInstrumentTemplate` (in `enc-mapping.cpp`) combines
 name and MIDI program into a single score over every non-drumset
 template:
 
@@ -105,7 +105,7 @@ For STAFFTEXT ornaments (subtype `0x1E`):
 **Italian tempo term promotion.** Anonymous `StaffText` would
 leave tempo words ("Allegro", "Andante", ...) untracked in
 MuseScore's tempo map, so layout spacing and playback speed would
-be wrong. `encTextToTempoBps` in `encoremapping.cpp` recognises
+be wrong. `encTextToTempoBps` in `enc-mapping.cpp` recognises
 the canonical Italian tempo set and promotes those strings to
 `TempoText`:
 
@@ -267,7 +267,7 @@ parts and adds it to every NOTE pitch at the two
 applyConcertPitch(note, en->semiTonePitch + staffPitchOffset[staffIdx]);
 ```
 
-Visual alignment via the staff clef (`pickStaffClef` in `encoremapping.cpp`).
+Visual alignment via the staff clef (`pickStaffClef` in `enc-mapping.cpp`).
 The clef is derived directly from the **binary Encore clef + Key offset**,
 without requiring a matched instrument template:
 
@@ -451,7 +451,7 @@ are not yet decoded; it is currently silently ignored.
 
 ## Articulations, technical markings, tremolos
 
-`encArticulation2SymIds` (in `encoremapping.cpp`) maps the byte
+`encArticulation2SymIds` (in `enc-mapping.cpp`) maps the byte
 to a vector of `SymId`s (combo bytes return more than one);
 unmapped values are silently dropped.
 
@@ -645,7 +645,7 @@ EncRepeatType repeatMark() const {
 
 The prior `(coda >> 8) & 0xFF` accessor silently dropped every
 D.C./D.S./Fine on every Encore file. `addRepeatMark` in
-`encoremapping.cpp` then routes each EncRepeatType to the right
+`enc-mapping.cpp` then routes each EncRepeatType to the right
 `Jump` or `Marker`.
 
 **CODA1 vs CODA2.** Encore distinguishes the source measure of

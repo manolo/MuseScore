@@ -20,8 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef MU_IMPORTEXPORT_ENCORETUPLETS_H
-#define MU_IMPORTEXPORT_ENCORETUPLETS_H
+#ifndef MU_IMPORTEXPORT_ENC_IMPORT_TUPLETS_H
+#define MU_IMPORTEXPORT_ENC_IMPORT_TUPLETS_H
 
 #include <set>
 
@@ -29,7 +29,7 @@
 #include "engraving/types/fraction.h"
 #include "engraving/types/types.h"
 
-#include "encoreelements.h"
+#include "../parser/elements.h"
 
 namespace mu::engraving {
 class Measure;
@@ -38,10 +38,8 @@ class Tuplet;
 
 namespace mu::iex::encore {
 
-// Tuplet state tracker (one per staff+voice combination).
-// With faceValue-cumulative placement, groups close when the accumulated face-value
-// sum reaches actualN * baseLen.  This handles mixed-duration brackets (e.g. a 3:2
-// triplet of 8th+8th+16th+16th whose face values sum to 3/8 = 3×(1/8)).
+// Tuplet state per staff+voice. Group closes when face-value sum reaches actualN * baseLen.
+// This handles mixed-duration brackets (e.g. 3:2 triplet with 8th+8th+16th+16th).
 struct TupletTracker {
     mu::engraving::Tuplet* currentTuplet { nullptr };
     int actualN       { 0 };        // ratio numerator (e.g. 3 for 3:2)
@@ -65,19 +63,11 @@ struct TupletTracker {
     mu::engraving::Fraction noteAdvance(mu::engraving::DurationType baseType) const;
 };
 
-// Pre-compute which elements belong to COMPLETE tuplet groups (both implied and explicit).
-//
-// Implied tuplets (v0xC2): only valid when exactly actualN consecutive chord-groups in
-// the same (staffIdx, voice) all have the same detectImpliedTuplet ratio.
-// Single isolated notes with a "matching" rdur are MIDI swing drift, not real tuplets.
-//
-// Explicit tuplets: notes with a standard tup byte (3:2, 5:4, 6:4) are valid when
-// exactly actualN consecutive chord-groups have the SAME tup byte.  Isolated notes
-// at the tail of a longer run (e.g. note 4 of a 3:2 group in besamemucho) are
-// marked as invalid so they are treated as plain notes — preventing partial tuplets
-// that confuse checkMeasure.
-//
-// Returns a set of element pointers that are validated group members.
+// Find all elements that belong to complete tuplet groups (implied and explicit).
+// Implied (v0xC2): valid only when exactly actualN consecutive chord-groups share
+// the same ratio; isolated notes with matching rdur are MIDI swing drift.
+// Explicit: valid only when all actualN notes share the same tup byte; isolated
+// tail notes are excluded to prevent partial tuplets that break checkMeasure.
 std::set<const EncMeasureElem*> computeImpliedTupletMembers(
     const MeasureElemRefVec& sortedElems,
     const EncMeasure& encMeas,
@@ -85,4 +75,4 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
 
 } // namespace mu::iex::encore
 
-#endif // MU_IMPORTEXPORT_ENCORETUPLETS_H
+#endif // MU_IMPORTEXPORT_ENC_IMPORT_TUPLETS_H
