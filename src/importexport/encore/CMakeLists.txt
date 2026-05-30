@@ -60,6 +60,32 @@ target_sources(iex_encore PRIVATE
     internal/parser/parsers-text.cpp
     internal/parser/parsers-lyric-tie.cpp
     internal/parser/parsers-metadata.cpp
+    internal/importer/ctx.h
+    internal/importer/builders.h
+    internal/importer/builders-parts.cpp
+    internal/importer/builders-measures.cpp
+    internal/importer/emitters.cpp
+    internal/importer/emitters-note.cpp
+    internal/importer/emitters-rest.cpp
+    internal/importer/emitters-chords.cpp
+    internal/importer/emitters-fill.cpp
+    internal/importer/emitters-lyrics.cpp
+    internal/importer/emitters-orn.cpp
+    internal/importer/emitters-note-grace.cpp
+    internal/importer/emitters-note-artic.cpp
+    internal/importer/emitters-tempo.cpp
+    internal/importer/emitters-internal.h
+    internal/importer/emitters-tuplets.h
+    internal/importer/emitters-tuplets.cpp
+    internal/importer/emitters-tuplets-groups.cpp
+    internal/importer/resolvers.h
+    internal/importer/resolvers.cpp
+    internal/importer/mappers.h
+    internal/importer/mappers-clefs.cpp
+    internal/importer/mappers-title.cpp
+    internal/importer/mappers-instruments.cpp
+    internal/importer/mappers-tempo.cpp
+    internal/importer/mappers-articulations.cpp
 )
 
 target_link_libraries(iex_encore PRIVATE engraving)
