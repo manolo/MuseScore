@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Instrument resolution: name/MIDI/clef routing to templates, drumset detection, TK-block name/MIDI/Key
+// decoding across format variants, key transposition and octave clefs. See ENCORE_IMPORTER.md §Instrument routing.
+
 #include <gtest/gtest.h>
 
 #include "engraving/dom/chord.h"
@@ -198,9 +201,9 @@ TEST_F(Tst_Instruments, instrument_name_diacritics_insensitive_match)
 // FEATURE: TK block instrument name encoding (UTF-16 probe for v0xC4)
 // ===========================================================================
 
+// A large-varsize TK block selects two-byte (UTF-16) name decoding directly, no probe needed.
 TEST_F(Tst_Instruments, tk_utf16_name_charsize_reads_full_name)
 {
-    // TK00 varsize=2158 → offset>250 → charSize=TWO_BYTES; name read fully without probe.
     MasterScore* score = readEncoreScore("instruments_tk_utf16_name.enc");
     ASSERT_NE(score, nullptr);
     ASSERT_FALSE(score->parts().empty());
@@ -212,9 +215,9 @@ TEST_F(Tst_Instruments, tk_utf16_name_charsize_reads_full_name)
     delete score;
 }
 
+// A small-varsize TK block defaults to one-byte, but a NUL second byte probes as UTF-16 and upgrades it.
 TEST_F(Tst_Instruments, tk_probe_upgrades_onebyte_to_utf16)
 {
-    // TK00 varsize=112 → offset<=250 → charSize=ONE_BYTE; b1=0x00 probe detects UTF-16, upgrades to TWO_BYTES.
     MasterScore* score = readEncoreScore("instruments_tk_probe_utf16.enc");
     ASSERT_NE(score, nullptr);
     ASSERT_FALSE(score->parts().empty());
@@ -223,6 +226,18 @@ TEST_F(Tst_Instruments, tk_probe_upgrades_onebyte_to_utf16)
     EXPECT_EQ(longName, String(u"Bandurria"))
         << "Probe must upgrade ONE_BYTE charSize to TWO_BYTES for UTF-16 content";
 
+    delete score;
+}
+
+// A non-NUL second byte keeps one-byte (Latin-1) decoding rather than misreading it as UTF-16.
+TEST_F(Tst_Instruments, tk_probe_keeps_onebyte_for_latin1)
+{
+    MasterScore* score = readEncoreScore("instruments_tk_onebyte_name.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "ONE_BYTE TK name file must produce a clean score";
+    EXPECT_EQ(score->parts().size(), 1u)
+        << "ONE_BYTE TK name file must produce exactly 1 part";
     delete score;
 }
 
@@ -381,21 +396,31 @@ TEST_F(Tst_Instruments, staff_hidden_flag)
     delete score;
 }
 
+TEST_F(Tst_Instruments, instrument_count_padding)
+{
+    // header instrumentCount=2 but only 1 TK block. Instruments vector must be padded to instrumentCount
+    // so both parts are created (padded entry uses MIDI fallback).
+    MasterScore* score = readEncoreScore("instruments_instrument_count_padding.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "score must be clean: " << ret.text();
+
+    EXPECT_EQ(score->parts().size(), 2u)
+        << "Both instruments must be imported even when only 1 TK block exists";
+
+    delete score;
+}
+
 TEST_F(Tst_Instruments, transposition_filter_prefers_compatible_key)
 {
-    // The transposition filter is a PREFERENCE, not a hard rejection. When no
-    // transposition-compatible match exists (e.g. no C-pitched Dulzaina template),
-    // the function falls back to the best name+MIDI match instead of returning nullptr.
-    // This prevents transposing instruments from becoming Grand Piano when the Encore
-    // Key field is not set (encKey=0).
+    // The transposition filter is a preference, not a hard rejection: when no compatible template exists it
+    // falls back to the best name+MIDI match rather than returning nullptr (which would give Grand Piano).
     MasterScore* score = readEncoreScore("instruments_instrument_count_padding.enc");
     ASSERT_NE(score, nullptr);
     delete score;
 
     using namespace mu::iex::enc;
 
-    // encKey=0, only Castilian Dulzaina template exists (chromatic=6, no C-Dulzaina).
-    // Filter prefers a compatible match; since none exists it falls back to best name match.
     const InstrumentTemplate* filtered = findEncoreInstrumentTemplate(
         QStringLiteral("Dulzaina 2"), -1, 0);
     ASSERT_NE(filtered, nullptr)
@@ -404,7 +429,6 @@ TEST_F(Tst_Instruments, transposition_filter_prefers_compatible_key)
     EXPECT_EQ(filtered->transpose.chromatic, 6)
         << "Castilian Dulzaina (chromatic=6) is the only dulzaina template, so it is the fallback";
 
-    // Unfiltered call must return the same result.
     const InstrumentTemplate* unfiltered = findEncoreInstrumentTemplate(
         QStringLiteral("Dulzaina 2"), -1);
     ASSERT_NE(unfiltered, nullptr);
@@ -446,22 +470,10 @@ TEST_F(Tst_Instruments, fuzzy_name_match_typo)
     delete score;
 }
 
-// ===========================================================================
-// FIX: v0xC4 files with no TK blocks use fallback instruments (contentFilePos=-1,
-// offset=0). The compact MIDI/Key offsets (390/367) have 0, but the standard
-// large-TK offsets (2278/2255) have the real values. The importer must probe
-// the large-TK positions when contentFilePos<0 (no TK blocks found).
-// ===========================================================================
-// ===========================================================================
-// BUG FIX: instrument names from no-TK-block files recovered from fixed offsets
-// ===========================================================================
+// When a file has no TK blocks, instrument names are recovered from fixed offsets; the "Part N" fallback
+// must be applied only after recovery so it does not pre-empt a name present in the file.
 TEST_F(Tst_Instruments, no_tk_blocks_name_recovered_from_fixed_offset)
 {
-    // instruments_no_tk_name_recovered.enc: TK00 magic zeroed, "Dulzaina" written
-    // as UTF-16 LE at NAME_BASE=202. Fix: fallback "Part N" names are applied AFTER
-    // readInstrumentMeta() so recoverMissingNames() can read names from the file.
-    // Without the fix: name was set to "Part 1" before recovery → guard !isEmpty()
-    // skipped the read → part remained "Part 1".
     MasterScore* score = readEncoreScore("instruments_no_tk_name_recovered.enc");
     ASSERT_NE(score, nullptr);
     ASSERT_FALSE(score->parts().empty());
@@ -499,7 +511,6 @@ TEST_F(Tst_Instruments, no_tk_blocks_name_falls_back_to_part_n_when_not_recovera
     const Part* part = score->parts().front();
     ASSERT_NE(part, nullptr);
     const QString longName = part->longName().toQString();
-    // When recovery finds nothing, the part must have a non-empty fallback name.
     EXPECT_FALSE(longName.isEmpty())
         << "Part must have a non-empty name even when name recovery fails";
     delete score;
@@ -507,13 +518,8 @@ TEST_F(Tst_Instruments, no_tk_blocks_name_falls_back_to_part_n_when_not_recovera
 
 TEST_F(Tst_Instruments, small_tk_midi_read_from_correct_offset)
 {
-    // instruments_small_tk_midi49.enc: TK00 varsize=112 (smallTK layout), MIDI 49
-    // stored at contentFilePos + offset + 76 = 202 + 112 + 76 = 390.
-    //
-    // Without fix: readMidiPrograms uses MIDI_IN_CONTENT=60, reads at 202+60=262
-    //   (within the zero-padded name area) → midiProgram=0 → Grand Piano fallback.
-    // With fix: reads at 202+112+76=390 → midiProgram=49 → step 5 selects a
-    //   non-Piano template (String Ensemble 1 for MIDI 49).
+    // smallTK layout stores the MIDI program at a different offset; reading the wrong one lands in the
+    // zero-padded name area (program 0 -> Grand Piano). MIDI 49 must resolve to a non-Piano template.
     MasterScore* score = readEncoreScore("instruments_small_tk_midi49.enc");
     ASSERT_NE(score, nullptr);
     ASSERT_FALSE(score->parts().empty());
@@ -527,12 +533,7 @@ TEST_F(Tst_Instruments, small_tk_midi_read_from_correct_offset)
 
 TEST_F(Tst_Instruments, small_tk_key_read_from_correct_offset)
 {
-    // instruments_small_tk_key6.enc: TK00 varsize=112, key=+6 semitones at
-    // contentFilePos + varSize + 53 = 202 + 112 + 53 = 367.
-    //
-    // Without fix: readKeyTranspositions returned early for smallTK (offset 1..250),
-    //   key stayed 0, no transposition applied.
-    // With fix: key=6 read from offset 367, instrument transposed +6 semitones.
+    // smallTK layout stores the Key at a distinct offset the reader used to skip; +6 must be read and applied.
     MasterScore* score = readEncoreScore("instruments_small_tk_key6.enc");
     ASSERT_NE(score, nullptr);
     ASSERT_FALSE(score->parts().empty());
@@ -545,15 +546,8 @@ TEST_F(Tst_Instruments, small_tk_key_read_from_correct_offset)
 
 TEST_F(Tst_Instruments, total_size_tk_midi_read_from_content_offset)
 {
-    // Encore 4.x format: TK varSize = TOTAL block size (includes 8-byte header).
-    // Stride between TK blocks = varSize (not varSize+8 as in standard 5.x layout).
-    // isTotalBlockSizeTkFmt() detects this and reads MIDI at content[60].
-    //
-    // instruments_total_size_tk_two_instrs.enc: TK00 varSize=80, MIDI=49 at content[60].
-    // TK01 varSize=80, MIDI=34 at content[60]. Stride=80=varSize.
-    //
-    // Without fix: reads MIDI at contentFilePos + varSize + 76 = 202+80+76=358, gets 0 (Grand Piano).
-    // With fix: reads MIDI at content[60]=49 for instr 0 and 34 for instr 1.
+    // Encore 4.x TK varSize is the TOTAL block size, so the stride equals varSize and MIDI sits at
+    // content[60]. Both instruments' programs must be read from there, not the 5.x-layout offset.
     MasterScore* score = readEncoreScore("instruments_total_size_tk_two_instrs.enc");
     ASSERT_NE(score, nullptr);
     ASSERT_GE(static_cast<int>(score->parts().size()), 2)
@@ -569,17 +563,10 @@ TEST_F(Tst_Instruments, total_size_tk_midi_read_from_content_offset)
     delete score;
 }
 
-// ===========================================================================
-// BUG: an instrument with a REAL TK block but an empty name had a name
-// positionally recovered from music/structure bytes, producing garbage. An
-// empty name on a real TK block is authoritative; the importer must leave it
-// empty and fall back to "Part N" rather than probing the formula offset.
-// ===========================================================================
+// An empty name on a real TK block is authoritative: the importer must fall back to "Part N" rather than
+// probe the formula offset (where unrelated bytes would produce a garbage name).
 TEST_F(Tst_Instruments, tk_empty_name_is_authoritative_not_recovered)
 {
-    // instruments_tk_empty_name_authoritative.enc: TK00="InstrA", TK01=empty
-    // name (real block). "ZZTOP" is planted at the formula recovery offset for
-    // instrument 1 (2360). Before the fix, instrument 1 was named "ZZTOP".
     MasterScore* score = readEncoreScore("instruments_tk_empty_name_authoritative.enc");
     ASSERT_NE(score, nullptr);
     ASSERT_GE(static_cast<int>(score->parts().size()), 2)
@@ -608,13 +595,8 @@ TEST_F(Tst_Instruments, no_tk_blocks_reads_midi_and_key_from_large_tk_offsets)
 
 TEST_F(Tst_Instruments, no_tk_blocks_large_tk_layout_reads_all_instrument_names)
 {
-    // instruments_no_tk_large_tk_two_names.enc: no TK blocks, LINE block at offset 2386
-    // (firstBlockOff > 2278 triggers large-TK stride=2158 in recoverMissingNames).
-    // "Oboe" (UTF-16 LE) at NAME_BASE=202; "Cello" (UTF-16 LE) at 202+2158=2360.
-    //
-    // Before fix: recoverMissingNames always used step=112 for no-TK-no-tilde files,
-    // so instrument 1 read from 202+112=314 (zero bytes) and fell back to "Part 2".
-    // With fix: large-TK detection mirrors readMidiProgramsNoTk, step=2158 is used.
+    // No-TK files with a large-TK layout must use the large stride when recovering names, or the second
+    // instrument reads from empty bytes and falls back to "Part 2".
     MasterScore* score = readEncoreScore("instruments_no_tk_large_tk_two_names.enc");
     ASSERT_NE(score, nullptr);
     ASSERT_GE(static_cast<int>(score->parts().size()), 2)
@@ -628,12 +610,8 @@ TEST_F(Tst_Instruments, no_tk_blocks_large_tk_layout_reads_all_instrument_names)
     delete score;
 }
 
-// ===========================================================================
-// BUG regression: drumset staves imported via GM percussion range (113-128)
-// must receive a percussion clef, not the C3L/C4L/F clef stored in the
-// LINE block.  buildInitialSignatures now checks for a drumset and forces
-// ClefType::PERC.
-// ===========================================================================
+// A drumset staff (GM percussion range) must get a percussion clef, overriding the pitched clef stored in
+// the LINE block. See ENCORE_IMPORTER.md §Instruments in the GM Percussive range (MIDI programs 113 to 128).
 TEST_F(Tst_Instruments, gm_perc_range_drumset_staff_gets_perc_clef)
 {
     MasterScore* score = readEncoreScore("instruments_gm_perc_range_taiko.enc");
@@ -664,16 +642,8 @@ TEST_F(Tst_Instruments, gm_perc_range_drumset_staff_gets_perc_clef)
     delete score;
 }
 
-// ===========================================================================
-// BUG regression: chord notes on percussion staves were dropped by the MIDI
-// artifact filter even when they are genuine simultaneous chord tones.
-// Two bypass conditions added: (a) first note on staff in a measure
-// (savedPrevMidiTick<0), (b) chord extensions (isChordExt=true).
-//
-// Fixture: prg=116, measure with H@tick=0 (pit=60) and H@tick=5 (pit=64).
-// calculateRealDurations gives note@0 rdur=5 (tick diff 5-0).  Without the
-// bypass, that triggers the artifact filter and drops note@0.
-// ===========================================================================
+// Genuine simultaneous chord tones on a percussion staff must survive the short-rdur MIDI-artifact filter.
+// The first on-staff note and chord extensions bypass the filter so a close-tick chord is not thinned.
 TEST_F(Tst_Instruments, gm_perc_chord_notes_not_dropped_by_artifact_filter)
 {
     MasterScore* score = readEncoreScore("instruments_gm_perc_chord_notes.enc");
@@ -697,12 +667,8 @@ TEST_F(Tst_Instruments, gm_perc_chord_notes_not_dropped_by_artifact_filter)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: instrument with MIDI program in GM Percussive range (113-128) and
-// a name that matches no standard template must import as drumset, not Grand
-// Piano.  Fixture: instruments_gm_perc_range_taiko.enc, prg=116 (Taiko Drum).
-// Triggered by real-world files with performer-named staves in that range.
-// ===========================================================================
+// A MIDI program in the GM percussive range with a name matching no template must route to drumset,
+// not fall back to Grand Piano.
 TEST_F(Tst_Instruments, gm_perc_range_midi_program_routes_to_drumset)
 {
     MasterScore* score = readEncoreScore("instruments_gm_perc_range_taiko.enc");
@@ -718,17 +684,10 @@ TEST_F(Tst_Instruments, gm_perc_range_midi_program_routes_to_drumset)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: encKey=0 ("sounds as written") must zero the template's OCTAVE
-// transposition, not just non-octave ones.
-// The acoustic-bass template carries transposeChromatic=-12; without the fix
-// the importer keeps that -12 (the guard `chromatic % 12 != 0` skips -12),
-// causing notes to display one octave too high in written-pitch view.
-// ===========================================================================
+// encKey=0 ("sounds as written") must zero even an octave template transposition (e.g. acoustic-bass -12),
+// so notes display at Encore's written pitch. See ENCORE_IMPORTER.md §Per-instrument Key transposition.
 TEST_F(Tst_Instruments, key0_zeroes_octave_template_transposition)
 {
-    // "Bajo" + MIDI 33 resolves to acoustic-bass (transposeChromatic=-12).
-    // encKey=0 means "sounds as written" so the -12 must be zeroed.
     MasterScore* score = readEncoreScore("instruments_bass_enckey0_no_octave_transpos.enc");
     ASSERT_NE(score, nullptr);
     ASSERT_FALSE(score->parts().empty());
@@ -738,7 +697,6 @@ TEST_F(Tst_Instruments, key0_zeroes_octave_template_transposition)
         << "encKey=0 (sounds as written) must zero the template's octave transposition (-12) "
         "so notes display at Encore's written pitch, not one octave higher";
 
-    // Verify the note pitch is preserved at the Encore-stored value (A2=45).
     Measure* m = score->firstMeasure();
     ASSERT_NE(m, nullptr);
     Segment* seg = m->first(SegmentType::ChordRest);
@@ -751,16 +709,10 @@ TEST_F(Tst_Instruments, key0_zeroes_octave_template_transposition)
     delete score;
 }
 
-// ===========================================================================
-// FIX: findTemplateByMidi() was matching tremolo/secondary channels and
-// returning Acoustic Bass for MIDI 44 (Tremolo Strings).  Only the first
-// channel of each instrument template is now used for MIDI lookup.
-// ===========================================================================
+// MIDI lookup must use only each template's primary channel, so MIDI 44 (Tremolo Strings) does not match
+// acoustic-bass via its tremolo secondary channel.
 TEST_F(Tst_Instruments, midi44_does_not_resolve_to_acoustic_bass_via_tremolo_channel)
 {
-    // instruments_compact_no_tk_midi_oboe.enc has MIDI 69 (Oboe) which resolves
-    // correctly.  The regression: MIDI 44 (Tremolo Strings) must NOT give
-    // acoustic-bass (which has program 44 only in its tremolo secondary channel).
     MasterScore* score = readEncoreScore("instruments_compact_no_tk_midi_oboe.enc");
     ASSERT_NE(score, nullptr);
     ASSERT_FALSE(score->parts().empty());
@@ -771,15 +723,9 @@ TEST_F(Tst_Instruments, midi44_does_not_resolve_to_acoustic_bass_via_tremolo_cha
     delete score;
 }
 
-// ===========================================================================
-// FIX: Instrument names ending in punctuation (e.g. "Bandurr.") were not
-// matching template names via substring because the dot was kept in the
-// needle.  After stripping trailing punctuation, "Bandurr." → "Bandurr"
-// which matches "Bandurria" via contains().
-// ===========================================================================
+// Trailing punctuation must be stripped from the name needle so "Bandurr. I" matches Bandurria.
 TEST_F(Tst_Instruments, abbreviated_name_with_trailing_dot_matches_bandurria)
 {
-    // instruments_abbreviated_name_bandurr.enc has TK name "Bandurr. I".
     MasterScore* score = readEncoreScore("instruments_abbreviated_name_bandurr.enc");
     ASSERT_NE(score, nullptr);
     ASSERT_FALSE(score->parts().empty());
@@ -790,25 +736,15 @@ TEST_F(Tst_Instruments, abbreviated_name_with_trailing_dot_matches_bandurria)
     delete score;
 }
 
-// ===========================================================================
-// FIX: v0xC2 files without a ~~~~ block use a different compact-table layout
-// (entries at NAME_BASE+n*112, MIDI at 262+n*112) compared to ~~~~-block
-// files (NAME_BASE+n*2158, MIDI at 374+k*112).  Before the fix, names were
-// read with step=2158 (landing in LINE data) and MIDI was read from entry
-// k+1 instead of entry k, so instrument [0] received the name and MIDI of
-// instrument [1], [1] got [2]'s data, etc. (duplicated names, shifted MIDI).
-// ===========================================================================
+// v0xC2 files without a ~~~~ block use a distinct compact-table layout; using the ~~~~ stride/offsets
+// shifts each instrument's name and MIDI by one entry. Names must stay on their own instrument.
 TEST_F(Tst_Instruments, c2_no_tilde_compact_instr1_name_not_duplicated_to_instr0)
 {
-    // instruments_c2_no_tilde_compact_names_midi.enc:
-    //   [0] no name, MIDI=49   [1] "Guitarra", MIDI=25   [2] no name, MIDI=57
     MasterScore* score = readEncoreScore("instruments_c2_no_tilde_compact_names_midi.enc");
     ASSERT_NE(score, nullptr);
     ASSERT_EQ(score->parts().size(), 3u);
-    // Part 1 must have the name "Guitarra" (not shifted to part 0).
     EXPECT_EQ(score->parts()[1]->longName(), String(u"Guitarra"))
         << "Name 'Guitarra' must be assigned to instrument [1], not [0]";
-    // Part 0 must NOT have "Guitarra" (would indicate the old shift bug).
     EXPECT_NE(score->parts()[0]->longName(), String(u"Guitarra"))
         << "Instrument [0] must not receive instrument [1]'s name";
     delete score;
@@ -816,10 +752,8 @@ TEST_F(Tst_Instruments, c2_no_tilde_compact_instr1_name_not_duplicated_to_instr0
 
 TEST_F(Tst_Instruments, c2_no_tilde_compact_midi_assigned_to_correct_instr)
 {
-    // Same file: verify MIDI programs are not shifted by one entry.
-    // [0] MIDI=49, [1] MIDI=25 (name "Guitarra"), [2] MIDI=57.
-    // Old bug: [0] received entry[1]'s MIDI=25 and matched Classical Guitar,
-    // making [0] and [1] both resolve to the same instrument.
+    // Same file: MIDI programs must not be shifted by one entry, so adjacent instruments do not collapse
+    // to the same template.
     MasterScore* score = readEncoreScore("instruments_c2_no_tilde_compact_names_midi.enc");
     ASSERT_NE(score, nullptr);
     ASSERT_EQ(score->parts().size(), 3u);
@@ -831,17 +765,10 @@ TEST_F(Tst_Instruments, c2_no_tilde_compact_midi_assigned_to_correct_instr)
     delete score;
 }
 
-// ===========================================================================
-// FIX: v0xC2 ~~~~-block files where instrument n has printable ASCII at
-// NAME_BASE+n*NAME_STEP (hasPrimaryBlock=true) now have their MIDI read
-// from block_start+60 instead of being silently skipped (midiProgram=0).
-// Regression: "Voz 1" in pajarilo.enc was getting midiProgram=0 before fix.
-// ===========================================================================
+// In v0xC2 ~~~~-block files, an instrument whose name block has printable ASCII must still have its MIDI
+// read from block+60 rather than being skipped (which left midiProgram 0 -> Grand Piano).
 TEST_F(Tst_Instruments, c2_tilde_primary_block_midi_read_from_offset_60)
 {
-    // instruments_c2_tilde_primary_block_midi.enc: ~~~~-block file, single
-    // instrument with printable ASCII 'V' at offset 202 (hasPrimaryBlock=true).
-    // MIDI=25 at 202+60=262 must be read (-> Classical Guitar, not Grand Piano).
     MasterScore* score = readEncoreScore("instruments_c2_tilde_primary_block_midi.enc");
     ASSERT_NE(score, nullptr);
     ASSERT_EQ(score->parts().size(), 1u);
@@ -868,8 +795,10 @@ TEST_F(Tst_Instruments, orchestra_sanity_check)
     delete score;
 }
 
-// Binary-driven clef rule: G clef + Key=+12 -> G8_VA. No template required.
-TEST_F(Tst_Instruments, v0c4_g_clef_8va_from_key)
+// Positive octave Key: a clef is NOT decorated with an 8va (octave-up clefs are rare and Encore
+// shows such instruments with a plain clef). The octave becomes a playback transposition, so the
+// staff keeps its plain G clef and the notes stay at their written height.
+TEST_F(Tst_Instruments, v0c4_positive_octave_key_keeps_g_clef)
 {
     MasterScore* score = readEncoreScore("structure_g_clef_8va_from_key.enc");
     ASSERT_NE(score, nullptr);
@@ -879,8 +808,11 @@ TEST_F(Tst_Instruments, v0c4_g_clef_8va_from_key)
     ASSERT_NE(seg, nullptr);
     EngravingItem* el = seg->element(0);
     ASSERT_TRUE(el && el->isClef());
-    EXPECT_EQ(toClef(el)->clefType(), ClefType::G8_VA)
-        << "G clef + Key=+12 must yield G8_VA";
+    EXPECT_EQ(toClef(el)->clefType(), ClefType::G)
+        << "G clef + Key=+12 must keep a plain G clef (no 8va)";
+    ASSERT_FALSE(score->parts().empty());
+    EXPECT_EQ(score->parts()[0]->instrument()->transpose().chromatic, 12)
+        << "positive octave is carried as a playback transposition (+12)";
     delete score;
 }
 
@@ -900,8 +832,9 @@ TEST_F(Tst_Instruments, v0c4_f_clef_8vb_from_key)
     delete score;
 }
 
-// Binary-driven clef rule: F clef + Key=+12 -> F_8VA. No template required.
-TEST_F(Tst_Instruments, v0c4_f_clef_8va_from_key)
+// Positive octave Key with an F clef (the tuba "Bajo" case): keep a plain F clef and carry the
+// octave as a playback transposition, so the bass instrument reads as clave de fa, not F8va.
+TEST_F(Tst_Instruments, v0c4_positive_octave_key_keeps_f_clef)
 {
     MasterScore* score = readEncoreScore("structure_f_clef_8va_from_key.enc");
     ASSERT_NE(score, nullptr);
@@ -911,8 +844,58 @@ TEST_F(Tst_Instruments, v0c4_f_clef_8va_from_key)
     ASSERT_NE(seg, nullptr);
     EngravingItem* el = seg->element(0);
     ASSERT_TRUE(el && el->isClef());
-    EXPECT_EQ(toClef(el)->clefType(), ClefType::F_8VA)
-        << "F clef + Key=+12 must yield F_8VA";
+    EXPECT_EQ(toClef(el)->clefType(), ClefType::F)
+        << "F clef + Key=+12 must keep a plain F clef (no 8va)";
+    ASSERT_FALSE(score->parts().empty());
+    EXPECT_EQ(score->parts()[0]->instrument()->transpose().chromatic, 12)
+        << "positive octave is carried as a playback transposition (+12)";
+    delete score;
+}
+
+// Tokenizer: a trailing ordinal after a non-space separator ("Trumpet-1") must be stripped so
+// the base name "Trumpet" still matches. MIDI 41 (Violin) is the wrong answer if it is not.
+TEST_F(Tst_Instruments, instrument_name_trailing_number_after_dash_stripped)
+{
+    MasterScore* score = readEncoreScore("instruments_name_trailing_number.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts()[0]->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(inst->id().contains(String(u"trumpet")))
+        << "\"Trumpet-1\" must match a Trumpet (trailing \"-1\" stripped), not the MIDI fallback; got "
+        << inst->id().toStdString();
+    delete score;
+}
+
+// Tokenizer: words split on '-' (not only spaces), so "French-Horn" yields the needle "horn"
+// and matches the Horn template. MIDI 41 (Violin) is the wrong answer if the split fails.
+TEST_F(Tst_Instruments, instrument_name_splits_on_dash_separator)
+{
+    MasterScore* score = readEncoreScore("instruments_name_dash_separator.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts()[0]->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(inst->id().contains(String(u"horn")))
+        << "\"French-Horn\" must split on '-' and match a Horn, not the MIDI fallback; got "
+        << inst->id().toStdString();
+    delete score;
+}
+
+// Weak (substring-only) name match must not let a treble bugle sharing the tuba's MIDI program
+// outrank the GM instrument. "Contrabass" + MIDI 59 (Tuba) resolves to a bass-clef instrument,
+// not the treble "Contrabass Bugle". Mirrors the Spanish "Bajo" -> "Clarín contrabajo" case.
+TEST_F(Tst_Instruments, instrument_weak_substring_name_defers_to_midi)
+{
+    MasterScore* score = readEncoreScore("instruments_weak_name_defers_to_midi.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts()[0]->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_NE(inst->id(), String(u"contrabass-bugle"))
+        << "weak substring name match must not pick the treble bugle";
+    EXPECT_TRUE(inst->id().contains(String(u"tuba")))
+        << "must defer to MIDI program 59 (Tuba); got " << inst->id().toStdString();
     delete score;
 }
 
@@ -1164,3 +1147,89 @@ TEST_F(Tst_Instruments, midi_mapping_is_built_for_every_part)
     }
     delete score;
 }
+
+// Name-confidence matcher tests, calling the matcher directly. A confident match (exact, unique, or an
+// unambiguous normalized/plural/fuzzy match) must be flagged confident so the weak-name -> MIDI override
+// does not discard it for a placeholder program.
+TEST_F(Tst_Instruments, plural_name_depluralized_and_unique)
+{
+    using namespace mu::iex::enc;
+    bool exact = false, unique = false;
+    // A plural name must collapse to its singular stem and match the unique template confidently.
+    const InstrumentTemplate* t = findEncoreInstrumentTemplate(
+        QStringLiteral("Bandurrias"), -1, ENC_KEY_NO_FILTER, &exact, &unique);
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(t->id, String(u"bandurria"));
+    EXPECT_TRUE(exact || unique)
+        << "a depluralized stem must match the Bandurria template confidently, not weakly";
+}
+
+TEST_F(Tst_Instruments, attached_digit_name_normalized)
+{
+    using namespace mu::iex::enc;
+    bool exact = false, unique = false;
+    // "Bandurria1" (digit attached, no separator) must normalize to "Bandurria".
+    const InstrumentTemplate* t = findEncoreInstrumentTemplate(
+        QStringLiteral("Bandurria1"), -1, ENC_KEY_NO_FILTER, &exact, &unique);
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(t->id, String(u"bandurria"));
+    EXPECT_TRUE(exact || unique) << "attached part number must be stripped to a confident match";
+}
+
+TEST_F(Tst_Instruments, fuzzy_unique_name_reported_unique)
+{
+    using namespace mu::iex::enc;
+    bool exact = false, unique = false;
+    // "Acordeon" fuzzy-matches only "accordion"; a single close template is confident.
+    const InstrumentTemplate* t = findEncoreInstrumentTemplate(
+        QStringLiteral("Acordeon"), -1, ENC_KEY_NO_FILTER, &exact, &unique);
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(t->id, String(u"accordion"));
+    EXPECT_TRUE(unique) << "a fuzzy match that is the only template above threshold must be unique";
+}
+
+TEST_F(Tst_Instruments, ambiguous_name_still_not_unique)
+{
+    using namespace mu::iex::enc;
+    bool exact = false, unique = false;
+    // Regression guard: "Guitarra" contains-matches many guitar templates, so it must stay
+    // non-unique and keep deferring to the MIDI program (Classical Guitar via MIDI 25).
+    const InstrumentTemplate* t = findEncoreInstrumentTemplate(
+        QStringLiteral("Guitarra"), -1, ENC_KEY_NO_FILTER, &exact, &unique);
+    ASSERT_NE(t, nullptr);
+    EXPECT_FALSE(exact);
+    EXPECT_FALSE(unique) << "an ambiguous substring name must remain weak so MIDI can correct it";
+}
+
+// Class B: a configured MIDI program that no template carries as its primary sound must fall
+// back to the nearest template in the same General MIDI family, not to Grand Piano.
+TEST_F(Tst_Instruments, gm_family_fallback_for_unmapped_program)
+{
+    using namespace mu::iex::enc;
+    constexpr int kPizzicatoStrings0 = 45;   // GM 46, 0-indexed; Strings family (40..47)
+    EXPECT_EQ(findTemplateByMidi(kPizzicatoStrings0), nullptr)
+        << "precondition: no template has Pizzicato Strings as its primary program";
+    const InstrumentTemplate* t = findTemplateByMidiFamily(kPizzicatoStrings0);
+    ASSERT_NE(t, nullptr);
+    ASSERT_FALSE(t->channel.empty());
+    const int prog = t->channel.front().program();
+    EXPECT_GE(prog, 40);
+    EXPECT_LE(prog, 47) << "family fallback must stay within the Strings family, not Grand Piano";
+}
+
+// Regression: SCO5 (big-endian macOS Encore 5) frames every block's size big-endian
+// except the TK instrument blocks, whose size is little-endian ("70 00 00 00" = 112).
+// Reading it big-endian and masking to 16 bits yielded 0, so the name-scan loop ran
+// zero times and only the first instrument name survived (recovered by position); the
+// rest imported as "Part N". The importer must undo the big-endian read of the TK size.
+TEST_F(Tst_Instruments, sco5_tk_block_instrument_names)
+{
+    MasterScore* score = readEncoreScore("instruments_sco5_tk_names.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load instruments_sco5_tk_names.enc";
+    ASSERT_EQ(score->parts().size(), 2u) << "expected 2 instruments";
+    EXPECT_EQ(score->parts().at(0)->longName(), String(u"CORNETA 1"));
+    EXPECT_EQ(score->parts().at(1)->longName(), String(u"TROMPETA 2"))
+        << "second TK-block name must import, not fall back to a default";
+    delete score;
+}
+
