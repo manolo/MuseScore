@@ -1,0 +1,258 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-only
+ * MuseScore-Studio-CLA-applies
+ *
+ * MuseScore Studio
+ * Music Composition & Notation
+ *
+ * Copyright (C) 2026 MuseScore Limited and others
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#ifndef MU_IMPORTEXPORT_ENC_IMPORT_CTX_H
+#define MU_IMPORTEXPORT_ENC_IMPORT_CTX_H
+
+#include "import-options.h"
+
+#include <map>
+#include <set>
+#include <memory>
+#include <vector>
+
+#include <QtGlobal>
+
+#include "../parser/elem.h"
+#include "../parser/readers.h"
+#include "emitters-tuplets.h"
+#include "engraving/types/fraction.h"
+#include "engraving/types/symid.h"
+#include "engraving/dom/lyrics.h"
+#include "engraving/dom/hairpin.h"
+#include "engraving/dom/masterscore.h"
+#include "engraving/dom/timesig.h"
+#include "engraving/dom/arpeggio.h"
+#include "engraving/dom/ornament.h"
+#include "engraving/dom/marker.h"
+
+using namespace mu::engraving;
+
+namespace mu::iex::enc {
+// LINE staff-data entry for the given running staff index, or nullptr when the file has no
+// LINE block or the index is out of range. Centralizes the "lines non-empty + index in range"
+// guard repeated by the part/staff routing.
+inline const EncLineStaffData* lineStaffDataAt(const EncRoot& enc, int idx)
+{
+    if (enc.lines.empty() || idx < 0
+        || idx >= static_cast<int>(enc.lines[0].staffData.size())) {
+        return nullptr;
+    }
+    return &enc.lines[0].staffData[static_cast<size_t>(idx)];
+}
+
+struct PendingSlur {
+    Fraction startTick;
+    track_idx_t track;
+    int startMeasIdx;
+    int endMeasIdx;
+    int alMezuro;
+    bool alMezuroValid { true };  // false when format cannot guarantee measure-count semantics
+    int slurXoffset;
+    int slurXoffset2;
+    int staffIdx;
+    int encVoice;
+};
+
+// Hairpin end resolved in post-pass to the next Dynamic on the same track (not the barline).
+struct PendingHairpin {
+    Fraction startTick;
+    Fraction maxEndTick;     // end of alMezuro target measure (upper bound)
+    track_idx_t track;
+    HairpinType type;
+    int endMeasIdx;
+    int hairpinXoffset2;
+    int staffIdx;
+    int encVoice;
+};
+
+// Deferred: ORN precedes chord notes in MEAS order, so the chord does not exist at parse time.
+struct PendingArpeggio {
+    Fraction tick;
+    track_idx_t track;
+};
+
+// Single-chord tremolo (tipo 0xAF/0xEF), deferred like ARPEGGIO. Post-pass falls back to latest chord before the tick.
+struct PendingOrnTremolo {
+    Fraction tick;
+    Fraction measTick;
+    int staffIdx;
+    int msVoice;
+    TremoloType tremType;
+};
+
+// Trill intents (tipo 0x35/0x36/0x37), deferred for the same reason as ARPEGGIO.
+struct PendingTrill {
+    Fraction tick;
+    track_idx_t track;
+    int alMezuro { 0 };           // forward measure count to trill end (0 = same measure)
+    size_t measIdx  { 0 };
+    int xoffset2 { 0 };           // end x-position hint for same-measure endpoint detection
+    bool isAlt    { false };      // TRILL_ALT (0x37): secondary mark, always Ornament glyph
+    bool isSimple { false };      // TRILL_TR/TRILL_SHORT: standalone glyph, never a spanner
+    mu::engraving::SymId simpleSymId { mu::engraving::SymId::ornamentTrill };
+};
+
+// Staccato (tipo 0xC9), deferred like ARPEGGIO.
+struct PendingStaccato {
+    Fraction tick;
+    track_idx_t track;
+};
+
+// Fermata (tipo 0xCC/0xCD), deferred like ARPEGGIO.
+struct PendingFermata {
+    Fraction tick;
+    track_idx_t track;
+    mu::engraving::SymId symId;
+};
+
+// Breath / caesura (tipo 0xA7/0xA8).
+struct PendingBreath {
+    Fraction tick;
+    track_idx_t track;
+    mu::engraving::SymId symId;
+};
+
+// Measure repeat (tipo 0xA3).
+struct PendingMeasureRepeat {
+    Fraction measTick;
+    int staffIdx;
+};
+
+// Bowing/stroke (tipo 0xC4/0xC5), deferred like ARPEGGIO.
+// v0xC4: 0xC4=stringsUpBow, 0xC5=stringsDownBow; v0xC2: 0xC4=articAccentAbove.
+struct PendingBowing {
+    Fraction tick;
+    track_idx_t track;
+    mu::engraving::SymId symId;
+    int measIdx = -1;
+    bool crossMeasure = false;  // no voice=0 note at same enc tick; belongs to next measure
+    int ornXoffset = 0;         // absolute horizontal pixel position (for xoffset-cluster correction)
+    int encTickRaw = 0;
+};
+
+// Fingering from stand-alone ORN elements (tipo 0xB9..0xBD), deferred like ARPEGGIO.
+// Also used for standalone string-number ORNs (0xE6..0xEA = strings 2..6); those set
+// isStringNum=true and the resolver uses TextStyleType::STRING_NUMBER.
+struct PendingOrnFingering {
+    Fraction tick;
+    track_idx_t track;
+    int fingerNum;
+    int measIdx = -1;
+    bool crossMeasure = false;   // ORN at last v0 tick, no v4 note there: belongs to next measure
+    bool preferSibling = false;  // more ORNs than v0 notes at tick: belongs to 2nd-staff chord
+    bool isStringNum  = false;   // true → render as STRING_NUMBER (circled), not FINGERING
+};
+
+// Segno/Coda markers (tipo 0xA2/0xA6).
+struct PendingMarker {
+    Fraction tick;
+    MarkerType type;
+};
+
+// Lyric syllables queued for attachment. encTick lets us find the correct chord even
+// when queue index shifts due to ORN elements.
+struct PendingLyric {
+    int encTick;
+    String text;
+    bool hyphenBefore;
+    bool hyphenAfter;
+};
+
+struct BuildCtx
+{
+    mu::engraving::MasterScore* score;
+    const EncRoot& enc;
+    EncImportOptions opts;
+
+    // Populated by buildParts():
+    int totalStaves = 0;
+    std::vector<int> staffPitchOffset {};
+    std::vector<ClefType> staffTemplateConcertClef {};
+    std::vector<ClefType> staffTemplateTransposingClef {};
+
+    // Nominal time sig of the score (differs from measures[0] when the first measure is a pickup).
+    Fraction nominalTimeSig { 4, 4 };
+    TimeSigType nominalTimeSigType { TimeSigType::NORMAL };
+
+    // Tick → TimeSigType for measures with non-numeric display (e.g. common time "C").
+    std::map<int, TimeSigType> measTickToTimeSigType {};
+
+    // encToMsIdx[i] = MuseScore measure index of the first measure from enc.measures[i].
+    // Accounts for multi-measure rest expansion (mrestCount > 1).
+    std::vector<size_t> encToMsIdx {};
+
+    std::vector<Measure*> measuresByIdx {};
+    std::vector<PendingHairpin> pendingHairpins {};
+    std::vector<PendingSlur> pendingSlurs {};
+    std::vector<PendingArpeggio> pendingArpeggios {};
+    std::vector<PendingOrnTremolo> pendingOrnTremolos {};
+    std::vector<PendingTrill> pendingTrills {};
+    // TRILL_END ticks by track; consumed by resolveOrnaments() to compute span endpoints.
+    std::map<track_idx_t, std::vector<mu::engraving::Fraction> > pendingTrillEnds {};
+    std::vector<PendingStaccato> pendingStaccatos {};
+    std::vector<PendingFermata> pendingFermatas {};
+    std::vector<PendingBreath> pendingBreaths {};
+    std::vector<PendingMeasureRepeat> pendingMeasureRepeats {};
+    std::vector<PendingBowing> pendingBowings {};
+    // (measIdx, staffIdx) → list of (enc_tick, note.xoffset) for bowing xoffset clustering.
+    std::map<std::pair<int, int>, std::vector<std::pair<int, int> > > noteXoffByMeasStaff {};
+    std::vector<PendingOrnFingering> pendingOrnFingerings {};
+    std::vector<PendingMarker> pendingMarkers {};
+    std::map<track_idx_t, std::vector<PendingLyric> > pendingLyrics {};
+
+    // Volta being coalesced: equal-bitmask runs collapse into one Volta.
+    Volta* activeVolta { nullptr };
+    quint8 activeVoltaBits { 0 };
+    // Accumulated bitmask of all volta brackets already emitted in the current repeat block.
+    // Used to suppress endings that were already labelled in an earlier bracket (e.g. "1.-3."
+    // followed by a bitmask of {2,4} → only show "4." for the second bracket, not "2, 4.").
+    quint8 usedVoltaBits { 0 };
+
+    std::map<std::pair<int, int>, TupletTracker> tuplets {};
+
+    // Pending tie-start notes, persists across measures. key=(staffIdx, voice, pitch).
+    std::map<std::tuple<int, int, int>, Note*> pendingTieNote {};
+
+    // Accumulated written position per (staffIdx, msVoice).
+    std::map<std::pair<int, int>, Fraction> cumTick {};
+    // Last MIDI tick placed; same tick = same chord.
+    std::map<std::pair<int, int>, int> prevMidiTick {};
+    // Encore voice of last note placed; guards against chord-extension misdetection.
+    std::map<std::pair<int, int>, int> prevEncVoice {};
+    std::map<std::pair<int, int>, Fraction> lastChordPos {};
+    // Last enc tick at which a REST was placed; absorbs duplicate rests when multiple
+    // Encore voices route to the same MuseScore voice.
+    std::map<std::pair<int, int>, int> prevRestTick {};
+
+    // Grace chords held detached; attached to the next normal chord.
+    std::map<std::pair<int, int>, std::vector<Chord*> > pendingGraces {};
+    // Ticks borrowed by grace notes; suppresses spurious gap-snap rests after a grace group.
+    std::map<std::pair<int, int>, int> graceStolenTicks {};
+    // Inner (nested) TupletTrackers; cleared each measure alongside tuplets.
+    std::map<std::pair<int, int>, TupletTracker> innerTuplets {};
+    // True when the next syllable follows a hyphen; reset at measure boundary.
+    std::map<track_idx_t, bool> nextLyricHyphenBefore {};
+};
+} // namespace mu::iex::enc
+
+#endif // MU_IMPORTEXPORT_ENC_IMPORT_CTX_H
