@@ -22,9 +22,11 @@
 
 #include <gtest/gtest.h>
 
+#include "engraving/dom/chord.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/keysig.h"
+#include "engraving/dom/note.h"
 #include "engraving/dom/part.h"
 #include "engraving/dom/segment.h"
 #include "engraving/dom/staff.h"
@@ -392,6 +394,222 @@ TEST_F(Tst_Structure, page_margins_wini_screen_pixel_a4_detected)
     const double rightM = kA4W - kExpectedM - printW;
     EXPECT_NEAR(rightM, kExpectedM, 0.01)
         << "Screen-pixel WINI: right margin must be ~0.33\"";
+
+    delete score;
+}
+
+// ===========================================================================
+// FIX: KEYCHANGE tipo=0 (C major modulation) must be emitted; previous guard silently dropped it.
+// ===========================================================================
+
+TEST_F(Tst_Structure, keychange_to_c_major_emitted)
+{
+    MasterScore* score = readEncoreScore("structure_keychange_to_c.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int keySigCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        Measure* m = toMeasure(mb);
+        for (Segment* s = m->first(SegmentType::KeySig); s; s = s->next(SegmentType::KeySig)) {
+            if (s->element(0)) {
+                ++keySigCount;
+            }
+        }
+    }
+    // Initial key sig (m0 G major) + tipo=0 modulation sig (m1); both must be present.
+    EXPECT_GE(keySigCount, 2);
+    delete score;
+}
+
+// ===========================================================================
+// FIX: v0xC2 (old Encore format) -- MIDI pitch stored at byte +13 (tuplet field), not semiTonePitch.
+// ===========================================================================
+
+TEST_F(Tst_Structure, old_format_v0c2_correct_pitches)
+{
+    // v0xC2: MIDI pitch at byte +13 (tuplet-field); needsPitchFix swaps it to semiTonePitch.
+    MasterScore* score = readEncoreScore("structure_v0c2_pitches.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<int> pitches;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->elist()) {
+                if (e && e->isChord()) {
+                    for (Note* n : toChord(e)->notes()) {
+                        pitches.push_back(n->pitch());
+                    }
+                }
+            }
+        }
+    }
+    ASSERT_EQ(pitches.size(), 4u) << "Should have 4 notes";
+    EXPECT_EQ(pitches[0], 60) << "First note should be C4 (60)";
+    EXPECT_EQ(pitches[1], 64) << "Second note should be E4 (64)";
+    EXPECT_EQ(pitches[2], 67) << "Third note should be G4 (67)";
+    EXPECT_EQ(pitches[3], 72) << "Fourth note should be C5 (72)";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "v0xC2 pitch-fixed score should pass sanityCheck: " << ret.text();
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Pickup measure (Case A and Case B) shortening.
+// ===========================================================================
+
+// The importer should produce a shortened first measure (actual ticks=1/4)
+// that displays the nominal 4/4 time signature. The pickup note is at
+// offset 0 within the short measure, and m1 starts right after at tick=1/4.
+TEST_F(Tst_Structure, pickup_measure_shortened)
+{
+    MasterScore* score = readEncoreScore("structure_pickup_measure.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    Measure* m1 = measureAt(score, 1);
+    ASSERT_NE(m0, nullptr);
+    ASSERT_NE(m1, nullptr);
+
+    EXPECT_EQ(m0->timesig(), Fraction(4, 4)) << "Pickup m0 must display the nominal 4/4 time signature";
+    EXPECT_EQ(m0->ticks(), Fraction(1, 4)) << "Pickup m0 must be shortened to the pickup duration";
+    EXPECT_EQ(m1->tick(), Fraction(1, 4)) << "m1 must start immediately after the shortened m0";
+
+    // The pickup note must be at offset 0 within the short measure.
+    Fraction noteOffset { -1, 1 };
+    for (Segment* s = m0->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) {
+            noteOffset = s->tick() - m0->tick();
+            break;
+        }
+    }
+    EXPECT_EQ(noteOffset, Fraction(0, 1)) << "Pickup note must be at offset 0 within the shortened m0";
+
+    delete score;
+}
+
+// Case B (pure cumTick): same timeSig=4/4, 8 32nd notes from tick=0.
+// No gap-snap (notes at exact cumTick positions). cumTick = 8/32 = 1/4.
+// Measure 0 must be shortened to 1/4 based purely on cumTick, no barline needed.
+TEST_F(Tst_Structure, pickup_caseb_reduces_to_max_content)
+{
+    MasterScore* score = readEncoreScore("structure_pickup_caseb_reduces.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    Measure* m1 = measureAt(score, 1);
+    ASSERT_NE(m0, nullptr);
+    ASSERT_NE(m1, nullptr);
+
+    EXPECT_EQ(m0->timesig(), Fraction(4, 4)) << "Pickup m0 must display nominal 4/4";
+    EXPECT_EQ(m0->ticks(), Fraction(1, 4)) << "Pickup m0 must be shortened to cumTick=8/32=1/4";
+    EXPECT_EQ(m1->tick(), Fraction(1, 4)) << "m1 must start immediately after the shortened m0";
+
+    delete score;
+}
+
+// Case B: whole note (fv=1) at tick=0 fills the measure completely.
+// cumTick = 1 = measure->ticks() -> NOT less than -> no shortening.
+TEST_F(Tst_Structure, pickup_caseb_no_reduce_when_full_content)
+{
+    MasterScore* score = readEncoreScore("structure_pickup_caseb_no_reduce_full.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+
+    EXPECT_EQ(m0->ticks(), Fraction(4, 4)) << "Measure 0 must NOT be shortened: whole note cumTick=1=measure->ticks()";
+
+    delete score;
+}
+
+// Regression: Case A pickup (timeSig[0]=2/4, timeSig[1]=4/4) whose note-loop
+// content is less than the short ts (cumTick=3/8 < ticks=2/4). The Case B
+// shortening guard must fire (timesig=4/4 != ticks=2/4) and leave measure 0
+// at 2/4. Without the guard, Case B would double-shorten to 3/8 and shift all
+// subsequent measures by an extra 1/8.
+TEST_F(Tst_Structure, pickup_casea_guard_prevents_double_shortening)
+{
+    MasterScore* score = readEncoreScore("structure_pickup_casea_sparse.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    Measure* m1 = measureAt(score, 1);
+    ASSERT_NE(m0, nullptr);
+    ASSERT_NE(m1, nullptr);
+
+    EXPECT_EQ(m0->timesig(), Fraction(4, 4)) << "Case A pickup must display nominal 4/4";
+    EXPECT_EQ(m0->ticks(), Fraction(2, 4)) << "Case A pickup must stay at its explicit 2/4, not be further shortened by Case B";
+    EXPECT_EQ(m1->tick(), Fraction(2, 4)) << "m1 must start at 2/4, not be shifted by a spurious Case B delta";
+
+    delete score;
+}
+
+// ===========================================================================
+// FIX: v0xC2 time signature glyph byte (0x63 = 'c' = common time).
+// ===========================================================================
+
+// v0xC2 4/4 with timeSigGlyph=0x63 ('c' = common time "C" symbol in Encore).
+// Regression: the initial TimeSig must have TimeSigType::FOUR_FOUR, not NORMAL.
+// Without the fix the glyph byte was ignored and all v0xC2 4/4 scores displayed
+// numeric "4/4" even when the original had the "C" symbol.
+TEST_F(Tst_Structure, timesig_v0c2_common_time_glyph_preserved)
+{
+    MasterScore* score = readEncoreScore("notes_v0c2_common_time_glyph.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+
+    Segment* tsSeg = m0->findSegment(SegmentType::TimeSig, m0->tick());
+    ASSERT_NE(tsSeg, nullptr) << "Measure 0 must have a TimeSig segment";
+
+    bool foundFourFour = false;
+    for (EngravingItem* el : tsSeg->elist()) {
+        if (el && el->isTimeSig()) {
+            TimeSig* ts = toTimeSig(el);
+            if (ts->timeSigType() == TimeSigType::FOUR_FOUR) {
+                foundFourFour = true;
+            }
+        }
+    }
+    EXPECT_TRUE(foundFourFour) << "TimeSig glyph 0x63 must produce TimeSigType::FOUR_FOUR (common time C), not NORMAL";
+
+    delete score;
+}
+
+// Same as above but for glyph=0x43 ('C', uppercase ASCII), the variant produced by
+// older Encore versions (e.g. Encore 3.x/4.x files vs. 5.x files with 0x63).
+TEST_F(Tst_Structure, timesig_v0c2_common_time_glyph_uppercase_preserved)
+{
+    MasterScore* score = readEncoreScore("notes_v0c2_common_time_glyph_uc.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+
+    Segment* tsSeg = m0->findSegment(SegmentType::TimeSig, m0->tick());
+    ASSERT_NE(tsSeg, nullptr) << "Measure 0 must have a TimeSig segment";
+
+    bool foundFourFour = false;
+    for (EngravingItem* el : tsSeg->elist()) {
+        if (el && el->isTimeSig()) {
+            TimeSig* ts = toTimeSig(el);
+            if (ts->timeSigType() == TimeSigType::FOUR_FOUR) {
+                foundFourFour = true;
+            }
+        }
+    }
+    EXPECT_TRUE(foundFourFour) << "TimeSig glyph 0x43 must produce TimeSigType::FOUR_FOUR (common time C), not NORMAL";
 
     delete score;
 }

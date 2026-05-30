@@ -32,6 +32,8 @@ set(MODULE_TEST_SRC
     ${CMAKE_CURRENT_LIST_DIR}/tst_instruments.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tst_staff_size.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tst_structure.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tst_notes.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tst_notes_mrest.cpp
 )
 
 set(MODULE_TEST_LINK
