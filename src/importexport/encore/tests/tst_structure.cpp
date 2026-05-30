@@ -30,6 +30,7 @@
 #include "engraving/dom/part.h"
 #include "engraving/dom/segment.h"
 #include "engraving/dom/staff.h"
+#include "engraving/dom/tempotext.h"
 #include "engraving/dom/timesig.h"
 #include "engraving/style/style.h"
 #include "engraving/types/fraction.h"
@@ -341,6 +342,27 @@ TEST_F(Tst_Structure, page_margins_wini_custom_left)
     delete score;
 }
 
+// File with WINI top=0 left=0 (zero margins, full-page printable area).
+// ornaments_fingering_grandstaff.enc: top=0 left=0 bEdge=842 rEdge=595.
+// Zero margins are clamped to the minimum safe values so staves stay within the page.
+TEST_F(Tst_Structure, page_margins_wini_zero_margins_clamped)
+{
+    MasterScore* score = readEncoreScore("ornaments_fingering_grandstaff.enc");
+    ASSERT_NE(score, nullptr);
+
+    // Margins clamped to minimums: LR=0.03", TB=0.10".
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddTopMargin),    0.10, 0.001);
+    EXPECT_NEAR(score->style().styleD(Sid::pageEvenTopMargin),   0.10, 0.001);
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddLeftMargin),   0.03, 0.001);
+    EXPECT_NEAR(score->style().styleD(Sid::pageEvenLeftMargin),  0.03, 0.001);
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddBottomMargin), 0.10, 0.001);
+    // printableWidth capped to pageWidth - leftMargin - minRightMargin.
+    const double pageWIn = score->style().styleD(Sid::pageWidth);
+    EXPECT_NEAR(score->style().styleD(Sid::pagePrintableWidth), pageWIn - 0.03 - 0.03, 0.01);
+
+    delete score;
+}
+
 // Verify bottom margin is correctly derived from bottomEdge.
 // bazo.enc: top=18 left=18 bEdge=824 rEdge=577 on A4 (842 pts high).
 // bottomMargin = (842 - 824) / 72 = 18 / 72 = 0.25"
@@ -394,6 +416,27 @@ TEST_F(Tst_Structure, page_margins_wini_screen_pixel_a4_detected)
     const double rightM = kA4W - kExpectedM - printW;
     EXPECT_NEAR(rightM, kExpectedM, 0.01)
         << "Screen-pixel WINI: right margin must be ~0.33\"";
+
+    delete score;
+}
+
+// ===========================================================================
+// WINI / page margin: no-WINI file must leave MuseScore default margins intact.
+// ===========================================================================
+
+// File with no WINI block must leave MuseScore default margins intact.
+// text_tempo_orn_compound_68.enc has no WINI block.
+TEST_F(Tst_Structure, page_margins_no_wini_uses_defaults)
+{
+    MasterScore* score = readEncoreScore("text_tempo_orn_compound_68.enc");
+    ASSERT_NE(score, nullptr);
+
+    const double defaultLeftIn = 15.0 / INCH;
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddLeftMargin),  defaultLeftIn, 0.001)
+        << "no-WINI file must keep default left margin";
+    EXPECT_NEAR(score->style().styleD(Sid::pageEvenLeftMargin), defaultLeftIn, 0.001);
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddTopMargin),   defaultLeftIn, 0.001)
+        << "no-WINI file must keep default top margin";
 
     delete score;
 }
