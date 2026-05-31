@@ -186,6 +186,8 @@ void buildNoteLoop(BuildCtx& ctx)
         prevEncVoice.clear();
         lastChordPos.clear();
         v0xA6GraceStolenTicks.clear();
+        streamOffset.clear();
+        v0PitchesInMeasure.clear();
 
         // Delete unattached grace chords explicitly: not in score tree, so no auto-cleanup.
         for (auto& [key, vec] : pendingGraces) {
@@ -316,8 +318,12 @@ void buildNoteLoop(BuildCtx& ctx)
         // - Implied tuplets (v0xC2 only): groups of exactly actualN notes with matching
         //   detectImpliedTuplet ratio; isolated swing-timing notes are excluded.
         // Both sets are merged into validTupletGroupMember.
+        // partialEndGroup tracks elements added by the measure-end partial-group exception
+        // only (groups whose rdur sum fills the measure but face values would overflow);
+        // Fix 2 and Fix 3 apply only to these notes, not to complete groups.
+        std::set<const EncMeasureElem*> partialEndGroup;
         std::set<const EncMeasureElem*> validTupletGroupMember
-            = computeImpliedTupletMembers(sortedElems, encMeas, ctx.totalStaves);
+            = computeImpliedTupletMembers(sortedElems, encMeas, ctx.totalStaves, &partialEndGroup);
         // Alias for implied-tuplet checks (v0xC2 guard applied in the element loop).
         const auto& impliedGroupMember = validTupletGroupMember;
 
@@ -468,6 +474,23 @@ void buildNoteLoop(BuildCtx& ctx)
             }
             if (dropNote) {
                 continue;
+            }
+            // Suppress stream-duplicate overflow notes: any note routed to voice 1+
+            // whose pitch already exists in voice 0 for this staff/measure is a
+            // recording-stream artifact. Encore records 3 MIDI streams per instrument
+            // into the same voice; when one stream diverges in timing beyond
+            // CHORD_MIDI_THRESHOLD it is treated as a new note rather than a chord
+            // extension, fills cumTick, and triggers an overflow. Since Encore has no
+            // real secondary voices, the overflow note is always a duplicate.
+            if (msVoice > 0 && et == EncElemType::NOTE) {
+                const EncNote* enChk = static_cast<const EncNote*>(e);
+                const int pitchChk = static_cast<int>(enChk->semiTonePitch)
+                                     + (staffIdx < static_cast<int>(ctx.staffPitchOffset.size())
+                                        ? ctx.staffPitchOffset[staffIdx] : 0);
+                if (v0PitchesInMeasure.count(staffIdx)
+                    && v0PitchesInMeasure[staffIdx].count(pitchChk)) {
+                    continue;
+                }
             }
 
             // Save prevMidiTick/lastChordPos so we can restore them if we later decide
@@ -766,6 +789,25 @@ void buildNoteLoop(BuildCtx& ctx)
                 if (isStandardExplicit) {
                     dt   = faceValue2DurationType(en->faceValue);
                     dots = 0;
+                    // For partial measure-end groups only: reduce dt if the tuplet-scaled
+                    // advance would overshoot the remaining measure space (e.g. last slot
+                    // of a mixed-value bracket where the face value is one step too long).
+                    // Not applied to complete groups that happen to start late — those use
+                    // the existing capped-note-removed-from-tuplet path instead.
+                    if (partialEndGroup.count(e)) {
+                        const auto& ttX = tuplets[trackKey];
+                        if (ttX.inTuplet() && dt != DurationType::V_INVALID) {
+                            Fraction adv = TDuration(dt).fraction()
+                                           * Fraction(ttX.normalN, ttX.actualN);
+                            Fraction rem = measure->ticks() - cumTick[trackKey];
+                            while (adv > rem && rem > Fraction(0, 1)
+                                   && dt < DurationType::V_128TH) {
+                                dt  = static_cast<DurationType>(static_cast<int>(dt) + 1);
+                                adv = TDuration(dt).fraction()
+                                      * Fraction(ttX.normalN, ttX.actualN);
+                            }
+                        }
+                    }
                 } else {
                     dt   = realDuration2DurationType(en->realDuration, en->faceValue);
                     // Use dotControl (actual sounding duration stored by Encore) for dot
@@ -927,7 +969,25 @@ void buildNoteLoop(BuildCtx& ctx)
                                     normalN = 0;           // treat as plain note
                                 }
                             } else {
-                                tt.startTuplet(measure, elemTick, actualN, normalN, dt, track);
+                                // For partial measure-end groups only: derive baseLen from
+                                // remaining/normalN when the full normalN-unit span at face
+                                // value would exceed the remaining measure space, so the bracket
+                                // spans exactly what fits (e.g. 1/8 remaining / normalN=2 = 1/16).
+                                // Not applied to complete groups — they use the existing baseLen.
+                                DurationType baseLenDt = dt;
+                                if (partialEndGroup.count(e)) {
+                                    Fraction rem3 = measure->ticks() - cumTick[trackKey];
+                                    Fraction fullAdv = TDuration(dt).fraction() * Fraction(normalN, 1);
+                                    if (fullAdv > rem3 && rem3 > Fraction(0, 1)) {
+                                        Fraction baseFrac = Fraction(rem3.numerator(),
+                                                                     rem3.denominator() * normalN);
+                                        TDuration baseLenDur(baseFrac);
+                                        if (baseLenDur.isValid()) {
+                                            baseLenDt = baseLenDur.type();
+                                        }
+                                    }
+                                }
+                                tt.startTuplet(measure, elemTick, actualN, normalN, baseLenDt, track);
                             }
                         }
                     }
@@ -1029,6 +1089,9 @@ void buildNoteLoop(BuildCtx& ctx)
                 Note* note = Factory::createNote(chord);
                 applyConcertPitch(note, en->semiTonePitch + ctx.staffPitchOffset[staffIdx]);
                 chord->add(note);
+                if (msVoice == 0) {
+                    v0PitchesInMeasure[staffIdx].insert(note->pitch());
+                }
 
                 // Fingering glyphs and the open-string marker travel in the
                 // same artic byte slot. Fingerings 1..5 (bytes 0x0D..0x11)
@@ -1479,7 +1542,25 @@ void buildNoteLoop(BuildCtx& ctx)
                         endIdx = measIdx;
                     }
                     PendingSlur ps;
-                    ps.startTick = elemTick;
+                    // Use the raw Encore tick for the slur start position, not
+                    // elemTick (cumTick-based). The ORN's encVoice is the voice
+                    // where the arc is drawn, which may differ from the voice
+                    // whose notes it connects. When voice 0 is empty, cumTick=0
+                    // and elemTick = measure start; when voice 0 has a full-
+                    // measure rest, elemTick = barline. Both are wrong. The raw
+                    // eo->tick encodes the beat position directly.
+                    {
+                        // durTicks * timeSigDen / timeSigNum always yields 960
+                        // ticks/whole regardless of whether Encore stores a simple
+                        // or compound beat in beatTicks (e.g. 6/8 stores 360 for
+                        // the dotted-quarter compound beat, giving beatTicks*den=2880
+                        // instead of the correct 960).
+                        const int wt = (encMeas.durTicks && encMeas.timeSigNum && encMeas.timeSigDen)
+                                       ? (static_cast<int>(encMeas.durTicks) * encMeas.timeSigDen)
+                                         / encMeas.timeSigNum : 960;
+                        ps.startTick = measTick
+                                       + Fraction(static_cast<int>(eo->tick), wt).reduced();
+                    }
                     ps.track = track;
                     ps.startMeasIdx = measIdx;
                     ps.endMeasIdx = endIdx;

@@ -64,16 +64,22 @@ TEST(Tst_EncoreRhythm, faceValueToDurationType)
 
 TEST(Tst_EncoreRhythm, realDurationToDurationType)
 {
-    // Plain duration mappings.
+    // Plain duration mappings: realDur == faceTicks, guard does not fire.
     EXPECT_EQ(realDuration2DurationType(960, 1), DurationType::V_WHOLE);
-    EXPECT_EQ(realDuration2DurationType(480, 1), DurationType::V_HALF);
+    EXPECT_EQ(realDuration2DurationType(480, 2), DurationType::V_HALF);
     EXPECT_EQ(realDuration2DurationType(240, 3), DurationType::V_QUARTER);
     EXPECT_EQ(realDuration2DurationType(120, 4), DurationType::V_EIGHTH);
     EXPECT_EQ(realDuration2DurationType(60, 5), DurationType::V_16TH);
-    // Dotted mappings.
-    EXPECT_EQ(realDuration2DurationType(720, 1), DurationType::V_HALF);
+    // Dotted mappings: realDur > faceTicks, guard does not fire.
+    EXPECT_EQ(realDuration2DurationType(720, 2), DurationType::V_HALF);
     EXPECT_EQ(realDuration2DurationType(360, 3), DurationType::V_QUARTER);
     EXPECT_EQ(realDuration2DurationType(180, 4), DurationType::V_EIGHTH);
+    // Multi-stream truncation: realDur < faceTicks → face value is authoritative.
+    // Encore records 3 MIDI streams per instrument in the same voice; gaps between
+    // overlapping streams are shorter than the written note value.
+    EXPECT_EQ(realDuration2DurationType(120, 3), DurationType::V_QUARTER);
+    EXPECT_EQ(realDuration2DurationType(240, 2), DurationType::V_HALF);
+    EXPECT_EQ(realDuration2DurationType(480, 1), DurationType::V_WHOLE);
     // Triplet rdur values fall back to faceValue: a triplet 8th (rdur=80
     // for fv=eighth=120) is still notated as an eighth, with the 3:2 ratio
     // expressed via the tuplet wrapper rather than by upgrading the type.

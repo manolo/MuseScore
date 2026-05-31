@@ -126,6 +126,7 @@ static void clearImportState()
     lastChordPos.clear();
     pendingGraces.clear();
     streamOffset.clear();
+    v0PitchesInMeasure.clear();
     v0xA6LeadingGraceFv.clear();
     v0xA6GraceStolenTicks.clear();
 }

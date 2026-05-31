@@ -279,10 +279,11 @@ struct EncGenericElem : EncMeasureElem {
 };
 
 // TIE element: marks notes at (staffIdx, voice, tick) that tie forward.
-// Byte at elemStart+2: 0xfe = outgoing tie (TIE-START, added to tieStartSet);
-// any other value = incoming arc endpoint only, NOT a new outgoing tie.
+// Dir byte (elemStart+5): bit 7 (0x80) = arc-above outgoing; bit 1 (0x02) = arc-below outgoing.
+//   0xfe/0x80+: arc-above; 0x02/0x03: arc-below. Endpoint-only TIEs have dir=0x00/0x01.
+// StartFlag byte (elemStart+6): high bit set = additional outgoing tie marker.
 struct EncTie : EncMeasureElem {
-    bool isTieStart { false };   // true when elemStart+2 == 0xfe (outgoing tie)
+    bool isTieStart { false };   // true when dir byte has bit 7 or bit 1 set, or startFlag has bit 7 set
 
     using EncMeasureElem::EncMeasureElem;
 

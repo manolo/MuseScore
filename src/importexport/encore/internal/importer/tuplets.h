@@ -37,7 +37,6 @@ class Tuplet;
 }
 
 namespace mu::iex::encore {
-
 // Tuplet state per staff+voice. Group closes when face-value sum reaches actualN * baseLen.
 // This handles mixed-duration brackets (e.g. 3:2 triplet with 8th+8th+16th+16th).
 struct TupletTracker {
@@ -53,26 +52,18 @@ struct TupletTracker {
 
     void closeTuplet();
 
-    mu::engraving::Tuplet* startTuplet(mu::engraving::Measure* measure,
-                                       mu::engraving::Fraction tick,
-                                       int aN, int normalN_,
-                                       mu::engraving::DurationType baseType,
-                                       mu::engraving::track_idx_t track_);
+    mu::engraving::Tuplet* startTuplet(mu::engraving::Measure* measure, mu::engraving::Fraction tick, int aN, int normalN_,
+                                       mu::engraving::DurationType baseType, mu::engraving::track_idx_t track_);
 
     // Duration advance per note within this tuplet group
     mu::engraving::Fraction noteAdvance(mu::engraving::DurationType baseType) const;
 };
 
-// Find all elements that belong to complete tuplet groups (implied and explicit).
-// Implied (v0xC2): valid only when exactly actualN consecutive chord-groups share
-// the same ratio; isolated notes with matching rdur are MIDI swing drift.
-// Explicit: valid only when all actualN notes share the same tup byte; isolated
-// tail notes are excluded to prevent partial tuplets that break checkMeasure.
+// Find all elements belonging to complete tuplet groups (implied v0xC2 or explicit). Isolated notes with matching rdur are MIDI swing drift.
+// partialEndGroup: if non-null, receives measure-end partial groups (rdur fills measure AND face-value would overflow without scaling).
 std::set<const EncMeasureElem*> computeImpliedTupletMembers(
-    const MeasureElemRefVec& sortedElems,
-    const EncMeasure& encMeas,
-    int totalStaves);
-
+    const MeasureElemRefVec& sortedElems, const EncMeasure& encMeas, int totalStaves,
+    std::set<const EncMeasureElem*>* partialEndGroup = nullptr);
 } // namespace mu::iex::encore
 
 #endif // MU_IMPORTEXPORT_ENC_IMPORT_TUPLETS_H
