@@ -43,6 +43,15 @@ class InstrumentTemplate;
 namespace mu::iex::enc {
 mu::engraving::ClefType encClef2MuseScore(EncClefType ct);
 
+// Encore time-signature glyph byte to MuseScore TimeSigType. Common time (0x43 'C' / 0x63 'c')
+// in 4/4 maps to FOUR_FOUR; everything else is NORMAL (numeric). Cut time (alla breve) uses a
+// glyph value that is not yet confirmed in the format, so it currently shows as numeric 2/2.
+mu::engraving::TimeSigType encTimeSigGlyph2Type(quint8 glyph, mu::engraving::Fraction ts);
+
+// Encore dynamic ornament subtype (DYN_*) to MuseScore DynamicType. Non-dynamic subtypes
+// return DynamicType::OTHER.
+mu::engraving::DynamicType encOrnType2DynamicType(EncOrnamentType ot);
+
 // Pick octave-decorated clef when Encore's plain G/F plus a NEGATIVE octave Key implies one
 // (e.g. keyOffset=-12 -> G8_VB/F8_VB; -24 -> G15_MB/F15_MB). Positive octave Keys keep the plain
 // clef (the octave is carried as a playback transposition; see builders-parts.cpp).
