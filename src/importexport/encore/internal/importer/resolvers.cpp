@@ -268,6 +268,9 @@ void resolveAll(BuildCtx& ctx)
     // Find the chord at the stored tick; if none, search backwards in the
     // source measure for the latest chord (handles Encore placement at
     // tick == durTicks on long notes).
+    // Tremolo ORNs are visual annotations placed in voice 0 by Encore regardless
+    // of which voice holds the actual notes. When the ORN voice produces no
+    // match, widen the search to all voices for the same staff.
     for (const PendingOrnTremolo& pt : ctx.pendingOrnTremolos) {
         const track_idx_t trTrack = static_cast<track_idx_t>(pt.staffIdx * VOICES + pt.msVoice);
         // Try exact tick match first.
@@ -298,10 +301,32 @@ void resolveAll(BuildCtx& ctx)
                 }
             }
         }
-        if (!seg || !seg->element(trTrack)) {
+        // Resolve the track: start with the ORN voice; if that yields no chord,
+        // try all other voices for the same staff (ORN voice 0 is the norm even
+        // when the notes live in a different voice).
+        track_idx_t resolvedTrack = trTrack;
+        if (!seg || !seg->element(resolvedTrack) || !seg->element(resolvedTrack)->isChord()) {
+            Measure* srcMeas = score->tick2measure(pt.measTick);
+            if (!srcMeas) {
+                srcMeas = m;
+            }
+            if (srcMeas) {
+                for (int v = 0; v < static_cast<int>(VOICES) && !seg; ++v) {
+                    const track_idx_t altTrack = static_cast<track_idx_t>(pt.staffIdx * VOICES + v);
+                    for (Segment* s = srcMeas->first(SegmentType::ChordRest); s;
+                         s = s->next(SegmentType::ChordRest)) {
+                        if (s->element(altTrack) && s->element(altTrack)->isChord()) {
+                            seg = s;
+                            resolvedTrack = altTrack;
+                        }
+                    }
+                }
+            }
+        }
+        if (!seg || !seg->element(resolvedTrack)) {
             continue;
         }
-        EngravingItem* el = seg->element(trTrack);
+        EngravingItem* el = seg->element(resolvedTrack);
         if (!el || !el->isChord()) {
             continue;
         }

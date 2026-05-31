@@ -73,10 +73,11 @@ bool EncNote::read(QDataStream& ds)
         semiTonePitch = tuplet;
         tuplet = 0;
     }
-    // v0xA6 NOTEs are 10 bytes; articulationUp/Down live past byte 22.
-    // Reading them on short elements consumes bytes from the next slot.
-    // Zero out so downstream does not create spurious articulation glyphs.
-    if (size < 22) {
+    // articulationUp is at byte +24, articulationDown at +26.
+    // Elements shorter than 27 bytes don't contain valid data at those offsets;
+    // zero out to suppress spurious articulation glyphs (e.g. size-22 v0xA6 notes
+    // whose padding bytes contain 0x20, which maps to fermataAbove).
+    if (size < 27) {
         articulationUp   = 0;
         articulationDown = 0;
     }
@@ -173,9 +174,15 @@ bool EncOrnament::read(QDataStream& ds)
     ds >> noto;
     ds.skipRawData(1);
     ds >> tempo;
-    ds.skipRawData(1);
-    ds >> tind;
-    int toSkip = static_cast<int>(size) - 5 - 28;
+    // Size-32 ornaments (v0xC2) end at byte[31]; tind overlaps with tempo at byte[30].
+    // Size-33+ ornaments have a skip byte + tind byte after tempo.
+    if (static_cast<int>(size) >= 33) {
+        ds.skipRawData(1);
+        ds >> tind;
+    } else {
+        tind = tempo;
+    }
+    int toSkip = static_cast<int>(size) - 5 - (static_cast<int>(size) >= 33 ? 28 : 26);
     if (toSkip > 0) {
         ds.skipRawData(toSkip);
     }

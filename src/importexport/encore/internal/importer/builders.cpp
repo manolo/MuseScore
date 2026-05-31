@@ -203,7 +203,28 @@ void buildMeasures(BuildCtx& ctx)
     MasterScore* score = ctx.score;
     const EncFile& enc = ctx.enc;
     // --------------- Measures ---------------
+
+    // Determine the nominal (displayed) time signature. When the first measure is
+    // shorter than the rest (anacrusis / pickup), Encore stores its actual duration
+    // as the time sig. The nominal sig comes from the second measure.
+    {
+        int n0 = !enc.measures.empty() && enc.measures[0].timeSigNum > 0
+                 ? enc.measures[0].timeSigNum : 4;
+        int d0 = !enc.measures.empty() && enc.measures[0].timeSigDen > 0
+                 ? enc.measures[0].timeSigDen : 4;
+        ctx.nominalTimeSig = Fraction(n0, d0);
+        if (enc.measures.size() >= 2) {
+            int n1 = enc.measures[1].timeSigNum > 0 ? enc.measures[1].timeSigNum : 4;
+            int d1 = enc.measures[1].timeSigDen > 0 ? enc.measures[1].timeSigDen : 4;
+            Fraction ts1(n1, d1);
+            if (ts1 != ctx.nominalTimeSig) {
+                ctx.nominalTimeSig = ts1;   // m0 is a pickup; m1 carries the real sig
+            }
+        }
+    }
+
     int currentTick = 0;
+    bool firstMeasure = true;
     for (const auto& encMeas : enc.measures) {
         int num = encMeas.timeSigNum > 0 ? encMeas.timeSigNum : 4;
         int den = encMeas.timeSigDen > 0 ? encMeas.timeSigDen : 4;
@@ -211,8 +232,17 @@ void buildMeasures(BuildCtx& ctx)
 
         Measure* measure = Factory::createMeasure(score->dummy()->system());
         measure->setTick(Fraction::fromTicks(currentTick));
-        measure->setTimesig(ts);
-        measure->setTicks(ts);
+
+        if (firstMeasure && ts != ctx.nominalTimeSig) {
+            // Pickup measure: display nominal sig, use actual (shorter) duration.
+            // isIrregular() returns true automatically when timesig != ticks.
+            measure->setTimesig(ctx.nominalTimeSig);
+            measure->setTicks(ts);
+        } else {
+            measure->setTimesig(ts);
+            measure->setTicks(ts);
+        }
+        firstMeasure = false;
 
         if (encMeas.startBarline() == EncBarlineType::REPEATSTART) {
             measure->setRepeatStart(true);
@@ -251,7 +281,7 @@ void buildInitialSignatures(BuildCtx& ctx)
     const EncFile& enc = ctx.enc;
     // --------------- Initial key/time/clef signatures ---------------
     if (!enc.measures.empty()) {
-        addInitialTimeSig(score, ctx.totalStaves, enc.measures[0]);
+        addInitialTimeSig(score, ctx.totalStaves, ctx.nominalTimeSig);
     }
     if (!enc.lines.empty()) {
         const auto& firstLine = enc.lines[0];
@@ -266,6 +296,28 @@ void buildInitialSignatures(BuildCtx& ctx)
                                   ? ctx.staffPitchOffset[si] : 0;
             addInitialClef(score, si, pickStaffClef(sd.clef, cClef, tClef, keyOffset));
         }
+    }
+
+    // --------------- Intermediate time signature changes ---------------
+    // buildMeasures() sets measure->setTimesig() per measure but never adds
+    // TimeSig engraving elements at change points. Walk all measures and emit
+    // a TimeSig element whenever the nominal sig changes from the previous one.
+    Fraction prevTs = ctx.nominalTimeSig;
+    for (const Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        Fraction mTs = m->timesig();
+        if (mTs == prevTs) {
+            continue;
+        }
+        // Time sig changed — add a TimeSig element on every staff at this measure.
+        Fraction mTick = m->tick();
+        for (int si = 0; si < ctx.totalStaves; ++si) {
+            Segment* seg = const_cast<Measure*>(m)->getSegment(SegmentType::TimeSig, mTick);
+            TimeSig* tsig = Factory::createTimeSig(seg);
+            tsig->setTrack(static_cast<track_idx_t>(si) * VOICES);
+            tsig->setSig(mTs);
+            seg->add(tsig);
+        }
+        prevTs = mTs;
     }
 
 }
