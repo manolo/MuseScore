@@ -22,7 +22,11 @@
 
 #include <gtest/gtest.h>
 
+#include "engraving/dom/barline.h"
 #include "engraving/dom/chord.h"
+#include "engraving/dom/hairpin.h"
+#include "engraving/dom/jump.h"
+#include "engraving/dom/marker.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/keysig.h"

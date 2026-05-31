@@ -36,6 +36,7 @@ set(MODULE_TEST_SRC
     ${CMAKE_CURRENT_LIST_DIR}/tst_notes_mrest.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tst_tempo.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tst_ornaments.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tst_repeats.cpp
 )
 
 set(MODULE_TEST_LINK

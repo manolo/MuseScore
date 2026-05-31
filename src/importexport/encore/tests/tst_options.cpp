@@ -54,6 +54,10 @@ protected:
     void SetUp() override { setRootDir(ENC_DIR); }
 };
 
+// importPageBreaks tests (importPageBreaks_true_places_page_break,
+// importPageBreaks_false_produces_no_page_breaks) deferred to B13:
+// applyPageBreaksFromLines is in resolvers-fingering.cpp.
+
 // ===========================================================================
 // importStaffSize
 // All test files in data/ have scoreSize=3, which maps to MAG 1.00 (100%).
@@ -223,6 +227,77 @@ TEST_F(Tst_Options, firstMeasure_not_pickup_keeps_full_nominal_duration)
     ASSERT_NE(m0, nullptr);
     EXPECT_EQ(m0->ticks(), m0->timesig())
         << "firstMeasureIsPickup=false: first measure must retain full nominal duration";
+    delete score;
+}
+
+// Regression: when firstMeasureIsPickup=false and underfillMeasureStrategy=IrregularMeasure,
+// buildMeasures advanced currentTick by ts.ticks() (the explicit pickup duration) while
+// setting measure->ticks(nominalTimeSig). The mismatch made IrregularMeasure shift all
+// subsequent measures by the wrong delta, placing volta brackets mid-measure instead of at
+// barlines. File: Case A pickup (ts[0]=2/4, nominal=4/4), volta on MEAS[2] and MEAS[3].
+static Volta* findVolta(MasterScore* score, const String& label)
+{
+    for (auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isVolta() && toVolta(sp)->beginText() == label) {
+            return toVolta(sp);
+        }
+    }
+    return nullptr;
+}
+
+static bool isAtImpliedBarline(Volta* volta, MasterScore* score)
+{
+    Fraction cumTick(0, 1);
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        if (cumTick == volta->tick()) {
+            return true;
+        }
+        cumTick += m->ticks();
+    }
+    return false;
+}
+
+TEST_F(Tst_Options, firstMeasure_not_pickup_irregular_volta_at_barline)
+{
+    EncImportOptions opts;
+    opts.firstMeasureIsPickup = false;
+    opts.underfillMeasureStrategy = UnderfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("structure_pickup_casea_volta.enc", opts);
+    ASSERT_NE(score, nullptr);
+
+    Volta* v1 = findVolta(score, String(u"1."));
+    Volta* v2 = findVolta(score, String(u"2."));
+    ASSERT_NE(v1, nullptr) << "score must contain a '1.' volta";
+    ASSERT_NE(v2, nullptr) << "score must contain a '2.' volta";
+
+    EXPECT_TRUE(isAtImpliedBarline(v1, score))
+        << "Volta '1.' tick (" << v1->tick().ticks()
+        << ") must coincide with a measure barline (cumulative durations)";
+    EXPECT_TRUE(isAtImpliedBarline(v2, score))
+        << "Volta '2.' tick (" << v2->tick().ticks()
+        << ") must coincide with a measure barline (cumulative durations)";
+    delete score;
+}
+
+TEST_F(Tst_Options, firstMeasure_pickup_irregular_volta_at_barline)
+{
+    EncImportOptions opts;
+    opts.underfillMeasureStrategy = UnderfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("structure_pickup_casea_volta.enc", opts);
+    ASSERT_NE(score, nullptr);
+
+    Volta* v1 = findVolta(score, String(u"1."));
+    Volta* v2 = findVolta(score, String(u"2."));
+    ASSERT_NE(v1, nullptr) << "score must contain a '1.' volta";
+    ASSERT_NE(v2, nullptr) << "score must contain a '2.' volta";
+
+    EXPECT_TRUE(isAtImpliedBarline(v1, score))
+        << "Volta '1.' tick (" << v1->tick().ticks()
+        << ") must coincide with a measure barline (pickup=true, regression guard)";
+    EXPECT_TRUE(isAtImpliedBarline(v2, score))
+        << "Volta '2.' tick (" << v2->tick().ticks()
+        << ") must coincide with a measure barline (pickup=true, regression guard)";
     delete score;
 }
 
