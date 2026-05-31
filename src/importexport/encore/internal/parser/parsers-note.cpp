@@ -23,7 +23,6 @@
 #include "elem-note.h"
 
 namespace mu::iex::enc {
-
 bool EncMeasureElem::read(QDataStream& ds)
 {
     quint8 rawStaff;
@@ -65,10 +64,9 @@ bool EncNote::read(QDataStream& ds)
     ds >> articulationUp;
     ds.skipRawData(1);
     ds >> articulationDown;
-    int toSkip = static_cast<int>(size) - 27;
-    if (toSkip > 0) {
-        ds.skipRawData(toSkip);
-    }
+    // No trailing skip to the element end: the measure element loop reseeks to
+    // elemStart + elemSpacing(size) after every read(), so any remaining bytes are
+    // skipped there. The same applies to the other element readers below.
     return true;
 }
 
@@ -80,15 +78,10 @@ bool EncRest::read(QDataStream& ds)
     ds >> xoffset;
     ds.skipRawData(2);
     ds >> tuplet >> dotControl;
-    int toSkip = static_cast<int>(size) - 10 - 5;
-    if (toSkip > 0) {
-        ds >> mrestCount;
-        --toSkip;
+    if (static_cast<int>(size) > 15) {
+        ds >> mrestCount;   // multi-measure rest count at element offset +15
         if (mrestCount < 1) {
             mrestCount = 1;
-        }
-        if (toSkip > 0) {
-            ds.skipRawData(toSkip);
         }
     }
     return true;
@@ -98,20 +91,21 @@ bool EncKeyChange::read(QDataStream& ds)
 {
     EncMeasureElem::read(ds);
     ds >> tipo;
-    int toSkip = static_cast<int>(size) - 5 - 1;
-    if (toSkip > 0) {
-        ds.skipRawData(toSkip);
-    }
+    return true;
+}
+
+bool EncClefChange::read(QDataStream& ds)
+{
+    EncMeasureElem::read(ds);
+    qint8 ct;
+    ds >> ct;
+    clefType = static_cast<EncClefType>(ct);
     return true;
 }
 
 bool EncGenericElem::read(QDataStream& ds)
 {
     EncMeasureElem::read(ds);
-    int toSkip = static_cast<int>(size) - 5;
-    if (toSkip > 0) {
-        ds.skipRawData(toSkip);
-    }
     return true;
 }
 

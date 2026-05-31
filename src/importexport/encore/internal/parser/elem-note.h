@@ -138,6 +138,14 @@ struct EncKeyChange : EncMeasureElem {
     bool read(QDataStream& ds) override;
 };
 
+struct EncClefChange : EncMeasureElem {
+    EncClefType clefType { EncClefType::G };
+
+    using EncMeasureElem::EncMeasureElem;
+
+    bool read(QDataStream& ds) override;
+};
+
 struct EncGenericElem : EncMeasureElem {
     using EncMeasureElem::EncMeasureElem;
 
