@@ -56,7 +56,7 @@ int encKeyToFifths(quint8 key);
 
 void addTitleFrame(mu::engraving::MasterScore* score, const EncTitle& titleBlock);
 void addInitialKeySig(mu::engraving::MasterScore* score, int staffIdx, quint8 encKey);
-void addInitialTimeSig(mu::engraving::MasterScore* score, int nstaves, const EncMeasure& firstMeas);
+void addInitialTimeSig(mu::engraving::MasterScore* score, int nstaves, mu::engraving::Fraction ts);
 void addInitialClef(mu::engraving::MasterScore* score, int staffIdx, EncClefType ct);
 void addInitialClef(mu::engraving::MasterScore* score, int staffIdx, mu::engraving::ClefType clef);
 void addRepeatMark(mu::engraving::Score* score, mu::engraving::Measure* measure, EncRepeatType rt);
