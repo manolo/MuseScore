@@ -112,7 +112,7 @@ Each staff entry: clef, key, page index, staff type, instrument index, visibilit
 |-------------|--------|----------------------------------------------------------------------------------------|
 | 0x00        | 2      | BPM (quarter-note beats-per-minute; applies forward until next change)                 |
 | 0x02        | 1      | time-signature glyph                                                                   |
-| 0x04        | 2      | ticks per beat                                                                         |
+| 0x04        | 2      | ticks per beat (beatTicks); for compound meters e.g. 6/8 this is the compound beat (dotted quarter = 360), not the simple beat |
 | 0x06        | 2      | total ticks in measure (durTicks)                                                      |
 | 0x08        | 1      | time-signature numerator                                                               |
 | 0x09        | 1      | time-signature denominator                                                             |
@@ -217,15 +217,19 @@ Value 0 is a legitimate change (naturals cancel prior accidentals).
 
 Type 3. Size 16 or 18 bytes.
 
-| Byte at offset   | Meaning                                              |
-|------------------|------------------------------------------------------|
-| +5 = `0xFE`      | tie-start, arc above                                 |
-| +5 = `0xFC`      | tie-start, arc below                                 |
-| +5 = `0x02`      | arc-only, top-arc-incoming (does NOT start a tie)    |
-| +5 = `0x04`      | arc-only, bottom-arc-incoming                        |
+Byte +5 encodes arc direction and outgoing status; byte +6 is an additional tie-start flag.
 
-Byte +6 high bit (`0x80`) is set for any tie-start, including arc-only cases.
-An element is a tie-start if bit 7 is set on **either** byte +5 or byte +6.
+| Byte +5        | Arc direction   | Tie-start?                         |
+|----------------|-----------------|------------------------------------|
+| `0xFE` / `0x80`+ | arc above     | yes (bit 7 set)                    |
+| `0x02`         | arc below       | yes (bit 1 set, no high bit)       |
+| `0x03`         | arc below       | yes (bits 0+1: incoming + outgoing)|
+| `0x01`         | incoming only   | no                                 |
+| `0x04`         | incoming only   | no                                 |
+
+**Tie-start rule:** an element is a tie-start when `(+5 & 0x80) || (+5 & 0x02) || (+6 & 0x80)`.
+Values `0x02` and `0x03` encode the arc-below outgoing direction; they do NOT set bit 7
+but bit 1 carries the same "outgoing" semantic.
 
 ---
 
@@ -274,7 +278,14 @@ Type 5. Variable size. Offsets from element start:
 | 0xA6    | CODA          | Coda glyph marker                                                                |
 | 0xAA    | DYN_FZ        | dynamic `fz`                                                                     |
 | 0xAB    | DYN_SF        | dynamic `sf`                                                                     |
-| 0xAF    | TREMOLO_32    | single-chord triple tremolo (3 slashes = 32nd speed); standard plectro notation  |
+| 0xAF    | TREMOLO_32    | single-chord triple tremolo (3 slashes = 32nd speed); always at voice 0 regardless of note voice |
+| 0xB9    | FINGER_1      | stand-alone fingering digit "1" (size-16 ORN; attached to top note of chord)    |
+| 0xBA    | FINGER_2      | stand-alone fingering digit "2"                                                  |
+| 0xBB    | FINGER_3      | stand-alone fingering digit "3"                                                  |
+| 0xBC    | FINGER_4      | stand-alone fingering digit "4"                                                  |
+| 0xBD    | FINGER_5      | stand-alone fingering digit "5"                                                  |
+| 0xC4    | UPBOW         | up-bow stroke (V) as size-16 ORN; maps to Articulation stringsUpBow             |
+| 0xC5    | DOWNBOW       | down-bow stroke (П) as size-16 ORN; maps to Articulation stringsDownBow         |
 | 0xC9    | STACCATO      | per-chord staccato dot                                                           |
 | 0xEF    | TREMOLO_32B   | alternate triple tremolo (ORN at tick == durTicks); also maps to R32             |
 
@@ -472,7 +483,10 @@ Each byte holds one or two glyphs:
 
 ## Rhythm encoding
 
-240 ticks per quarter note.
+240 ticks per quarter note. **Whole-note tick count** is always 960 for any time signature
+and can be computed reliably as `(durTicks * timeSigDen) / timeSigNum`. Do NOT use
+`beatTicks * timeSigDen`: in compound meters (e.g. 6/8) `beatTicks` is the compound beat
+(360 for the dotted quarter), giving 2880 instead of the correct 960.
 
 | Face value   | Ticks   | Duration   |
 |-------------:|--------:|------------|

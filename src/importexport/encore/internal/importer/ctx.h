@@ -175,6 +175,10 @@ struct BuildCtx
     std::vector<ClefType>    staffTemplateConcertClef;
     std::vector<ClefType>    staffTemplateTransposingClef;
 
+    // Populated by buildMeasures(): nominal time sig of the score (differs from
+    // measures[0] when the first measure is a pickup / anacrusis).
+    Fraction                 nominalTimeSig { 4, 4 };
+
     // Populated by buildNoteLoop():
     std::vector<Measure*>    measuresByIdx;
     std::vector<PendingHairpin>    pendingHairpins;
