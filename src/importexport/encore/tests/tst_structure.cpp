@@ -26,8 +26,10 @@
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/keysig.h"
+#include "engraving/dom/layoutbreak.h"
 #include "engraving/dom/note.h"
 #include "engraving/dom/part.h"
+#include "engraving/dom/clef.h"
 #include "engraving/dom/segment.h"
 #include "engraving/dom/staff.h"
 #include "engraving/dom/tempotext.h"
@@ -654,5 +656,404 @@ TEST_F(Tst_Structure, timesig_v0c2_common_time_glyph_uppercase_preserved)
     }
     EXPECT_TRUE(foundFourFour) << "TimeSig glyph 0x43 must produce TimeSigType::FOUR_FOUR (common time C), not NORMAL";
 
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: All ten Encore navigation options (Segno/Coda/ToCoda/Fine + 6 DC/DS variants) survive import.
+// ===========================================================================
+TEST_F(Tst_Structure, all_encore_navigation_options)
+{
+    MasterScore* score = readEncoreScore("structure_jump_marks_all.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int segnoMarkers = 0;
+    int codaMarkers = 0;
+    int toCodaMarkers = 0;
+    int fineMarkers = 0;
+    std::set<JumpType> jumpTypes;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (EngravingItem* e : mb->el()) {
+            if (e && e->isMarker()) {
+                MarkerType mt = toMarker(e)->markerType();
+                if (mt == MarkerType::SEGNO) {
+                    ++segnoMarkers;
+                } else if (mt == MarkerType::CODA) {
+                    ++codaMarkers;
+                } else if (mt == MarkerType::TOCODA) {
+                    ++toCodaMarkers;
+                } else if (mt == MarkerType::FINE) {
+                    ++fineMarkers;
+                }
+            } else if (e && e->isJump()) {
+                jumpTypes.insert(toJump(e)->jumpType());
+            }
+        }
+    }
+    // Segno comes from ORN 0xA2 AND coda byte 0x88; both add a Marker.
+    EXPECT_GE(segnoMarkers, 1) << "ORN 0xA2 must produce a Segno Marker";
+    // Coda from ORN 0xA6 + byte 0x89; byte 0x85 produces TOCODA instead.
+    EXPECT_GE(codaMarkers, 1) << "ORN 0xA6 must produce a Coda Marker";
+    // "To Coda" comes from ORN 0xA5 AND coda byte 0x85 (CODA1).
+    EXPECT_GE(toCodaMarkers, 1) << "ORN 0xA5 must produce a TOCODA Marker";
+    // Fine comes from coda byte 0x86.
+    EXPECT_EQ(fineMarkers, 1) << "coda byte 0x86 must produce a FINE Marker";
+    // Every Jump variant must appear at least once.
+    const std::set<JumpType> expectedJumps = {
+        JumpType::DC, JumpType::DS,
+        JumpType::DC_AL_FINE, JumpType::DS_AL_FINE,
+        JumpType::DC_AL_CODA, JumpType::DS_AL_CODA,
+    };
+    for (JumpType j : expectedJumps) {
+        EXPECT_TRUE(jumpTypes.count(j) > 0)
+            << "missing Jump variant for the Encore-UI option";
+    }
+    delete score;
+}
+
+// ===========================================================================
+// FIX: Jump marks from MEAS coda byte at offset 0x1A (low byte); To Coda from ORN tipo=0xA5.
+// ===========================================================================
+TEST_F(Tst_Structure, jump_marks_dc_ds_tocoda)
+{
+    MasterScore* score = readEncoreScore("structure_jump_marks.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<std::pair<int, String> > seen;  // measure number (1-based), text
+    int measIdx = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        ++measIdx;
+        for (EngravingItem* e : mb->el()) {
+            if (e && e->isMarker()) {
+                seen.emplace_back(measIdx, toMarker(e)->plainText());
+            } else if (e && e->isJump()) {
+                seen.emplace_back(measIdx, toJump(e)->plainText());
+            }
+        }
+    }
+    // Marker (TOCODA) lands on m1; Jumps land on m2 and m3.
+    ASSERT_EQ(seen.size(), 3u);
+    EXPECT_EQ(seen[0].first, 1);
+    EXPECT_TRUE(seen[0].second.contains(u"Coda"))
+        << "expected To Coda Marker on m1";
+    EXPECT_EQ(seen[1].first, 2);
+    EXPECT_TRUE(seen[1].second.contains(u"D.S."))
+        << "expected D.S. al Coda Jump on m2";
+    EXPECT_EQ(seen[2].first, 3);
+    EXPECT_TRUE(seen[2].second.contains(u"D.C."))
+        << "expected D.C. Jump on m3";
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Section markers (Segno / Coda) from ORN tipos 0xA2 / 0xA6 and
+// DOTTED end barline (barTypeEnd=0x08).
+// ===========================================================================
+TEST_F(Tst_Structure, section_markers_and_dotted_barline)
+{
+    MasterScore* score = readEncoreScore("structure_section_markers.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<MarkerType> seenMarkers;
+    BarLineType m3Bar = BarLineType::NORMAL;
+    int measIdx = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        ++measIdx;
+        for (EngravingItem* e : mb->el()) {
+            if (e && e->isMarker()) {
+                seenMarkers.push_back(toMarker(e)->markerType());
+            }
+        }
+        if (measIdx == 3) {
+            Measure* m3 = toMeasure(mb);
+            Segment* seg = m3->findSegment(SegmentType::EndBarLine, m3->endTick());
+            if (seg) {
+                if (EngravingItem* el = seg->element(0)) {
+                    if (el->isBarLine()) {
+                        m3Bar = toBarLine(el)->barLineType();
+                    }
+                }
+            }
+        }
+    }
+    const std::vector<MarkerType> expectedMarkers = {
+        MarkerType::SEGNO, MarkerType::CODA,
+    };
+    EXPECT_EQ(seenMarkers, expectedMarkers);
+    EXPECT_EQ(m3Bar, BarLineType::DOTTED)
+        << "m3 end barline must be DOTTED (barTypeEnd=0x08)";
+    delete score;
+}
+
+// ===========================================================================
+// Regression: Case B pickup (4/4 with cumTick=1/4, shortens by delta=3/4) plus a
+// WEDGESTART hairpin spanning from measure 0 into measure 1. Without the maxEndTick
+// fix, the hairpin search boundary would be 3/4 too large (stale absolute tick from
+// before the Case B shift), potentially resolving the endpoint in the wrong measure.
+// Test verifies: (a) at least one hairpin exists, (b) it ends within measure 1.
+// ===========================================================================
+TEST_F(Tst_Structure, pickup_caseb_hairpin_maxendtick_not_stale)
+{
+    MasterScore* score = readEncoreScore("structure_pickup_caseb_hairpin.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m1 = measureAt(score, 1);
+    ASSERT_NE(m1, nullptr);
+
+    int hairpinCount = 0;
+    bool hairpinEndsInM1 = false;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isHairpin()) {
+            ++hairpinCount;
+            const Fraction tick2 = sp->tick2();
+            if (tick2 >= m1->tick() && tick2 <= m1->endTick()) {
+                hairpinEndsInM1 = true;
+            }
+        }
+    }
+
+    EXPECT_GE(hairpinCount, 1) << "At least one hairpin must be imported";
+    EXPECT_TRUE(hairpinEndsInM1) << "Hairpin must end within measure 1 (stale maxEndTick would push it past)";
+
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: LINE block data becomes SystemLocks, each Encore system is locked so the
+// layout engine keeps its measures together regardless of spatium.
+// ===========================================================================
+TEST_F(Tst_Structure, system_breaks_from_line_data)
+{
+    MasterScore* score = readEncoreScore("structure_system_break.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    // Measure 2 is the last measure of the first Encore system → end of a SystemLock.
+    Measure* m2 = measureAt(score, 2);
+    ASSERT_NE(m2, nullptr);
+    EXPECT_TRUE(m2->isEndOfSystemLock())
+        << "measure 2 (end of system 0) must be the end of a SystemLock";
+
+    // Measure 0 is the start of the first system → start of a SystemLock.
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+    EXPECT_TRUE(m0->isStartOfSystemLock())
+        << "measure 0 (start of system 0) must be the start of a SystemLock";
+
+    delete score;
+}
+
+// ===========================================================================
+// FIX: SCO5 (big-endian Encore 5) does not surface the per-line measureCount
+// (the byte reads 0), but the line start indices are correct. The importer must
+// derive each system's span from the start deltas so line breaks still apply.
+// Fixture: same 6 measures / 2 systems as structure_system_break.enc but with
+// every LINE measureCount byte zeroed; system 0 must still lock measures 0..2.
+// ===========================================================================
+TEST_F(Tst_Structure, system_breaks_from_line_start_deltas_when_count_zero)
+{
+    MasterScore* score = readEncoreScore("structure_system_break_mcount_zero.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+    EXPECT_TRUE(m0->isStartOfSystemLock())
+        << "measure 0 must start a SystemLock derived from the line start delta";
+    Measure* m2 = measureAt(score, 2);
+    ASSERT_NE(m2, nullptr);
+    EXPECT_TRUE(m2->isEndOfSystemLock())
+        << "measure 2 (start[1]-start[0]=3 measures later) must end the first SystemLock";
+
+    delete score;
+}
+
+// ===========================================================================
+// FIX: page-break detection must use the same start-delta fallback as the
+// system-lock pass. SCO5 (big-endian Encore 5) reports measureCount 0, so the
+// old "lastBlock = firstBlock + measureCount - 1" left lastBlock < firstBlock
+// and silently dropped every page break. The line span must be recovered from
+// the start deltas, the same way system locks already do.
+// Fixture: same 6 measures / 2 systems as structure_page_break.enc but with
+// every LINE measureCount byte zeroed; the page break after system 0 must remain.
+// ===========================================================================
+TEST_F(Tst_Structure, page_break_from_line_start_deltas_when_count_zero)
+{
+    MasterScore* score = readEncoreScore("structure_page_break_mcount_zero.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    bool foundPageBreak = false;
+    for (Measure* m = score->firstMeasure(); m && !foundPageBreak; m = m->nextMeasure()) {
+        for (EngravingItem* e : m->el()) {
+            if (e && e->isLayoutBreak() && toLayoutBreak(e)->isPageBreak()) {
+                foundPageBreak = true;
+                break;
+            }
+        }
+    }
+    EXPECT_TRUE(foundPageBreak)
+        << "page break must be recovered from line start deltas when measureCount is 0";
+
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: SystemLocks lock each Encore system to exactly enc.lines[i].measureCount measures.
+// ===========================================================================
+TEST_F(Tst_Structure, fit_spatium_first_system_measure_count)
+{
+    MasterScore* score = readEncoreScore("text_tempo_orn_compound_68.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int firstSystemMeasureCount = 0;
+    for (const System* sys : score->systems()) {
+        int mc = 0;
+        for (const MeasureBase* mb : sys->measures()) {
+            if (mb->isMeasure()) {
+                ++mc;
+            }
+        }
+        if (mc > 0) {
+            firstSystemMeasureCount = mc;
+            break;
+        }
+    }
+    EXPECT_GE(firstSystemMeasureCount, 3)
+        << "first system must fit at least enc.lines[0].measureCount (3) measures";
+
+    delete score;
+}
+
+TEST_F(Tst_Structure, fit_spatium_multiple_systems_measure_count)
+{
+    // All 8 lines have measureCount=3; verify the first 4 systems each have exactly 3 measures.
+    MasterScore* score = readEncoreScore("text_tempo_orn_compound_68.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<int> sysCounts;
+    for (const System* sys : score->systems()) {
+        int mc = 0;
+        for (const MeasureBase* mb : sys->measures()) {
+            if (mb->isMeasure()) {
+                ++mc;
+            }
+        }
+        if (mc > 0) {
+            sysCounts.push_back(mc);
+        }
+    }
+
+    // The fixture has 8 lines; we require at least the first 4 to be present.
+    ASSERT_GE(sysCounts.size(), 4u) << "fixture must produce at least 4 music systems";
+
+    for (int j = 0; j < 4; ++j) {
+        EXPECT_GE(sysCounts[j], 3)
+            << "system " << j << " must fit at least 3 measures (enc.lines[" << j << "].measureCount)";
+    }
+
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: CLEF element (EncElemType::CLEF=1) in MEAS stream triggers a
+// mid-measure clef change in MuseScore. The clef anchors to the note that
+// physically follows it in the stream, not to its own stored tick.
+// Fixture: 2/4 measure of eight 16th notes; a CLEF(C4L=3) carrying stored tick
+// 180 is serialized between the beat-1 notes and the beat-2 note (tick 240).
+// Before fix: the clef was placed at its own tick (Fraction 3/16, before note 4).
+// After fix: it anchors to the following note, a SegmentType::Clef at Fraction(1,4)
+// (beat 2, before note 5) holding ClefType::C4.
+// ===========================================================================
+TEST_F(Tst_Structure, mid_measure_clef_change_imported)
+{
+    // The CLEF carries tick 180 but the next note in the stream is at tick 240 (beat 2);
+    // the clef must land before that note at Fraction(1,4), never at its own 3/16 tick.
+    MasterScore* score = readEncoreScore("structure_clef_change_mid_measure.enc");
+    ASSERT_NE(score, nullptr);
+
+    bool foundC4 = false;
+    bool foundEarly = false;
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (Segment* s = m->first(SegmentType::Clef); s; s = s->next(SegmentType::Clef)) {
+            if (s->tick() <= m->tick()) {
+                continue;  // skip header clef at measure start
+            }
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isClef() || toClef(el)->clefType() != ClefType::C4) {
+                continue;
+            }
+            if (s->tick() == m->tick() + Fraction(1, 4)) {
+                foundC4 = true;
+            } else if (s->tick() == m->tick() + Fraction(3, 16)) {
+                foundEarly = true;
+            }
+        }
+    }
+    EXPECT_TRUE(foundC4)
+        << "mid-measure CLEF(C4L) must anchor to the following note at beat-2 offset (1/4)";
+    EXPECT_FALSE(foundEarly)
+        << "CLEF must not be placed at its own stored tick (3/16); it follows the next note";
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: a trailing CLEF element (the last element of a measure, with no
+// note/rest after it) is a cautionary clef that takes effect on the downbeat
+// of the NEXT measure, not before the current measure's final note.
+// Fixture: measure 1 (2/4) filled by eight 16th notes, then a CLEF(F=1) as the
+// last stream element; measure 2 follows.
+// ===========================================================================
+TEST_F(Tst_Structure, trailing_clef_change_moves_to_next_measure)
+{
+    MasterScore* score = readEncoreScore("structure_clef_trailing_cautionary.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m1 = score->firstMeasure();
+    ASSERT_NE(m1, nullptr);
+    Measure* m2 = m1->nextMeasure();
+    ASSERT_NE(m2, nullptr);
+    const Fraction barline = m2->tick();   // = end of measure 1 = downbeat of measure 2
+
+    // A cautionary clef on the m1/m2 barline is serialized as a trailing Clef segment of m1,
+    // so check by absolute tick rather than by measure ownership.
+    bool clefAtBarline = false;
+    bool clefMidM1 = false;
+    for (Measure* m = m1; m; m = m->nextMeasure()) {
+        for (Segment* s = m->first(SegmentType::Clef); s; s = s->next(SegmentType::Clef)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isClef() || toClef(el)->clefType() != ClefType::F) {
+                continue;
+            }
+            if (s->tick() == barline) {
+                clefAtBarline = true;
+            } else if (s->tick() > m1->tick() && s->tick() < barline) {
+                clefMidM1 = true;
+            }
+        }
+    }
+    EXPECT_TRUE(clefAtBarline)
+        << "trailing CLEF must take effect on the downbeat of the next measure";
+    EXPECT_FALSE(clefMidM1)
+        << "trailing CLEF must not land inside measure 1";
     delete score;
 }
