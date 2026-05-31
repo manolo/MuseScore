@@ -80,6 +80,10 @@ target_sources(iex_encore PRIVATE
     internal/importer/emitters-tuplets-groups.cpp
     internal/importer/resolvers.h
     internal/importer/resolvers.cpp
+    internal/importer/resolvers-ornaments.cpp
+    internal/importer/resolvers-hairpin.cpp
+    internal/importer/resolvers-slur.cpp
+    internal/importer/resolvers-fingering.cpp
     internal/importer/mappers.h
     internal/importer/mappers-clefs.cpp
     internal/importer/mappers-title.cpp

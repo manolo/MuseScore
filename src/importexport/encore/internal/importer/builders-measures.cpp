@@ -115,15 +115,6 @@ static int encMeasDisplayCount(const EncMeasure& m, const EncMeasure* prev)
     return cnt;
 }
 
-// Encore encodes common time as 0x43 ('C') or 0x63 ('c'); 0x00 means normal numeric.
-static TimeSigType encGlyphToTimeSigType(quint8 glyph, Fraction ts)
-{
-    if ((glyph == 0x43 || glyph == 0x63) && ts == Fraction(4, 4)) {
-        return TimeSigType::FOUR_FOUR;
-    }
-    return TimeSigType::NORMAL;
-}
-
 void buildMeasures(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
@@ -154,7 +145,7 @@ void buildMeasures(BuildCtx& ctx)
                                    enc.measures[0].timeSigDen > 0 ? enc.measures[0].timeSigDen : 4))
                               ? 1 : 0;
         if (nomIdx < enc.measures.size()) {
-            ctx.nominalTimeSigType = encGlyphToTimeSigType(enc.measures[nomIdx].timeSigGlyph,
+            ctx.nominalTimeSigType = encTimeSigGlyph2Type(enc.measures[nomIdx].timeSigGlyph,
                                                            ctx.nominalTimeSig);
         }
     }
@@ -168,7 +159,7 @@ void buildMeasures(BuildCtx& ctx)
         int num = encMeas.timeSigNum > 0 ? encMeas.timeSigNum : 4;
         int den = encMeas.timeSigDen > 0 ? encMeas.timeSigDen : 4;
         Fraction ts(num, den);
-        ctx.measTickToTimeSigType[currentTick] = encGlyphToTimeSigType(encMeas.timeSigGlyph, ts);
+        ctx.measTickToTimeSigType[currentTick] = encTimeSigGlyph2Type(encMeas.timeSigGlyph, ts);
 
         const EncMeasure* prev = (mi > 0) ? &enc.measures[mi - 1] : nullptr;
         const int displayCount = encMeasDisplayCount(encMeas, prev);

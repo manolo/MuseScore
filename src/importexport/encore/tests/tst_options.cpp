@@ -83,6 +83,69 @@ TEST_F(Tst_Options, importStaffSize_false_keeps_unit_scale)
 }
 
 // ===========================================================================
+// importTempoTextSemantic
+// ===========================================================================
+
+// text_stafftext_tempo_promotion has "Allegro" as a STAFFTEXT element.
+// Default: promoted to TempoText.  With importTempoTextSemantic=false: stays StaffText.
+TEST_F(Tst_Options, importTempoTextSemantic_false_keeps_italian_term_as_stafftext)
+{
+    EncImportOptions opts;
+    opts.importTempoTextSemantic = false;
+    MasterScore* score = readEncoreScoreWithOpts("text_stafftext_tempo_promotion.enc", opts);
+    ASSERT_NE(score, nullptr);
+
+    bool foundAllegroAsStaffText = false;
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (Segment* s = m->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (!e) {
+                    continue;
+                }
+                if (e->isTempoText()) {
+                    const String text = toTempoText(e)->plainText();
+                    EXPECT_FALSE(text.contains(String(u"Allegro"), muse::CaseInsensitive))
+                        << "Italian term must not be promoted to TempoText when semantic mode is off";
+                }
+                if (e->isStaffText()
+                    && toStaffText(e)->plainText().contains(String(u"Allegro"),
+                                                            muse::CaseInsensitive)) {
+                    foundAllegroAsStaffText = true;
+                }
+            }
+        }
+    }
+    EXPECT_TRUE(foundAllegroAsStaffText)
+        << "Allegro should remain as StaffText when importTempoTextSemantic=false";
+    delete score;
+}
+
+// Default opts: "Allegro" is promoted to TempoText (existing behavior, regression guard).
+TEST_F(Tst_Options, importTempoTextSemantic_true_promotes_italian_term_to_tempotext)
+{
+    MasterScore* score = readEncoreScore("text_stafftext_tempo_promotion.enc");
+    ASSERT_NE(score, nullptr);
+
+    bool foundAllegroAsTempoText = false;
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (Segment* s = m->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isTempoText()
+                    && toTempoText(e)->plainText().contains(String(u"Allegro"),
+                                                            muse::CaseInsensitive)) {
+                    foundAllegroAsTempoText = true;
+                }
+            }
+        }
+    }
+    EXPECT_TRUE(foundAllegroAsTempoText)
+        << "Allegro must be promoted to TempoText under default (semantic=true) opts";
+    delete score;
+}
+
+// ===========================================================================
 // underfillMeasureStrategy
 // ===========================================================================
 
@@ -160,6 +223,55 @@ TEST_F(Tst_Options, firstMeasure_not_pickup_keeps_full_nominal_duration)
     ASSERT_NE(m0, nullptr);
     EXPECT_EQ(m0->ticks(), m0->timesig())
         << "firstMeasureIsPickup=false: first measure must retain full nominal duration";
+    delete score;
+}
+
+// ===========================================================================
+// importUnsupportedArticulationsAsText
+// ornaments_open_string_and_stick.enc: note 1 = 0x46 (open string, mapped),
+//   note 2 = 0x47 (stick technique, unmapped).
+// ===========================================================================
+
+TEST_F(Tst_Options, unsupported_artic_default_drops_silently)
+{
+    MasterScore* score = readEncoreScore("ornaments_open_string_and_stick.enc");
+    ASSERT_NE(score, nullptr);
+    // Default: no StaffText emitted for the unmapped 0x47 byte.
+    int staffTextCount = 0;
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (Segment* s = m->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isStaffText()) {
+                    ++staffTextCount;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(staffTextCount, 0)
+        << "Default: unsupported artic bytes must be dropped with no StaffText";
+    delete score;
+}
+
+TEST_F(Tst_Options, unsupported_artic_as_text_emits_stafftext)
+{
+    EncImportOptions opts;
+    opts.importUnsupportedArticulationsAsText = true;
+    MasterScore* score = readEncoreScoreWithOpts("ornaments_open_string_and_stick.enc", opts);
+    ASSERT_NE(score, nullptr);
+    int staffTextCount = 0;
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (Segment* s = m->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isStaffText()) {
+                    ++staffTextCount;
+                }
+            }
+        }
+    }
+    EXPECT_GT(staffTextCount, 0)
+        << "importUnsupportedArticulationsAsText=true must emit at least one StaffText for 0x47";
     delete score;
 }
 

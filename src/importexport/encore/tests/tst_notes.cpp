@@ -1449,8 +1449,87 @@ TEST_F(Tst_Notes, transposing_melody_no_double_flat_after_spell)
 
     delete score;
 }
-// grandstaff_staffwithin_fermata deferred to B6 (ornaments and articulations).
-// scale_string_numbers_from_anchor_bytes deferred to B6 (ornaments and articulations).
+// grandstaff_staffwithin_fermata
+TEST_F(Tst_Notes, grandstaff_staffwithin_fermata)
+{
+    MasterScore* score = readEncoreScore("notes_grandstaff_staffwithin_fermata.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+    ASSERT_EQ(score->nstaves(), 2);
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    auto fermatasOnStaff = [&](int staffIdx) {
+        std::vector<SymId> symIds;
+        for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : seg->annotations()) {
+                if (e->isFermata() && e->staffIdx() == static_cast<staff_idx_t>(staffIdx)) {
+                    symIds.push_back(toFermata(e)->symId());
+                }
+            }
+        }
+        return symIds;
+    };
+
+    auto s1 = fermatasOnStaff(0);
+    auto s2 = fermatasOnStaff(1);
+
+    EXPECT_EQ(s1.size(), 1u) << "Treble staff must have 1 fermata (tipo 0xCC)";
+    EXPECT_EQ(s2.size(), 1u) << "Bass staff must have 1 fermata (tipo 0xCD, staffWithin=1)";
+
+    if (!s1.empty()) {
+        EXPECT_EQ(s1[0], SymId::fermataAbove)
+            << "Treble fermata must be above (tipo 0xCC)";
+    }
+    if (!s2.empty()) {
+        EXPECT_EQ(s2[0], SymId::fermataBelow)
+            << "Bass fermata must be below (tipo 0xCD); staffWithin routing broken for ORNs";
+    }
+
+    delete score;
+}// scale_string_numbers_from_anchor_bytes
+TEST_F(Tst_Notes, scale_string_numbers_from_anchor_bytes)
+{
+    // Fixture: M1 has 4 notes with au=0x39 on note 1 (explicit string 1) and au=0x00
+    // on notes 2-4. The anchor unlocks opt-based circles for the whole measure:
+    // all 4 notes show strings 1-4 via pos+1.
+    MasterScore* score = readEncoreScore("notes_scale_string_numbers_anchor.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    std::vector<int> nums;
+    for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        EngravingItem* el = seg->element(0);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        for (Note* n : toChord(el)->notes()) {
+            for (EngravingItem* sub : n->el()) {
+                if (sub && sub->isFingering()) {
+                    Fingering* fg = toFingering(sub);
+                    if (fg->textStyleType() == TextStyleType::STRING_NUMBER) {
+                        bool ok;
+                        int v = fg->plainText().toInt(&ok);
+                        if (ok) {
+                            nums.push_back(v);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    EXPECT_EQ(nums.size(), 4u) << "Anchor byte 0x39 must enable circles on all 4 notes";
+    for (int i = 0; i < (int)nums.size(); ++i) {
+        EXPECT_EQ(nums[i], i + 1) << "Note " << i + 1 << " must show string " << i + 1;
+    }
+
+    delete score;
+}
 
 // scale_no_anchor_produces_no_circles
 TEST_F(Tst_Notes, scale_no_anchor_produces_no_circles)
@@ -1486,7 +1565,57 @@ TEST_F(Tst_Notes, scale_no_anchor_produces_no_circles)
     delete score;
 }
 
-// string_num_orn_does_not_duplicate_anchor_path_number deferred to B6 (ornaments and articulations).
+
+// ===========================================================================
+// REGRESSION: Standalone string-number ORN (0xE6 = string 2) must NOT duplicate
+// the string number that the per-note hasScaleStringAnchors options-bit-0 path
+// already placed on the same note.
+// Fixture: n1 artUp=0x39 (string 1, sets anchor); ORN 0xE6 at tick=240 (string 2)
+// + n2 with options bit 0 and position=1. Without the dedup guard in the resolver,
+// n2 would get TWO "2" string numbers.
+// ===========================================================================
+TEST_F(Tst_Notes, string_num_orn_does_not_duplicate_anchor_path_number)
+{
+    MasterScore* score = readEncoreScore("notes_string_num_orn_no_dup.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    std::map<int, std::vector<int> > numsByBeat;  // beat_index → list of string numbers
+    int beat = 0;
+    for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        EngravingItem* el = seg->element(0);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        for (Note* n : toChord(el)->notes()) {
+            for (EngravingItem* sub : n->el()) {
+                if (sub && sub->isFingering()
+                    && toFingering(sub)->textStyleType() == TextStyleType::STRING_NUMBER) {
+                    bool ok;
+                    int v = toFingering(sub)->plainText().toInt(&ok);
+                    if (ok) {
+                        numsByBeat[beat].push_back(v);
+                    }
+                }
+            }
+        }
+        ++beat;
+    }
+    EXPECT_EQ(numsByBeat[0].size(), 1u) << "n1 must have exactly one string number (1)";
+    EXPECT_EQ(numsByBeat[1].size(), 1u) << "n2 must have exactly one string number (2), not two";
+    if (!numsByBeat[0].empty()) {
+        EXPECT_EQ(numsByBeat[0][0], 1);
+    }
+    if (!numsByBeat[1].empty()) {
+        EXPECT_EQ(numsByBeat[1][0], 2);
+    }
+
+    delete score;
+}
+
 
 // voice_overflow_notes_dropped_not_routed_to_voice2
 TEST_F(Tst_Notes, voice_overflow_notes_dropped_not_routed_to_voice2)
@@ -1698,7 +1827,49 @@ TEST_F(Tst_Notes, notes_v0c2_multiinstr_compact_routing)
     delete score;
 }
 
-// notes_v0c2_size24_correct_pitch_and_artic deferred to B6 (articulations).
+
+// v0xC2 size=24 notes: MIDI pitch is at offset +13 (tuplet slot), same as size=22.
+// Articulation byte is at offset +22. Before this fix, size=24 notes used offset +15
+// for pitch (which is 0 in v0xC2 files), producing C-1 instead of the correct note.
+TEST_F(Tst_Notes, notes_v0c2_size24_correct_pitch_and_artic)
+{
+    MasterScore* score = readEncoreScore("notes_v0c2_size24_artic_pitch.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    std::vector<int> pitches;
+    std::vector<SymId> artics;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        Chord* c = toChord(el);
+        pitches.push_back(c->notes().front()->pitch());
+        for (Articulation* a : c->articulations()) {
+            artics.push_back(a->symId());
+        }
+    }
+
+    ASSERT_EQ(pitches.size(), 2u);
+    EXPECT_EQ(pitches[0], 67) << "First note should be G4 (67), not C-1 (0)";
+    EXPECT_EQ(pitches[1], 64) << "Second note should be E4 (64), not C-1 (0)";
+
+    // MuseScore flips Above/Below based on stem direction after layout; compare kind only.
+    auto isStaccato = [](SymId s) {
+        return s == SymId::articStaccatoAbove || s == SymId::articStaccatoBelow;
+    };
+    auto isTenuto = [](SymId s) {
+        return s == SymId::articTenutoAbove || s == SymId::articTenutoBelow;
+    };
+    ASSERT_EQ(artics.size(), 2u);
+    EXPECT_TRUE(isStaccato(artics[0])) << "G4 should have staccato (0x1d)";
+    EXPECT_TRUE(isTenuto(artics[1])) << "E4 should have tenuto (0x1c)";
+
+    delete score;
+}
 
 // v0xC2 size=24 notes where tuplet==0 and the MIDI pitch is already stored in
 // semiTonePitch (not in the tuplet slot). Found in some Encore 4.x files (e.g.
