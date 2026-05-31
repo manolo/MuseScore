@@ -293,10 +293,11 @@ bool EncTie::read(QDataStream& ds)
     if (size > 6) {
         ds >> startFlag;        // tie-start flag at element offset +6
     }
-    // Byte +5: arc direction (high bit = outgoing tie).
+    // Byte +5: arc direction. Bit 7 (0x80) = arc-above outgoing; bit 1 (0x02) = arc-below outgoing.
+    // Values 0x02 and 0x03 both carry bit 1 and mean "tie starts here, arc drawn below".
     // Byte +6: tie-start flag (high bit = sends tie forward).
-    // Either high bit set means TIE-START; ~32% of outgoing ties need byte +6.
-    isTieStart = ((dirByte & 0x80) != 0) || ((startFlag & 0x80) != 0);
+    // Any outgoing indicator means TIE-START.
+    isTieStart = ((dirByte & 0x80) != 0) || ((startFlag & 0x80) != 0) || ((dirByte & 0x02) != 0);
     int consumed = (size > 5 ? 1 : 0) + (size > 6 ? 1 : 0);
     int toSkip = static_cast<int>(size) - 5 - consumed;
     if (toSkip > 0) {

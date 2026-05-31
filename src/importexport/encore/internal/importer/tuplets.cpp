@@ -34,7 +34,6 @@
 using namespace mu::engraving;
 
 namespace mu::iex::encore {
-
 bool TupletTracker::groupFull() const
 {
     // Close when accumulated face values reach (or exceed) actualN × baseLen.
@@ -123,7 +122,8 @@ Fraction TupletTracker::noteAdvance(DurationType baseType) const
 std::set<const EncMeasureElem*> computeImpliedTupletMembers(
     const MeasureElemRefVec& sortedElems,
     const EncMeasure& encMeas,
-    int totalStaves)
+    int totalStaves,
+    std::set<const EncMeasureElem*>* partialEndGroup)
 {
     std::set<const EncMeasureElem*> result;
 
@@ -268,6 +268,49 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     }
                 }
                 // Partial last group: NOT marked here — the isolated-fill check handles it.
+                // Exception: mark a partial group only when two conditions both hold:
+                //   (a) rdur sum reaches the exact end of the measure (notes fill end by MIDI sounding).
+                //   (b) face-value sum from startTick would OVERFLOW without tuplet scaling
+                //       (i.e. the notes cannot be placed as plain notes without exceeding the measure).
+                // Condition (b) prevents false-positives where plain face-value advances already
+                // fill the measure, e.g. a 3:2 quarter triplet {Q,8,8} starting at tick=0 whose
+                // face ticks sum to exactly durTicks — those notes need no tuplet correction.
+                if (i > groupStart) {
+                    int startTick = 0;
+                    if (!chords[groupStart].empty()) {
+                        startTick = static_cast<int>(chords[groupStart][0]->tick);
+                    }
+                    int rdurSum = 0;
+                    int faceTickSum = 0;
+                    for (int j = groupStart; j < i; ++j) {
+                        if (!chords[j].empty()) {
+                            const EncMeasureElem* ch = chords[j][0];
+                            rdurSum += std::max(0, static_cast<int>(ch->realDuration));
+                            EncElemType cht = static_cast<EncElemType>(ch->type);
+                            quint8 fv = 0;
+                            if (cht == EncElemType::NOTE) {
+                                fv = static_cast<const EncNote*>(ch)->faceValue & 0x0F;
+                            } else if (cht == EncElemType::REST) {
+                                fv = static_cast<const EncRest*>(ch)->faceValue & 0x0F;
+                            }
+                            faceTickSum += faceValue2ticks(fv);
+                        }
+                    }
+                    const bool rdurFillsMeasure = (rdurSum > 0)
+                                                  && (startTick + rdurSum == static_cast<int>(encMeas.durTicks));
+                    const bool faceWouldOverflow = (startTick + faceTickSum
+                                                    > static_cast<int>(encMeas.durTicks));
+                    if (rdurFillsMeasure && faceWouldOverflow) {
+                        for (int j = groupStart; j < i; ++j) {
+                            for (const EncMeasureElem* e2 : chords[j]) {
+                                result.insert(e2);
+                                if (partialEndGroup) {
+                                    partialEndGroup->insert(e2);
+                                }
+                            }
+                        }
+                    }
+                }
             } else {
                 // Implied tuplets (v0xC2): check for exactly actualN consecutive groups.
                 if (i + actualN > n) {
@@ -295,5 +338,4 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
     }
     return result;
 }
-
 } // namespace mu::iex::encore

@@ -27,7 +27,6 @@
 using namespace mu::engraving;
 
 namespace mu::iex::encore {
-
 int faceValue2ticks(quint8 fv)
 {
     switch (fv & 0x0F) {
@@ -58,9 +57,7 @@ DurationType faceValue2DurationType(quint8 fv)
     }
 }
 
-// Guard against rdur inflated by gap-to-next-event (e.g. a quarter note alone
-// in 3/4 gets rdur=720 which looks like dotted half). Reject if rdur > faceTicks
-// but is not a real dotted multiple of the face value.
+// Reject rdur-based dot promotion when rdur is inflated by gap-to-next-event, not a real dotted value.
 static bool inflatedDottedPromotion(qint16 realDur, quint8 fv)
 {
     int faceTicks = faceValue2ticks(fv);
@@ -71,6 +68,11 @@ static bool inflatedDottedPromotion(qint16 realDur, quint8 fv)
 DurationType realDuration2DurationType(qint16 realDur, quint8 fv)
 {
     if (realDur <= 0) {
+        return faceValue2DurationType(fv);
+    }
+    // Multi-stream MIDI overlap can shorten rdur below the written value; trust face value when rdur < faceTicks.
+    const int faceTicks = faceValue2ticks(fv);
+    if (faceTicks > 0 && realDur < faceTicks) {
         return faceValue2DurationType(fv);
     }
     switch (realDur) {
@@ -168,5 +170,4 @@ Fraction dottedAdvance(DurationType durationType, int dots)
     }
     return TDuration(durationType).fraction() * multiplier;
 }
-
 } // namespace mu::iex::encore

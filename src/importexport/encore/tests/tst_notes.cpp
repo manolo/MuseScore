@@ -547,7 +547,6 @@ TEST_F(Tst_Notes, no_voice_conflict_from_clamping)
     delete score;
 }
 
-
 // ===========================================================================
 // FIX: Encore encodes leading and interior silences implicitly via the
 // element's absolute tick offset rather than via REST elements. The importer
@@ -665,7 +664,6 @@ TEST_F(Tst_Notes, note_rdur_80_stays_16th_face_value)
     delete score;
 }
 
-
 TEST_F(Tst_Notes, tie_direction_fc_creates_tie)
 {
     MasterScore* score = readEncoreScore("notes_tie_dir_fc.enc");
@@ -692,6 +690,74 @@ TEST_F(Tst_Notes, tie_direction_fc_creates_tie)
         }
     }
     EXPECT_EQ(tieCount, 1) << "expected one tie from the 0xfc TIE element";
+    delete score;
+}
+
+// ===========================================================================
+// FIX: dir byte 0x02 (bit 1 set, arc below, no high bit) must also produce
+// a tie. Some instruments store the outgoing-tie marker in bit 1 rather than
+// bit 7, so the check must be (dirByte & 0x02) not just (dirByte & 0x80).
+// ===========================================================================
+TEST_F(Tst_Notes, tie_direction_02_creates_tie)
+{
+    MasterScore* score = readEncoreScore("notes_tie_dir_02.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int tieCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Note* n : toChord(el)->notes()) {
+                if (n->tieFor()) {
+                    ++tieCount;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(tieCount, 1) << "expected one tie from the 0x02 TIE dir element";
+    delete score;
+}
+
+// ===========================================================================
+// FIX: dir byte 0x03 (bits 0+1 set: incoming arc + outgoing tie) must also
+// produce a tie. This value marks notes that both receive a preceding tie arc
+// and send a new tie forward, and appears without sflag=0x80 in some files.
+// ===========================================================================
+TEST_F(Tst_Notes, tie_direction_03_creates_tie)
+{
+    MasterScore* score = readEncoreScore("notes_tie_dir_03.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int tieCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Note* n : toChord(el)->notes()) {
+                if (n->tieFor()) {
+                    ++tieCount;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(tieCount, 1) << "expected one tie from the 0x03 TIE dir element";
     delete score;
 }
 
@@ -1169,6 +1235,66 @@ TEST_F(Tst_Notes, capped_tuplet_note_removed_from_tuplet)
         EXPECT_EQ(chords[4]->tuplet(), nullptr)
             << "Capped 2nd triplet Q removed from tuplet";
     }
+    delete score;
+}
+
+// ===========================================================================
+// BUG FIX: Partial measure-end triplet placed in tuplet, not overflowed
+// ===========================================================================
+
+TEST_F(Tst_Notes, partial_triplet_at_measure_end_no_voice_overflow)
+{
+    // notes_partial_triplet_measure_end.enc: 2/4 measure with 3 plain eighths
+    // (filling ticks 0-360) followed by a 2-note partial 3:2 triplet at the end.
+    //
+    // Notes at ticks 360 and 440 both have tup=0x32 (3:2) and fv=4 (eighth).
+    //   rdur(tick=360) = 80  (2 triplet slots: displayed as eighth in the bracket)
+    //   rdur(tick=440) = 40  (1 triplet slot:  displayed as sixteenth in the bracket)
+    //   startTick(360) + rdurSum(120) = 480 = durTicks  -> rdur fills measure
+    //   startTick(360) + faceTickSum(240) = 600 > 480   -> face values would overflow
+    //
+    // Fix: the partial group is marked (Fix 1). A V_16TH baseLen bracket is
+    // started (Fix 3: remaining=1/8 / normalN=2 = 1/16). The second note's dt
+    // is reduced V_EIGHTH -> V_16TH to fit the remaining 1/24 slot (Fix 2).
+    //
+    // Without fix: the plain V_EIGHTH face-value advance at tick=360 fills the
+    // remaining 1/8, causing tick=440 to overflow into voice 1. This produced
+    // a phantom note at beat 1 (voice-1 note placed at cumTick=0) and an
+    // unresolved tie in similar multi-staff files (e.g. the POLCA regression).
+    MasterScore* score = readEncoreScore("notes_partial_triplet_measure_end.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Partial measure-end triplet must not corrupt score: " << ret.text();
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->timesig(), Fraction(2, 4));
+
+    std::vector<Chord*> chords;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChord()) {
+            chords.push_back(toChord(e));
+        }
+    }
+    ASSERT_GE(chords.size(), 5u) << "Should have 3 plain eighths + 2 triplet notes";
+
+    // Plain eighths are not in a tuplet.
+    EXPECT_EQ(chords[0]->tuplet(), nullptr) << "Plain 8th 1 no tuplet";
+    EXPECT_EQ(chords[1]->tuplet(), nullptr) << "Plain 8th 2 no tuplet";
+    EXPECT_EQ(chords[2]->tuplet(), nullptr) << "Plain 8th 3 no tuplet";
+
+    // Both partial-triplet notes are in the same tuplet (not overflowed to voice 1).
+    EXPECT_NE(chords[3]->tuplet(), nullptr) << "Triplet note 1 (eighth) should be in tuplet";
+    EXPECT_NE(chords[4]->tuplet(), nullptr) << "Triplet note 2 (sixteenth) should be in tuplet";
+    EXPECT_EQ(chords[3]->tuplet(), chords[4]->tuplet()) << "Both triplet notes in same bracket";
+
+    // Note 1 displays as eighth (2 triplet slots), note 2 as sixteenth (1 slot).
+    EXPECT_EQ(chords[3]->durationType().type(), DurationType::V_EIGHTH)
+        << "First triplet note: V_EIGHTH (2-slot face value)";
+    EXPECT_EQ(chords[4]->durationType().type(), DurationType::V_16TH)
+        << "Second triplet note: V_16TH (1-slot, shortened by dt-reduction fix)";
+
     delete score;
 }
 

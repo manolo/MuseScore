@@ -24,6 +24,7 @@
 #define MU_IMPORTEXPORT_ENC_IMPORT_CTX_H
 
 #include <map>
+#include <set>
 #include <memory>
 #include <vector>
 
@@ -151,8 +152,14 @@ std::map<std::pair<int, int>, std::vector<Chord*> > pendingGraces;
 
 // Stream-overflow voice assignment: when cumTick fills and a new note arrives,
 // it belongs to another recording stream; assign it to the next MuseScore voice.
-// Persists across measures: once a stream moves to msVoice=1, it stays there.
+// Reset each measure; overflow from one measure must not affect the next.
 std::map<std::pair<int, int>, int> streamOffset;  // key=(staffIdx,encVoice), val=extra offset
+
+// Pitches placed in voice 0 for the current measure, keyed by staffIdx.
+// Used to suppress stream-duplicate notes overflowing to voice 1+: any overflow
+// note whose pitch already exists in voice 0 is a recording-stream artifact.
+// Cleared per measure.
+std::map<int, std::set<int>> v0PitchesInMeasure;
 
 // v0xA6 inner-grace tracking: leading grace fv stored here so inner graces
 // (g1=0x10) with higher fv are also classified as graces. Cleared on flush.
