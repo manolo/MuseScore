@@ -223,12 +223,8 @@ void addInitialKeySig(MasterScore* score, int staffIdx, quint8 encKey)
     seg->add(ks);
 }
 
-void addInitialTimeSig(MasterScore* score, int nstaves, const EncMeasure& firstMeas)
+void addInitialTimeSig(MasterScore* score, int nstaves, Fraction ts)
 {
-    int num = firstMeas.timeSigNum > 0 ? firstMeas.timeSigNum : 4;
-    int den = firstMeas.timeSigDen > 0 ? firstMeas.timeSigDen : 4;
-    Fraction ts(num, den);
-
     Measure* m = score->tick2measure(Fraction(0, 1));
     if (!m) {
         return;
@@ -371,6 +367,7 @@ void addRepeatMark(Score* /*score*/, Measure* measure, EncRepeatType rt)
     case EncRepeatType::DC: {
         Jump* j = Factory::createJump(measure);
         j->setJumpType(JumpType::DC);
+        j->setPlayRepeats(true);
         j->setTrack(0);
         measure->add(j);
         break;
@@ -378,6 +375,7 @@ void addRepeatMark(Score* /*score*/, Measure* measure, EncRepeatType rt)
     case EncRepeatType::DS: {
         Jump* j = Factory::createJump(measure);
         j->setJumpType(JumpType::DS);
+        j->setPlayRepeats(true);
         j->setTrack(0);
         measure->add(j);
         break;
@@ -385,6 +383,7 @@ void addRepeatMark(Score* /*score*/, Measure* measure, EncRepeatType rt)
     case EncRepeatType::DCALFINE: {
         Jump* j = Factory::createJump(measure);
         j->setJumpType(JumpType::DC_AL_FINE);
+        j->setPlayRepeats(true);
         j->setTrack(0);
         measure->add(j);
         break;
@@ -392,6 +391,7 @@ void addRepeatMark(Score* /*score*/, Measure* measure, EncRepeatType rt)
     case EncRepeatType::DSALFINE: {
         Jump* j = Factory::createJump(measure);
         j->setJumpType(JumpType::DS_AL_FINE);
+        j->setPlayRepeats(true);
         j->setTrack(0);
         measure->add(j);
         break;
@@ -399,6 +399,7 @@ void addRepeatMark(Score* /*score*/, Measure* measure, EncRepeatType rt)
     case EncRepeatType::DCALCODA: {
         Jump* j = Factory::createJump(measure);
         j->setJumpType(JumpType::DC_AL_CODA);
+        j->setPlayRepeats(true);
         j->setTrack(0);
         measure->add(j);
         break;
@@ -406,6 +407,7 @@ void addRepeatMark(Score* /*score*/, Measure* measure, EncRepeatType rt)
     case EncRepeatType::DSALCODA: {
         Jump* j = Factory::createJump(measure);
         j->setJumpType(JumpType::DS_AL_CODA);
+        j->setPlayRepeats(true);
         j->setTrack(0);
         measure->add(j);
         break;
@@ -645,18 +647,20 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     // Byte encodes one or two glyphs (e.g. 0x24=tenuto+staccato).
     // Confirmed against encore-symbols.enc m8-m12 vs Encore's MusicXML export.
     switch (articByte) {
-    // Trill/mordent from m16-m17: 0x04..0x07=trill, 0x0A/0x0C=inv-mordent, 0x0B/0x2F=mordent.
+    // Trill/mordent from m16-m17: 0x04..0x07=trill, 0x08=turn, 0x09=wave, 0x0A/0x0C=inv-mordent, 0x0B/0x2F=mordent.
     case 0x04:
     case 0x05:
     case 0x06:
     case 0x07: return { SymId::ornamentTrill };
-    case 0x0A:
-    case 0x0C: return { SymId::ornamentShortTrill };   // <inverted-mordent>
+    case 0x08: return { SymId::ornamentTurn };
+    case 0x09: return { SymId::ornamentTrill };
+    case 0x0A: return { SymId::ornamentShortTrill };    // <inverted-mordent>
+    case 0x0C: return { SymId::ornamentTremblement };   // <inverted-mordent long="yes">
     case 0x0B:
     case 0x2F: return { SymId::ornamentMordent };
     case 0x12: return { SymId::articAccentAbove };
     case 0x13: return { SymId::articMarcatoAbove };
-    case 0x14: return { SymId::articAccentAbove, SymId::articTenutoAbove };
+    case 0x14: return { SymId::articMarcatoAbove, SymId::articStaccatoAbove };
     case 0x15: return { SymId::articMarcatoAbove, SymId::articStaccatoAbove };
     case 0x16: return { SymId::articAccentAbove, SymId::articStaccatissimoAbove };
     case 0x17: return { SymId::articAccentAbove, SymId::articStaccatoAbove };
@@ -667,7 +671,7 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x1D: return { SymId::articStaccatoAbove };
     case 0x20:
     case 0x21: return { SymId::fermataAbove };
-    case 0x22: return { SymId::fermataShortAbove };  // short / square fermata
+    case 0x22: return { SymId::articAccentAbove, SymId::articTenutoAbove };
     case 0x23: return { SymId::articAccentAbove, SymId::articTenutoAbove };
     case 0x24: return { SymId::articTenutoAbove, SymId::articStaccatoAbove };
     case 0x25: return { SymId::articMarcatoAbove, SymId::articTenutoAbove };

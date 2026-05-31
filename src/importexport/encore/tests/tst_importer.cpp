@@ -288,7 +288,7 @@ TEST_F(Tst_Importer, v0c4_octave_lower_implicit_silences)
     EXPECT_EQ(v1Chord->durationType().dots(), 0);
     ASSERT_EQ(v1Chord->notes().size(), 2u);
     std::set<int> pitches{ v1Chord->notes()[0]->pitch(), v1Chord->notes()[1]->pitch() };
-    EXPECT_EQ(pitches, (std::set<int>{ 64 - 12, 73 - 12 }));
+    EXPECT_EQ(pitches, (std::set<int> { 64 - 12, 73 - 12 }));
     delete score;
 }
 
@@ -354,23 +354,23 @@ TEST_F(Tst_Importer, v0xa6_boda_like_full_pipeline)
 
     // Staff 0 (B1, Key=0): eighth + 2 triplet groups, 7 notes total.
     EXPECT_EQ(staffTupletGroups(0), 2u) << "B1 must hold 2 triplet groups";
-    EXPECT_EQ(staffPitches(0), (std::vector<int>{ 88, 88, 89, 88, 86, 88, 86 }))
+    EXPECT_EQ(staffPitches(0), (std::vector<int> { 88, 88, 89, 88, 86, 88, 86 }))
         << "B1 pitches survive without Key shift";
 
     // Staff 1 (B2, Key=0): rest + 2 eighths, no shift.
     EXPECT_EQ(staffElementCount(1), 3) << "B2 must hold rest + 2 chords";
-    EXPECT_EQ(staffPitches(1), (std::vector<int>{ 76, 77 }))
+    EXPECT_EQ(staffPitches(1), (std::vector<int> { 76, 77 }))
         << "B2 pitches survive without Key shift";
 
     // Staff 2 (Laud, Key=-12): duplicate REST collapsed, m_pitch = binary -12.
     EXPECT_EQ(staffElementCount(2), 3)
         << "Laud must hold exactly rest + 2 chords after duplicate-REST dedupe";
-    EXPECT_EQ(staffPitches(2), (std::vector<int>{ 76 - 12, 77 - 12 }))
+    EXPECT_EQ(staffPitches(2), (std::vector<int> { 76 - 12, 77 - 12 }))
         << "Laud pitches must drop by Key = -12";
 
     // Staff 3 (Bajo, Key=-12): 3 eighth notes shifted by -12.
     EXPECT_EQ(staffElementCount(3), 3) << "Bajo holds 3 notes";
-    EXPECT_EQ(staffPitches(3), (std::vector<int>{ 57 - 12, 60 - 12, 64 - 12 }))
+    EXPECT_EQ(staffPitches(3), (std::vector<int> { 57 - 12, 60 - 12, 64 - 12 }))
         << "Bajo pitches must drop by Key = -12";
 
     // No staff should carry spillover into voice 1.
@@ -462,7 +462,7 @@ TEST_F(Tst_Importer, v0xa6_triplet_byte_at_offset_7)
     }
     EXPECT_EQ(noteCount, 6) << "6 triplet sixteenths must survive import";
     EXPECT_EQ(tupletCount, 2) << "two 3:2 triplet groups expected";
-    const std::vector<int> expected{64, 65, 64, 62, 64, 62};
+    const std::vector<int> expected{ 64, 65, 64, 62, 64, 62 };
     EXPECT_EQ(pitches, expected) << "pitches must match the binary in order";
 
     // Voice 1 must be empty (no spillover).
@@ -553,7 +553,7 @@ TEST_F(Tst_Importer, v0xa6_header_ends_at_0xa6)
     ASSERT_EQ(firstChord->notes().size(), 1u);
     EXPECT_EQ(firstChord->notes()[0]->pitch(), 48)
         << "TK00 at the v0xA6 file offset 0xA6 must be parsed so its "
-           "Key = -12 actually lowers C4 (60) to C3 (48)";
+        "Key = -12 actually lowers C4 (60) to C3 (48)";
     delete score;
 }
 
@@ -724,7 +724,7 @@ TEST_F(Tst_Importer, v0c4_compact_tk_ignores_key_byte)
     ASSERT_EQ(firstChord->notes().size(), 1u);
     EXPECT_EQ(firstChord->notes()[0]->pitch(), 76)
         << "compact-TK file: garbage Key byte at formula offset must be "
-           "ignored; imported pitch stays at binary 76 (not 76+8=84)";
+        "ignored; imported pitch stays at binary 76 (not 76+8=84)";
     delete score;
 }
 
@@ -778,7 +778,7 @@ TEST_F(Tst_Importer, v0c4_volta_coalesce_and_numbered_text)
               [](Volta* a, Volta* b) { return a->tick() < b->tick(); });
     ASSERT_EQ(voltas.size(), 2u)
         << "consecutive measures with the same repeatAlternative bitmask "
-           "must collapse into one Volta";
+        "must collapse into one Volta";
     EXPECT_EQ(voltas[0]->beginText(), String(u"1."))
         << "first ending must render the number '1.'";
     EXPECT_EQ(voltas[1]->beginText(), String(u"2."))
@@ -1020,7 +1020,7 @@ TEST_F(Tst_Importer, v0c4_hairpin_ends_at_next_dynamic)
         << "hairpin must start at the WEDGESTART tick";
     EXPECT_EQ(found->tick2(), Fraction(3, 4))
         << "hairpin must end at the next Dynamic (tick=720, beat 4), "
-           "not at the bar line of its alMezuro target measure";
+        "not at the bar line of its alMezuro target measure";
     delete score;
 }
 
@@ -1051,7 +1051,7 @@ TEST_F(Tst_Importer, v0c4_slur_pixel_span)
         << "slur start at the SLURSTART tick (beat 1)";
     EXPECT_EQ(found->tick2(), Fraction(1, 2))
         << "slur end snaps to note 3 at tick=480 (target xoff 70 matches "
-           "note xoff 70 exactly); not the last note of the measure";
+        "note xoff 70 exactly); not the last note of the measure";
     delete score;
 }
 
@@ -1083,7 +1083,7 @@ TEST_F(Tst_Importer, v0c4_slur_cross_measure_fallback)
     // ChordRest is the 4th quarter, at m2.tick + 3/4 = 7/4.
     EXPECT_EQ(found->tick2(), Fraction(7, 4))
         << "cross-measure slur must fall back to the last ChordRest of "
-           "the alMezuro target measure (m2 beat 4 = absolute tick 7/4)";
+        "the alMezuro target measure (m2 beat 4 = absolute tick 7/4)";
     delete score;
 }
 
@@ -1120,8 +1120,8 @@ TEST_F(Tst_Importer, v0c4_dyn_snap_back_by_xoffset)
     ASSERT_NE(found, nullptr) << "expected one Dynamic in the measure";
     EXPECT_EQ(foundTick, Fraction(1, 8))
         << "dynamic must snap from the tagged eighth (tick 1/4) back to "
-           "the previous eighth (tick 1/8) because its xoffset matches "
-           "that note's region";
+        "the previous eighth (tick 1/8) because its xoffset matches "
+        "that note's region";
     delete score;
 }
 
@@ -1145,8 +1145,8 @@ TEST_F(Tst_Importer, v0c4_wedge_snap_back_by_xoffset)
     ASSERT_NE(found, nullptr) << "expected one Hairpin";
     EXPECT_EQ(found->tick(), Fraction(0, 1))
         << "hairpin must snap back from the tagged eighth (tick 1/2) to "
-           "the start of the half note (tick 0) because its xoffset is "
-           "less than the eighth's xoffset";
+        "the start of the half note (tick 0) because its xoffset is "
+        "less than the eighth's xoffset";
     delete score;
 }
 
@@ -1204,7 +1204,7 @@ TEST_F(Tst_Importer, v0c4_dyn_dedup)
     }
     EXPECT_EQ(dynCount, 1)
         << "two identical MF ORNs at the same tick must collapse to one "
-           "Dynamic on the segment";
+        "Dynamic on the segment";
     delete score;
 }
 
@@ -1225,13 +1225,21 @@ TEST_F(Tst_Importer, v0c4_dyn_displaced_to_staff_above)
     bool foundOnStaff0 = false;
     bool foundOnStaff1 = false;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
-        if (!mb->isMeasure()) continue;
+        if (!mb->isMeasure()) {
+            continue;
+        }
         for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s;
              s = s->next(SegmentType::ChordRest)) {
             for (EngravingItem* ann : s->annotations()) {
-                if (!ann || !ann->isDynamic()) continue;
-                if (ann->track() == trackStaff0) foundOnStaff0 = true;
-                if (ann->track() == trackStaff1) foundOnStaff1 = true;
+                if (!ann || !ann->isDynamic()) {
+                    continue;
+                }
+                if (ann->track() == trackStaff0) {
+                    foundOnStaff0 = true;
+                }
+                if (ann->track() == trackStaff1) {
+                    foundOnStaff1 = true;
+                }
             }
         }
     }
@@ -1274,7 +1282,7 @@ TEST_F(Tst_Importer, v0c4_hairpin_snapstart_at_barline)
     // Latest with xoff <= 110: tick=480 (xoff=90). Start = Fraction(1,2).
     EXPECT_LT(dim->tick(), Fraction(1, 1))
         << "hairpin start must be inside m1 (snap from bar-line tick to last "
-           "note with xoff <= ornament.xoffset)";
+        "note with xoff <= ornament.xoffset)";
     EXPECT_EQ(dim->tick(), Fraction(1, 2))
         << "start must snap to tick=480 (xoff=90, latest note with xoff<=110)";
     // MF in m2 at tick=240 xoffset=70 (>= note@240 xoff=60 -> no snap-back)
@@ -1307,7 +1315,7 @@ TEST_F(Tst_Importer, v0c4_hairpin_endpoint_dynamic_wins)
     const Fraction m2tick = Fraction(1, 1);
     EXPECT_GT(dim->tick2(), m2tick)
         << "hairpin must end at MF dynamic in m2 (after bar line), not at m2.tick; "
-           "next-dynamic endpoint must win over bar-line clamp";
+        "next-dynamic endpoint must win over bar-line clamp";
     // Specifically at m2 + 1/4 (= where MF is placed after snap-back)
     EXPECT_EQ(dim->tick2(), m2tick + Fraction(1, 4))
         << "hairpin must end at the MF dynamic tick (m2 + 1/4)";
@@ -1326,13 +1334,17 @@ TEST_F(Tst_Importer, v0c4_tremolo_orn_normal_and_barline_tick)
     ASSERT_NE(score, nullptr) << "Failed to load ornaments_tremolo_orn.enc";
 
     // Collect all TremoloSingleChord elements across all chords.
-    std::vector<std::pair<Fraction, TremoloType>> trems;
+    std::vector<std::pair<Fraction, TremoloType> > trems;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
-        if (!mb->isMeasure()) continue;
+        if (!mb->isMeasure()) {
+            continue;
+        }
         for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s;
              s = s->next(SegmentType::ChordRest)) {
             EngravingItem* el = s->element(0);
-            if (!el || !el->isChord()) continue;
+            if (!el || !el->isChord()) {
+                continue;
+            }
             Chord* c = toChord(el);
             if (c->tremoloSingleChord()) {
                 trems.push_back({ s->tick(), c->tremoloSingleChord()->tremoloType() });
@@ -1341,13 +1353,51 @@ TEST_F(Tst_Importer, v0c4_tremolo_orn_normal_and_barline_tick)
     }
     ASSERT_EQ(trems.size(), 2u)
         << "expected exactly 2 TremoloSingleChord: one at m1.0 (normal tick) "
-           "and one at m2.beat-4 (from ORN at measure end tick)";
+        "and one at m2.beat-4 (from ORN at measure end tick)";
     // m1 tremolo: at tick=0 (half note, tipo=0xAF at same tick)
     EXPECT_EQ(trems[0].first, Fraction(0, 1));
     EXPECT_EQ(trems[0].second, TremoloType::R32);
     // m2 tremolo: at tick of last quarter (beat 4 = m2.tick + 3/4)
     EXPECT_EQ(trems[1].first, Fraction(1, 1) + Fraction(3, 4));
     EXPECT_EQ(trems[1].second, TremoloType::R32);
+    delete score;
+}
+
+// Regression: a TREMOLO_32 ORN placed in voice 0 must attach to a chord in
+// a different voice on the same staff. Encore writes tremolo ORNs at voice 0
+// as a visual annotation regardless of which voice holds the actual note.
+// The resolver must widen the search to all voices when the ORN voice yields
+// no chord, so that the tremolo reaches the note in voice 3.
+TEST_F(Tst_Importer, v0c4_tremolo_orn_cross_voice_attaches)
+{
+    MasterScore* score = readEncoreScore("ornaments_tremolo_orn_crossvoice.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load ornaments_tremolo_orn_crossvoice.enc";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    // The ORN is at voice 0 but the note may land in any voice on staff 0 after
+    // the importer maps encVoice 3. Search all four voice tracks for a tremolo.
+    bool foundTremolo = false;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            for (int v = 0; v < static_cast<int>(VOICES); ++v) {
+                EngravingItem* el = s->element(static_cast<track_idx_t>(v));
+                if (!el || !el->isChord()) {
+                    continue;
+                }
+                if (toChord(el)->tremoloSingleChord()) {
+                    EXPECT_EQ(toChord(el)->tremoloSingleChord()->tremoloType(), TremoloType::R32);
+                    foundTremolo = true;
+                }
+            }
+        }
+    }
+    EXPECT_TRUE(foundTremolo)
+        << "TremoloSingleChord must attach to the chord even when ORN is in a different voice";
     delete score;
 }
 
@@ -1377,7 +1427,9 @@ TEST_F(Tst_Importer, v0xa6_grace_ongrid_snap_suppressed)
     int graceCount = 0;
     for (Segment* s = m1->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
-        if (!el) continue;
+        if (!el) {
+            continue;
+        }
         if (el->isRest()) {
             // A rest immediately after a chord (and not the last element)
             // is suspicious -- it means the snap fired creating an inter-note gap.
@@ -1393,7 +1445,7 @@ TEST_F(Tst_Importer, v0xa6_grace_ongrid_snap_suppressed)
     }
     EXPECT_FALSE(hasSpuriousInterNoteRest)
         << "spurious rest between regular notes detected; "
-           "stolenTicks snap suppression likely missing for post-grace notes on face grid";
+        "stolenTicks snap suppression likely missing for post-grace notes on face grid";
     EXPECT_EQ(graceCount, 1) << "expected exactly 1 grace (leading 32nd)";
     delete score;
 }
@@ -1425,7 +1477,9 @@ TEST_F(Tst_Importer, v0xa6_inner_grace_group)
     std::vector<DurationType> regularTypes;
     for (Segment* s = m1->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
-        if (!el) continue;
+        if (!el) {
+            continue;
+        }
         if (el->isRest()) {
             // A rest that appears RIGHT BEFORE a grace-note chord is spurious:
             // it was created by the face-grid snap firing while graces were
@@ -1451,7 +1505,7 @@ TEST_F(Tst_Importer, v0xa6_inner_grace_group)
     // No rest immediately before the grace group (= the crash-inducing structure).
     EXPECT_FALSE(hasSpuriousPreGraceRest)
         << "Rest found immediately before grace-note chord; "
-           "this corrupted structure crashes the MuseScore GUI layout";
+        "this corrupted structure crashes the MuseScore GUI layout";
     // Both leading (32nd) and inner (64th) graces must be recognised.
     EXPECT_EQ(graceCount, 2)
         << "expected 2 graces (32nd leader + 64th inner)";
@@ -1477,10 +1531,12 @@ TEST_F(Tst_Importer, v0xa6_grace_restores_face_value)
     Measure* m1 = score->firstMeasure();
     ASSERT_NE(m1, nullptr);
 
-    std::vector<std::pair<DurationType, bool>> elements;
+    std::vector<std::pair<DurationType, bool> > elements;
     for (Segment* s = m1->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
-        if (!el) continue;
+        if (!el) {
+            continue;
+        }
         if (el->isRest()) {
             elements.push_back({ toRest(el)->durationType().type(), false });
         } else if (el->isChord()) {
@@ -1496,12 +1552,17 @@ TEST_F(Tst_Importer, v0xa6_grace_restores_face_value)
     // Expected: 8th (regular), 32nd (grace), 16th, 16th, 8th — no rests
     ASSERT_EQ(elements.size(), 5u)
         << "grace time-borrowing correction must restore the last 8th and "
-           "eliminate spurious rests; got " << elements.size() << " elements";
-    EXPECT_EQ(elements[0].second, false); EXPECT_EQ(elements[0].first, DurationType::V_EIGHTH);
-    EXPECT_EQ(elements[1].second, true);  EXPECT_EQ(elements[1].first, DurationType::V_32ND);
-    EXPECT_EQ(elements[2].second, false); EXPECT_EQ(elements[2].first, DurationType::V_16TH);
-    EXPECT_EQ(elements[3].second, false); EXPECT_EQ(elements[3].first, DurationType::V_16TH);
-    EXPECT_EQ(elements[4].second, false); EXPECT_EQ(elements[4].first, DurationType::V_EIGHTH)
+        "eliminate spurious rests; got " << elements.size() << " elements";
+    EXPECT_EQ(elements[0].second, false);
+    EXPECT_EQ(elements[0].first, DurationType::V_EIGHTH);
+    EXPECT_EQ(elements[1].second, true);
+    EXPECT_EQ(elements[1].first, DurationType::V_32ND);
+    EXPECT_EQ(elements[2].second, false);
+    EXPECT_EQ(elements[2].first, DurationType::V_16TH);
+    EXPECT_EQ(elements[3].second, false);
+    EXPECT_EQ(elements[3].first, DurationType::V_16TH);
+    EXPECT_EQ(elements[4].second, false);
+    EXPECT_EQ(elements[4].first, DurationType::V_EIGHTH)
         << "last note must be an eighth (face value), not a 16th from rawGap=90";
     delete score;
 }
@@ -1513,9 +1574,12 @@ TEST_F(Tst_Importer, v0c4_g_clef_8va_from_key)
 {
     MasterScore* score = readEncoreScore("structure_g_clef_8va_from_key.enc");
     ASSERT_NE(score, nullptr);
-    Measure* m = score->firstMeasure(); ASSERT_NE(m, nullptr);
-    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick()); ASSERT_NE(seg, nullptr);
-    EngravingItem* el = seg->element(0); ASSERT_TRUE(el && el->isClef());
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick());
+    ASSERT_NE(seg, nullptr);
+    EngravingItem* el = seg->element(0);
+    ASSERT_TRUE(el && el->isClef());
     EXPECT_EQ(toClef(el)->clefType(), ClefType::G8_VA)
         << "G clef + Key=+12 must yield G8_VA";
     delete score;
@@ -1526,9 +1590,12 @@ TEST_F(Tst_Importer, v0c4_f_clef_8vb_from_key)
 {
     MasterScore* score = readEncoreScore("structure_f_clef_8vb_from_key.enc");
     ASSERT_NE(score, nullptr);
-    Measure* m = score->firstMeasure(); ASSERT_NE(m, nullptr);
-    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick()); ASSERT_NE(seg, nullptr);
-    EngravingItem* el = seg->element(0); ASSERT_TRUE(el && el->isClef());
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick());
+    ASSERT_NE(seg, nullptr);
+    EngravingItem* el = seg->element(0);
+    ASSERT_TRUE(el && el->isClef());
     EXPECT_EQ(toClef(el)->clefType(), ClefType::F8_VB)
         << "F clef + Key=-12 must yield F8_VB";
     delete score;
@@ -1539,9 +1606,12 @@ TEST_F(Tst_Importer, v0c4_f_clef_8va_from_key)
 {
     MasterScore* score = readEncoreScore("structure_f_clef_8va_from_key.enc");
     ASSERT_NE(score, nullptr);
-    Measure* m = score->firstMeasure(); ASSERT_NE(m, nullptr);
-    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick()); ASSERT_NE(seg, nullptr);
-    EngravingItem* el = seg->element(0); ASSERT_TRUE(el && el->isClef());
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick());
+    ASSERT_NE(seg, nullptr);
+    EngravingItem* el = seg->element(0);
+    ASSERT_TRUE(el && el->isClef());
     EXPECT_EQ(toClef(el)->clefType(), ClefType::F_8VA)
         << "F clef + Key=+12 must yield F_8VA";
     delete score;
@@ -1553,9 +1623,12 @@ TEST_F(Tst_Importer, v0c4_non_octave_key_keeps_clef)
 {
     MasterScore* score = readEncoreScore("structure_non_octave_key_keeps_clef.enc");
     ASSERT_NE(score, nullptr);
-    Measure* m = score->firstMeasure(); ASSERT_NE(m, nullptr);
-    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick()); ASSERT_NE(seg, nullptr);
-    EngravingItem* el = seg->element(0); ASSERT_TRUE(el && el->isClef());
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick());
+    ASSERT_NE(seg, nullptr);
+    EngravingItem* el = seg->element(0);
+    ASSERT_TRUE(el && el->isClef());
     EXPECT_EQ(toClef(el)->clefType(), ClefType::G)
         << "G clef + Key=-7 (non-octave) must keep plain G";
     delete score;
@@ -1591,7 +1664,7 @@ TEST_F(Tst_Importer, v0c4_octave_bassa_clef_override)
     ASSERT_TRUE(clefEl->isClef());
     EXPECT_EQ(toClef(clefEl)->clefType(), ClefType::G8_VB)
         << "laud staff must carry G8_VB (template clef), not the plain G "
-           "stored by Encore";
+        "stored by Encore";
 
     // The Key = -12 stored in the binary must also apply: written pitch 76
     // becomes m_pitch 64. Combined with the G8_VB clef, the note sits at the
@@ -1626,7 +1699,7 @@ TEST_F(Tst_Importer, v0c4_bass_guitar_transposing_clef)
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(inst->transpose().chromatic, -12)
         << "matched instrument template must be a bass-guitar variant "
-           "(transposeChromatic = -12)";
+        "(transposeChromatic = -12)";
 
     Measure* m = score->firstMeasure();
     ASSERT_NE(m, nullptr);
@@ -1637,7 +1710,7 @@ TEST_F(Tst_Importer, v0c4_bass_guitar_transposing_clef)
     ASSERT_TRUE(clefEl->isClef());
     EXPECT_EQ(toClef(clefEl)->clefType(), ClefType::F8_VB)
         << "F clef + Key=-12 must yield F8_VB (binary-driven rule); "
-           "template transposing clef (plain F) is no longer preferred";
+        "template transposing clef (plain F) is no longer preferred";
 
     Chord* firstChord = nullptr;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
@@ -2095,8 +2168,12 @@ TEST_F(Tst_Importer, encore_symbols_full_coverage)
         }
         Measure* m = toMeasure(mb);
         for (EngravingItem* e : m->el()) {
-            if (e && e->isMarker()) ++markers;
-            if (e && e->isJump()) ++jumps;
+            if (e && e->isMarker()) {
+                ++markers;
+            }
+            if (e && e->isJump()) {
+                ++jumps;
+            }
         }
         // Dotted end barline
         Segment* endBar = m->findSegment(SegmentType::EndBarLine, m->endTick());
@@ -2112,46 +2189,66 @@ TEST_F(Tst_Importer, encore_symbols_full_coverage)
         for (Segment* s = m->first(SegmentType::ChordRest);
              s; s = s->next(SegmentType::ChordRest)) {
             for (EngravingItem* e : s->annotations()) {
-                if (e && e->isDynamic()) ++dynamics;
-                if (e && e->isFermata()) ++fermatas;
+                if (e && e->isDynamic()) {
+                    ++dynamics;
+                }
+                if (e && e->isFermata()) {
+                    ++fermatas;
+                }
             }
             EngravingItem* el = s->element(0);
             if (!el || !el->isChord()) {
                 continue;
             }
             Chord* c = toChord(el);
-            if (c->arpeggio()) ++arpeggios;
-            if (c->tremoloSingleChord()) ++tremolos;
+            if (c->arpeggio()) {
+                ++arpeggios;
+            }
+            if (c->tremoloSingleChord()) {
+                ++tremolos;
+            }
             for (Articulation* a : c->articulations()) {
                 using mu::engraving::SymId;
                 switch (a->symId()) {
                 case SymId::articStaccatoAbove: case SymId::articStaccatoBelow:
-                    ++staccatos; break;
+                    ++staccatos;
+                    break;
                 case SymId::articTenutoAbove: case SymId::articTenutoBelow:
-                    ++tenutos; break;
+                    ++tenutos;
+                    break;
                 case SymId::articAccentAbove: case SymId::articAccentBelow:
-                    ++accents; break;
+                    ++accents;
+                    break;
                 case SymId::articMarcatoAbove: case SymId::articMarcatoBelow:
-                    ++marcatos; break;
+                    ++marcatos;
+                    break;
                 case SymId::articStaccatissimoAbove: case SymId::articStaccatissimoBelow:
-                    ++staccatissimos; break;
+                    ++staccatissimos;
+                    break;
                 case SymId::ornamentTrill:
-                    ++trills; break;
-                case SymId::ornamentShortTrill:  // <inverted-mordent>
+                    ++trills;
+                    break;
+                case SymId::ornamentShortTrill:    // <inverted-mordent>
+                case SymId::ornamentTremblement:   // <inverted-mordent long="yes">
                 case SymId::ornamentMordent:
-                    ++mordents; break;
+                    ++mordents;
+                    break;
                 default: break;
                 }
             }
             for (Note* n : c->notes()) {
                 for (EngravingItem* nel : n->el()) {
-                    if (nel && nel->isFingering()) ++fingerings;
+                    if (nel && nel->isFingering()) {
+                        ++fingerings;
+                    }
                 }
             }
         }
     }
     for (auto& [tick, sp] : score->spannerMap().map()) {
-        if (sp->isHairpin()) ++hairpins;
+        if (sp->isHairpin()) {
+            ++hairpins;
+        }
     }
     EXPECT_GE(dynamics,      13) << "all 13 Encore dynamics expected";
     EXPECT_GE(fermatas,       2);
