@@ -32,6 +32,7 @@
 
 #include "../parser/elements.h"
 #include "engraving/types/fraction.h"
+#include "engraving/types/symid.h"
 #include "engraving/dom/lyrics.h"
 #include "engraving/dom/hairpin.h"
 #include "engraving/dom/masterscore.h"
@@ -104,6 +105,28 @@ struct PendingStaccato {
     track_idx_t track;
 };
 std::vector<PendingStaccato> pendingStaccatos;
+
+// Bowing/stroke intents (tipo 0xC4=upbow, 0xC5=downbow), deferred like ARPEGGIO.
+struct PendingBowing {
+    Fraction tick;
+    track_idx_t track;
+    mu::engraving::SymId symId;
+    int measIdx = -1;       // source measure index
+    bool crossMeasure = false;  // no voice=0 note at same raw Encore tick; belongs to next measure
+};
+std::vector<PendingBowing> pendingBowings;
+
+// Fingering number intents from stand-alone ORN elements (tipo 0xB9..0xBD),
+// deferred because the chord segment is not built yet at ORN parse time.
+struct PendingOrnFingering {
+    Fraction tick;
+    track_idx_t track;
+    int fingerNum;
+    int measIdx = -1;
+    bool crossMeasure = false;   // ORN at last v0 tick, no v4 note there: belongs to next measure
+    bool preferSibling = false;  // more ORNs than v0 notes at tick: belongs to 2nd-staff chord
+};
+std::vector<PendingOrnFingering> pendingOrnFingerings;
 
 // Segno/Coda markers (tipo 0xA2/0xA6), attached to the measure, not a chord.
 struct PendingMarker {
@@ -192,9 +215,11 @@ struct BuildCtx
     std::vector<PendingSlur>       pendingSlurs;
     std::vector<PendingArpeggio>   pendingArpeggios;
     std::vector<PendingOrnTremolo> pendingOrnTremolos;
-    std::vector<PendingTrill>      pendingTrills;
-    std::vector<PendingStaccato>   pendingStaccatos;
-    std::vector<PendingMarker>     pendingMarkers;
+    std::vector<PendingTrill>         pendingTrills;
+    std::vector<PendingStaccato>      pendingStaccatos;
+    std::vector<PendingBowing>        pendingBowings;
+    std::vector<PendingOrnFingering>  pendingOrnFingerings;
+    std::vector<PendingMarker>        pendingMarkers;
     std::map<track_idx_t, std::vector<PendingLyric> > pendingLyrics;
 };
 

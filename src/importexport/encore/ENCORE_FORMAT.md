@@ -117,7 +117,7 @@ infer the actual kit from the track name.
 |--------|------|--------------------------------------------------------------------------------|
 | +14    | 1    | clef type                                                                      |
 | +15    | 1    | key signature                                                                  |
-| +16    | 1    | page-row counter (varies per system; NOT the page number and NOT a fixed property) |
+| +16    | 1    | sequential row index (0, 1, 2 … across all systems; NOT the page number)       |
 | +19    | 1    | visibility: `0x00` = hidden; any non-zero = visible                            |
 | +20    | 1    | staff type: `0` = MELODY, `1` = TAB, `2` = RHYTHM (single-line percussion)    |
 | +21    | 1    | packed instrument/staff index: bits 0-5 = instrument index, bits 6-7 = staff within instrument |
@@ -305,7 +305,11 @@ Type 5. Variable size. Offsets from element start:
 | 0xA6    | CODA          | Coda glyph marker                                                                |
 | 0xAA    | DYN_FZ        | dynamic `fz`                                                                     |
 | 0xAB    | DYN_SF        | dynamic `sf`                                                                     |
+<<<<<<< HEAD
 | 0xAF    | TREMOLO_32    | single-chord triple tremolo (3 slashes = 32nd speed); always at voice 0 regardless of note voice |
+=======
+| 0xAF    | TREMOLO_32    | single-chord triple tremolo (3 slashes = 32nd speed); standard plectro notation  |
+>>>>>>> 22f59381c8 (enc importer: update ENCORE_FORMAT.md for LINE block and bowing/fingering ORNs)
 | 0xB9    | FINGER_1      | stand-alone fingering digit "1" (size-16 ORN; attached to top note of chord)    |
 | 0xBA    | FINGER_2      | stand-alone fingering digit "2"                                                  |
 | 0xBB    | FINGER_3      | stand-alone fingering digit "3"                                                  |
@@ -316,7 +320,7 @@ Type 5. Variable size. Offsets from element start:
 | 0xC9    | STACCATO      | per-chord staccato dot                                                           |
 | 0xEF    | TREMOLO_32B   | alternate triple tremolo (ORN at tick == durTicks); also maps to R32             |
 
-**Undecoded subtypes.** `0xBE`, `0xC0`, `0xC4`–`0xC6`, `0xC8`, `0xEE`, plus rare values. Silently ignored.
+**Undecoded subtypes.** `0xBE`, `0xC0`, `0xC6`, `0xC8`, `0xEE`, plus rare values. Silently ignored.
 
 ### Hairpin direction (speguleco bit 0)
 
