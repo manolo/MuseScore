@@ -135,6 +135,7 @@ bool EncFile::read(QDataStream& ds)
             textBlock.read(ds, varSize);
         } else if (isInstrumentMagic(nextId)) {
             EncInstrument instr;
+            instr.contentFilePos = ds.device()->pos();
             // v0xA6 TK block: Key transposition at content+42 (signed semitones).
             // Read before EncInstrument::read, then restore stream position.
             // v0xC4 reads Key from outside TK block, done in readInstrumentMeta.

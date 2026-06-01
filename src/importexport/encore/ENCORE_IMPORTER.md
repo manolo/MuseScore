@@ -74,23 +74,22 @@ a prioritized chain instead:
    names ("Batería", "Batterie", "Drumset", …) drive the match, so no
    hardcoded keyword list is needed and any UI language is supported.
 
-4. **MIDI program lookup** (`searchTemplateForMidiProgram`). Last resort
-   for melodic instruments whose name did not match any template.
+4. **MIDI program lookup** (`searchTemplateForMidiProgram`). Active for
+   any instrument that has a non-zero `midiProgram` and has not been
+   matched by earlier steps. This is the only available signal when the
+   name is absent, so the step has no name-length gate.
 
 **Short-name guard.** Instrument names shorter than four characters
 (typically SATB choir labels `S` / `A` / `T` / `B` and the Spanish
-`C` for Contralto) short-circuit the matcher to `nullptr`. With a
-1- to 3-character needle the substring scoring matches almost any
-template that contains that letter (e.g. `S` lands on Bass
-Clarinet, `C` on Piccolo, `T` on Contrabassoon, `B` on Oboe).
-Files that carry such labels also tend to use compact TK blocks
-which invalidate the `PRG_BASE + n * PRG_STEP` formula and so make
-the MIDI program byte unreliable too, so the importer also skips
-the drumset-keyword and the MIDI-program fallback for short
-names. The chain falls through to the Grand Piano template and
-the original Encore label is preserved as the part's long name;
-the user picks the right choir voice from the instrument browser
-afterwards.
+`C` for Contralto) skip steps 2 and 3 only. With a 1- to 3-character
+needle the substring scoring in those steps matches almost any template
+that contains that letter (e.g. `S` lands on Bass Clarinet, `C` on
+Piccolo). Step 4 (keyword) and step 5 (MIDI) still fire: when the name
+is empty the MIDI program is the sole signal, and suppressing it would
+force every un-named instrument to Grand Piano regardless of what
+program Encore recorded. The chain falls through to Grand Piano only
+when both name and MIDI give no result; the original label is preserved
+and the user can reassign from the instrument browser.
 
 ## STAFFTEXT placement and tempo promotion
 
