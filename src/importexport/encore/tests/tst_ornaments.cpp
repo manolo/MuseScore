@@ -757,3 +757,80 @@ TEST_F(Tst_Ornaments, multi_measure_hairpin_resolved_from_almezuro)
     EXPECT_TRUE(foundDim);
     delete score;
 }
+
+// ===========================================================================
+// FEATURE: Bowing marks from stand-alone size-16 ORN elements.
+// tipo 0xC5 = down-bow (П), tipo 0xC4 = up-bow (V). Placed at the same
+// tick as the chord; the importer defers them in pendingBowings and attaches
+// an Articulation (stringsDownBow / stringsUpBow) during resolveAll().
+// ===========================================================================
+TEST_F(Tst_Ornaments, bowing_marks_from_orn_c4_c5)
+{
+    MasterScore* score = readEncoreScore("ornaments_bowing.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<SymId> bowings;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Articulation* a : toChord(el)->articulations()) {
+                if (a->symId() == SymId::stringsDownBow
+                    || a->symId() == SymId::stringsUpBow) {
+                    bowings.push_back(a->symId());
+                }
+            }
+        }
+    }
+    const std::vector<SymId> expected = {
+        SymId::stringsDownBow, SymId::stringsUpBow,
+        SymId::stringsDownBow, SymId::stringsUpBow,
+    };
+    EXPECT_EQ(bowings, expected);
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Stand-alone fingering from ORN elements tipo 0xB9..0xBD.
+// tipo = 0xB8 + finger (1..5). The importer defers them in pendingOrnFingerings
+// and attaches a Fingering with xmlText "1".."5" to the top note of the chord.
+// ===========================================================================
+TEST_F(Tst_Ornaments, fingering_from_orn_b9_bd)
+{
+    MasterScore* score = readEncoreScore("ornaments_fingering_orn.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> fingerings;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Note* n : toChord(el)->notes()) {
+                for (EngravingItem* e : n->el()) {
+                    if (e && e->isFingering()) {
+                        fingerings.push_back(toFingering(e)->plainText());
+                    }
+                }
+            }
+        }
+    }
+    const std::vector<String> expected = { u"1", u"2", u"3", u"4", u"5" };
+    EXPECT_EQ(fingerings, expected);
+    delete score;
+}
