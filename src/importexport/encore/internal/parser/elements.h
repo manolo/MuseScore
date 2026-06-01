@@ -472,6 +472,17 @@ struct EncTextBlock {
     bool read(QDataStream& ds, quint32 varSize);
 };
 
+// WINI block: page setup stored when the user explicitly opens Page Setup in Encore.
+// All margin fields are in typographic points (1/72 inch). Present only when the user
+// has saved page setup; absent = use MuseScore defaults.
+struct EncPageSetup {
+    bool hasData      { false };
+    qint32 top        { 0 };   // top margin in pts
+    qint32 left       { 0 };   // left margin in pts
+    qint32 bottomEdge { 0 };   // pageHeight_pts - bottomMargin_pts
+    qint32 rightEdge  { 0 };   // pageWidth_pts  - rightMargin_pts
+};
+
 struct EncFile {
     EncHeader header;
     std::vector<EncInstrument> instruments;
@@ -479,6 +490,7 @@ struct EncFile {
     std::vector<EncMeasure> measures;
     EncTitle titleBlock;
     EncTextBlock textBlock;
+    EncPageSetup pageSetup;
 
     bool read(QDataStream& ds);
 };

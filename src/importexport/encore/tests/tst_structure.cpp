@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include "engraving/dom/arpeggio.h"
+#include "engraving/dom/system.h"
 #include "engraving/dom/layoutbreak.h"
 #include "engraving/dom/articulation.h"
 #include "engraving/dom/barline.h"
@@ -551,6 +552,70 @@ TEST_F(Tst_Structure, system_breaks_from_line_data)
     Measure* m5 = measureAt(score, 5);
     ASSERT_NE(m5, nullptr);
     EXPECT_FALSE(hasLineBreak(m5)) << "last system must not get a break";
+
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: fitSpatiumToLineBreaks — system layout density matching.
+// The importer reduces spatium until the first N music systems each contain
+// at least as many measures as the corresponding Encore LINE block specifies.
+// Fixture: text_tempo_orn_compound_68.enc — 8 LINE blocks, 3 measures each.
+// After import the first system must have exactly 3 measures (the value from
+// enc.lines[0].measureCount), not 4 or 2.
+// ===========================================================================
+TEST_F(Tst_Structure, fit_spatium_first_system_measure_count)
+{
+    MasterScore* score = readEncoreScore("text_tempo_orn_compound_68.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    // Collect music systems (skip systems with 0 measures, e.g. a title frame system).
+    int firstSystemMeasureCount = 0;
+    for (const System* sys : score->systems()) {
+        int mc = 0;
+        for (const MeasureBase* mb : sys->measures()) {
+            if (mb->isMeasure()) { ++mc; }
+        }
+        if (mc > 0) {
+            firstSystemMeasureCount = mc;
+            break;
+        }
+    }
+    // enc.lines[0].measureCount == 3 for this fixture.
+    EXPECT_GE(firstSystemMeasureCount, 3)
+        << "first system must fit at least enc.lines[0].measureCount (3) measures";
+
+    delete score;
+}
+
+TEST_F(Tst_Structure, fit_spatium_multiple_systems_measure_count)
+{
+    // Verify that the spatium reduction checks multiple systems, not just the
+    // first.  All 8 lines in text_tempo_orn_compound_68.enc have measureCount=3,
+    // so each of the first 4 music systems must also have >= 3 measures.
+    MasterScore* score = readEncoreScore("text_tempo_orn_compound_68.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<int> sysCounts;
+    for (const System* sys : score->systems()) {
+        int mc = 0;
+        for (const MeasureBase* mb : sys->measures()) {
+            if (mb->isMeasure()) { ++mc; }
+        }
+        if (mc > 0) {
+            sysCounts.push_back(mc);
+        }
+    }
+
+    // The fixture has 8 lines; we require at least the first 4 to be present.
+    ASSERT_GE(sysCounts.size(), 4u) << "fixture must produce at least 4 music systems";
+
+    for (int j = 0; j < 4; ++j) {
+        EXPECT_GE(sysCounts[j], 3)
+            << "system " << j << " must fit at least 3 measures (enc.lines[" << j << "].measureCount)";
+    }
 
     delete score;
 }

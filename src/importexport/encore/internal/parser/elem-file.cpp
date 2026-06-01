@@ -39,7 +39,7 @@ bool isInstrumentMagic(const QString& magic)
 bool isKnownMagic(const QString& magic)
 {
     return magic == "LINE" || magic == "MEAS" || magic == "TITL" || magic == "TEXT"
-           || isInstrumentMagic(magic);
+           || magic == "WINI" || isInstrumentMagic(magic);
 }
 
 QString findNextKnownMagic(QDataStream& ds)
@@ -133,6 +133,27 @@ bool EncFile::read(QDataStream& ds)
             titleBlock.read(ds, varSize, charsize);
         } else if (nextId == "TEXT") {
             textBlock.read(ds, varSize);
+        } else if (nextId == "WINI") {
+            // WINI: page setup block. Layout: 21 uint16 LE values (42 bytes).
+            // Margins as int32 LE (two adjacent uint16s, high word always 0):
+            //   [12,13] = top margin, [14,15] = left margin,
+            //   [16,17] = page_height_pts - bottom_margin, [18,19] = page_width_pts - right_margin.
+            // All values in typographic points (1/72 inch).
+            if (varSize >= 40) {
+                qint32 top, left, bottomEdge, rightEdge;
+                ds.skipRawData(24);   // skip fields 0..11 (window/screen data)
+                ds >> top >> left >> bottomEdge >> rightEdge;
+                ds.skipRawData(static_cast<int>(varSize) - 40);
+                if (bottomEdge > 0 && rightEdge > 0 && bottomEdge > top && rightEdge > left) {
+                    pageSetup.hasData    = true;
+                    pageSetup.top        = top;
+                    pageSetup.left       = left;
+                    pageSetup.bottomEdge = bottomEdge;
+                    pageSetup.rightEdge  = rightEdge;
+                }
+            } else {
+                ds.skipRawData(varSize);
+            }
         } else if (isInstrumentMagic(nextId)) {
             EncInstrument instr;
             instr.contentFilePos = ds.device()->pos();

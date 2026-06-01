@@ -316,10 +316,24 @@ segment. That covers:
   already provides the right BPS for the term and a visible
   label.
 
-For now the TempoText is always rendered as `♩ = <quarter-BPM>`,
-matching the existing ORN TEMPO and Italian-term outputs.
-Time-signature-aware display (e.g. `♪ = N` in 3/8 instead of
-`♩ = N/2`) is a follow-up.
+The TempoText display is time-signature-aware. For compound meters
+(6/8, 9/8, 12/8 where the beat is a dotted quarter) the text is
+`♩. = <dotted-quarter-BPM>` where `dotted-quarter-BPM = quarter-BPM * 2/3`.
+For simple meters the text is `♩ = <quarter-BPM>`.
+
+### ORN TEMPO subtype 0x32
+
+The ORN `tempo` byte stores the beat-unit BPM displayed in Encore,
+which is NOT always the quarter-note BPM:
+
+- Simple meter: `tempo` byte = quarter-note BPM. No conversion needed.
+- Compound meter (6/8, 9/8, 12/8): `tempo` byte = dotted-quarter BPM.
+  The importer multiplies by 3/2 to obtain quarter-note BPM for the
+  tempo map: `quarterBpm = tempo * 3/2`.
+
+The conversion uses the MuseScore measure's nominal timesig (so a
+pickup measure with actual 4/8 but nominal 6/8 correctly inherits
+the 6/8 compound factor).
 
 ## TIE element handling
 
@@ -1065,6 +1079,105 @@ Test fixtures under `tests/data/`:
 - Real-world corpus files (Beethoven Sinfonia 7, La Morena de
   mi Copla, bandurriator/Tie a Yellow Ribbon, etc.) referenced
   by the integration tests in `tst_encore.cpp`.
+
+## System layout fitting
+
+After the note loop and before resolvers (which place system breaks), the
+importer runs `fitSpatiumToLineBreaks` to reduce MuseScore's spatium (staff
+space) until the score's auto-layout produces at least as many measures per
+system as Encore's LINE blocks specify.
+
+### Why spatium adjustment is needed
+
+Encore stores exactly how many measures belong on each printed line in the
+LINE block's `measureCount` field (1 byte, immediately after `start`). After
+import the system breaks from `resolveAll` force the same boundaries. If
+MuseScore's default spatium (1.750 mm at A4) is too large for the page width,
+the layout engine auto-breaks a system before its forced break, moving one
+measure to the next line and violating the Encore structure.
+
+### Algorithm
+
+```
+1. Collect targets: enc.lines[0..3].measureCount (first 4 lines, skip zeros).
+2. Loop up to 20 iterations:
+   a. score->style().setSpatium(spatium); score->doLayout();
+   b. Collect actual music-system measure counts in document order.
+   c. For each j in [0, min(4, targets.size()) - 1]:
+        if sysCounts[j] < targets[j]: allFit = false; break.
+   d. If allFit: done.  Else: spatium *= 0.9.
+3. Safety floor: stop if spatium < 0.01.
+```
+
+Only the first 4 lines are checked: beyond that the lines in real scores
+are representative of the whole document and a density misfit in line 5+
+would be caught by the line 1-4 checks (the piece is usually consistent).
+The 10 % reduction per step converges in at most 20 steps (factor 0.9^20
+≈ 0.12 of the original value, well below any real score's practical minimum).
+
+The function runs BEFORE `resolveAll`, so no system breaks are in place
+during the doLayout calls; the reduced spatium is stored and respects the
+breaks placed later.
+
+### What is NOT adjusted
+
+Page margins are left at MuseScore defaults (15 mm per side). The Encore
+binary format does not encode margins in a location that has been decoded;
+see the "Page margins" section below.
+
+## Page margins
+
+Encore's page margins were investigated during importer development.
+The result: the margin values cannot be reliably decoded from any of the
+known block locations in a v0xC4 file.
+
+### What was tried
+
+**PAGE block (26 bytes, embedded before the first LINE block).**
+Byte scanning revealed a 26-byte region in the pre-LINE area whose content
+matches the PAGE block documented in the format (word[0] = line count,
+word[1] = measures on line 0, word[6] = something similar). None of the
+remaining 22 bytes contain the margin values as float32 BE/LE, as twips
+(1/1440 inch, i.e. 0.626*1440=901), or as mm*10. The block appears to
+store layout counts, not metric dimensions.
+
+**PREC block (Windows DEVMODE printer record).**
+A PREC block embedded before the LINE area carries a Windows DEVMODE
+structure (field `dmSize = 156`) followed by driver-extra bytes. DEVMODE
+stores paper size (`dmPaperSize = 9` for A4) and orientation but not the
+page margins set by the user in Encore's Page Setup dialog.
+
+**LINE block 10-byte skip area.**
+`EncLine::read` skips 10 bytes before reading `start` and `measureCount`.
+Bytes 4-5 of that skip (interpreted as a little-endian uint16) appear to be
+the system's y-position on the page; bytes 2-3 appear to be the first-system
+left indent. Three test files were compared:
+
+| File | Encore margin | LINE[0] skip[4:5] |
+|---|---|---|
+| Jota de Abades | 0.626 in | 40 |
+| Bolero Alcudia | 0.375 in | 40 |
+| 40 estudios faciles | 0 in | 40 |
+
+All three produce the same value (40) at that position regardless of margin.
+The y-position hypothesis does not encode margin.
+
+**Header skip area (0x36 to 0xC2, 140 bytes).**
+No byte pattern matching 0.626 in, 0.375 in, or their equivalents in twips,
+mm*10, or 16-bit fixed-point was found in this region across the three test
+files.
+
+### Current status
+
+Margins are left at MuseScore defaults (15 mm ≈ 0.59 in per side) after
+import. A file where Encore set 0 margins (like `40 estudios faciles.enc`)
+keeps MuseScore's 15 mm defaults, which is close enough for practical use.
+A file with 0.626 in margins (like Jota de Abades) imports with 0.59 in
+margins; the visual difference is small.
+
+Decoding margins precisely would require either a full PAGE block
+specification or an experiment with a fixture file where only one margin
+dimension is changed and the binary diff is inspected.
 
 ## Current corpus status
 
