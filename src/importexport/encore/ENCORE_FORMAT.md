@@ -90,6 +90,11 @@ instrument n → file offset  base + n * step
 "Key" dropdown (`0` = sounds as written, `-12` = octave lower, range ±33 semitones).
 Encore shifts every note pitch by this value.
 
+**Compact format (no TK blocks).** Single-instrument files store the MIDI program at fixed
+offset 390 and the key transposition at `390 - 23 = 367`, using the same relative offset
+as the TK-based format. Multi-instrument compact files use a different layout and their
+key transpositions are not currently read.
+
 **Percussion quirk.** Percussion tracks always report MIDI program 1 (GM Grand Piano);
 infer the actual kit from the track name.
 

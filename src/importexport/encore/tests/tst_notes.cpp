@@ -548,13 +548,8 @@ TEST_F(Tst_Notes, no_voice_conflict_from_clamping)
 }
 
 // ===========================================================================
-// FIX: Encore encodes leading and interior silences implicitly via the
-// element's absolute tick offset rather than via REST elements. The importer
-// snaps cumTick to the Encore tick when the gap exceeds CHORD_MIDI_THRESHOLD,
-// so a measure encoded as "NOTE at tick 240, NOTE at tick 480" in a 3/4
-// bar renders as "quarter rest, quarter, quarter" instead of squashing the
-// notes to beats 1-2 with the rest pushed to the end (which would shift the
-// song's timing).
+// FIX: Encore encodes leading silences via absolute tick offsets, not REST elements.
+// The importer snaps cumTick to that tick (when gap > CHORD_MIDI_THRESHOLD) to preserve beat positions.
 // ===========================================================================
 TEST_F(Tst_Notes, implicit_leading_rest_keeps_note_positions)
 {
@@ -599,12 +594,8 @@ TEST_F(Tst_Notes, implicit_leading_rest_keeps_note_positions)
 }
 
 // ===========================================================================
-// FIX: When a voice carries a single NOTE/chord with no following events,
-// EncMeasure::calculateRealDurations inflates rdur to the gap-to-measure-end
-// (e.g. 720 in 3/4). That value lands on the dotted-half mapping bucket of
-// realDuration2DurationType, which would falsely promote a face=quarter note
-// to a dotted half. The importer rejects the promotion when rdur exceeds the
-// face's tick count AND it isn't a real dotted multiple of the face.
+// FIX: calculateRealDurations inflates rdur to gap-to-measure-end for isolated notes (e.g. 720 in 3/4).
+// The importer rejects dotted-half promotion when rdur exceeds face's tick count AND isn't a real dotted multiple.
 // ===========================================================================
 TEST_F(Tst_Notes, inflated_rdur_keeps_face_value_quarter_chord)
 {
@@ -636,10 +627,8 @@ TEST_F(Tst_Notes, inflated_rdur_keeps_face_value_quarter_chord)
 }
 
 // ===========================================================================
-// FIX: realDuration2DurationType no longer promotes triplet-spaced rdur
-// (80, 40, ...) past the face value, so a notated 16th whose MIDI gap to
-// the next note happens to be 80 ticks stays a 16th instead of becoming an
-// eighth and overflowing the measure.
+// FIX: triplet-spaced rdur (80, 40, ...) no longer promotes past the face value;
+// a 16th note with MIDI gap=80 stays a 16th instead of becoming an eighth and overflowing.
 // ===========================================================================
 TEST_F(Tst_Notes, note_rdur_80_stays_16th_face_value)
 {
@@ -694,9 +683,8 @@ TEST_F(Tst_Notes, tie_direction_fc_creates_tie)
 }
 
 // ===========================================================================
-// FIX: dir byte 0x02 (bit 1 set, arc below, no high bit) must also produce
-// a tie. Some instruments store the outgoing-tie marker in bit 1 rather than
-// bit 7, so the check must be (dirByte & 0x02) not just (dirByte & 0x80).
+// FIX: dir byte 0x02 (bit 1 set) must produce a tie; some instruments use bit 1
+// not bit 7 for the outgoing-tie marker, so check (dirByte & 0x02) not just (& 0x80).
 // ===========================================================================
 TEST_F(Tst_Notes, tie_direction_02_creates_tie)
 {
@@ -728,9 +716,8 @@ TEST_F(Tst_Notes, tie_direction_02_creates_tie)
 }
 
 // ===========================================================================
-// FIX: dir byte 0x03 (bits 0+1 set: incoming arc + outgoing tie) must also
-// produce a tie. This value marks notes that both receive a preceding tie arc
-// and send a new tie forward, and appears without sflag=0x80 in some files.
+// FIX: dir byte 0x03 (bits 0+1: incoming arc + outgoing tie) must produce a tie;
+// appears without sflag=0x80 in some files.
 // ===========================================================================
 TEST_F(Tst_Notes, tie_direction_03_creates_tie)
 {
@@ -762,12 +749,8 @@ TEST_F(Tst_Notes, tie_direction_03_creates_tie)
 }
 
 // ===========================================================================
-// FIX: Encore stores the tie-start indicator on either byte +5 (arc
-// direction) or byte +6 (start flag). Around a third of outgoing ties in
-// the LaMorenaDeMiCopla / Beethoven Plectro corpora use the +6 variant
-// with +5 = 0x04 (arc-only). The importer must accept either byte's high
-// bit as a tie-start marker; otherwise long ties such as the m20 dotted
-// quarter B in LaMorenaDeMiCopla disappear.
+// FIX: tie-start indicator may be on byte +5 (arc direction) or byte +6 (start flag);
+// ~1/3 of ties use the +6 variant (with +5=0x04 arc-only). Accept either byte's high bit.
 // ===========================================================================
 TEST_F(Tst_Notes, tie_start_flag_on_byte6_creates_tie)
 {
@@ -805,17 +788,8 @@ TEST_F(Tst_Notes, tie_start_flag_on_byte6_creates_tie)
 
 TEST_F(Tst_Notes, grace_notes_only_on_short_facevalues)
 {
-    // Grace notes are only created when faceValue >= 4 (eighth or shorter).
-    // Notes with grace bytes but fv=3 (quarter) or longer must NOT get grace type.
-    // notes_grace.enc:
-    //   note 1: fv=4 + grace bytes -> ACCIACCATURA
-    //   note 2: fv=3 + grace bytes -> fv<4 filter -> grace type NOT applied
-    //
-    // Grace chords are parented under their main Chord (not a Segment), so they
-    // appear in main->graceNotes(), not as direct segment elements. Segment-attached
-    // chords must therefore all be NORMAL; only chords inside graceNotes() may carry
-    // a grace noteType.
-    // Key invariant: any grace chord must have short base duration (fv>=4).
+    // Grace notes only for faceValue >= 4 (eighth or shorter); fv=3 (quarter) must NOT get grace type.
+    // Grace chords appear in main->graceNotes(), not as segment elements; segment-attached chords must be NORMAL.
     MasterScore* score = readEncoreScore("notes_grace.enc");
     ASSERT_NE(score, nullptr);
     bool foundGrace = false;
@@ -858,13 +832,8 @@ TEST_F(Tst_Notes, grace_notes_only_on_short_facevalues)
 
 TEST_F(Tst_Notes, swing_offgrid_spurious_triplet_removed)
 {
-    // notes_swing_offgrid.enc: 3/4, notes at Encore ticks [0,320,560].
-    // Note 3 (tick=560, realDur=160) triggers detectImpliedTuplet → 3:2 quarter
-    // triplet.  But MS offset 1120 % (480*2/3=320) = 160 ≠ 0: off canonical grid
-    // → spurious swing-timing artefact → tuplet removed by adjustMeasureTuplets.
-    // Without fix: voice sum = 1/4+1/4+1/6=2/3, gap fill pushes it over 3/4
-    //              → sanityCheck failure.
-    // With fix:    3 plain quarters = 3/4 = mLen → sanityCheck passes.
+    // Note at tick=560 (rdur=160) triggers implied 3:2 triplet but MS offset is off canonical grid (swing artifact).
+    // adjustMeasureTuplets removes the spurious triplet; 3 plain quarters = 3/4. Without this: sum overflows 3/4.
     MasterScore* score = readEncoreScore("notes_swing_offgrid.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1449,16 +1418,8 @@ TEST_F(Tst_Notes, mixed_value_tuplet_ticks_corrected_for_overshoot)
 
 TEST_F(Tst_Notes, near_simultaneous_notes_form_chord)
 {
-    // notes_v0c2_near_simultaneous_chord.enc: v0xC2 2/4 measure with two
-    // quarter notes at Encore ticks 0 and 3 (3-tick MIDI offset).  They are
-    // meant to be simultaneous (a chord) but stored at slightly different ticks
-    // due to live MIDI recording drift.
-    //
-    // Bug: calculateRealDurations gave the first note rdur=3 (<15 threshold)
-    //   → skipped as "tiny duration MIDI artifact" → only E4 survived, C4 lost.
-    // Fix: CHORD_CLUSTER_THRESHOLD=4 in calculateRealDurations skips past
-    //   near-simultaneous elements when computing rdur, giving the first note
-    //   rdur=240 (not 3).  isChordExt then groups them as one chord. ✓
+    // Ticks 0 and 3 (3-tick MIDI drift) must form one chord. Without fix, rdur=3 (<15) caused C4 to be skipped.
+    // CHORD_CLUSTER_THRESHOLD=4 skips near-simultaneous elements in rdur calc, giving rdur=240 for the first note.
     MasterScore* score = readEncoreScore("notes_v0c2_near_simultaneous_chord.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1489,11 +1450,7 @@ TEST_F(Tst_Notes, near_simultaneous_notes_form_chord)
 
 TEST_F(Tst_Notes, triple_dotted_advance_matches_chord_ticks)
 {
-    // notes_triple_dotted_advance.enc: first note is a triple-dotted 8th
-    // (rdur=225 Encore ticks → calcDots=3 → ticks=(1/8)*(15/8)=15/64).
-    // Bug: advance used Fraction(7,4) giving 14/64 ≠ 15/64 → cumTick mismatch.
-    // Fix: dots==3 uses Fraction(15,8) → advance=15/64=ticks.
-    // Verify: sanityCheck passes AND advance == ticks (no spurious fill at end of chord).
+    // Triple-dotted 8th (rdur=225, dots=3, ticks=15/64). Bug: advance used 7/4 giving 14/64 instead of 15/64.
     MasterScore* score = readEncoreScore("notes_triple_dotted_advance.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1568,13 +1525,8 @@ TEST_F(Tst_Notes, dotted_note_uses_dotcontrol_byte)
 
 TEST_F(Tst_Notes, tie_element_creates_mscore_tie)
 {
-    // notes_tie.enc: 2/4 measure with C4 quarter at tick=0, TIE element
-    // at tick=0, C4 quarter at tick=240.  The two notes must be linked by a Tie.
-    //
-    // Bug: TIE elements (EncElemType::TIE=3) were dispatched to EncGenericElem
-    //   and their data discarded.  No Tie objects were ever created.
-    // Fix: EncTie struct + pre-scan tieStartSet + pendingTieNote map creates
-    //   Factory::createTie() linking start note to end note. ✓
+    // C4 quarter at tick=0 and C4 quarter at tick=240 with TIE element: must link via a Tie.
+    // Bug: TIE elements (type=3) were discarded. Fix: EncTie + pendingTieNote creates Factory::createTie().
     MasterScore* score = readEncoreScore("notes_tie.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1616,13 +1568,7 @@ TEST_F(Tst_Notes, tie_element_creates_mscore_tie)
 
 TEST_F(Tst_Notes, dotted_rest_uses_dotcontrol_byte)
 {
-    // notes_dotted_rest.enc: 3/4 measure with C4 quarter + dotted 8th
-    // rest (dotControl=180=8th*3/2) + 16th rest.
-    // The dotted 8th rest must have dots()==1.
-    //
-    // Bug: calcDots used er->realDuration (MIDI tick spacing, e.g. 154 ticks due
-    //   to timing drift).  calcDots(154, fv=4=8th) returns 0 dots.
-    // Fix: use er->dotControl when non-zero.  calcDots(180, 4)=1. ✓
+    // Dotted 8th rest with dotControl=180; rdur=154 (MIDI drift) gives calcDots=0. Fix: use dotControl when non-zero.
     MasterScore* score = readEncoreScore("notes_dotted_rest.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1655,14 +1601,7 @@ TEST_F(Tst_Notes, dotted_rest_uses_dotcontrol_byte)
 
 TEST_F(Tst_Notes, rdur_snap_corrects_dot_count)
 {
-    // notes_rdur_snap.enc: 4/4 measure with an 8th note at tick=0,
-    // dotControl=0 (no hint), next event at tick=211.  rdur=211 is 1 tick away
-    // from dd8th=210 — calcDots(211,8th)=0 but calcDotsSnap(211,8th,1)=2.
-    //
-    // Bug: before calcDotsSnap, both calcDots(rdur=211) and calcDots(dotControl=0)
-    //   returned 0 dots → plain 8th displayed instead of double-dotted 8th.
-    // Fix: when dotControl gives no dotted result, fall back to calcDotsSnap on
-    //   realDuration with tolerance=1.  |211-210|=1 ≤ 1 → 2 dots. ✓
+    // rdur=211 is 1 tick from dd8th=210; dotControl=0 gives 0 dots. Fix: calcDotsSnap with tolerance=1 gives 2 dots.
     MasterScore* score = readEncoreScore("notes_rdur_snap.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1693,15 +1632,8 @@ TEST_F(Tst_Notes, rdur_snap_corrects_dot_count)
 
 TEST_F(Tst_Notes, sf_tiestart_not_filtered_by_rdur)
 {
-    // notes_sf_tiestart.enc: 4/4 measure with a TIE element at tick=0,
-    // a 64th note (C4) at tick=0 with rdur=11 (<15), and a Q note (C4) at tick=11.
-    // The 64th has a TIE element, so it is a real note in a tie chain, not an
-    // artifact.  It must be placed and tied to the Q note.
-    //
-    // Bug: rdur=11 < 15 → 64th skipped unconditionally.  Pending ties from
-    //   previous measures for same pitch got misapplied to later unrelated notes.
-    // Fix: 64th/128th notes (fvBase≤15) with a TIE element at their tick bypass
-    //   the rdur<15 filter.  The 64th is placed and ties correctly to the Q. ✓
+    // 64th note at tick=0 with rdur=11 (<15) and a TIE element: must not be filtered.
+    // Fix: 64th/128th notes with a TIE element at their tick bypass the rdur<15 filter.
     MasterScore* score = readEncoreScore("notes_sf_tiestart.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1742,15 +1674,8 @@ TEST_F(Tst_Notes, sf_tiestart_not_filtered_by_rdur)
 
 TEST_F(Tst_Notes, rdur_non_chord_ext_filtered)
 {
-    // notes_rdur_non_chord_ext_filtered.enc: 4/4 with a Q rest, then a
-    // 64th C4 at tick=240 (rdur=11, not a tie-start, not a chord extension), then
-    // a Q E4 at tick=251.
-    //
-    // Bug: prevMidiTick was set to e->tick before the rdur<15 filter check, making
-    //   the delta=0<4 appear to be a chord extension.  The 64th artifact bypassed
-    //   the filter and appeared as a spurious note.
-    // Fix: use isChordExt (computed from the OLD prevMidiTick=0 set by the rest).
-    //   Gap 240-0=240>=4 → not a chord extension → 64th filtered correctly. ✓
+    // 64th C4 at tick=240 (rdur=11, not a tie-start). Bug: prevMidiTick set too early made it look like a chord ext.
+    // Fix: isChordExt uses OLD prevMidiTick (set by the rest); gap=240>=4 → not chord ext → filtered.
     MasterScore* score = readEncoreScore("notes_rdur_non_chord_ext_filtered.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1784,15 +1709,8 @@ TEST_F(Tst_Notes, rdur_non_chord_ext_filtered)
 
 TEST_F(Tst_Notes, grace1_cascade_filter)
 {
-    // notes_grace1_cascade_filter.enc: 4/4 with:
-    //   - 64th C4 at tick=0, grace1=0x01 (g1low=1, tie-sender), rdur=11 → filtered
-    //   - Q C4 at tick=11, grace1=0x02 (g1low=2, tie-receiver of filtered note)
-    //   - Q E4 at tick=240, grace1=0x00 (standalone) → placed
-    //
-    // Bug: Q C4 (g1low=2) was not subject to any filter check and appeared in
-    //   output as a spurious note even after the 64th artifact was filtered.
-    // Fix: when a note with g1low=1 is filtered as a MIDI artifact, record its
-    //   pitch; the next note with g1low=2 and the same pitch is cascade-filtered. ✓
+    // 64th C4 (g1low=1) filtered as artifact; Q C4 (g1low=2) is its tie-receiver and must also be filtered.
+    // Fix: when g1low=1 note is filtered, record its pitch; next note with g1low=2 and same pitch is cascade-filtered.
     MasterScore* score = readEncoreScore("notes_grace1_cascade_filter.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1824,22 +1742,8 @@ TEST_F(Tst_Notes, grace1_cascade_filter)
 
 TEST_F(Tst_Notes, chord_cluster_5tick_v0c2)
 {
-    // notes_v0c2_chord_cluster_5tick.enc: 4/4 with a half rest, then 4
-    // live-recorded notes spanning ticks 100, 103, 104, 105 (all 16th, g1low=1,
-    // dc=90=dotted-16th) tied via TIE@100 to 4 quarter receiver notes at tick=240.
-    //
-    // Three bugs caused the 4-note chord to be split:
-    //   A) root@100 had rdur=4 == CHORD_CLUSTER_THRESHOLD → filtered by
-    //      "else: continue", leaving a singleton on the E note (chord extension).
-    //   B) note@104 was 4 ticks from root → not a chord extension because
-    //      CHORD_MIDI_THRESHOLD equaled CHORD_CLUSTER_THRESHOLD (strict < 4).
-    //   C) notes@104 and @105 missed tie registration (TIE@100 is outside the
-    //      ±3-tick isTieStart window for those ticks).
-    //
-    // Fixes:
-    //   A) fvBase>15 filter now only applies when realDuration > CHORD_CLUSTER_THRESHOLD.
-    //   B) CHORD_MIDI_THRESHOLD = 2 * CHORD_CLUSTER_THRESHOLD (= 8).
-    //   C) grace1 low==1 used as secondary tie-start indicator (v0xC2 only). ✓
+    // 4 live-recorded notes at ticks 100,103,104,105 must form one chord tied to 4 receiver notes at tick=240.
+    // Fixes: (A) rdur==CHORD_CLUSTER_THRESHOLD not filtered; (B) CHORD_MIDI_THRESHOLD=2*CLUSTER; (C) g1low=1 as tie indicator.
     MasterScore* score = readEncoreScore("notes_v0c2_chord_cluster_5tick.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1878,5 +1782,20 @@ TEST_F(Tst_Notes, chord_cluster_5tick_v0c2)
     EXPECT_EQ(chords[1]->notes().size(), 4u)
         << "Receiver chord must have all 4 notes";
 
+    delete score;
+}
+
+// ===========================================================================
+// BUG FIX: Partial measure-end triplet with gap-snap unreduced Fraction
+//          caused TDuration assertion in Fix-3 of the partial-group path
+// ===========================================================================
+
+TEST_F(Tst_Notes, partial_triplet_unreduced_cumtick_no_crash)
+{
+    // Large gap triggers gap-snap storing cumTick as Fraction(800,960) (unreduced). Fix-3 must call .reduced()
+    // before constructing TDuration; otherwise TDuration(Fraction(160,1920), truncate=false) asserts.
+    MasterScore* score = readEncoreScore("notes_partial_triplet_unreduced_cumtick.enc");
+    ASSERT_NE(score, nullptr) << "File must import without TDuration assertion failure";
+    EXPECT_GT(score->nmeasures(), 0);
     delete score;
 }

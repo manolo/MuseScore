@@ -31,7 +31,6 @@
 #include <QString>
 
 namespace mu::iex::encore {
-
 // ---------------------------------------------------------------------------
 // Encore binary format data structures
 // Ported from Enc2MusicXML (https://github.com/lvinken/Enc2MusicXML)
@@ -338,6 +337,7 @@ struct EncMeasure {
 struct EncInstrument {
     QString name;
     quint32 offset    { 0 };
+    qint64 contentFilePos { -1 };   // byte offset of TK content start (after 8-byte header); -1 for compact
     int nstaves   { 0 };
     int midiProgram { 0 };   // 1-indexed GM program (0 = not configured)
     bool showStaff { true }; // false = hidden in score (Encore "Show" flag)
@@ -472,7 +472,6 @@ struct EncFile {
 
     bool read(QDataStream& ds);
 };
-
 } // namespace mu::iex::encore
 
 #endif // MU_IMPORTEXPORT_ENC_PARSER_ELEMENTS_H

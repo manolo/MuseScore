@@ -83,9 +83,15 @@ void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& d
 
 void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds)
 {
-    static constexpr qint64 PRG_BASE = 2278, PRG_STEP = 2158;
+    // Compact files (no TK blocks): offset == 0 for all instruments.
+    // Their MIDI program sits at a fixed location in the pre-LINE area
+    // (0xC2 + 196 per instrument, 276-byte blocks). TK-based files use
+    // the TK-derived formula (PRG_BASE = 2278, PRG_STEP = 2158).
+    const bool compact = (!instruments.empty() && instruments[0].offset == 0);
+    const qint64 base = compact ? 390 : 2278;
+    const qint64 step = compact ? 276 : 2158;
     for (size_t n = 0; n < instruments.size(); ++n) {
-        const qint64 off = PRG_BASE + static_cast<qint64>(n) * PRG_STEP;
+        const qint64 off = base + static_cast<qint64>(n) * step;
         if (off >= static_cast<qint64>(ds.device()->size())) { break; }
         if (!ds.device()->seek(off)) { break; }
         quint8 prg; ds >> prg;
@@ -95,7 +101,27 @@ void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds)
 
 void readKeyTranspositions(std::vector<EncInstrument>& instruments, QDataStream& ds)
 {
-    if (!instruments.empty() && instruments[0].offset <= 250) { return; }
+    if (instruments.empty()) { return; }
+    const bool compact = (instruments[0].offset == 0);
+    const bool tkBased = (instruments[0].offset > 250);
+
+    if (compact) {
+        // Compact format (no TK blocks): key transposition stored 23 bytes before the
+        // MIDI base, same relative offset as in TK-based format. Only defined for
+        // single-instrument compact files; multi-instrument files use a different layout.
+        if (instruments.size() != 1) { return; }
+        static constexpr qint64 MIDI_BASE = 390, KEY_OFF = -23;
+        const qint64 off = MIDI_BASE + KEY_OFF;
+        if (off >= static_cast<qint64>(ds.device()->size())) { return; }
+        if (!ds.device()->seek(off)) { return; }
+        quint8 raw; ds >> raw;
+        const qint8 sv = static_cast<qint8>(raw);
+        if (sv >= -33 && sv <= 24) { instruments[0].keyTransposeSemitones = sv; }
+        return;
+    }
+
+    if (!tkBased) { return; }   // offset 1..250: unusual, skip
+
     static constexpr qint64 PRG_BASE = 2278, PRG_STEP = 2158, KEY_OFF = -23;
     for (size_t n = 0; n < instruments.size(); ++n) {
         const qint64 off = PRG_BASE + KEY_OFF + static_cast<qint64>(n) * PRG_STEP;
