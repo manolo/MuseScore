@@ -492,6 +492,58 @@ importer attaches `SymId::articStaccatoAbove` and dedups against
 the per-note artic byte `0x1D`. Recovered count on Beethoven
 Plectro: 1 -> 1864 staccatos.
 
+## Stand-alone FINGER and BOWING ORN routing in grand-staff scores
+
+In v0xC4 grand-staff instruments (piano, organ, harp) all elements
+share `staffIdx=0`; the 2nd staff's notes use `voice=4`. Stand-alone
+FINGER ORNs (tipos 0xB9..0xBD) and BOWING ORNs (0xC4 up-bow, 0xC5
+down-bow) use `voice=0` regardless of which staff they belong to.
+The importer resolves the ambiguity in a deferred post-pass using two
+heuristics computed from a per-measure pre-scan.
+
+**Pre-scan state (computed once per measure before the element loop):**
+
+| Symbol | Meaning |
+|--------|---------|
+| `voice4NoteTicks` | Set of raw Encore ticks where at least one `voice>=VOICES` note exists |
+| `v0NoteCountAtTick[t]` | Count of `voice=0` notes at raw tick `t` |
+| `ornFingCountAtTick[t]` | Count of FINGER ORNs at raw tick `t` |
+| `maxVoice0Tick` | Largest raw tick carrying a `voice=0` note |
+
+**Pattern A: cross-measure ORN (stored in wrong measure).**
+
+Encore places the fingerings/bowings for the 2nd-staff chord of measure
+N+1 at the end of the measure N binary block, at the same raw tick as
+the last voice=0 note. Detection:
+
+```
+crossMeasure = !voice4NoteTicks.empty()       // grand-staff measure
+            && !voice4NoteTicks.count(t)       // no 2nd-staff note at this tick
+            && t == maxVoice0Tick              // ORN is at the last 1st-staff note tick
+```
+
+Resolution: route to the **first chord of the next measure** on the
+sibling track (`track + VOICES`), with fallback to the original track.
+
+**Pattern B: ORN cluster for a multi-note 2nd-staff chord.**
+
+When a voice=4 chord appears at the same tick as a voice=0 note and the
+count of FINGER ORNs at that tick exceeds the count of voice=0 notes,
+the excess ORNs belong to the 2nd-staff chord. Detection:
+
+```
+preferSibling = !crossMeasure
+             && voice4NoteTicks.count(t)                // 2nd-staff note at this tick
+             && ornFingCountAtTick[t] > v0NoteCountAtTick[t]
+```
+
+Resolution: in the resolver, try the **sibling track** (`track + VOICES`)
+first; fall back to the original track if no chord is found there.
+
+**Non-grand-staff scores** have an empty `voice4NoteTicks`, so both flags
+are `false` and the resolution is identical to the pre-fix behaviour
+(exact-tick lookup on the original track with sibling fallback).
+
 ## Spanner endpoints
 
 Encore `.enc` files do not emit a separate WEDGESTOP or SLURSTOP

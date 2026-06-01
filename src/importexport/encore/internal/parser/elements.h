@@ -142,7 +142,17 @@ enum class EncOrnamentType : quint8 {
     DYN_FP     = 0x8A,
     // High-range: fp=0x8A, fz=0xAA, sf=0xAB (from encore-symbols.enc m3).
     DYN_FZ     = 0xAA,
-    DYN_SF     = 0xAB
+    DYN_SF     = 0xAB,
+    // Fingering numbers 1..5 as stand-alone ORN elements (size-16).
+    // Encoded as 0xB8 + finger (1=0xB9, 2=0xBA, 3=0xBB, 4=0xBC, 5=0xBD).
+    FINGER_1   = 0xB9,
+    FINGER_2   = 0xBA,
+    FINGER_3   = 0xBB,
+    FINGER_4   = 0xBC,
+    FINGER_5   = 0xBD,
+    // Plectro stroke direction (size-16): down stroke (П) and up stroke (V).
+    UPBOW      = 0xC4,
+    DOWNBOW    = 0xC5
 };
 
 enum class EncAccidentalType : quint8 {

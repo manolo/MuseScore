@@ -37,6 +37,7 @@
 #include <QRegularExpression>
 #include "engraving/dom/arpeggio.h"
 #include "engraving/dom/box.h"
+#include "engraving/dom/layoutbreak.h"
 #include "engraving/dom/chord.h"
 #include "engraving/dom/dynamic.h"
 #include "engraving/dom/fermata.h"
@@ -78,27 +79,6 @@ void resolveAll(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
     const EncFile& enc = ctx.enc;
-
-    // Return the track of the first Chord found at tick on staffIdx (any voice),
-    // or fallback if no chord is present. Used to correct slur tracks after
-    // stream-overflow voice reassignment: the SLURSTART ORN is parsed before
-    // the note at the same tick, so ps.track may reflect a stale msVoice=0
-    // while the actual note landed in msVoice=1 due to overflow.
-    auto resolveChordTrack = [&](Fraction tick, int staffIdx, track_idx_t fallback) -> track_idx_t {
-        Segment* seg = score->tick2segment(tick, false, SegmentType::ChordRest);
-        if (!seg) {
-            return fallback;
-        }
-        for (int v = 0; v < static_cast<int>(VOICES); ++v) {
-            track_idx_t t = static_cast<track_idx_t>(staffIdx * VOICES + v);
-            EngravingItem* el = seg->element(t);
-            if (el && el->isChord()) {
-                return t;
-            }
-        }
-        return fallback;
-    };
-
     // Resolve slur intents: .enc has no SLURSTOP; endpoint from alMezuro.
     // Anchor on last ChordRest in the target measure on this track.
     for (const PendingSlur& ps : ctx.pendingSlurs) {
@@ -141,11 +121,7 @@ void resolveAll(BuildCtx& ctx)
                 if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
                     continue;
                 }
-                // Search all voices on this staff: the slur ORN's encVoice is the
-                // voice where the arc is drawn, not necessarily the voice whose notes
-                // it connects. A cross-voice slur would miss the start note if we
-                // filtered by ps.encVoice here.
-                if (em->staffIdx != ps.staffIdx) {
+                if (em->staffIdx != ps.staffIdx || em->voice != ps.encVoice) {
                     continue;
                 }
                 if (static_cast<int>(em->tick) != startEncTick) {
@@ -164,7 +140,7 @@ void resolveAll(BuildCtx& ctx)
                     if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
                         continue;
                     }
-                    if (em->staffIdx != ps.staffIdx) {
+                    if (em->staffIdx != ps.staffIdx || em->voice != ps.encVoice) {
                         continue;
                     }
                     // Only consider notes strictly after the start — the start note
@@ -188,61 +164,11 @@ void resolveAll(BuildCtx& ctx)
             }
         }
 
-        // Resolve the actual track from the placed chord (may differ from ps.track
-        // when a stream-overflow moved the note to a higher MuseScore voice).
-        const track_idx_t startTrack = resolveChordTrack(ps.startTick, ps.staffIdx, ps.track);
-
-        // For cross-measure slurs, use xoffset2 to locate the end note in the
-        // target measure by horizontal proximity. xoffset2 resets at barlines, so
-        // it is directly comparable to note xoffsets within the target measure.
-        // This avoids always landing on the last note when the actual endpoint is
-        // an earlier note in the measure.
-        if (!resolved && clampedEndMeasIdx < static_cast<int>(enc.measures.size())) {
-            const EncMeasure& endEncMeas = enc.measures[clampedEndMeasIdx];
-            const int wholeTicks = (endEncMeas.durTicks && endEncMeas.timeSigNum && endEncMeas.timeSigDen)
-                                   ? (static_cast<int>(endEncMeas.durTicks) * endEncMeas.timeSigDen)
-                                     / endEncMeas.timeSigNum : 960;
-            int bestDist = std::numeric_limits<int>::max();
-            int bestEncTick = -1;
-            for (const auto& elem : endEncMeas.elements) {
-                const EncMeasureElem* em = elem.get();
-                if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
-                    continue;
-                }
-                if (em->staffIdx != ps.staffIdx) {
-                    continue;
-                }
-                const int xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
-                const int dist = std::abs(xoff - ps.slurXoffset2);
-                if (dist <= bestDist) {
-                    bestDist = dist;
-                    bestEncTick = static_cast<int>(em->tick);
-                }
-            }
-            if (bestEncTick >= 0 && wholeTicks > 0) {
-                const Fraction candidate = endMeas->tick()
-                                           + Fraction(bestEncTick, wholeTicks).reduced();
-                if (candidate > ps.startTick) {
-                    endTick = candidate;
-                    resolved = true;
-                }
-            }
-        }
-
         if (!resolved) {
             Segment* lastSeg = nullptr;
             for (Segment* s = endMeas->first(SegmentType::ChordRest); s;
                  s = s->next(SegmentType::ChordRest)) {
-                // Accept any chord on the same staff (any voice).
-                bool hasChord = false;
-                for (int v = 0; v < static_cast<int>(VOICES); ++v) {
-                    track_idx_t t = static_cast<track_idx_t>(ps.staffIdx * VOICES + v);
-                    if (s->element(t) && s->element(t)->isChord()) {
-                        hasChord = true;
-                        break;
-                    }
-                }
-                if (hasChord) {
+                if (s->element(ps.track)) {
                     lastSeg = s;
                 }
             }
@@ -255,11 +181,9 @@ void resolveAll(BuildCtx& ctx)
         if (endTick <= ps.startTick) {
             continue;   // zero or negative span: drop
         }
-        const track_idx_t endTrack = resolveChordTrack(endTick, ps.staffIdx, startTrack);
-
         Slur* slur = Factory::createSlur(score->dummy());
-        slur->setTrack(startTrack);
-        slur->setTrack2(endTrack);
+        slur->setTrack(ps.track);
+        slur->setTrack2(ps.track);
         slur->setTick(ps.startTick);
         slur->setTick2(endTick);
         score->addElement(slur);
@@ -364,9 +288,6 @@ void resolveAll(BuildCtx& ctx)
     // Find the chord at the stored tick; if none, search backwards in the
     // source measure for the latest chord (handles Encore placement at
     // tick == durTicks on long notes).
-    // Tremolo ORNs are visual annotations placed in voice 0 by Encore regardless
-    // of which voice holds the actual notes. When the ORN voice produces no
-    // match, widen the search to all voices for the same staff.
     for (const PendingOrnTremolo& pt : ctx.pendingOrnTremolos) {
         const track_idx_t trTrack = static_cast<track_idx_t>(pt.staffIdx * VOICES + pt.msVoice);
         // Try exact tick match first.
@@ -397,32 +318,10 @@ void resolveAll(BuildCtx& ctx)
                 }
             }
         }
-        // Resolve the track: start with the ORN voice; if that yields no chord,
-        // try all other voices for the same staff (ORN voice 0 is the norm even
-        // when the notes live in a different voice).
-        track_idx_t resolvedTrack = trTrack;
-        if (!seg || !seg->element(resolvedTrack) || !seg->element(resolvedTrack)->isChord()) {
-            Measure* srcMeas = score->tick2measure(pt.measTick);
-            if (!srcMeas) {
-                srcMeas = m;
-            }
-            if (srcMeas) {
-                for (int v = 0; v < static_cast<int>(VOICES) && !seg; ++v) {
-                    const track_idx_t altTrack = static_cast<track_idx_t>(pt.staffIdx * VOICES + v);
-                    for (Segment* s = srcMeas->first(SegmentType::ChordRest); s;
-                         s = s->next(SegmentType::ChordRest)) {
-                        if (s->element(altTrack) && s->element(altTrack)->isChord()) {
-                            seg = s;
-                            resolvedTrack = altTrack;
-                        }
-                    }
-                }
-            }
-        }
-        if (!seg || !seg->element(resolvedTrack)) {
+        if (!seg || !seg->element(trTrack)) {
             continue;
         }
-        EngravingItem* el = seg->element(resolvedTrack);
+        EngravingItem* el = seg->element(trTrack);
         if (!el || !el->isChord()) {
             continue;
         }
@@ -501,6 +400,52 @@ void resolveAll(BuildCtx& ctx)
         c->add(orn);
     }
 
+    // Resolve bowing marks (up-bow / down-bow) from stand-alone ORN elements.
+    for (const PendingBowing& pb : ctx.pendingBowings) {
+        Measure* m = score->tick2measure(pb.tick);
+        if (!m) {
+            continue;
+        }
+        Segment* seg = m->findSegment(SegmentType::ChordRest, pb.tick);
+        if (!seg) {
+            continue;
+        }
+        EngravingItem* el = seg->element(pb.track);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        Chord* c = toChord(el);
+        Articulation* art = Factory::createArticulation(c);
+        art->setTrack(pb.track);
+        art->setSymId(pb.symId);
+        c->add(art);
+    }
+
+    // Resolve fingering numbers from stand-alone ORN elements (tipo 0xB9..0xBD).
+    for (const PendingOrnFingering& pf : ctx.pendingOrnFingerings) {
+        Measure* m = score->tick2measure(pf.tick);
+        if (!m) {
+            continue;
+        }
+        Segment* seg = m->findSegment(SegmentType::ChordRest, pf.tick);
+        if (!seg) {
+            continue;
+        }
+        EngravingItem* el = seg->element(pf.track);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        Chord* c = toChord(el);
+        if (c->notes().empty()) {
+            continue;
+        }
+        Note* n = c->notes().front();
+        Fingering* f = Factory::createFingering(n);
+        f->setTrack(pf.track);
+        f->setXmlText(String::number(pf.fingerNum));
+        n->add(f);
+    }
+
     // Remove slurs whose start or end note doesn't exist (corrupted files).
     // Such slurs cause NaN in Bezier layout.
     {
@@ -516,6 +461,29 @@ void resolveAll(BuildCtx& ctx)
         }
         for (Spanner* sp : toRemove) {
             score->removeElement(sp);
+        }
+    }
+
+    // Add system and page breaks from Encore LINE layout data.
+    // Each EncLine is one system; consecutive systems on different pageIdx
+    // get a PAGE break; same-page transitions get a LINE break.
+    {
+        const auto& lines = ctx.enc.lines;
+        int cumMeas = 0;
+        for (int li = 0; li + 1 < static_cast<int>(lines.size()); ++li) {
+            cumMeas += lines[li].measureCount;
+            const int lastIdx = cumMeas - 1;
+            if (lastIdx < 0 || lastIdx >= static_cast<int>(ctx.measuresByIdx.size())) {
+                continue;
+            }
+            Measure* m = ctx.measuresByIdx[lastIdx];
+            if (!m) {
+                continue;
+            }
+                LayoutBreak* lb = Factory::createLayoutBreak(m);
+            lb->setLayoutBreakType(LayoutBreakType::LINE);
+            lb->setTrack(0);
+            m->add(lb);
         }
     }
 

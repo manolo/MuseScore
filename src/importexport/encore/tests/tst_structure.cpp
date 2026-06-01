@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include "engraving/dom/arpeggio.h"
+#include "engraving/dom/layoutbreak.h"
 #include "engraving/dom/articulation.h"
 #include "engraving/dom/barline.h"
 #include "engraving/dom/chord.h"
@@ -479,5 +480,77 @@ TEST_F(Tst_Structure, very_old_format_v0xa6_pitch_encoding)
     EXPECT_EQ(pitches[1], 62) << "D4";
     EXPECT_EQ(pitches[2], 64) << "E4";
     EXPECT_EQ(pitches[3], 67) << "G4";
+    delete score;
+}
+
+TEST_F(Tst_Structure, intermediate_time_sig_7_8)
+{
+    MasterScore* score = readEncoreScore("paloteos_7x8.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+    EXPECT_EQ(m0->timesig(), Fraction(4, 4)) << "M0 should be 4/4";
+
+    Measure* m16 = measureAt(score, 16);
+    ASSERT_NE(m16, nullptr);
+    EXPECT_EQ(m16->timesig(), Fraction(7, 8)) << "M16 should be 7/8";
+    EXPECT_EQ(m16->ticks(), Fraction(7, 8)) << "M16 duration should be 7/8";
+
+    Segment* tsSeg = m16->findSegment(SegmentType::TimeSig, m16->tick());
+    EXPECT_NE(tsSeg, nullptr) << "M16 must have a TimeSig segment";
+    if (tsSeg) {
+        bool found7_8 = false;
+        for (EngravingItem* el : tsSeg->elist()) {
+            if (el && el->isTimeSig()) {
+                TimeSig* ts = toTimeSig(el);
+                if (ts->sig() == Fraction(7, 8)) {
+                    found7_8 = true;
+                }
+            }
+        }
+        EXPECT_TRUE(found7_8) << "TimeSig segment at M16 must contain a 7/8 element";
+    }
+
+    Measure* m15 = measureAt(score, 15);
+    ASSERT_NE(m15, nullptr);
+    EXPECT_EQ(m15->timesig(), Fraction(4, 4)) << "M15 should still be 4/4";
+
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: System breaks from Encore LINE blocks.
+// The skeleton used by all generated fixtures (bazo.enc) declares two LINE
+// blocks: system 0 covers measures 0..2 (measureCount=3), system 1 covers
+// measures 3..5.  The importer must place a LINE break on the last measure
+// of system 0 (index 2) and no break on the last measure of system 1
+// (index 5, last system never gets a break).
+// ===========================================================================
+TEST_F(Tst_Structure, system_breaks_from_line_data)
+{
+    MasterScore* score = readEncoreScore("structure_system_break.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    auto hasLineBreak = [](Measure* m) {
+        for (EngravingItem* e : m->el()) {
+            if (e->isLayoutBreak()
+                && toLayoutBreak(e)->layoutBreakType() == LayoutBreakType::LINE) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    Measure* m2 = measureAt(score, 2);
+    ASSERT_NE(m2, nullptr);
+    EXPECT_TRUE(hasLineBreak(m2)) << "LINE break expected after measure 2 (end of system 0)";
+
+    Measure* m5 = measureAt(score, 5);
+    ASSERT_NE(m5, nullptr);
+    EXPECT_FALSE(hasLineBreak(m5)) << "last system must not get a break";
+
     delete score;
 }

@@ -167,7 +167,19 @@ bool EncFile::read(QDataStream& ds)
     // Format-specific instrument metadata (name recovery, MIDI programs, Key transposition).
     fmt->readInstrumentMeta(instruments, ds, *this);
 
-        addSpannerEnds(measures);
+    // Derive per-instrument staff count from LINE block; grand-staff instruments
+    // have two entries with the same instrumentIndex() but staffIndex() 0 and 1.
+    if (!lines.empty()) {
+        for (const auto& lsd : lines[0].staffData) {
+            const int ii = static_cast<int>(lsd.instrumentIndex());
+            const int si = static_cast<int>(lsd.staffIndex());
+            if (ii >= 0 && ii < static_cast<int>(instruments.size())) {
+                instruments[ii].nstaves = std::max(instruments[ii].nstaves, si + 1);
+            }
+        }
+    }
+
+    addSpannerEnds(measures);
     return true;
 }
 } // namespace mu::iex::encore
