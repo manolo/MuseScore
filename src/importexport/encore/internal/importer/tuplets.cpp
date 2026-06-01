@@ -31,22 +31,20 @@
 #include "engraving/dom/mscore.h"
 #include "../parser/ticks.h"
 
+#include "log.h"
+
 using namespace mu::engraving;
 
 namespace mu::iex::encore {
 bool TupletTracker::groupFull() const
 {
-    // Close when accumulated face values reach (or exceed) actualN × baseLen.
-    // fullFaceSum is always > 0 for any valid tuplet (set in startTuplet).
-    // Using >= handles both standard same-value groups ({8,8,8}: exact match)
-    // and mixed-value groups ({16,16,Q}: 3/8 exceeds threshold 3/16).
+    // Close when accumulated face values reach actualN × baseLen.
+    // >= handles both standard groups ({8,8,8}: exact) and mixed-duration groups ({16,16,Q}: exceeds threshold).
     return inTuplet() && fullFaceSum > Fraction(0, 1) && faceTicks >= fullFaceSum;
 }
 
-// Returns true when a Fraction can be represented exactly by a TDuration
-// (power-of-two value with up to 4 dots). Used to guard tuplet setTicks calls,
-// since downstream beam layout constructs TDuration(ticks, /*truncate*/false)
-// and asserts if the value does not fit exactly.
+// True when a Fraction fits exactly in a TDuration (power-of-two, up to 4 dots).
+// Guards tuplet setTicks: beam layout calls TDuration(ticks, truncate=false) and asserts on non-fitting fractions.
 static bool fitsTDuration(const Fraction& f)
 {
     if (f.numerator() <= 0) {
@@ -58,26 +56,16 @@ static bool fitsTDuration(const Fraction& f)
 
 void TupletTracker::closeTuplet()
 {
-    // Correct tuplet->ticks() to the actual placed span when it differs from baseLen*normalN.
-    // checkMeasure advances by ticks() via skipTuplet(): a wrong value inserts stray
-    // fill rests (overshoot) or leaves a gap (undershoot).
-    //
-    // Two cases need correction:
-    //   placedTicks < expected: partial group (fewer notes than actualN).
-    //   placedTicks > expected AND faceTicks > fullFaceSum: mixed-duration bracket
-    //     (e.g. {16,16,Q}) where a note larger than baseLen closed the group early.
-    //
-    // Skip the shortening when placedTicks does not fit a TDuration (e.g. 1/3
-    // from a partial 3:2 quarter triplet). Beam layout in beam.cpp::calcBeamBreaks
-    // calls TDuration(tuplet->ticks()) with truncate=false and asserts on
-    // non-TDuration fractions. Keeping the full baseLen*normalN default is safe.
+    // Correct tuplet ticks to actual placed span when it differs from baseLen*normalN (wrong value causes fill-rest gaps or overshoots).
+    // Skip when placedTicks doesn't fit a TDuration (e.g. 1/3 from a partial triplet): beam layout asserts on non-fitting fractions.
     if (currentTuplet && placedTicks > Fraction(0, 1)) {
         const Fraction expected = TDuration(currentTuplet->baseLen()).fraction()
                                   * currentTuplet->ratio().denominator();
         const bool mixedValueOvershoot = (placedTicks > expected)
                                          && (faceTicks > fullFaceSum);
-        if ((placedTicks < expected || mixedValueOvershoot)
-            && fitsTDuration(placedTicks)) {
+        const bool willSet = (placedTicks < expected || mixedValueOvershoot)
+                             && fitsTDuration(placedTicks);
+        if (willSet) {
             currentTuplet->setTicks(placedTicks);
         }
     }
@@ -235,11 +223,8 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
             }
 
             if (isExplicit) {
-                // Explicit tuplets: group by face-value sum (= actualN × baseLen).
-                // A mixed-duration group (e.g. 8+8+16+16 in a 3:2 bracket) closes when
-                // the accumulated face values reach 3 × (1/8) = 3/8, not after 3 notes.
-                // Only COMPLETE groups are marked; partial remainders are handled by the
-                // isolated-fill-remaining check in the main element loop.
+                // Explicit: group by face-value sum (actualN × baseLen). A mixed group ({8,8,16,16} in 3:2) closes at 3/8, not after 3 notes.
+                // Only complete groups are marked; partial remainders handled by isolated-fill-remaining in the main element loop.
                 Fraction baseLen = getFaceValue(chords[i]);
                 if (baseLen <= Fraction(0, 1)) {
                     ++i;
@@ -267,14 +252,8 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                         groupStart = i;
                     }
                 }
-                // Partial last group: NOT marked here — the isolated-fill check handles it.
-                // Exception: mark a partial group only when two conditions both hold:
-                //   (a) rdur sum reaches the exact end of the measure (notes fill end by MIDI sounding).
-                //   (b) face-value sum from startTick would OVERFLOW without tuplet scaling
-                //       (i.e. the notes cannot be placed as plain notes without exceeding the measure).
-                // Condition (b) prevents false-positives where plain face-value advances already
-                // fill the measure, e.g. a 3:2 quarter triplet {Q,8,8} starting at tick=0 whose
-                // face ticks sum to exactly durTicks — those notes need no tuplet correction.
+                // Mark a partial end group only when rdur fills to exact measure end AND face-value sum would overflow without tuplet scaling.
+                // Condition (b) prevents false-positives where plain advances already fill the measure (e.g. {Q,8,8} triplet at tick=0).
                 if (i > groupStart) {
                     int startTick = 0;
                     if (!chords[groupStart].empty()) {

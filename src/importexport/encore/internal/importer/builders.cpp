@@ -73,30 +73,52 @@
 #include "log.h"
 
 namespace mu::iex::encore {
-
 // Apply the best matching MuseScore template to `part`; return it for per-staff clef info.
 static const InstrumentTemplate* applyBestInstrument(Part* part,
-                                                      const EncInstrument& instr,
-                                                      bool isPercByClef)
+                                                     const EncInstrument& instr,
+                                                     bool isPercByClef)
 {
     const int encMidi = instr.midiProgram > 0 ? instr.midiProgram - 1 : -1;
+    const int encKey  = static_cast<int>(instr.keyTransposeSemitones);
     const bool nameTooShort = instr.name.trimmed().size() < 4;
 
     const InstrumentTemplate* tmpl = nullptr;
+    int matchStep = 0;
 
     // Step 1: PERC clef → drumset (language-agnostic binary signal)
     if (isPercByClef) {
         tmpl = searchTemplate(String(u"drumset"));
+        if (tmpl) {
+            matchStep = 1;
+        }
     }
 
-    // Step 2: name + MIDI scoring across non-drumset templates
+    // Step 2: name + MIDI scoring with transposition compatibility filter.
+    // If the best name-scored template has an incompatible non-octave transposition,
+    // the function returns nullptr so we fall through to the MIDI step.
+    // Templates with C or octave-only transpositions always qualify (octave handling
+    // is done via pickStaffClef; C templates get overridden by buildParts if needed).
     if (!tmpl) {
-        tmpl = findEncoreInstrumentTemplate(instr.name, encMidi);
+        tmpl = findEncoreInstrumentTemplate(instr.name, encMidi, encKey);
+        if (tmpl) {
+            matchStep = 2;
+        } else if (!instr.name.trimmed().isEmpty()) {
+            const InstrumentTemplate* rejected = findEncoreInstrumentTemplate(instr.name, encMidi);
+            if (rejected) {
+                LOGD() << "  instrument \"" << instr.name.toStdString()
+                       << "\": name match \"" << rejected->trackName.toStdString()
+                       << "\" rejected (template chromatic=" << rejected->transpose.chromatic
+                       << " vs encKey=" << encKey << "), trying MIDI";
+            }
+        }
     }
 
     // Step 3: name scoring over drumset templates (localized names)
     if (!tmpl && !nameTooShort) {
         tmpl = findDrumsetTemplate(instr.name);
+        if (tmpl) {
+            matchStep = 3;
+        }
     }
 
     // Step 4: generic percussion keywords (last resort for labels too generic
@@ -107,34 +129,71 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
             || lname.contains(QStringLiteral("drum"))
             || lname.contains(QStringLiteral("bater"))) {
             tmpl = searchTemplate(String(u"drumset"));
+            if (tmpl) {
+                matchStep = 4;
+            }
         }
     }
 
-    // Step 5: MIDI program lookup
-    if (!tmpl && !nameTooShort && instr.midiProgram > 0) {
-        tmpl = searchTemplateForMidiProgram(0, instr.midiProgram - 1, false);
+    // Step 5: MIDI program lookup (always active: when name is missing it is the only signal).
+    // Uses findTemplateByMidi rather than searchTemplateForMidiProgram so the "common" genre
+    // tiebreaker applies (e.g. Oboe wins over Castilian Dulzaina for program 68).
+    // Discard the MIDI result if its non-octave transposition conflicts with encKey.
+    if (!tmpl && instr.midiProgram > 0) {
+        const InstrumentTemplate* midiTmpl = findTemplateByMidi(instr.midiProgram - 1);
+        if (midiTmpl) {
+            const int tmplChr = midiTmpl->transpose.chromatic;
+            // C/octave templates always OK; non-octave must match encKey mod 12.
+            const bool ok = (tmplChr % 12 == 0)
+                            || (encKey % 12 != 0
+                                && (((encKey % 12) + 12) % 12 == ((tmplChr % 12) + 12) % 12));
+            if (ok) {
+                tmpl = midiTmpl;
+                matchStep = 5;
+            } else {
+                LOGD() << "  instrument \"" << instr.name.toStdString()
+                       << "\": MIDI match \"" << midiTmpl->trackName.toStdString()
+                       << "\" rejected (template chromatic=" << tmplChr
+                       << " vs encKey=" << encKey << "), using fallback";
+            }
+        }
     }
 
+    static const char* stepDesc[] = {
+        "", "PERC clef", "name+MIDI score", "drumset name", "perc keyword", "MIDI program"
+    };
     if (tmpl) {
+        LOGD() << "  instrument \"" << instr.name.toStdString()
+               << "\": step" << matchStep << "(" << stepDesc[matchStep] << ")"
+               << " -> " << tmpl->trackName.toStdString();
         Instrument instrument = Instrument::fromTemplate(tmpl);
         if (!instr.name.isEmpty()) {
             instrument.setLongName(String(instr.name));
         }
+        instrument.setShortName(String());
+        instrument.instrumentLabel().setAllowGroupName(false);
         part->setInstrument(instrument);
     } else {
         // Grand Piano fallback — user can reassign from the instrument browser.
         const InstrumentTemplate* pianoTmpl = searchTemplateForMidiProgram(0, 0, false);
         if (pianoTmpl) {
+            LOGD() << "  instrument \"" << instr.name.toStdString()
+                   << "\": no match -> fallback: Grand Piano";
             Instrument instrument = Instrument::fromTemplate(pianoTmpl);
             if (!instr.name.isEmpty()) {
                 instrument.setLongName(String(instr.name));
             }
+            instrument.setShortName(String());
+            instrument.instrumentLabel().setAllowGroupName(false);
             part->setInstrument(instrument);
         } else {
+            LOGD() << "  instrument \"" << instr.name.toStdString()
+                   << "\": no match, no piano template -> bare MIDI";
             part->setMidiProgram(0, 0);
             if (!instr.name.isEmpty()) {
                 part->setPlainLongName(String(instr.name));
             }
+            part->setPlainShortName(String());
         }
     }
 
@@ -155,20 +214,32 @@ void buildParts(BuildCtx& ctx)
         Part* part = new Part(score);
 
         const bool isPercByClef = !enc.lines.empty()
-            && cumStaffIdx < static_cast<int>(enc.lines[0].staffData.size())
-            && enc.lines[0].staffData[cumStaffIdx].clef == EncClefType::PERC;
+                                  && cumStaffIdx < static_cast<int>(enc.lines[0].staffData.size())
+                                  && enc.lines[0].staffData[cumStaffIdx].clef == EncClefType::PERC;
 
         const InstrumentTemplate* tmpl = applyBestInstrument(part, instr, isPercByClef);
 
         // Apply Encore's staff visibility flag (showByte at +19 in EncLineStaffData).
         const bool showFromLine = enc.lines.empty()
-            || cumStaffIdx >= static_cast<int>(enc.lines[0].staffData.size())
-            || enc.lines[0].staffData[cumStaffIdx].showStaff;
+                                  || cumStaffIdx >= static_cast<int>(enc.lines[0].staffData.size())
+                                  || enc.lines[0].staffData[cumStaffIdx].showStaff;
         if (!showFromLine) {
             part->setShow(false);
         }
 
         const int pitchOffset = static_cast<int>(instr.keyTransposeSemitones);
+        // Non-octave key transposition: set on the instrument so MuseScore displays
+        // written pitch (= Encore's pitch). Notes are already stored as concert pitch
+        // (semiTonePitch + pitchOffset); instrument.transpose() provides the inverse
+        // so the display formula (concert - chromatic = written) works correctly.
+        // Octave offsets (±12, ±24) are handled via octave-decorated clefs in
+        // pickStaffClef() and via the matched template's own transposition.
+        if (pitchOffset != 0 && std::abs(pitchOffset) % 12 != 0) {
+            Instrument* instrument = part->instrument();
+            if (instrument) {
+                instrument->setTranspose(Interval(pitchOffset));
+            }
+        }
         for (int s = 0; s < ns; ++s) {
             Staff* staff = Factory::createStaff(part);
             score->appendStaff(staff);
@@ -195,7 +266,6 @@ void buildParts(BuildCtx& ctx)
         score->appendPart(part);
         ctx.totalStaves = 1;
     }
-
 }
 
 void buildMeasures(BuildCtx& ctx)
@@ -272,7 +342,6 @@ void buildMeasures(BuildCtx& ctx)
         score->measures()->append(measure);
         currentTick += ts.ticks();
     }
-
 }
 
 void buildInitialSignatures(BuildCtx& ctx)
@@ -319,8 +388,5 @@ void buildInitialSignatures(BuildCtx& ctx)
         }
         prevTs = mTs;
     }
-
 }
-
-
 } // namespace mu::iex::encore
