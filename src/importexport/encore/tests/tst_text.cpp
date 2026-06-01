@@ -63,33 +63,8 @@ protected:
 };
 
 // ===========================================================================
-// FIX: LYRIC (type 6) syllables attached to chords (P3.7).
-// 4/4 measure with notes do/re/mi/fa and matching LYRIC elements. The
-// importer parses the 6-character text payload (UTF-16 LE in v0xC4) and
-// attaches one syllable per ChordRest in tick order.
-// ===========================================================================
-
-// ===========================================================================
-// FIX: Variable-length LYRIC parsing + empty placeholder alignment.
-// Encore writes each lyric element as variable size (text length determines
-// total bytes). A standalone empty LYRIC keeps the per-chord syllable count
-// aligned but produces no <Lyrics>. Without this, "MU" between "LA" and
-// "JER" goes missing on real songs (LaMorenaDeMiCopla.enc).
-// ===========================================================================
-
-// ===========================================================================
-// FIX: Multi-verse lyrics (Encore stores verse 2 on voice 1, etc.).
-// Two LYRIC streams on the same staff but different voices: the importer
-// must anchor both on the voice-0 chord and tag them with Lyrics::verse()
-// so MuseScore renders them as separate rows.
-// ===========================================================================
-
-// ===========================================================================
-// FIX: Encore "-" LYRIC elements are hyphen continuation markers, not
-// syllables. Filtering them out and tagging adjacent syllables with the
-// matching LyricsSyllabic keeps lyrics aligned with their notes and lets
-// MuseScore draw the hyphen automatically. The LaMorenaDeMiCopla m18 case
-// "JU - LIO RO -" reproduced the off-by-one shift the user reported.
+// FIX: Encore "-" LYRIC elements are hyphen continuation markers; filter them out and tag adjacent
+// syllables with LyricsSyllabic. LaMorenaDeMiCopla m18 "JU - LIO RO -" reproduced the off-by-one shift.
 // ===========================================================================
 TEST_F(Tst_Text, lyrics_hyphen_separators_dropped_and_set_syllabic)
 {
@@ -221,11 +196,8 @@ TEST_F(Tst_Text, lyrics_attached_to_chords)
 }
 
 // ===========================================================================
-// FIX: EncLyric::read() detects per-element encoding instead of assuming
-// UTF-16 LE. Real v0xC4 corpora (e.g. milesdepartituras/
-// Fe_cega_faca_amolada_tk.enc) store lyric text as one byte per char in
-// Latin-1; the previous decoder read pairs of bytes as a single QChar and
-// produced spurious CJK code units.
+// FIX: EncLyric::read() detects per-element encoding; some v0xC4 files store lyrics as Latin-1 (one byte/char).
+// Reading as UTF-16 LE produced spurious CJK code units.
 // ===========================================================================
 TEST_F(Tst_Text, lyrics_latin1_text_decoded_as_one_byte_per_char)
 {
@@ -257,11 +229,8 @@ TEST_F(Tst_Text, lyrics_latin1_text_decoded_as_one_byte_per_char)
 }
 
 // ===========================================================================
-// FIX: STAFFTEXT whose payload matches a standard Italian tempo term
-// (Allegro, Adagio, ...) is promoted to a TempoText so the score's tempo
-// map updates. Relative markings ("a tempo") become TempoText too but
-// don't carry an absolute BPS - they defer to the previous tempo.
-// Non-tempo strings ("ten.", "cresc.") keep the StaffText path.
+// FIX: STAFFTEXT matching Italian tempo terms is promoted to TempoText.
+// Relative markings ("a tempo") get TempoText without absolute BPS; non-tempo strings stay StaffText.
 // ===========================================================================
 TEST_F(Tst_Text, staff_text_promoted_to_tempo_for_italian_terms)
 {
@@ -302,8 +271,7 @@ TEST_F(Tst_Text, staff_text_promoted_to_tempo_sets_tempo_map)
     MasterScore* score = readEncoreScore("text_stafftext_tempo_promotion.enc");
     ASSERT_NE(score, nullptr);
 
-    // "Allegro" lives at the start of measure 0; the tempo map there must
-    // pick up the palette default of 144 BPM (= 2.4 BPS).
+    // Allegro at measure 0 must use the palette default of 144 BPM (= 2.4 BPS).
     const Fraction tick0(0, 1);
     EXPECT_NEAR(score->tempo(tick0).val, 144.0 / 60.0, 1e-6)
         << "Allegro at tick 0 must set the tempo to 144 BPM";
@@ -311,23 +279,8 @@ TEST_F(Tst_Text, staff_text_promoted_to_tempo_sets_tempo_map)
 }
 
 // ===========================================================================
-// FIX: Encore header/footer text can carry `#`-prefixed tokens (`#P` page,
-// `#D` date, `#T` time). The importer rewrites them to the matching
-// MuseScore macros (`$P`/`$D`/`$m`) before assigning the text to the page
-// header/footer style slots. Without the rewrite the literal characters
-// would print on every page instead of expanding at render time.
-// ===========================================================================
-// ===========================================================================
-// FIX: TITL slot categories (subtitle 1-2, instruction 1-3, author 1-4,
-// copyright 1-6, header 1-2, footer 1-2) carry multi-line content as one
-// slot per visible line. The importer joins all non-empty slots of the same
-// category with `\n` for the VBox text and Score Properties metadata.
-// Headers and footers also stack when multiple slots share the same
-// alignment byte (left / center / right): same-aligned lines are joined
-// with `\n` into a single Sid value. Mirrors the multi-author block in
-// Mamae_eu_quero-Bateria.enc (composer = author1 + author2 + author3) that
-// Encore's own MusicXML exporter writes as a single <creator> with
-// newline-separated lines.
+// FIX: TITL multi-line slots of the same category join with \n; headers/footers stack by alignment byte.
+// Also: Encore #P/#D/#T tokens are rewritten to MuseScore macros $P/$D/$m.
 // ===========================================================================
 TEST_F(Tst_Text, multi_slot_text_joined_with_newlines)
 {
@@ -354,11 +307,8 @@ TEST_F(Tst_Text, multi_slot_text_joined_with_newlines)
 }
 
 // ===========================================================================
-// FIX: some Encore files (e.g. Mamae_eu_quero-Bateria.enc) write the TITL
-// block twice with identical content. `EncTitle::read()` clears its slot
-// vectors at the start of every pass so the second block replaces the
-// first instead of doubling every line in the resulting composer, header,
-// footer, etc.
+// FIX: some files write the TITL block twice. EncTitle::read() clears slot vectors on each pass
+// so the second block replaces the first instead of doubling composer/header/footer lines.
 // ===========================================================================
 TEST_F(Tst_Text, duplicate_titl_block_does_not_double_lines)
 {
@@ -376,13 +326,8 @@ TEST_F(Tst_Text, duplicate_titl_block_does_not_double_lines)
 }
 
 // ===========================================================================
-// FIX: each Encore MEAS header carries a quarter-note BPM at offset 0 that
-// the importer previously read into `EncMeasure::bpm` but never used. As a
-// result every imported score played at MuseScore's 120 quarter-BPM default
-// instead of the tempo the user set in Encore. A post-measure pass now
-// emits a TempoText for the first measure plus every measure whose BPM
-// differs from the previous applied value, and calls Score::setTempo so
-// playback follows the new tempo map.
+// FIX: MEAS header BPM at offset 0 was read but never used, forcing 120 bpm on all imports.
+// Post-pass emits TempoText for the first measure and each BPM change, and calls Score::setTempo.
 // ===========================================================================
 TEST_F(Tst_Text, measure_header_bpm_drives_initial_tempo_and_changes)
 {
@@ -410,10 +355,7 @@ TEST_F(Tst_Text, measure_header_bpm_drives_initial_tempo_and_changes)
             }
         }
     }
-    // Fixture writes [100, 60, 100, 60, 200, 200]. The importer emits a
-    // TempoText for: m1 (initial 100), m2 (change to 60), m3 (back to 100),
-    // m4 (back to 60), m5 (change to 200). m6 carries the same BPM as m5
-    // and produces no extra mark.
+    // [100,60,100,60,200,200]: emit TempoText for m1..m5 (initial + changes); m6 same as m5, no mark.
     ASSERT_EQ(seen.size(), 5u);
     EXPECT_EQ(seen[0].measureIdx, 0);
     EXPECT_NEAR(seen[0].bps, 100.0 / 60.0, 1e-6);
@@ -427,14 +369,46 @@ TEST_F(Tst_Text, measure_header_bpm_drives_initial_tempo_and_changes)
     EXPECT_EQ(seen[4].measureIdx, 4);
     EXPECT_NEAR(seen[4].bps, 200.0 / 60.0, 1e-6);
 
-    // The tempo map must reflect the same changes (sampled at the start of
-    // each measure).
+    // Tempo map must reflect the same changes (sampled at each measure start).
     Measure* m = score->firstMeasure();
     std::vector<int> expected = { 100, 60, 100, 60, 200, 200 };
     for (int i = 0; i < 6 && m; ++i, m = m->nextMeasure()) {
         EXPECT_NEAR(score->tempo(m->tick()).val, expected[i] / 60.0, 1e-6)
             << "measure " << i << " expected " << expected[i] << " BPM";
     }
+    delete score;
+}
+
+// ===========================================================================
+// FIX: ORN TEMPO byte is beat-unit BPM, not quarter-note BPM. Compound meters (6/8, 9/8, 12/8) beat = dotted quarter;
+// multiply by 3/2. 6/8 TEMPO=80 → BPS=2.0 (120 qBPM); old code gave 80/60=1.333 (♩.=53).
+// ===========================================================================
+TEST_F(Tst_Text, orn_tempo_compound_meter_dotted_quarter_bpm)
+{
+    MasterScore* score = readEncoreScore("text_tempo_orn_compound_68.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    TempoText* tt = nullptr;
+    for (MeasureBase* mb = score->first(); mb && !tt; mb = mb->next()) {
+        if (!mb->isMeasure()) { continue; }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s && !tt; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isTempoText()) {
+                    tt = toTempoText(e);
+                    break;
+                }
+            }
+        }
+    }
+    ASSERT_NE(tt, nullptr) << "No TempoText found in score";
+    EXPECT_NEAR(tt->tempo().val, 120.0 / 60.0, 1e-6)
+        << "ORN TEMPO=80 in 6/8 must produce quarterBpm=120 (BPS=2.0), not 80/60";
+    EXPECT_EQ(tt->plainText(), u"♩. = 80")
+        << "Displayed tempo must be dotted quarter = 80, not dotted quarter = 53";
+
     delete score;
 }
 
@@ -462,11 +436,8 @@ TEST_F(Tst_Text, header_footer_tokens_translated_to_mscore_macros)
 
 
 // ===========================================================================
-// FIX: STAFFTEXT 0x1E rendered from TEXT block (P3.8).
-// Four STAFFTEXT ornaments reference indices 0..3 of an injected TEXT block
-// containing "Allegretto", "cresc.", "dimin.", "ten.". The importer reads
-// the TEXT block, parses each entry's UTF-16 LE payload, and indexes via
-// the ornament's tind byte (+32) to create a StaffText element.
+// FIX: STAFFTEXT 0x1E (ORN tind byte +32) indexes into the TEXT block for the display string.
+// Importer reads TEXT block entries and creates StaffText via the tind-derived index.
 // ===========================================================================
 
 TEST_F(Tst_Text, staff_text_resolved_via_text_block)
@@ -476,8 +447,7 @@ TEST_F(Tst_Text, staff_text_resolved_via_text_block)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    // "Allegretto" is now promoted to a TempoText (see the
-    // staff_text_promoted_to_tempo* tests); the rest stays as StaffText.
+    // "Allegretto" is promoted to TempoText; the remaining entries stay as StaffText.
     std::vector<String> expected = { u"cresc.", u"dimin.", u"ten." };
     std::vector<String> seen;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
@@ -498,10 +468,7 @@ TEST_F(Tst_Text, staff_text_resolved_via_text_block)
 }
 
 // ===========================================================================
-// FEATURE: STAFFTEXT placement derived from Encore y-offset.
-// Two ornaments at adjacent ticks: yoffset=+10 keeps default (ABOVE) and
-// yoffset=-10 must flip placement to BELOW (the case Beethoven Plectro m3
-// hits for its "ten" markers).
+// FEATURE: STAFFTEXT placement from ORN yoffset: positive keeps ABOVE; negative (Cartesian below staff) maps to BELOW.
 // ===========================================================================
 TEST_F(Tst_Text, staff_text_placement_from_yoffset)
 {
