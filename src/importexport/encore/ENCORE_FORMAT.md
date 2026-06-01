@@ -624,6 +624,46 @@ Some files write TITL twice (identical content). Treat idempotently — do not c
 
 ---
 
+## WINI block (page setup)
+
+Optional block written only when the user explicitly opens and saves Page Setup in Encore.
+Files that have never been through Page Setup have no WINI block; the importer uses
+MuseScore defaults in that case. Present in all files saved by Encore 5.0.2 (`chuVersio = 1056`).
+
+Block layout (after 8-byte magic + varsize header):
+
+| Offset | Size | Type    | Description |
+|--------|------|---------|-------------|
+| +0     | 24   | bytes   | screen/window data (not used by importer) |
+| +24    | 4    | int32LE | top margin in typographic points (1/72 in) |
+| +28    | 4    | int32LE | left margin in pts |
+| +32    | 4    | int32LE | bottom edge of printable area (pageHeight_pts - bottomMargin_pts) |
+| +36    | 4    | int32LE | right edge of printable area (pageWidth_pts - rightMargin_pts) |
+| +40    | 2    | uint16  | flags (observed: 1) |
+
+Total content size: 42 bytes (`varsize = 42`). Some older files have `varsize = 40`
+(the trailing uint16 is absent); the importer handles both.
+
+Derived values:
+
+```
+topMargin    = top / 72.0                        (inches)
+leftMargin   = left / 72.0
+printWidth   = (rightEdge - left) / 72.0
+printHeight  = (bottomEdge - top) / 72.0
+bottomMargin = pageHeight - topMargin - printHeight   (pageHeight from style, default A4)
+```
+
+**Encoding quirk.** Encore stores `round(inches × 72)`, then displays
+`floor(pts / 72 × 1000) / 1000`. A user-entered 0.100" stores as 7 pts and
+displays back as 0.097".
+
+**Zero-margin files.** When all four margins are 0, `top = left = 0` and
+`bottomEdge = pageHeight_pts`, `rightEdge = pageWidth_pts`. The importer
+accepts this (guard requires `bottomEdge > 0 && rightEdge > 0`).
+
+---
+
 ## Known quirks
 
 - Encore 5.0.2 can omit instrument block headers while still writing the name at the formula-derived offset.

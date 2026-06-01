@@ -80,6 +80,7 @@
 #include "engraving/dom/tie.h"
 #include "engraving/dom/timesig.h"
 #include "engraving/dom/tuplet.h"
+#include "engraving/dom/system.h"
 #include "engraving/dom/volta.h"
 #include "engraving/engravingerrors.h"
 
@@ -126,7 +127,6 @@ static void clearImportState()
     lastChordPos.clear();
     pendingGraces.clear();
     streamOffset.clear();
-    v0PitchesInMeasure.clear();
     v0xA6LeadingGraceFv.clear();
     v0xA6GraceStolenTicks.clear();
 }
@@ -140,35 +140,27 @@ static void logEncFileInfo(const EncFile& enc)
     LOGD() << "  Magic:          " << h.magic.toStdString();
     LOGD() << "  Format:         0x" << QString::number(h.chuMagio, 16).toUpper().toStdString()
            << " (" << fmtName << ")  version=" << h.chuVersio;
-    LOGD() << "  Lines:" << h.lineCount
-           << "  Pages:" << h.pageCount
+    LOGD() << "  Lines:"     << h.lineCount
+           << "  Pages:"     << h.pageCount
            << "  Instruments:" << h.instrumentCount
            << "  Staves/sys:" << h.staffPerSystem
-           << "  Measures:" << h.measureCount;
+           << "  Measures:"  << h.measureCount;
 
     LOGD() << "---- Titles ----";
     if (!enc.titleBlock.title.isEmpty()) {
         LOGD() << "  Title:    " << enc.titleBlock.title.toStdString();
     }
     for (const QString& s : enc.titleBlock.subtitle) {
-        if (!s.isEmpty()) {
-            LOGD() << "  Subtitle: " << s.toStdString();
-        }
+        if (!s.isEmpty()) { LOGD() << "  Subtitle: " << s.toStdString(); }
     }
     for (const QString& s : enc.titleBlock.author) {
-        if (!s.isEmpty()) {
-            LOGD() << "  Author:   " << s.toStdString();
-        }
+        if (!s.isEmpty()) { LOGD() << "  Author:   " << s.toStdString(); }
     }
     for (const QString& s : enc.titleBlock.instruction) {
-        if (!s.isEmpty()) {
-            LOGD() << "  Instr:    " << s.toStdString();
-        }
+        if (!s.isEmpty()) { LOGD() << "  Instr:    " << s.toStdString(); }
     }
     for (const QString& s : enc.titleBlock.copyright) {
-        if (!s.isEmpty()) {
-            LOGD() << "  Copyrt:   " << s.toStdString();
-        }
+        if (!s.isEmpty()) { LOGD() << "  Copyrt:   " << s.toStdString(); }
     }
 
     LOGD() << "---- Texts ----";
@@ -208,9 +200,7 @@ static void logEncFileInfo(const EncFile& enc)
                    << (m.bpm ? (QString("  bpm=") + QString::number(m.bpm)).toStdString() : "");
             lastNum = m.timeSigNum;
             lastDen = m.timeSigDen;
-            if (m.bpm) {
-                lastBpm = m.bpm;
-            }
+            if (m.bpm) { lastBpm = m.bpm; }
         }
     }
     LOGD() << "--------------------------";
@@ -252,9 +242,7 @@ static void fitSpatiumToLineBreaks(MasterScore* score, const EncFile& enc)
         for (const System* sys : score->systems()) {
             int mc = 0;
             for (const MeasureBase* mb : sys->measures()) {
-                if (mb->isMeasure()) {
-                    ++mc;
-                }
+                if (mb->isMeasure()) { ++mc; }
             }
             if (mc > 0) {
                 sysCounts.push_back(mc);
@@ -281,31 +269,6 @@ static void fitSpatiumToLineBreaks(MasterScore* score, const EncFile& enc)
     score->style().setSpatium(spatium);
 }
 
-static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
-{
-    if (!ps.hasData) {
-        return;
-    }
-    // WINI fields are in points (1/72 inch). MuseScore style values are in inches (mm / INCH).
-    const double topIn    = ps.top / 72.0;
-    const double leftIn   = ps.left / 72.0;
-    const double printW   = (ps.rightEdge - ps.left) / 72.0;
-    const double printH   = (ps.bottomEdge - ps.top) / 72.0;
-    const double pageHIn  = score->style().styleD(Sid::pageHeight);
-    // Clamp to 0: 0-margin files store bottomEdge = full page height in integer pts,
-    // which may differ by a few ULP from the style's floating-point page height.
-    const double bottomIn = std::max(0.0, pageHIn - topIn - printH);
-
-    score->style().set(Sid::pageOddTopMargin,     topIn);
-    score->style().set(Sid::pageEvenTopMargin,    topIn);
-    score->style().set(Sid::pageOddLeftMargin,    leftIn);
-    score->style().set(Sid::pageEvenLeftMargin,   leftIn);
-    score->style().set(Sid::pagePrintableWidth,   printW);
-    score->style().set(Sid::pageOddBottomMargin,  bottomIn);
-    score->style().set(Sid::pageEvenBottomMargin, bottomIn);
-}
-
-
 static void buildScore(MasterScore* score, const EncFile& enc)
 {
     clearImportState();
@@ -313,17 +276,14 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     score->style().set(Sid::chordsXmlFile, true);
     score->chordList()->read(u"chords.xml");
 
-    // Encore positions tuplet brackets/numbers flush against note heads and stems
-    // with no extra vertical gap, and never pushes them outside the staff.
-    score->style().set(Sid::tupletOutOfStaff,      false);
-    score->style().set(Sid::tupletVHeadDistance,   0.0);
-    score->style().set(Sid::tupletVStemDistance,   0.0);
-
     BuildCtx ctx{ score, enc };
     buildParts(ctx);
     buildMeasures(ctx);
     buildInitialSignatures(ctx);
     buildNoteLoop(ctx);
+
+    fitSpatiumToLineBreaks(score, enc);
+
     resolveAll(ctx);
 
     score->spell();

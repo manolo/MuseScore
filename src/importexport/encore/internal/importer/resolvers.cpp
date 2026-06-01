@@ -480,8 +480,11 @@ void resolveAll(BuildCtx& ctx)
             if (!m) {
                 continue;
             }
-                LayoutBreak* lb = Factory::createLayoutBreak(m);
-            lb->setLayoutBreakType(LayoutBreakType::LINE);
+            const bool isPageBreak = !lines[li].staffData.empty()
+                                     && !lines[li + 1].staffData.empty()
+                                     && lines[li].staffData[0].pageIdx != lines[li + 1].staffData[0].pageIdx;
+            LayoutBreak* lb = Factory::createLayoutBreak(m);
+            lb->setLayoutBreakType(isPageBreak ? LayoutBreakType::PAGE : LayoutBreakType::LINE);
             lb->setTrack(0);
             m->add(lb);
         }
