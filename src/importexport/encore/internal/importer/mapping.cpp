@@ -30,7 +30,10 @@
 #include "engraving/dom/instrtemplate.h"
 #include "engraving/dom/jump.h"
 #include "engraving/dom/key.h"
+#include "engraving/dom/instrument.h"
 #include "engraving/dom/keysig.h"
+#include "engraving/dom/part.h"
+#include "engraving/editing/transpose.h"
 #include "engraving/dom/marker.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
@@ -42,7 +45,6 @@
 using namespace mu::engraving;
 
 namespace mu::iex::encore {
-
 ClefType encClef2MuseScore(EncClefType ct)
 {
     switch (ct) {
@@ -59,9 +61,8 @@ ClefType encClef2MuseScore(EncClefType ct)
     }
 }
 
-// Encore stores key as an index (0-14) into the circle of fifths.
-// From Enc2MusicXML: { C, F, Bb, Eb, Ab, Db, Gb, Cb, G, D, A, E, B, F#, C# }
-//                  = { 0,-1, -2, -3, -4, -5, -6, -7, 1, 2, 3, 4, 5,  6,  7 }
+// Encore key byte is an index 0..14 into { C, F, Bb, Eb, Ab, Db, Gb, Cb, G, D, A, E, B, F#, C# }
+// mapping to fifths {0,-1,-2,-3,-4,-5,-6,-7,1,2,3,4,5,6,7}. See ENCORE_FORMAT.md §Key encoding.
 int encKeyToFifths(quint8 key)
 {
     static const int table[] = { 0, -1, -2, -3, -4, -5, -6, -7, 1, 2, 3, 4, 5, 6, 7 };
@@ -98,7 +99,20 @@ void addTitleFrame(MasterScore* score, const EncTitle& titleBlock)
         }
         return nonEmpty.join(QChar('\n'));
     };
-    const QString joinedSubtitle    = joinSlots(titleBlock.subtitle);
+    // Promote the first non-empty subtitle to title when the title slot is blank (TITL fixed-line layout quirk).
+    QString effectiveTitle = titleBlock.title;
+    std::vector<QString> subtitleSlots = titleBlock.subtitle;
+    if (effectiveTitle.isEmpty()) {
+        for (QString& slot : subtitleSlots) {
+            if (!slot.isEmpty()) {
+                effectiveTitle = slot;
+                slot = QString();
+                break;
+            }
+        }
+    }
+
+    const QString joinedSubtitle    = joinSlots(subtitleSlots);
     const QString joinedInstruction = joinSlots(titleBlock.instruction);
     const QString joinedAuthor      = joinSlots(titleBlock.author);
     const QString joinedCopyright   = joinSlots(titleBlock.copyright);
@@ -110,8 +124,8 @@ void addTitleFrame(MasterScore* score, const EncTitle& titleBlock)
 
     // Populate Score Properties metadata (File > Score Properties dialog).
     // These are independent of the VBox visual frame.
-    if (!titleBlock.title.isEmpty()) {
-        score->setMetaTag(u"workTitle", String(titleBlock.title));
+    if (!effectiveTitle.isEmpty()) {
+        score->setMetaTag(u"workTitle", String(effectiveTitle));
     }
     if (hasSubtitle) {
         score->setMetaTag(u"subtitle", String(joinedSubtitle));
@@ -126,7 +140,7 @@ void addTitleFrame(MasterScore* score, const EncTitle& titleBlock)
         score->setMetaTag(u"copyright", String(joinedCopyright));
     }
 
-    if (titleBlock.title.isEmpty() && !hasAuthor && !hasInstruction) {
+    if (effectiveTitle.isEmpty() && !hasSubtitle && !hasAuthor && !hasInstruction) {
         return;
     }
 
@@ -135,9 +149,9 @@ void addTitleFrame(MasterScore* score, const EncTitle& titleBlock)
     vbox->setNext(score->first());
     score->measures()->add(vbox);
 
-    if (!titleBlock.title.isEmpty()) {
+    if (!effectiveTitle.isEmpty()) {
         Text* t = Factory::createText(vbox, TextStyleType::TITLE);
-        t->setPlainText(String(titleBlock.title));
+        t->setPlainText(String(effectiveTitle));
         vbox->add(t);
     }
     if (hasSubtitle) {
@@ -207,9 +221,13 @@ void addInitialKeySig(MasterScore* score, int staffIdx, quint8 encKey)
     }
     Fraction tick = Fraction(0, 1);
     KeySigEvent ke;
-    Key k = Key(fifths);
-    ke.setConcertKey(k);
-    ke.setKey(k);
+    Key writtenKey = Key(fifths);
+    // Encore's key field is the written key for the instrument. Convert to concert
+    // key for the staff timeline; the written key is stored explicitly for display.
+    Interval v = staff->part()->instrument()->transpose();
+    Key concertKey = v.isZero() ? writtenKey : Transpose::transposeKey(writtenKey, v);
+    ke.setConcertKey(concertKey);
+    ke.setKey(writtenKey);
     staff->setKey(tick, ke);
 
     Measure* m = score->tick2measure(tick);
@@ -219,7 +237,7 @@ void addInitialKeySig(MasterScore* score, int staffIdx, quint8 encKey)
     Segment* seg = m->getSegment(SegmentType::KeySig, tick);
     KeySig* ks = Factory::createKeySig(seg);
     ks->setTrack(staffIdx * VOICES);
-    ks->setKey(k, k);
+    ks->setKey(concertKey, writtenKey);
     seg->add(ks);
 }
 
@@ -291,7 +309,7 @@ static int clefGlyphFamily(ClefType ct)
 }
 
 ClefType pickStaffClef(EncClefType encClef, ClefType /*concertClef*/, ClefType /*transposingClef*/,
-                      int keyOffsetSemitones)
+                       int keyOffsetSemitones)
 {
     const ClefType base = encClef2MuseScore(encClef);
     if (keyOffsetSemitones == 0 || clefGlyphFamily(base) == 0) {
@@ -417,9 +435,7 @@ void addRepeatMark(Score* /*score*/, Measure* measure, EncRepeatType rt)
     }
 }
 
-// Strip trailing number + ordinal marker from an instrument name so that
-// "Bandurria 1ª", "Bandurria 2ª" etc. all reduce to "Bandurria".
-// Also strips standalone ordinals like "ª" and "º".
+// Strip trailing ordinal numbers from instrument names ("Bandurria 1ª" -> "Bandurria"; standalone "ª"/"º" also removed).
 QString normalizeEncoreInstrName(const QString& name)
 {
     QString s = name.trimmed();
@@ -446,10 +462,24 @@ static QString normalizeForCompare(const QString& s)
     return out;
 }
 
-// Find best non-drumset template by name+MIDI score.
-// Score: trackName==needle +4, contains +2; longName==needle +2, contains +1; shortName==needle +1.
-// MIDI program match: +6. "common" genre tag: +1 tiebreaker.
-const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, int encMidiProgram)
+// Transposition compatibility: octave-only (chromatic%12==0) always passes (handled by pickStaffClef);
+// non-octave requires matching mod-12 with encKey; rejects when Encore says C-instrument (encKey%12==0).
+static bool transpCompatibleWith(int tmplChromatic, int encKeySemitones)
+{
+    if (tmplChromatic % 12 == 0) {
+        return true;
+    }
+    if (encKeySemitones % 12 == 0) {
+        return false;
+    }
+    const auto mod12 = [](int x) { return ((x % 12) + 12) % 12; };
+    return mod12(tmplChromatic) == mod12(encKeySemitones);
+}
+
+// Find best non-drumset template by name+MIDI score (trackName exact +4, contain +2; MIDI +6; "common" +1).
+// With encKeySemitones filter, returns nullptr if no transposition-compatible match is found.
+const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, int encMidiProgram,
+                                                       int encKeySemitones)
 {
     if (encName.isEmpty()) {
         return nullptr;
@@ -480,9 +510,13 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
         return nullptr;
     }
 
+    const bool filterTransp = (encKeySemitones != ENC_KEY_NO_FILTER);
     const InstrumentTemplate* best = nullptr;
+    const InstrumentTemplate* bestCompatible = nullptr;
     int bestScore = 0;
+    int bestCompatibleScore = 0;
     int bestNameStrength = 0;
+    int bestCompatibleNameStrength = 0;
     for (const InstrumentGroup* g : instrumentGroups) {
         for (const InstrumentTemplate* it : g->instrumentTemplates) {
             if (it->useDrumset) {
@@ -538,9 +572,17 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
                 bestNameStrength = nameStrength;
                 best = it;
             }
+            if (filterTransp && transpCompatibleWith(it->transpose.chromatic, encKeySemitones)) {
+                if (score > bestCompatibleScore
+                    || (score == bestCompatibleScore && nameStrength > bestCompatibleNameStrength)) {
+                    bestCompatibleScore = score;
+                    bestCompatibleNameStrength = nameStrength;
+                    bestCompatible = it;
+                }
+            }
         }
     }
-    return best;
+    return filterTransp ? bestCompatible : best;
 }
 
 // Find best drumset template by name score (exact match only, no substring).
@@ -583,13 +625,52 @@ const InstrumentTemplate* findDrumsetTemplate(const QString& encName)
                 it->instrumentName.shortName().toQString());
             int score = 0;
             for (const QString& needle : needles) {
-                if (nt == needle) { score += 4; }
-                if (nl == needle) { score += 2; }
-                if (ns == needle) { score += 1; }
+                if (nt == needle) {
+                    score += 4;
+                }
+                if (nl == needle) {
+                    score += 2;
+                }
+                if (ns == needle) {
+                    score += 1;
+                }
             }
             if (score > bestScore) {
                 bestScore = score;
                 best = it;
+            }
+        }
+    }
+    return best;
+}
+
+const InstrumentTemplate* findTemplateByMidi(int encMidiProgram0indexed)
+{
+    if (encMidiProgram0indexed < 0) {
+        return nullptr;
+    }
+    const InstrumentTemplate* best = nullptr;
+    bool bestIsCommon = false;
+    for (const InstrumentGroup* g : instrumentGroups) {
+        for (const InstrumentTemplate* it : g->instrumentTemplates) {
+            if (it->useDrumset) {
+                continue;
+            }
+            for (const InstrChannel& ch : it->channel) {
+                if (ch.program() == encMidiProgram0indexed) {
+                    bool isCommon = false;
+                    for (const InstrumentGenre* gen : it->genres) {
+                        if (gen && gen->id == "common") {
+                            isCommon = true;
+                            break;
+                        }
+                    }
+                    if (!best || (isCommon && !bestIsCommon)) {
+                        best = it;
+                        bestIsCommon = isCommon;
+                    }
+                    break;
+                }
             }
         }
     }
@@ -602,10 +683,11 @@ double encTextToTempoBps(const QString& text)
     if (t.isEmpty()) {
         return -1.0;
     }
-    // Italian tempo terms. BPM values mirror MuseScore's tempo palette
-    // (palettecreator.cpp) so the imported pieces play back at the same
-    // speed a user would get by dragging the term from the palette.
-    struct Entry { const char* word; double bps; };
+    // Italian tempo terms; BPM values match MuseScore's tempo palette (palettecreator.cpp) for consistent playback.
+    struct Entry {
+        const char* word;
+        double bps;
+    };
     static const Entry kAbsolute[] = {
         { "grave",        35.0 / 60.0 },
         { "largo",        50.0 / 60.0 },
@@ -644,8 +726,7 @@ double encTextToTempoBps(const QString& text)
 std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
 {
     using mu::engraving::SymId;
-    // Byte encodes one or two glyphs (e.g. 0x24=tenuto+staccato).
-    // Confirmed against encore-symbols.enc m8-m12 vs Encore's MusicXML export.
+    // Byte encodes one or two glyphs (e.g. 0x24=tenuto+staccato). See ENCORE_FORMAT.md §Articulation bytes.
     switch (articByte) {
     // Trill/mordent from m16-m17: 0x04..0x07=trill, 0x08=turn, 0x09=wave, 0x0A/0x0C=inv-mordent, 0x0B/0x2F=mordent.
     case 0x04:
@@ -712,5 +793,4 @@ bool encArticByteIsOpenString(quint8 articByte)
     // 0x46=open-string; emitted as Fingering "0" (STRING_NUMBER style).
     return articByte == 0x46;
 }
-
 } // namespace mu::iex::encore

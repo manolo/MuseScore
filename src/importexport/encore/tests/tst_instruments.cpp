@@ -33,6 +33,9 @@
 #include "engraving/dom/staff.h"
 #include "engraving/dom/tuplet.h"
 
+#include "engraving/dom/instrtemplate.h"
+#include "importexport/encore/internal/importer/mapping.h"
+
 #include "testbase.h"
 
 static const QString ENC_DIR(QString(iex_encore_tests_DATA_ROOT) + "/data/");
@@ -44,7 +47,6 @@ class Tst_Instruments : public ::testing::Test, public MTest
 protected:
     void SetUp() override { setRootDir(ENC_DIR); }
 };
-
 
 // ===========================================================================
 // FIX: findEncoreInstrumentTemplate scores name + MIDI program together so
@@ -193,6 +195,80 @@ TEST_F(Tst_Instruments, tk_probe_keeps_onebyte_for_latin1)
 }
 
 // ===========================================================================
+// FIX: compact v0xC4 files (no TK blocks) store the MIDI program in a
+// different location (offset 390, step 276) than TK-based files (offset
+// 2278, step 2158). Without this fix the byte at the TK-derived offset is
+// read, which is arbitrary file data (e.g. 0x58=88 instead of 69=Oboe).
+//
+// Fixture: instruments_compact_no_tk_midi_oboe.enc
+//   - Real v0xC4 file with no TK blocks; MIDI byte 69 (1-indexed) at 0x186.
+//   - The compact offset formula reads 69 correctly → Oboe.
+//   - The old TK formula reads 88 → no template match → Grand Piano.
+//
+// Additionally: findTemplateByMidi must prefer the "common" genre among
+// templates sharing the same program. MIDI 68 (0-indexed) is shared by
+// Oboe (common genre) and Castilian Dulzaina (world genre). Without the
+// tiebreaker, searchTemplateForMidiProgram returns Dulzaina first.
+// ===========================================================================
+TEST_F(Tst_Instruments, compact_no_tk_midi_reads_from_compact_area)
+{
+    MasterScore* score = readEncoreScore("instruments_compact_no_tk_midi_oboe.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->id(), String(u"oboe"))
+        << "Compact file (no TK blocks): MIDI 69 must read from compact offset and resolve to oboe";
+    delete score;
+}
+
+// ===========================================================================
+// FIX: MIDI program lookup (step 5) must fire even when the instrument name
+// is empty (length 0). The short-name guard previously blocked step 5 for
+// all names shorter than 4 characters, including the empty string, forcing
+// a Grand Piano fallback even when a valid midiProgram was available.
+// Fixture: instruments_instr_empty_name_midi_cello.enc
+//   - TK00 name zeroed → instr.name = ""
+//   - MIDI byte at PRG_BASE (offset 2278) = 43 (1-indexed) → GM program 42 = Cello
+// Expected: Violoncello template (id="violoncello"), not Grand Piano.
+// ===========================================================================
+TEST_F(Tst_Instruments, instrument_empty_name_midi_resolves_to_cello)
+{
+    MasterScore* score = readEncoreScore("instruments_instr_empty_name_midi_cello.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->id(), String(u"violoncello"))
+        << "Empty name + MIDI 43 (Cello) must resolve to violoncello via step5, not Grand Piano";
+    delete score;
+}
+
+// ===========================================================================
+// FIX: compact v0xC4 files with a short header (LINE blocks starting before
+// offset 390) must NOT read their instrument's MIDI program from inside the
+// LINE block data.  The byte at offset 390 is LINE layout data whose value
+// happens to be 0x30 = 48 (GM Timpani); without the guard the importer would
+// select Timpani instead of the correct fallback (Grand Piano).
+//
+// Fixture: instruments_compact_short_header_no_midi.enc
+//   - Compact v0xC4 (no TK blocks); first LINE block at offset 194.
+//   - Byte at compact formula offset 390 (inside LINE) = 0x30 = 48.
+//   - Expected: Grand Piano fallback (no valid MIDI in pre-LINE area).
+// ===========================================================================
+TEST_F(Tst_Instruments, compact_short_header_ignores_line_data_as_midi)
+{
+    MasterScore* score = readEncoreScore("instruments_compact_short_header_no_midi.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_NE(inst->id(), String(u"timpani"))
+        << "Byte 0x30=48 inside LINE block must NOT select Timpani; no MIDI program in pre-LINE area";
+    delete score;
+}
+
+// ===========================================================================
 // BUG FIX: missing instruments when Encore 5.0.2 v0xC4 omits TK blocks
 // ===========================================================================
 
@@ -264,4 +340,31 @@ TEST_F(Tst_Instruments, instrument_count_padding)
         << "Both instruments must be imported even when only 1 TK block exists";
 
     delete score;
+}
+
+TEST_F(Tst_Instruments, transposition_filter_rejects_mismatched_key)
+{
+    // Verify that findEncoreInstrumentTemplate with encKeySemitones=0 rejects
+    // templates whose non-octave chromatic transposition does not match.
+    // "Castilian Dulzaina" has chromatic=6: it must be filtered out when
+    // Encore says the instrument is a C-instrument (encKey=0).
+    //
+    // The unfiltered call (ENC_KEY_NO_FILTER) must still find the template so
+    // existing behaviour is preserved for callers that opt out of the filter.
+    MasterScore* score = readEncoreScore("instruments_instrument_count_padding.enc");
+    ASSERT_NE(score, nullptr);
+    delete score;
+
+    using namespace mu::iex::encore;
+
+    const InstrumentTemplate* filtered = findEncoreInstrumentTemplate(
+        QStringLiteral("Dulzaina 2"), -1, 0);
+    EXPECT_EQ(filtered, nullptr)
+        << "Transposing dulzaina template (chromatic=6) must be rejected when encKey=0";
+
+    const InstrumentTemplate* unfiltered = findEncoreInstrumentTemplate(
+        QStringLiteral("Dulzaina 2"), -1);
+    ASSERT_NE(unfiltered, nullptr);
+    EXPECT_EQ(unfiltered->transpose.chromatic, 6)
+        << "Unfiltered call must find Castilian Dulzaina (chromatic=6)";
 }

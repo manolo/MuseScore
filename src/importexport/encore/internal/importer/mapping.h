@@ -39,17 +39,11 @@ class InstrumentTemplate;
 }
 
 namespace mu::iex::encore {
-
 mu::engraving::ClefType encClef2MuseScore(EncClefType ct);
 
-// Pick the staff clef. Encore stores plain G/F for octave-transposing instruments;
-// the template carries G8_VB/F8_VB. Override applies when Key matches the octave:
-//   keyOffset -12: G8_VB/F8_VB; -24: G15_MB/F15_MB; +12: G8_VA; +24: G15_MA.
-// When template clefs differ, prefer the transposing clef (no octave glyph).
-// When equal or no template match, Encore clef wins.
-mu::engraving::ClefType pickStaffClef(EncClefType encClef,
-                                      mu::engraving::ClefType concertClef,
-                                      mu::engraving::ClefType transposingClef,
+// Pick octave-decorated clef when Encore's plain G/F plus Key offset implies one
+// (e.g. keyOffset=-12 -> G8_VB/F8_VB; -24 -> G15_MB/F15_MB; +12 -> G8_VA).
+mu::engraving::ClefType pickStaffClef(EncClefType encClef, mu::engraving::ClefType concertClef, mu::engraving::ClefType transposingClef,
                                       int keyOffsetSemitones);
 
 int encKeyToFifths(quint8 key);
@@ -62,12 +56,20 @@ void addInitialClef(mu::engraving::MasterScore* score, int staffIdx, mu::engravi
 void addRepeatMark(mu::engraving::Score* score, mu::engraving::Measure* measure, EncRepeatType rt);
 
 QString normalizeEncoreInstrName(const QString& name);
-// Find instrument template by name+MIDI score. midiProgram breaks ties (0-indexed; -1=none).
+
+// Sentinel for findEncoreInstrumentTemplate: skip the transposition compatibility filter.
+// Valid Encore key offsets are in [-33, +24]; 0x7FFFFFFF is outside that range.
+constexpr int ENC_KEY_NO_FILTER = 0x7FFFFFFF;
+
+// Find best non-drumset template by name+MIDI score; applies transposition filter when encKeySemitones != ENC_KEY_NO_FILTER.
 const mu::engraving::InstrumentTemplate* findEncoreInstrumentTemplate(
-    const QString& encName, int encMidiProgram = -1);
+    const QString& encName, int encMidiProgram = -1, int encKeySemitones = ENC_KEY_NO_FILTER);
 
 // Same as findEncoreInstrumentTemplate but restricted to useDrumset templates.
 const mu::engraving::InstrumentTemplate* findDrumsetTemplate(const QString& encName);
+
+// MIDI-only lookup among non-drumset templates; prefers "common" genre when multiple share the same program.
+const mu::engraving::InstrumentTemplate* findTemplateByMidi(int encMidiProgram0indexed);
 
 // Return BPS if text is a standard Italian tempo term (Allegro, Andante, ...).
 // Return 0 for relative marks (a tempo, Tempo I). Return -1 if not a tempo mark.
@@ -82,7 +84,6 @@ int encArticByteToFingerNumber(quint8 articByte);
 
 // True when the articulation byte is an open-string marker (importer emits Fingering "0").
 bool encArticByteIsOpenString(quint8 articByte);
-
 } // namespace mu::iex::encore
 
 #endif // MU_IMPORTEXPORT_ENC_IMPORT_MAPPING_H
