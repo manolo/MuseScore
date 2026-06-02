@@ -103,7 +103,29 @@ infer the actual kit from the track name.
 ## System block (LINE)
 
 21-byte header (start tick, measure count) + N × 30-byte staff entries (N = staves-per-system from header).
-Each staff entry: clef, key, page index, staff type, instrument index, visibility (`0x00` = hidden at byte +19).
+
+### LINE header (21 bytes)
+
+| Offset | Size | Description                                                      |
+|--------|------|------------------------------------------------------------------|
+| +10    | 2    | `start` — 0-based index of the first measure in this system     |
+| +12    | 1    | `measureCount` — number of measures in this system              |
+
+### LINE staff entry (30 bytes, repeated N times)
+
+| Offset | Size | Description                                                                    |
+|--------|------|--------------------------------------------------------------------------------|
+| +14    | 1    | clef type                                                                      |
+| +15    | 1    | key signature                                                                  |
+| +16    | 1    | page-row counter (varies per system; NOT the page number and NOT a fixed property) |
+| +19    | 1    | visibility: `0x00` = hidden; any non-zero = visible                            |
+| +20    | 1    | staff type: `0` = MELODY, `1` = TAB, `2` = RHYTHM (single-line percussion)    |
+| +21    | 1    | packed instrument/staff index: bits 0-5 = instrument index, bits 6-7 = staff within instrument |
+
+True page count is in `header.pageCount`; page break positions are not yet decoded.
+
+A RHYTHM staff (byte +20 = 2) maps to a single-line percussion template in MuseScore.
+The staff type is constant across all LINE blocks for the same staff position.
 
 ---
 
@@ -412,7 +434,7 @@ Syllabic role (begin/middle/end/single) derived from hyphen-before / hyphen-afte
 
 | Offset   | Size   | Description                                                                      |
 |----------|--------|----------------------------------------------------------------------------------|
-| +5       | 1      | face value — low nibble: 1=whole, 2=half, 3=qtr, 4=8th, …, 8=128th               |
+| +5       | 1      | face value — high nibble: 0=normal, 3=square notehead; low nibble: 1=whole, 2=half, 3=qtr, 4=8th, …, 8=128th |
 | +6       | 1      | grace1 (high-nibble flags, see grace section)                                    |
 | +7       | 1      | grace2                                                                           |
 | +10      | 2      | layout x-position                                                                |
