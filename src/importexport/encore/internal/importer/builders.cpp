@@ -76,7 +76,8 @@ namespace mu::iex::encore {
 // Apply the best matching MuseScore template to `part`; return it for per-staff clef info.
 static const InstrumentTemplate* applyBestInstrument(Part* part,
                                                      const EncInstrument& instr,
-                                                     bool isPercByClef)
+                                                     bool isPercByClef,
+                                                     bool isRhythm)
 {
     const int encMidi = instr.midiProgram > 0 ? instr.midiProgram - 1 : -1;
     const int encKey  = static_cast<int>(instr.keyTransposeSemitones);
@@ -135,11 +136,23 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         }
     }
 
+    // Step 4a: RHYTHM staff type detected (single-line percussion via Encore's EncStaffType).
+    // Falls through here when name and MIDI matched nothing; snare-drum is a neutral 1-line
+    // perc template that gives the correct staff and drumset scaffold.  MIDI step is skipped
+    // so a pitched MIDI program (e.g. piano=0) does not override the perc detection.
+    if (!tmpl && isRhythm) {
+        tmpl = searchTemplate(String(u"snare-drum"));
+        if (tmpl) {
+            matchStep = 6;
+        }
+    }
+
     // Step 5: MIDI program lookup (always active: when name is missing it is the only signal).
     // Uses findTemplateByMidi rather than searchTemplateForMidiProgram so the "common" genre
     // tiebreaker applies (e.g. Oboe wins over Castilian Dulzaina for program 68).
     // Discard the MIDI result if its non-octave transposition conflicts with encKey.
-    if (!tmpl && instr.midiProgram > 0) {
+    // Skip this step for rhythm staves: MIDI program 0 would wrongly select Grand Piano.
+    if (!tmpl && !isRhythm && instr.midiProgram > 0) {
         const InstrumentTemplate* midiTmpl = findTemplateByMidi(instr.midiProgram - 1);
         if (midiTmpl) {
             const int tmplChr = midiTmpl->transpose.chromatic;
@@ -160,7 +173,7 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
     }
 
     static const char* stepDesc[] = {
-        "", "PERC clef", "name+MIDI score", "drumset name", "perc keyword", "MIDI program"
+        "", "PERC clef", "name+MIDI score", "drumset name", "perc keyword", "MIDI program", "RHYTHM staff"
     };
     if (tmpl) {
         LOGD() << "  instrument \"" << instr.name.toStdString()
@@ -216,8 +229,10 @@ void buildParts(BuildCtx& ctx)
         const bool isPercByClef = !enc.lines.empty()
                                   && cumStaffIdx < static_cast<int>(enc.lines[0].staffData.size())
                                   && enc.lines[0].staffData[cumStaffIdx].clef == EncClefType::PERC;
-
-        const InstrumentTemplate* tmpl = applyBestInstrument(part, instr, isPercByClef);
+        const bool isRhythm = !enc.lines.empty()
+                              && cumStaffIdx < static_cast<int>(enc.lines[0].staffData.size())
+                              && enc.lines[0].staffData[cumStaffIdx].staffType == EncStaffType::RHYTHM;
+        const InstrumentTemplate* tmpl = applyBestInstrument(part, instr, isPercByClef, isRhythm);
 
         // Apply Encore's staff visibility flag (showByte at +19 in EncLineStaffData).
         const bool showFromLine = enc.lines.empty()
@@ -243,6 +258,9 @@ void buildParts(BuildCtx& ctx)
         for (int s = 0; s < ns; ++s) {
             Staff* staff = Factory::createStaff(part);
             score->appendStaff(staff);
+            if (tmpl) {
+                staff->init(tmpl, nullptr, s);
+            }
             ctx.staffPitchOffset.push_back(pitchOffset);
             ClefType cClef = ClefType::INVALID;
             ClefType tClef = ClefType::INVALID;

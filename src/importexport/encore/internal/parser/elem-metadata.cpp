@@ -22,7 +22,6 @@
 
 #include "elements.h"
 
-
 namespace mu::iex::encore {
 // ---------------------------------------------------------------------------
 // EncInstrument
@@ -82,21 +81,22 @@ bool EncInstrument::read(QDataStream& ds, quint32 vs, bool probeEncoding)
 
 bool EncLineStaffData::read(QDataStream& ds)
 {
+    // Bytes 0-13: visual layout data (Y-coordinates for staff lines, etc.)
     ds.skipRawData(14);
     qint8 ct;
-    ds >> ct;
+    ds >> ct;                                   // byte 14: clef type
     clef = static_cast<EncClefType>(ct);
-    ds >> key >> pageIdx;
+    ds >> key >> pageIdx;                       // bytes 15-16
     quint8 skip0, skip1, showByte;
-    ds >> skip0 >> skip1 >> showByte;
+    ds >> skip0 >> skip1 >> showByte;           // bytes 17-19
     showStaff = (showByte != 0);
     (void)skip0;
     (void)skip1;
     quint8 st;
-    ds >> st;
+    ds >> st;                                   // byte 20: staff type (MELODY/TAB/RHYTHM)
     staffType = static_cast<EncStaffType>(st);
-    ds >> instrStaffIdx;
-    ds.skipRawData(8);
+    ds >> instrStaffIdx;                        // byte 21
+    ds.skipRawData(8);                          // bytes 22-29
     return true;
 }
 
@@ -221,5 +221,4 @@ bool EncTitle::read(QDataStream& ds, quint32 vs, EncCharSize cs)
     ds.skipRawData(cs == EncCharSize::ONE_BYTE ? 504 : 120);
     return true;
 }
-
 } // namespace mu::iex::encore
