@@ -31,11 +31,7 @@
 #include <QString>
 
 namespace mu::iex::encore {
-// ---------------------------------------------------------------------------
-// Encore binary format data structures
-// Ported from Enc2MusicXML (https://github.com/lvinken/Enc2MusicXML)
-// by Leon Vinken, GPL v3+
-// ---------------------------------------------------------------------------
+// Encore binary format structures, ported from Enc2MusicXML (Leon Vinken, GPL v3+).
 
 enum class EncCharSize : char {
     ONE_BYTE,
@@ -106,29 +102,21 @@ enum class EncOrnamentType : quint8 {
     STAFFTEXT  = 0x1E,
     SLURSTART  = 0x21,
     ARPEGGIO   = 0x22,
-    // Trill-line ornaments (size-28): 0x36 starts first trill, 0x37 starts second,
-    // 0x35 is the end marker (adds no trill mark itself).
+    // See ENCORE_FORMAT.md §Ornament subtypes for tipo values, sizes, and quirks.
     TRILL_END   = 0x35,
     TRILL_START = 0x36,
     TRILL_ALT   = 0x37,
-    // Section navigation markers (size-16): 0xA2=segno, 0xA5=to coda, 0xA6=coda.
     SEGNO       = 0xA2,
     TO_CODA     = 0xA5,
     CODA        = 0xA6,
-    // Per-chord staccato (size-16). Encore's own MusicXML exporter drops 0xC9 entirely;
-    // we import it because it accounts for nearly all staccatos in plectro scores.
+    // 0xC9 staccato: Encore's MusicXML exporter drops it; we import it.
     STACCATO    = 0xC9,
     TEMPO      = 0x32,
-    // Single-chord tremolo (plectro), size-16. Both map to TremoloSingleChord/R32.
-    // 0xAF: standard encoding (248 occurrences in Beethoven Plectro).
-    // 0xEF: alternate encoding seen on half notes at tick >= measure durTicks.
+    // 0xAF standard, 0xEF alternate (half notes at tick >= durTicks).
     TREMOLO_32 = 0xAF,
     TREMOLO_32B = 0xEF,
     SLURSTOP   = 0x41,
     WEDGESTOP  = 0x4D,
-    // Dynamic markings (size-16), confirmed against encore-symbols.xml:
-    //   ppp=0x80, pp=0x81, p=0x82, mp=0x83, mf=0x84
-    //   f=0x85, ff=0x86, fff=0x87, sfz=0x88, sffz=0x89, fp=0x8A
     DYN_PPP    = 0x80,
     DYN_PP     = 0x81,
     DYN_P      = 0x82,
@@ -140,17 +128,14 @@ enum class EncOrnamentType : quint8 {
     DYN_SFZ    = 0x88,
     DYN_SFFZ   = 0x89,
     DYN_FP     = 0x8A,
-    // High-range: fp=0x8A, fz=0xAA, sf=0xAB (from encore-symbols.enc m3).
     DYN_FZ     = 0xAA,
     DYN_SF     = 0xAB,
-    // Fingering numbers 1..5 as stand-alone ORN elements (size-16).
-    // Encoded as 0xB8 + finger (1=0xB9, 2=0xBA, 3=0xBB, 4=0xBC, 5=0xBD).
+    // Fingering: 0xB8 + finger number (1..5).
     FINGER_1   = 0xB9,
     FINGER_2   = 0xBA,
     FINGER_3   = 0xBB,
     FINGER_4   = 0xBC,
     FINGER_5   = 0xBD,
-    // Plectro stroke direction (size-16): down stroke (П) and up stroke (V).
     UPBOW      = 0xC4,
     DOWNBOW    = 0xC5
 };
@@ -181,8 +166,7 @@ struct EncMeasureElem {
     quint8 xoffset  { 0 };
     qint16 realDuration { -1 };
 
-    // Returns the tuplet byte (0 = no tuplet). Used to sort tuplet notes before
-    // non-tuplet notes at the same tick, so the tuplet note creates the chord.
+    // Nonzero = tuplet member; sort tuplet notes first at their tick so they create the chord.
     virtual quint8 tupletByte() const { return 0; }
 
     EncMeasureElem() = default;
@@ -287,10 +271,7 @@ struct EncGenericElem : EncMeasureElem {
     bool read(QDataStream& ds) override;
 };
 
-// TIE element: marks notes at (staffIdx, voice, tick) that tie forward.
-// Dir byte (elemStart+5): bit 7 (0x80) = arc-above outgoing; bit 1 (0x02) = arc-below outgoing.
-//   0xfe/0x80+: arc-above; 0x02/0x03: arc-below. Endpoint-only TIEs have dir=0x00/0x01.
-// StartFlag byte (elemStart+6): high bit set = additional outgoing tie marker.
+// TIE element: dir byte (+5) and startFlag (+6) encode arc direction. See ENCORE_FORMAT.md §TIE element.
 struct EncTie : EncMeasureElem {
     bool isTieStart { false };   // true when dir byte has bit 7 or bit 1 set, or startFlag has bit 7 set
 
@@ -337,7 +318,7 @@ struct EncMeasure {
     EncRepeatType repeatMark() const { return static_cast<EncRepeatType>(coda & 0xFF); }
 
     bool read(QDataStream& ds, const quint32 vs, const struct EncFormatReader& fmt);
-    void calculateRealDurations();
+    void calculateRealDurations(bool hasGraceTimeBorrowing = false);
 };
 
 // ---------------------------------------------------------------------------
@@ -370,11 +351,7 @@ struct EncLineStaffData {
     quint8 pageIdx    { 0 };
     EncStaffType staffType  { EncStaffType::MELODY };
     quint8 instrStaffIdx { 0 };
-    // Staff visibility flag: bit 0 set (0x01) = visible; 0x00 = hidden from score.
-    // Stored at byte +19 of the 30-byte staff entry (3rd byte of the 3-byte skip
-    // block that follows pageIdx).  Verified by binary-diffing pachbel-shown.enc
-    // vs pachbel-hiden.enc: only the hidden staff has this byte == 0x00.
-    bool showStaff { true };
+    bool showStaff { true }; // byte +19 of LINE staff entry: 0x01 = visible, 0x00 = hidden.
 
     unsigned int instrumentIndex() const { return instrStaffIdx & 0x3F; }
     unsigned int staffIndex() const { return instrStaffIdx >> 6; }
@@ -397,9 +374,7 @@ struct EncLine {
 
 QString readTextItem(QDataStream& ds, EncCharSize cs);
 
-// Header/footer line in the TITL block. The 30-byte line prefix includes a
-// horizontal-alignment byte at +14 (0x02 = right, 0x04 = left, 0x06 = center)
-// that picks which page corner the text lands on.
+// See ENCORE_FORMAT.md §TITL block for header/footer alignment byte values.
 enum class EncTextAlign : quint8 {
     LEFT   = 0x04,
     CENTER = 0x06,
@@ -427,6 +402,8 @@ struct EncTitle {
 // File header
 // ---------------------------------------------------------------------------
 
+struct EncFormatReader;   // defined in reader.h; used by EncHeader::read()
+
 struct EncHeader {
     QString magic;
     quint8 chuMagio       { 0 };
@@ -439,10 +416,8 @@ struct EncHeader {
     qint8 staffPerSystem { 0 };
     qint16 measureCount   { 0 };
 
-    bool isOldFormat() const { return chuMagio == 0xC2; }
-    bool isVeryOldFormat() const { return chuMagio == 0xA6; }
-
-    bool read(QDataStream& ds);
+    bool readMagicAndVersion(QDataStream& ds);
+    bool read(QDataStream& ds, const EncFormatReader& fmt);
 };
 
 // ---------------------------------------------------------------------------
@@ -454,27 +429,14 @@ bool isKnownMagic(const QString& magic);
 QString findNextKnownMagic(QDataStream& ds);
 void addSpannerEnds(std::vector<EncMeasure>& measures);
 
-// TEXT block: indexed text payload for STAFFTEXT 0x1E ornaments (and possibly
-// other free-text annotations). The N-th entry is referenced by an ornament's
-// `tind` field (+32). Block layout:
-//   +0..+1: 0x0000 sync
-//   +2..+3: entry count (2 bytes)
-//   +4..+7: content size (4 bytes, total of all entries)
-//   then, for each entry:
-//     +0..+1: payload size (S)
-//     +2..+S+1: payload
-//       +0..+13: 14 bytes of header (not fully decoded)
-//       +14..+S-5: UTF-16 LE text
-//       +S-4..+S-1: 0x04 0x00 0x00 0x00 terminator
+// TEXT block: N-th entry referenced by ORN tind byte (+32). See ENCORE_FORMAT.md §TEXT block.
 struct EncTextBlock {
     std::vector<QString> entries;
 
     bool read(QDataStream& ds, quint32 varSize);
 };
 
-// WINI block: page setup stored when the user explicitly opens Page Setup in Encore.
-// All margin fields are in typographic points (1/72 inch). Present only when the user
-// has saved page setup; absent = use MuseScore defaults.
+// WINI block: margins in points (1/72 inch). See ENCORE_FORMAT.md §WINI block.
 struct EncPageSetup {
     bool hasData      { false };
     qint32 top        { 0 };   // top margin in pts
@@ -491,6 +453,7 @@ struct EncFile {
     EncTitle titleBlock;
     EncTextBlock textBlock;
     EncPageSetup pageSetup;
+    std::unique_ptr<struct EncFormatReader> fmt;  // set during read()
 
     bool read(QDataStream& ds);
 };

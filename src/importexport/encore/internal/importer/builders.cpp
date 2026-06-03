@@ -94,11 +94,8 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         }
     }
 
-    // Step 2: name + MIDI scoring with transposition compatibility filter.
-    // If the best name-scored template has an incompatible non-octave transposition,
-    // the function returns nullptr so we fall through to the MIDI step.
-    // Templates with C or octave-only transpositions always qualify (octave handling
-    // is done via pickStaffClef; C templates get overridden by buildParts if needed).
+    // Step 2: name + MIDI scoring with transposition filter — rejects templates whose non-octave transposition
+    // conflicts with encKey; C/octave templates always qualify (octave handling via pickStaffClef).
     if (!tmpl) {
         tmpl = findEncoreInstrumentTemplate(instr.name, encMidi, encKey);
         if (tmpl) {
@@ -136,10 +133,7 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         }
     }
 
-    // Step 4a: RHYTHM staff type detected (single-line percussion via Encore's EncStaffType).
-    // Falls through here when name and MIDI matched nothing; snare-drum is a neutral 1-line
-    // perc template that gives the correct staff and drumset scaffold.  MIDI step is skipped
-    // so a pitched MIDI program (e.g. piano=0) does not override the perc detection.
+    // Step 4a: RHYTHM staff — fall back to snare-drum (neutral 1-line perc); skip MIDI so program 0 (piano) doesn't override.
     if (!tmpl && isRhythm) {
         tmpl = searchTemplate(String(u"snare-drum"));
         if (tmpl) {
@@ -147,11 +141,8 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         }
     }
 
-    // Step 5: MIDI program lookup (always active: when name is missing it is the only signal).
-    // Uses findTemplateByMidi rather than searchTemplateForMidiProgram so the "common" genre
-    // tiebreaker applies (e.g. Oboe wins over Castilian Dulzaina for program 68).
-    // Discard the MIDI result if its non-octave transposition conflicts with encKey.
-    // Skip this step for rhythm staves: MIDI program 0 would wrongly select Grand Piano.
+    // Step 5: MIDI program lookup (skip for RHYTHM staves — program 0 would select Grand Piano).
+    // Rejects result when its non-octave transposition conflicts with encKey.
     if (!tmpl && !isRhythm && instr.midiProgram > 0) {
         const InstrumentTemplate* midiTmpl = findTemplateByMidi(instr.midiProgram - 1);
         if (midiTmpl) {
@@ -177,8 +168,9 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
     };
     if (tmpl) {
         LOGD() << "  instrument \"" << instr.name.toStdString()
-               << "\": step" << matchStep << "(" << stepDesc[matchStep] << ")"
-               << " -> " << tmpl->trackName.toStdString();
+               << "\": step" << matchStep << "(" << stepDesc[matchStep]
+               << (matchStep == 5 ? QString(" %1").arg(instr.midiProgram).toStdString() : std::string())
+               << ")" << " -> " << tmpl->trackName.toStdString();
         Instrument instrument = Instrument::fromTemplate(tmpl);
         if (!instr.name.isEmpty()) {
             instrument.setLongName(String(instr.name));
@@ -217,10 +209,8 @@ void buildParts(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
     const EncFile& enc = ctx.enc;
-    // staffPitchOffset: Encore stores written pitch; Key field gives chromatic shift.
-    // Add it to every note's setPitch() call so playback matches the source.
-    // staffTemplateConcertClef/TransposingClef: template clefs for octave instruments
-    // (e.g. bass guitar: F8_VB concert / F transposing). INVALID if no template matched.
+    // staffPitchOffset: Encore stores written pitch; add Key field (chromatic semitones) to each note pitch for correct playback.
+    // staffTemplateConcertClef/TransposingClef: template clefs for octave instruments (e.g. bass guitar). INVALID if no template.
     int cumStaffIdx = 0;  // running index into enc.lines[0].staffData
     for (const auto& instr : enc.instruments) {
         int ns = instr.nstaves > 0 ? instr.nstaves : 1;
@@ -243,16 +233,21 @@ void buildParts(BuildCtx& ctx)
         }
 
         const int pitchOffset = static_cast<int>(instr.keyTransposeSemitones);
-        // Non-octave key transposition: set on the instrument so MuseScore displays
-        // written pitch (= Encore's pitch). Notes are already stored as concert pitch
-        // (semiTonePitch + pitchOffset); instrument.transpose() provides the inverse
-        // so the display formula (concert - chromatic = written) works correctly.
-        // Octave offsets (±12, ±24) are handled via octave-decorated clefs in
-        // pickStaffClef() and via the matched template's own transposition.
+        // Non-octave transposition: set on the instrument so display shows written pitch (Encore's stored pitch).
+        // Octave offsets are handled by pickStaffClef() and the template's own transposition.
         if (pitchOffset != 0 && std::abs(pitchOffset) % 12 != 0) {
             Instrument* instrument = part->instrument();
             if (instrument) {
-                instrument->setTranspose(Interval(pitchOffset));
+                const Interval iv(pitchOffset);
+                instrument->setTranspose(iv);
+                // Note that sounds when written C is played (mod-12 of the offset).
+                static const char* const keyNames[] = {
+                    "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"
+                };
+                const int keyIdx = ((pitchOffset % 12) + 12) % 12;
+                LOGD() << "  instrument \"" << instr.name.toStdString()
+                       << "\": transposition in " << keyNames[keyIdx]
+                       << " (chromatic=" << iv.chromatic << " diatonic=" << iv.diatonic << ")";
             }
         }
         for (int s = 0; s < ns; ++s) {
@@ -292,9 +287,8 @@ void buildMeasures(BuildCtx& ctx)
     const EncFile& enc = ctx.enc;
     // --------------- Measures ---------------
 
-    // Determine the nominal (displayed) time signature. When the first measure is
-    // shorter than the rest (anacrusis / pickup), Encore stores its actual duration
-    // as the time sig. The nominal sig comes from the second measure.
+    // Pickup measure detection: Encore stores the actual short duration as measure 0's time sig;
+    // the real displayed sig is in measure 1.
     {
         int n0 = !enc.measures.empty() && enc.measures[0].timeSigNum > 0
                  ? enc.measures[0].timeSigNum : 4;
@@ -341,11 +335,7 @@ void buildMeasures(BuildCtx& ctx)
                    || encMeas.endBarline() == EncBarlineType::DOUBLEL
                    || encMeas.endBarline() == EncBarlineType::DOUBLER
                    || encMeas.endBarline() == EncBarlineType::DOTTED) {
-            // Encore renders barline graphics across every instrument on the
-            // system. MuseScore stores barlines per staff, so set the bar
-            // line on every track. Passing only track 0 leaves the bar line
-            // visible on the first instrument only (Beethoven Plectro m26
-            // double bar reproduced this).
+            // Encore barlines span all staves; MuseScore stores per-staff, so set on every track.
             BarLineType type = BarLineType::DOUBLE;
             if (encMeas.endBarline() == EncBarlineType::FINAL) {
                 type = BarLineType::END;
@@ -386,9 +376,7 @@ void buildInitialSignatures(BuildCtx& ctx)
     }
 
     // --------------- Intermediate time signature changes ---------------
-    // buildMeasures() sets measure->setTimesig() per measure but never adds
-    // TimeSig engraving elements at change points. Walk all measures and emit
-    // a TimeSig element whenever the nominal sig changes from the previous one.
+    // buildMeasures() sets timesig() per measure but not TimeSig elements; emit them here at each change point.
     Fraction prevTs = ctx.nominalTimeSig;
     for (const Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
         Fraction mTs = m->timesig();

@@ -100,10 +100,13 @@ void addSpannerEnds(std::vector<EncMeasure>& measures)
 
 bool EncFile::read(QDataStream& ds)
 {
-    if (!header.read(ds)) {
+    if (!header.readMagicAndVersion(ds)) {
         return false;
     }
-    auto fmt = EncFormatReader::create(header.chuMagio);
+    fmt = EncFormatReader::create(header.chuMagio);
+    if (!header.read(ds, *fmt)) {
+        return false;
+    }
     EncCharSize charsize = EncCharSize::ONE_BYTE;
 
     while (!ds.atEnd()) {
@@ -121,7 +124,7 @@ bool EncFile::read(QDataStream& ds)
         } else if (nextId == "MEAS") {
             EncMeasure meas;
             meas.read(ds, varSize, *fmt);
-            meas.calculateRealDurations();
+            meas.calculateRealDurations(fmt->hasGraceTimeBorrowing());
             // header.measureCount says how many MEAS blocks Encore shows.
             // Extra "ghost" measures from old edits; skip them.
             if (header.measureCount > 0

@@ -1121,63 +1121,54 @@ breaks placed later.
 
 ### What is NOT adjusted
 
-Page margins are left at MuseScore defaults (15 mm per side). The Encore
-binary format does not encode margins in a location that has been decoded;
-see the "Page margins" section below.
+Page margins: files that have never had Page Setup explicitly saved in Encore
+contain no WINI block and keep MuseScore defaults (15 mm per side). When the
+WINI block is present the margins are applied exactly as stored.
 
 ## Page margins
 
-Encore's page margins were investigated during importer development.
-The result: the margin values cannot be reliably decoded from any of the
-known block locations in a v0xC4 file.
+Page margins are stored in an optional WINI block near the end of the file.
+The block is written only when the user explicitly opens and saves Page Setup
+in Encore; files that were never touched through that dialog have no WINI block.
 
-### What was tried
+### WINI block layout
 
-**PAGE block (26 bytes, embedded before the first LINE block).**
-Byte scanning revealed a 26-byte region in the pre-LINE area whose content
-matches the PAGE block documented in the format (word[0] = line count,
-word[1] = measures on line 0, word[6] = something similar). None of the
-remaining 22 bytes contain the margin values as float32 BE/LE, as twips
-(1/1440 inch, i.e. 0.626*1440=901), or as mm*10. The block appears to
-store layout counts, not metric dimensions.
+Magic: `WINI`. Size field: 42 bytes (21 x uint16 LE).
 
-**PREC block (Windows DEVMODE printer record).**
-A PREC block embedded before the LINE area carries a Windows DEVMODE
-structure (field `dmSize = 156`) followed by driver-extra bytes. DEVMODE
-stores paper size (`dmPaperSize = 9` for A4) and orientation but not the
-page margins set by the user in Encore's Page Setup dialog.
+The four margin-related values are stored as int32 LE (pairs of adjacent uint16,
+high word always zero) at byte offsets 24-39 within the block content:
 
-**LINE block 10-byte skip area.**
-`EncLine::read` skips 10 bytes before reading `start` and `measureCount`.
-Bytes 4-5 of that skip (interpreted as a little-endian uint16) appear to be
-the system's y-position on the page; bytes 2-3 appear to be the first-system
-left indent. Three test files were compared:
-
-| File | Encore margin | LINE[0] skip[4:5] |
+| Offset | Field | Meaning |
 |---|---|---|
-| Jota de Abades | 0.626 in | 40 |
-| Bolero Alcudia | 0.375 in | 40 |
-| 40 estudios faciles | 0 in | 40 |
+| +24 | top | top margin in typographic points (1/72 in) |
+| +28 | left | left margin in pts |
+| +32 | bottomEdge | page_height_pts - bottom_margin_pts |
+| +36 | rightEdge | page_width_pts - right_margin_pts |
 
-All three produce the same value (40) at that position regardless of margin.
-The y-position hypothesis does not encode margin.
+Derived values applied to MuseScore style:
 
-**Header skip area (0x36 to 0xC2, 140 bytes).**
-No byte pattern matching 0.626 in, 0.375 in, or their equivalents in twips,
-mm*10, or 16-bit fixed-point was found in this region across the three test
-files.
+```
+topMargin    = top / 72.0                        (inches)
+leftMargin   = left / 72.0
+printWidth   = (rightEdge - left) / 72.0
+printHeight  = (bottomEdge - top) / 72.0
+bottomMargin = pageHeight - topMargin - printHeight
+```
 
-### Current status
+`printWidth` is set via `Sid::pagePrintableWidth`; `bottomMargin` is computed
+from the current score page height (defaults to A4 = 297 mm / INCH).
 
-Margins are left at MuseScore defaults (15 mm ≈ 0.59 in per side) after
-import. A file where Encore set 0 margins (like `40 estudios faciles.enc`)
-keeps MuseScore's 15 mm defaults, which is close enough for practical use.
-A file with 0.626 in margins (like Jota de Abades) imports with 0.59 in
-margins; the visual difference is small.
+### Encoding quirks
 
-Decoding margins precisely would require either a full PAGE block
-specification or an experiment with a fixture file where only one margin
-dimension is changed and the binary diff is inspected.
+Encore rounds when storing: `round(inches * 72)`. The display in Page Setup
+shows `floor(pts / 72 * 1000) / 1000` so values may differ slightly from what
+the user typed (e.g. 0.100 in stores as 7 pts and displays as 0.097 in).
+
+### Files with no WINI block
+
+Files that were never saved through Page Setup have no WINI block.
+`EncPageSetup::hasData` will be false and `applyPageMargins` is a no-op;
+MuseScore defaults (15 mm per side) remain.
 
 ## Current corpus status
 
