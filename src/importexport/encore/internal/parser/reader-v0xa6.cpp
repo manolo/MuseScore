@@ -27,37 +27,44 @@
 #include "elements.h"
 
 namespace mu::iex::encore {
-
-// v0xA6 NOTE (size=10): MIDI pitch at +11 (absolute, not offset) and tuplet
-// at +7. EncNote::read() uses v0xC4 offsets, so we fix both values here.
+// v0xA6 NOTE layouts: size=10 (pitch at +11, tuplet at +7), size=22 (pitch in tuplet slot),
+// size<27 (artic bytes lie beyond boundary, zero them). See ENCORE_FORMAT.md §Note element.
 bool EncFormatReader_V0xA6::postProcessElement(EncMeasureElem* elem,
                                                QDataStream& ds,
                                                qint64 rawElemStart) const
 {
     EncNote* en = dynamic_cast<EncNote*>(elem);
-    if (!en || en->size != 10) {
-        return false;   // not a v0xA6 note — nothing to fix
+    if (!en) {
+        return false;
     }
-    const qint64 savedPos = ds.device()->pos();
 
-    ds.device()->seek(rawElemStart + 11);
-    quint8 pitchByte;
-    ds >> pitchByte;
-    en->semiTonePitch = pitchByte;
+    if (en->size == 10) {
+        const qint64 savedPos = ds.device()->pos();
+        ds.device()->seek(rawElemStart + 11);
+        quint8 pitchByte;
+        ds >> pitchByte;
+        en->semiTonePitch = pitchByte;
+        ds.device()->seek(rawElemStart + 7);
+        quint8 tupByte;
+        ds >> tupByte;
+        en->tuplet = tupByte;
+        ds.device()->seek(savedPos);
+    }
 
-    ds.device()->seek(rawElemStart + 7);
-    quint8 tupByte;
-    ds >> tupByte;
-    en->tuplet = tupByte;
+    if (en->size == 22) {
+        en->semiTonePitch = en->tuplet;
+        en->tuplet = 0;
+    }
 
-    ds.device()->seek(savedPos);
+    if (en->size < 27) {
+        en->articulationUp   = 0;
+        en->articulationDown = 0;
+    }
+
     return false;   // element is kept
 }
 
-// v0xA6 sometimes writes two identical REST elements back-to-back
-// (same tick/staff/voice/faceValue). Encore shows only one.
-// Keeping both pushes cumTick past measure end and breaks voice routing.
-// Only consecutive duplicates removed; different-voice rests are kept.
+// v0xA6 back-to-back identical RESTs: Encore shows only one; duplicates break voice routing.
 bool EncFormatReader_V0xA6::deduplicateRest(
     std::vector<std::unique_ptr<EncMeasureElem> >& elements,
     EncMeasureElem* candidate) const
@@ -70,21 +77,20 @@ bool EncFormatReader_V0xA6::deduplicateRest(
     if (!prevR || !curR) {
         return false;
     }
-    if (prevR->tick      == curR->tick
+    if (prevR->tick == curR->tick
         && prevR->staffIdx == curR->staffIdx
-        && prevR->voice    == curR->voice
+        && prevR->voice == curR->voice
         && prevR->faceValue == curR->faceValue) {
         return true;   // drop the duplicate
     }
     return false;
 }
 
-// v0xA6 measures end before the 4-byte sentinel — stop when < 4 bytes remain.
+// v0xA6: no 4-byte sentinel; stop the element loop when < 4 bytes remain before measEnd.
 bool EncFormatReader_V0xA6::isMeasureNearEnd(QDataStream& ds, qint64 measEnd) const
 {
     return ds.device()->pos() >= measEnd - 4;
 }
-
 
 void EncFormatReader_V0xA6::readKeyFromTKBlock(EncInstrument& instr,
                                                QDataStream& ds,
@@ -101,5 +107,4 @@ void EncFormatReader_V0xA6::readKeyFromTKBlock(EncInstrument& instr,
     }
     ds.device()->seek(contentStart);
 }
-
 } // namespace mu::iex::encore

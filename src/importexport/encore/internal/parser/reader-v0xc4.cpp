@@ -25,9 +25,9 @@
 #include <QDataStream>
 
 #include "elements.h"
+#include "encoding.h"
 
 namespace mu::iex::encore {
-
 // Full class definition lives here, not in the header.
 struct EncFormatReader_V0xC4 final : EncFormatReader
 {
@@ -37,109 +37,175 @@ struct EncFormatReader_V0xC4 final : EncFormatReader
     quint32 elemBlockOffset() const override { return 0x36; }
     bool probeInstrumentEncoding() const override { return true; }
 
-    bool readInstrumentMeta(std::vector<EncInstrument>& instruments,
-                            QDataStream& ds,
-                            const EncFile& file) const override;
+    // v0xC2 (m_hasMetaTables=false) uses implied tuplets and G1 low tie sender.
+    bool supportsImpliedTuplets() const override { return !m_hasMetaTables; }
+    bool usesG1LowTieSender() const override { return !m_hasMetaTables; }
+
+    bool readInstrumentMeta(std::vector<EncInstrument>& instruments, QDataStream& ds, const EncFile& file) const override;
 private:
     bool m_hasMetaTables;
 };
 
 namespace {
-
 void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& ds)
 {
     static constexpr qint64 NAME_BASE = 202;
     static constexpr qint64 NAME_STEP = 2158;
     for (size_t n = 0; n < instruments.size(); ++n) {
-        if (!instruments[n].name.isEmpty()) { continue; }
+        if (!instruments[n].name.isEmpty()) {
+            continue;
+        }
         const qint64 off = NAME_BASE + static_cast<qint64>(n) * NAME_STEP;
-        if (off + 2 >= static_cast<qint64>(ds.device()->size())) { break; }
-        if (!ds.device()->seek(off)) { break; }
+        if (off + 2 >= static_cast<qint64>(ds.device()->size())) {
+            break;
+        }
+        if (!ds.device()->seek(off)) {
+            break;
+        }
         quint8 b0 = 0, b1 = 0;
         ds >> b0 >> b1;
-        if (b0 < 0x20 || b0 >= 0x7F) { continue; }
-        const bool isUtf16  = (b1 == 0x00);
-        const bool isLatin1 = (b1 != 0x00 && b1 >= 0x20 && b1 < 0xFF);
-        if (!isUtf16 && !isLatin1) { continue; }
-        if (!ds.device()->seek(off)) { break; }
-        QString recoveredName;
-        if (isUtf16) {
-            while (!ds.atEnd()) {
-                quint8 lo = 0, hi = 0; ds >> lo >> hi;
-                const QChar ch = QChar(char16_t((hi << 8) + lo));
-                if (ch == u'\0') { break; }
-                recoveredName.append(ch);
-            }
-        } else {
-            while (!ds.atEnd()) {
-                quint8 b = 0; ds >> b;
-                if (b == 0 || b < 0x20) { break; }
-                recoveredName.append(QChar(char16_t(b)));
-            }
+        if (b0 < 0x20 || b0 >= 0x7F) {
+            continue;
         }
-        instruments[n].name = recoveredName;
+        const bool isLatin1 = (b1 != 0x00 && b1 >= 0x20 && b1 < 0xFF);
+        if (!probeUtf16LE(b0, b1) && !isLatin1) {
+            continue;
+        }
+        if (!ds.device()->seek(off)) {
+            break;
+        }
+        int remaining = static_cast<int>(ds.device()->size() - off);
+        instruments[n].name = readEncodedStringRemaining(ds, remaining);
     }
 }
 
 void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds)
 {
-    // Compact files (no TK blocks): offset == 0 for all instruments.
-    // Their MIDI program sits at a fixed location in the pre-LINE area
-    // (0xC2 + 196 per instrument, 276-byte blocks). TK-based files use
-    // the TK-derived formula (PRG_BASE = 2278, PRG_STEP = 2158).
-    const bool compact = (!instruments.empty() && instruments[0].offset == 0);
+    // MIDI offsets: compact (offset=0): base=390 step=276; small TK (1-250): content+60; TK: base=2278 step=2158.
+    // Guard: compact files with a short header may have a LINE block before offset 390; skip MIDI in that case.
+    if (instruments.empty()) {
+        return;
+    }
+    const bool compact = (instruments[0].offset == 0);
+    const bool smallTK = (!compact && instruments[0].offset <= 250);
+
+    if (smallTK) {
+        static constexpr qint64 MIDI_IN_CONTENT = 60;
+        for (auto& instr : instruments) {
+            if (instr.contentFilePos < 0) {
+                continue;
+            }
+            const qint64 off = instr.contentFilePos + MIDI_IN_CONTENT;
+            if (off >= static_cast<qint64>(ds.device()->size())) {
+                continue;
+            }
+            if (!ds.device()->seek(off)) {
+                continue;
+            }
+            quint8 prg;
+            ds >> prg;
+            if (prg >= 1 && prg <= 128) {
+                instr.midiProgram = static_cast<int>(prg);
+            }
+        }
+        return;
+    }
+
+    qint64 firstBlockOff = ds.device()->size();
+    if (compact && ds.device()->seek(0)) {
+        static constexpr int PROBE = 4096;
+        const QByteArray buf = ds.device()->read(PROBE);
+        for (int i = 0; i <= buf.size() - 4; ++i) {
+            const char* p = buf.constData() + i;
+            if ((p[0] == 'L' && p[1] == 'I' && p[2] == 'N' && p[3] == 'E')
+                || (p[0] == 'M' && p[1] == 'E' && p[2] == 'A' && p[3] == 'S')) {
+                firstBlockOff = static_cast<qint64>(i);
+                break;
+            }
+        }
+    }
+
     const qint64 base = compact ? 390 : 2278;
     const qint64 step = compact ? 276 : 2158;
     for (size_t n = 0; n < instruments.size(); ++n) {
         const qint64 off = base + static_cast<qint64>(n) * step;
-        if (off >= static_cast<qint64>(ds.device()->size())) { break; }
-        if (!ds.device()->seek(off)) { break; }
-        quint8 prg; ds >> prg;
-        if (prg >= 1 && prg <= 128) { instruments[n].midiProgram = static_cast<int>(prg); }
+        if (off >= firstBlockOff) {
+            break;
+        }
+        if (off >= static_cast<qint64>(ds.device()->size())) {
+            break;
+        }
+        if (!ds.device()->seek(off)) {
+            break;
+        }
+        quint8 prg;
+        ds >> prg;
+        if (prg >= 1 && prg <= 128) {
+            instruments[n].midiProgram = static_cast<int>(prg);
+        }
     }
 }
 
 void readKeyTranspositions(std::vector<EncInstrument>& instruments, QDataStream& ds)
 {
-    if (instruments.empty()) { return; }
+    if (instruments.empty()) {
+        return;
+    }
     const bool compact = (instruments[0].offset == 0);
     const bool tkBased = (instruments[0].offset > 250);
 
     if (compact) {
-        // Compact format (no TK blocks): key transposition stored 23 bytes before the
-        // MIDI base, same relative offset as in TK-based format. Only defined for
-        // single-instrument compact files; multi-instrument files use a different layout.
-        if (instruments.size() != 1) { return; }
+        // Compact single-instrument only; Key at MIDI_BASE - 23. See ENCORE_FORMAT.md §Instrument block.
+        if (instruments.size() != 1) {
+            return;
+        }
         static constexpr qint64 MIDI_BASE = 390, KEY_OFF = -23;
         const qint64 off = MIDI_BASE + KEY_OFF;
-        if (off >= static_cast<qint64>(ds.device()->size())) { return; }
-        if (!ds.device()->seek(off)) { return; }
-        quint8 raw; ds >> raw;
+        if (off >= static_cast<qint64>(ds.device()->size())) {
+            return;
+        }
+        if (!ds.device()->seek(off)) {
+            return;
+        }
+        quint8 raw;
+        ds >> raw;
         const qint8 sv = static_cast<qint8>(raw);
-        if (sv >= -33 && sv <= 24) { instruments[0].keyTransposeSemitones = sv; }
+        if (sv >= -33 && sv <= 24) {
+            instruments[0].keyTransposeSemitones = sv;
+        }
         return;
     }
 
-    if (!tkBased) { return; }   // offset 1..250: unusual, skip
+    if (!tkBased) {
+        return;
+    }                           // offset 1..250: unusual, skip
 
     static constexpr qint64 PRG_BASE = 2278, PRG_STEP = 2158, KEY_OFF = -23;
     for (size_t n = 0; n < instruments.size(); ++n) {
         const qint64 off = PRG_BASE + KEY_OFF + static_cast<qint64>(n) * PRG_STEP;
-        if (off < 0 || off >= static_cast<qint64>(ds.device()->size())) { continue; }
-        if (!ds.device()->seek(off)) { continue; }
-        quint8 raw; ds >> raw;
+        if (off < 0 || off >= static_cast<qint64>(ds.device()->size())) {
+            continue;
+        }
+        if (!ds.device()->seek(off)) {
+            continue;
+        }
+        quint8 raw;
+        ds >> raw;
         const qint8 sv = static_cast<qint8>(raw);
-        if (sv >= -33 && sv <= 24) { instruments[n].keyTransposeSemitones = sv; }
+        if (sv >= -33 && sv <= 24) {
+            instruments[n].keyTransposeSemitones = sv;
+        }
     }
 }
-
 } // namespace
 
 bool EncFormatReader_V0xC4::readInstrumentMeta(std::vector<EncInstrument>& instruments,
                                                QDataStream& ds,
                                                const EncFile& /*file*/) const
 {
-    if (!m_hasMetaTables) { return true; }
+    if (!m_hasMetaTables) {
+        return true;
+    }
     recoverMissingNames(instruments, ds);
     readMidiPrograms(instruments, ds);
     readKeyTranspositions(instruments, ds);
@@ -155,5 +221,4 @@ std::unique_ptr<EncFormatReader> makeFormatReader_V0xC2()
 {
     return std::make_unique<EncFormatReader_V0xC4>(false);
 }
-
 } // namespace mu::iex::encore

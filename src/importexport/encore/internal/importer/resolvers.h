@@ -25,9 +25,11 @@
 #include "ctx.h"
 
 namespace mu::iex::encore {
-
 void resolveAll(BuildCtx& ctx);
-
+void resolveSlurs(BuildCtx& ctx);
+void resolveHairpins(BuildCtx& ctx);
+void resolveOrnaments(BuildCtx& ctx);
+void resolveFingeringAndBowing(BuildCtx& ctx);
 } // namespace mu::iex::encore
 
 #endif // MU_IMPORTEXPORT_ENC_IMPORT_RESOLVERS_H

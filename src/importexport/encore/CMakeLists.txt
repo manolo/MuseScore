@@ -28,6 +28,8 @@ target_sources(iex_encore PRIVATE
     internal/parser/elem-metadata.cpp
     internal/parser/elem-text.cpp
     internal/parser/elem-file.cpp
+    internal/parser/encoding.h
+    internal/parser/encoding.cpp
     internal/parser/reader.h
     internal/parser/reader.cpp
     internal/parser/reader-v0xa6.h
@@ -47,9 +49,17 @@ target_sources(iex_encore PRIVATE
     internal/importer/ctx.h
     internal/importer/builders.h
     internal/importer/builders.cpp
+    internal/importer/noteloop-internal.h
+    internal/importer/noteloop-note.cpp
+    internal/importer/noteloop-rest.cpp
+    internal/importer/noteloop-orn.cpp
     internal/importer/noteloop.cpp
     internal/importer/resolvers.h
     internal/importer/resolvers.cpp
+    internal/importer/resolvers-slur.cpp
+    internal/importer/resolvers-hairpin.cpp
+    internal/importer/resolvers-ornaments.cpp
+    internal/importer/resolvers-fingering.cpp
     internal/importer/import.h
 )
 

@@ -25,9 +25,7 @@
 #include "resolvers.h"
 
 // Encore (.enc) file importer for MuseScore.
-// The binary format was reverse-engineered by Leon Vinken (Enc2MusicXML project,
-// https://github.com/lvinken/Enc2MusicXML, GPL v3+) building on enc2ly by Felipe Castro.
-// This importer is based on that work.
+// Binary format reverse-engineered by Leon Vinken (Enc2MusicXML, GPL v3+) building on enc2ly by Felipe Castro.
 
 #include "import.h"
 
@@ -91,13 +89,13 @@ using namespace mu::engraving;
 namespace mu::iex::encore {
 // faceValue low nibble: 1=whole, 2=half ... 8=256th; 0 and 9..15 are invalid.
 // High nibble carries unrelated flags.
-static inline bool isValidFaceValue(quint8 faceValue)
+bool isValidFaceValue(quint8 faceValue)
 {
     const quint8 fv = faceValue & 0x0F;
     return fv > 0 && fv <= 8;
 }
 
-static inline void applyConcertPitch(Note* n, int semitone)
+void applyConcertPitch(Note* n, int semitone)
 {
     n->setPitch(semitone);
     n->setTpcFromPitch();
@@ -105,62 +103,44 @@ static inline void applyConcertPitch(Note* n, int semitone)
 
 // ---------------------------------------------------------------------------
 
-static void clearImportState()
-{
-    // ctx.h globals persist across calls in same process (tests, batch) — reset before each import.
-    pendingHairpins.clear();
-    pendingSlurs.clear();
-    pendingArpeggios.clear();
-    pendingOrnTremolos.clear();
-    pendingTrills.clear();
-    pendingStaccatos.clear();
-    pendingMarkers.clear();
-    activeVolta    = nullptr;
-    activeVoltaBits = 0;
-    tuplets.clear();
-    pendingTieNote.clear();
-    pendingLyrics.clear();
-    nextLyricHyphenBefore.clear();
-    cumTick.clear();
-    prevMidiTick.clear();
-    prevEncVoice.clear();
-    lastChordPos.clear();
-    pendingGraces.clear();
-    streamOffset.clear();
-    v0xA6LeadingGraceFv.clear();
-    v0xA6GraceStolenTicks.clear();
-}
-
 static void logEncFileInfo(const EncFile& enc)
 {
     const EncHeader& h = enc.header;
-    const char* fmtName = h.isVeryOldFormat() ? "v0xA6" : h.isOldFormat() ? "v0xC2" : "v0xC4";
+    const char* fmtName = (h.chuMagio == 0xA6) ? "v0xA6" : (h.chuMagio == 0xC2) ? "v0xC2" : "v0xC4";
 
     LOGD() << "---- Encore file info ----";
     LOGD() << "  Magic:          " << h.magic.toStdString();
     LOGD() << "  Format:         0x" << QString::number(h.chuMagio, 16).toUpper().toStdString()
            << " (" << fmtName << ")  version=" << h.chuVersio;
-    LOGD() << "  Lines:"     << h.lineCount
-           << "  Pages:"     << h.pageCount
+    LOGD() << "  Lines:" << h.lineCount
+           << "  Pages:" << h.pageCount
            << "  Instruments:" << h.instrumentCount
            << "  Staves/sys:" << h.staffPerSystem
-           << "  Measures:"  << h.measureCount;
+           << "  Measures:" << h.measureCount;
 
     LOGD() << "---- Titles ----";
     if (!enc.titleBlock.title.isEmpty()) {
         LOGD() << "  Title:    " << enc.titleBlock.title.toStdString();
     }
     for (const QString& s : enc.titleBlock.subtitle) {
-        if (!s.isEmpty()) { LOGD() << "  Subtitle: " << s.toStdString(); }
+        if (!s.isEmpty()) {
+            LOGD() << "  Subtitle: " << s.toStdString();
+        }
     }
     for (const QString& s : enc.titleBlock.author) {
-        if (!s.isEmpty()) { LOGD() << "  Author:   " << s.toStdString(); }
+        if (!s.isEmpty()) {
+            LOGD() << "  Author:   " << s.toStdString();
+        }
     }
     for (const QString& s : enc.titleBlock.instruction) {
-        if (!s.isEmpty()) { LOGD() << "  Instr:    " << s.toStdString(); }
+        if (!s.isEmpty()) {
+            LOGD() << "  Instr:    " << s.toStdString();
+        }
     }
     for (const QString& s : enc.titleBlock.copyright) {
-        if (!s.isEmpty()) { LOGD() << "  Copyrt:   " << s.toStdString(); }
+        if (!s.isEmpty()) {
+            LOGD() << "  Copyrt:   " << s.toStdString();
+        }
     }
 
     LOGD() << "---- Texts ----";
@@ -200,26 +180,32 @@ static void logEncFileInfo(const EncFile& enc)
                    << (m.bpm ? (QString("  bpm=") + QString::number(m.bpm)).toStdString() : "");
             lastNum = m.timeSigNum;
             lastDen = m.timeSigDen;
-            if (m.bpm) { lastBpm = m.bpm; }
+            if (m.bpm) {
+                lastBpm = m.bpm;
+            }
         }
+    }
+    LOGD() << "---- Page setup ----";
+    const EncPageSetup& ps = enc.pageSetup;
+    if (ps.hasData) {
+        LOGD() << "  WINI: top=" << ps.top << "  left=" << ps.left
+               << "  bottomEdge=" << ps.bottomEdge << "  rightEdge=" << ps.rightEdge
+               << "  (" << QString::number(ps.top / 72.0, 'f', 3).toStdString() << "\""
+               << " / " << QString::number(ps.left / 72.0, 'f', 3).toStdString() << "\" margins)";
+    } else {
+        LOGD() << "  WINI: absent — using MuseScore defaults";
     }
     LOGD() << "--------------------------";
 }
 
-// Reduce spatium until the first several music systems each fit at least as many
-// measures as the corresponding Encore LINE block specifies.  Runs before
-// resolveAll() (no system breaks yet); the reduced spatium is then locked in
-// so the layout engine honours the breaks placed by resolveAll().
-// Checking only line 0 is insufficient: later lines may contain denser notation
-// that needs more horizontal room than line 0.  We check the first 4 lines as a
-// practical bound (diminishing returns beyond that).
+// Shrink spatium until the first 4 music systems each hold at least as many measures as the Encore LINE block specifies.
+// Runs before resolveAll() so the reduced spatium is in effect when system breaks are placed.
 static void fitSpatiumToLineBreaks(MasterScore* score, const EncFile& enc)
 {
     if (enc.lines.empty()) {
         return;
     }
 
-    // Build target list from the first few non-zero enc.lines entries.
     const int kCheckLines = static_cast<int>(std::min<size_t>(enc.lines.size(), 4));
     std::vector<int> targets;
     for (int i = 0; i < kCheckLines; ++i) {
@@ -237,12 +223,13 @@ static void fitSpatiumToLineBreaks(MasterScore* score, const EncFile& enc)
         score->style().setSpatium(spatium);
         score->doLayout();
 
-        // Collect real measure counts per music system, in document order.
         std::vector<int> sysCounts;
         for (const System* sys : score->systems()) {
             int mc = 0;
             for (const MeasureBase* mb : sys->measures()) {
-                if (mb->isMeasure()) { ++mc; }
+                if (mb->isMeasure()) {
+                    ++mc;
+                }
             }
             if (mc > 0) {
                 sysCounts.push_back(mc);
@@ -269,18 +256,63 @@ static void fitSpatiumToLineBreaks(MasterScore* score, const EncFile& enc)
     score->style().setSpatium(spatium);
 }
 
+static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
+{
+    if (!ps.hasData) {
+        return;
+    }
+    // WINI fields are in points (1/72 inch); clamp margins to avoid zero-margin files producing invalid pagePrintableWidth.
+    static constexpr double kMinLR = 0.03;   // min left/right margin (inches)
+    static constexpr double kMinTB = 0.10;   // min top/bottom margin (inches)
+    static constexpr double kMaxM  = 0.60;   // max margin (inches)
+
+    double topIn  = ps.top / 72.0;
+    double leftIn = ps.left / 72.0;
+    double printW = (ps.rightEdge - ps.left) / 72.0;
+    double printH = (ps.bottomEdge - ps.top) / 72.0;
+    const double pageHIn = score->style().styleD(Sid::pageHeight);
+    const double pageWIn = score->style().styleD(Sid::pageWidth);
+
+    topIn  = std::clamp(topIn,  kMinTB, kMaxM);
+    leftIn = std::clamp(leftIn, kMinLR, kMaxM);
+
+    const double maxPrintW = pageWIn - leftIn - kMinLR;
+    if (printW > maxPrintW) {
+        printW = maxPrintW;
+    }
+
+    double bottomIn = std::max(0.0, pageHIn - topIn - printH);
+    bottomIn = std::clamp(bottomIn, kMinTB, kMaxM);
+
+    score->style().set(Sid::pageOddTopMargin,     topIn);
+    score->style().set(Sid::pageEvenTopMargin,    topIn);
+    score->style().set(Sid::pageOddLeftMargin,    leftIn);
+    score->style().set(Sid::pageEvenLeftMargin,   leftIn);
+    score->style().set(Sid::pagePrintableWidth,   printW);
+    score->style().set(Sid::pageOddBottomMargin,  bottomIn);
+    score->style().set(Sid::pageEvenBottomMargin, bottomIn);
+}
+
 static void buildScore(MasterScore* score, const EncFile& enc)
 {
-    clearImportState();
-
     score->style().set(Sid::chordsXmlFile, true);
     score->chordList()->read(u"chords.xml");
 
-    BuildCtx ctx{ score, enc };
+    // Encore positions tuplet brackets/numbers flush against note heads and stems
+    // with no extra vertical gap, and never pushes them outside the staff.
+    score->style().set(Sid::tupletOutOfStaff,      false);
+    score->style().set(Sid::tupletVHeadDistance,   0.0);
+    score->style().set(Sid::tupletVStemDistance,   0.0);
+
+    BuildCtx ctx{ score, enc, enc.fmt.get() };
+    ctx.impliedTuplets = ctx.fmt->supportsImpliedTuplets();
+    ctx.g1LowTieSender = ctx.fmt->usesG1LowTieSender();
     buildParts(ctx);
     buildMeasures(ctx);
     buildInitialSignatures(ctx);
     buildNoteLoop(ctx);
+
+    applyPageMargins(score, enc.pageSetup);
 
     fitSpatiumToLineBreaks(score, enc);
 

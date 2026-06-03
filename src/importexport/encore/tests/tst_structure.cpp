@@ -79,13 +79,8 @@ protected:
     void SetUp() override { setRootDir(ENC_DIR); }
 };
 
-// ===========================================================================
-// FEATURE: Basic score structure
-// ===========================================================================
-
 TEST_F(Tst_Structure, basic_measure_count)
 {
-    // bazo.enc has 5 measures (from ref.txt: 2 systems × ~2-3 measures each)
     MasterScore* score = readEncoreScore("bazo.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_GT(score->nmeasures(), 0);
@@ -103,17 +98,12 @@ TEST_F(Tst_Structure, basic_single_part)
 
 TEST_F(Tst_Structure, multipart_score)
 {
-    // bando.enc: band score with multiple instruments
     MasterScore* score = readEncoreScore("bando.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_GT(score->parts().size(), 1u) << "bando.enc should have multiple parts";
     EXPECT_GT(score->nstaves(), 1u);
     delete score;
 }
-
-// ===========================================================================
-// FEATURE: Time signatures
-// ===========================================================================
 
 TEST_F(Tst_Structure, time_sig_4_4)
 {
@@ -127,7 +117,6 @@ TEST_F(Tst_Structure, time_sig_4_4)
 
 TEST_F(Tst_Structure, time_sig_3_4)
 {
-    // notes_triplets.enc is 3/4
     MasterScore* score = readEncoreScore("notes_triplets.enc");
     ASSERT_NE(score, nullptr);
     Measure* m = measureAt(score, 0);
@@ -138,7 +127,6 @@ TEST_F(Tst_Structure, time_sig_3_4)
 
 TEST_F(Tst_Structure, time_sig_2_4)
 {
-    // Well, Licky Hear measure 1 is 2/4
     MasterScore* score = readEncoreScore("notes_swing.enc");
     ASSERT_NE(score, nullptr);
     Measure* m = measureAt(score, 0);
@@ -147,13 +135,8 @@ TEST_F(Tst_Structure, time_sig_2_4)
     delete score;
 }
 
-// ===========================================================================
-// FEATURE: Key signatures (encKeyToFifths table)
-// ===========================================================================
-
 TEST_F(Tst_Structure, key_sig_no_accidentals)
 {
-    // bazo.enc is in C major (key index 0 = 0 sharps/flats)
     MasterScore* score = readEncoreScore("bazo.enc");
     ASSERT_NE(score, nullptr);
     Staff* st = score->staff(0);
@@ -165,9 +148,7 @@ TEST_F(Tst_Structure, key_sig_no_accidentals)
 
 TEST_F(Tst_Structure, key_sig_no_invalid_large_values)
 {
-    // Before fix, key index 8 (G major = 1 sharp) was treated as key-256 = -248.
-    // After fix, encKeyToFifths(8) = 1.
-    // Verify no staff has a key > 7 or < -7.
+    // encKeyToFifths wrapping was broken before (key index 8 mapped to -248); verify -7..7 range.
     MasterScore* score = readEncoreScore("bando.enc");
     ASSERT_NE(score, nullptr);
     Fraction tick(0, 1);
@@ -181,9 +162,8 @@ TEST_F(Tst_Structure, key_sig_no_invalid_large_values)
 }
 
 
-// FIX: KEYCHANGE elements with tipo=0 (modulation to C major) are now emitted
-// (P4.10). The previous guard skipped them, dropping ~24 of 40 key signatures
-// on Beethoven's Plectro arrangement.
+// ===========================================================================
+// FIX: KEYCHANGE tipo=0 (C major modulation) must be emitted; previous guard silently dropped it.
 // ===========================================================================
 
 TEST_F(Tst_Structure, keychange_to_c_major_emitted)
@@ -205,22 +185,13 @@ TEST_F(Tst_Structure, keychange_to_c_major_emitted)
             }
         }
     }
-    // Expect: initial key sig (G major from measure 0) + tipo=0 modulation
-    // signature at measure 1. Without the fix, measure 1 would have no key sig.
+    // Initial key sig (m0 G major) + tipo=0 modulation sig (m1); both must be present.
     EXPECT_GE(keySigCount, 2);
     delete score;
 }
 
 // ===========================================================================
-// FEATURE: Every Encore navigation option survives the import.
-// Encore exposes ten jump / section options in its UI:
-//   Segno, Coda, To Coda, Fine, D.C., D.C. al Coda, D.C. al Fine,
-//   D.S., D.S. al Coda, D.S. al Fine.
-// Three (Segno, Coda, To Coda) travel via ORN tipos 0xA2 / 0xA6 / 0xA5;
-// the rest are encoded in the MEAS header coda byte (offset 0x1A low
-// byte). The fixture exercises every variant; the importer must create
-// the matching Marker (Segno/Coda/To Coda/Fine) or Jump (D.C./D.S. ...)
-// element on the right measure.
+// FEATURE: All ten Encore navigation options (Segno/Coda/ToCoda/Fine + 6 DC/DS variants) survive import.
 // ===========================================================================
 TEST_F(Tst_Structure, all_encore_navigation_options)
 {
@@ -252,10 +223,7 @@ TEST_F(Tst_Structure, all_encore_navigation_options)
     }
     // Segno comes from ORN 0xA2 AND coda byte 0x88; both add a Marker.
     EXPECT_GE(segnoMarkers, 1) << "ORN 0xA2 must produce a Segno Marker";
-    // Coda glyph comes from ORN 0xA6 AND coda byte 0x89 (CODA2). Coda byte
-    // 0x85 (CODA1) is the source measure for "To Coda" and produces a
-    // TOCODA marker instead, so codaMarkers counts the two coda-glyph
-    // sources only.
+    // Coda from ORN 0xA6 + byte 0x89; byte 0x85 produces TOCODA instead.
     EXPECT_GE(codaMarkers, 1) << "ORN 0xA6 must produce a Coda Marker";
     // "To Coda" comes from ORN 0xA5 AND coda byte 0x85 (CODA1).
     EXPECT_GE(toCodaMarkers, 1) << "ORN 0xA5 must produce a TOCODA Marker";
@@ -275,14 +243,7 @@ TEST_F(Tst_Structure, all_encore_navigation_options)
 }
 
 // ===========================================================================
-// FEATURE: Jump marks (To Coda + D.S. / D.C. al Coda / Fine).
-// Encore stores "To Coda" as ORN tipo=0xA5 (a measure-attached marker)
-// and the per-measure repeat-mark byte at the LOW byte of the coda u32
-// at MEAS header offset 0x1A. The previous accessor extracted byte+1 of
-// the u32 and consequently missed every DCALCODA / DSALCODA / FINE / DC
-// directive. After the fix, m2 (codaByte=0x81) becomes a Jump element
-// with D.S. al Coda text, m3 (codaByte=0x87) becomes a D.C. jump, and
-// the ORN 0xA5 in m1 becomes a TOCODA marker.
+// FIX: Jump marks from MEAS coda byte at offset 0x1A (low byte); To Coda from ORN tipo=0xA5.
 // ===========================================================================
 TEST_F(Tst_Structure, jump_marks_dc_ds_tocoda)
 {
@@ -366,17 +327,12 @@ TEST_F(Tst_Structure, section_markers_and_dotted_barline)
 }
 
 // ===========================================================================
-// BUG FIX: v0xC2 (old Encore format) — pitch stored at tuplet field offset
+// FIX: v0xC2 (old Encore format) — MIDI pitch stored at byte +13 (tuplet field), not semiTonePitch.
 // ===========================================================================
-// Synthetic files generated by tools/gen_enc_test_files.py (in the test data
-// directory).  Each file is hand-crafted to exercise exactly one parsing path.
 
 TEST_F(Tst_Structure, old_format_v0c2_correct_pitches)
 {
-    // structure_v0c2_pitches.enc: chuMagio=0xC2, 4/4, 4 quarter notes C-E-G-C.
-    // In v0xC2 notes have size=22 and MIDI pitch stored at the tuplet-field byte
-    // (+13 from elemStart).  needsPitchFix swaps it to semiTonePitch and clears tuplet.
-    // Without the fix all notes would have pitch=0.
+    // v0xC2: MIDI pitch at byte +13 (tuplet-field); needsPitchFix swaps it to semiTonePitch.
     MasterScore* score = readEncoreScore("structure_v0c2_pitches.enc");
     ASSERT_NE(score, nullptr);
 
@@ -408,8 +364,7 @@ TEST_F(Tst_Structure, old_format_v0c2_correct_pitches)
 
 TEST_F(Tst_Structure, old_format_v0c2_triplets_detected)
 {
-    // structure_v0c2_triplets.enc: 2/4, 6 eighth notes at 80-tick spacing.
-    // 80 Encore ticks = 2/3 of an eighth → detectImpliedTuplet returns 3:2.
+    // v0xC2: 6 eighth notes at 80-tick spacing (2/3 of an eighth) → detectImpliedTuplet returns 3:2.
     MasterScore* score = readEncoreScore("structure_v0c2_triplets.enc");
     ASSERT_NE(score, nullptr);
 
@@ -439,9 +394,7 @@ TEST_F(Tst_Structure, old_format_v0c2_triplets_detected)
 
 TEST_F(Tst_Structure, very_old_format_v0xa6_sanity_check)
 {
-    // structure_v0xa6_basic.enc: chuMagio=0xA6, 2 measures of 2/4, 4 eighth notes each.
-    // elemOffset must be 0x1A (not 0x3E).  Wrong offset causes tick=1280 > durTicks=480
-    // for all elements, silently dropping all notes and leaving empty measures.
+    // v0xA6: elemOffset must be 0x1A (not 0x3E); wrong offset drops all notes silently.
     MasterScore* score = readEncoreScore("structure_v0xa6_basic.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_EQ(score->nmeasures(), 2);
@@ -452,13 +405,7 @@ TEST_F(Tst_Structure, very_old_format_v0xa6_sanity_check)
 
 TEST_F(Tst_Structure, very_old_format_v0xa6_pitch_encoding)
 {
-    // v0xA6 pitch is the absolute MIDI value (0..127) at elemStart+11
-    // -- the first byte of the 20-byte slot's padding region. The
-    // synthetic helper writes MIDI 60+pitch_offset there; for offsets
-    // 0,+2,+4,+7 the imported pitches must be 60,62,64,67 (C D E G).
-    // The earlier reader looked at byte +9 with a signed-offset +60
-    // formula; on real Encore 2.x files +9 holds a staff-position
-    // field, so that produced wrong sounding pitches.
+    // v0xA6: MIDI pitch is absolute value at elemStart+11 (not byte +9 with signed offset).
     MasterScore* score = readEncoreScore("structure_v0xa6_basic.enc");
     ASSERT_NE(score, nullptr);
 
@@ -521,12 +468,7 @@ TEST_F(Tst_Structure, intermediate_time_sig_7_8)
 }
 
 // ===========================================================================
-// FEATURE: System breaks from Encore LINE blocks.
-// The skeleton used by all generated fixtures (bazo.enc) declares two LINE
-// blocks: system 0 covers measures 0..2 (measureCount=3), system 1 covers
-// measures 3..5.  The importer must place a LINE break on the last measure
-// of system 0 (index 2) and no break on the last measure of system 1
-// (index 5, last system never gets a break).
+// FEATURE: LINE block system breaks: break after last measure of each non-final system.
 // ===========================================================================
 TEST_F(Tst_Structure, system_breaks_from_line_data)
 {
@@ -557,12 +499,7 @@ TEST_F(Tst_Structure, system_breaks_from_line_data)
 }
 
 // ===========================================================================
-// FEATURE: fitSpatiumToLineBreaks — system layout density matching.
-// The importer reduces spatium until the first N music systems each contain
-// at least as many measures as the corresponding Encore LINE block specifies.
-// Fixture: text_tempo_orn_compound_68.enc — 8 LINE blocks, 3 measures each.
-// After import the first system must have exactly 3 measures (the value from
-// enc.lines[0].measureCount), not 4 or 2.
+// FEATURE: fitSpatiumToLineBreaks reduces spatium so each music system holds at least enc.lines[i].measureCount measures.
 // ===========================================================================
 TEST_F(Tst_Structure, fit_spatium_first_system_measure_count)
 {
@@ -571,7 +508,6 @@ TEST_F(Tst_Structure, fit_spatium_first_system_measure_count)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    // Collect music systems (skip systems with 0 measures, e.g. a title frame system).
     int firstSystemMeasureCount = 0;
     for (const System* sys : score->systems()) {
         int mc = 0;
@@ -583,7 +519,6 @@ TEST_F(Tst_Structure, fit_spatium_first_system_measure_count)
             break;
         }
     }
-    // enc.lines[0].measureCount == 3 for this fixture.
     EXPECT_GE(firstSystemMeasureCount, 3)
         << "first system must fit at least enc.lines[0].measureCount (3) measures";
 
@@ -592,9 +527,7 @@ TEST_F(Tst_Structure, fit_spatium_first_system_measure_count)
 
 TEST_F(Tst_Structure, fit_spatium_multiple_systems_measure_count)
 {
-    // Verify that the spatium reduction checks multiple systems, not just the
-    // first.  All 8 lines in text_tempo_orn_compound_68.enc have measureCount=3,
-    // so each of the first 4 music systems must also have >= 3 measures.
+    // All 8 lines have measureCount=3; verify the first 4 systems each have >= 3 measures.
     MasterScore* score = readEncoreScore("text_tempo_orn_compound_68.enc");
     ASSERT_NE(score, nullptr);
 
@@ -616,6 +549,100 @@ TEST_F(Tst_Structure, fit_spatium_multiple_systems_measure_count)
         EXPECT_GE(sysCounts[j], 3)
             << "system " << j << " must fit at least 3 measures (enc.lines[" << j << "].measureCount)";
     }
+
+    delete score;
+}
+
+// ===========================================================================
+// WINI block / page margin tests
+// ===========================================================================
+
+// File with no WINI block must leave MuseScore default margins intact.
+// text_tempo_orn_compound_68.enc has no WINI block.
+TEST_F(Tst_Structure, page_margins_no_wini_uses_defaults)
+{
+    MasterScore* score = readEncoreScore("text_tempo_orn_compound_68.enc");
+    ASSERT_NE(score, nullptr);
+
+    const double defaultLeftIn = 15.0 / INCH;
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddLeftMargin),  defaultLeftIn, 0.001)
+        << "no-WINI file must keep default left margin";
+    EXPECT_NEAR(score->style().styleD(Sid::pageEvenLeftMargin), defaultLeftIn, 0.001);
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddTopMargin),   defaultLeftIn, 0.001)
+        << "no-WINI file must keep default top margin";
+
+    delete score;
+}
+
+// File with standard A4 WINI (top=18, left=18, bEdge=824, rEdge=577).
+// bazo.enc in the test fixtures has exactly this block.
+TEST_F(Tst_Structure, page_margins_wini_standard_a4)
+{
+    MasterScore* score = readEncoreScore("bazo.enc");
+    ASSERT_NE(score, nullptr);
+
+    const double expectedIn = 18.0 / 72.0;   // 0.25"
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddTopMargin),  expectedIn, 0.001);
+    EXPECT_NEAR(score->style().styleD(Sid::pageEvenTopMargin), expectedIn, 0.001);
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddLeftMargin),  expectedIn, 0.001);
+    EXPECT_NEAR(score->style().styleD(Sid::pageEvenLeftMargin), expectedIn, 0.001);
+
+    // printableWidth = (rEdge - left) / 72 = (577 - 18) / 72 = 559 / 72
+    const double expectedPrintW = 559.0 / 72.0;
+    EXPECT_NEAR(score->style().styleD(Sid::pagePrintableWidth), expectedPrintW, 0.001);
+
+    delete score;
+}
+
+// File with custom left margin (left=7 pts, ~0.097 in).
+// bazo_left_100.enc: top=18 left=7 bEdge=824 rEdge=577.
+TEST_F(Tst_Structure, page_margins_wini_custom_left)
+{
+    MasterScore* score = readEncoreScore("bazo_left_100.enc");
+    ASSERT_NE(score, nullptr);
+
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddTopMargin),   18.0 / 72.0, 0.001);
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddLeftMargin),   7.0 / 72.0, 0.001);
+    EXPECT_NEAR(score->style().styleD(Sid::pageEvenLeftMargin),  7.0 / 72.0, 0.001);
+    // printableWidth = (577 - 7) / 72 = 570 / 72
+    EXPECT_NEAR(score->style().styleD(Sid::pagePrintableWidth), 570.0 / 72.0, 0.001);
+
+    delete score;
+}
+
+// File with WINI top=0 left=0 (zero margins, full-page printable area).
+// ornaments_fingering_grandstaff.enc: top=0 left=0 bEdge=842 rEdge=595.
+// Zero margins are clamped to the minimum safe values so staves stay within the page.
+TEST_F(Tst_Structure, page_margins_wini_zero_margins_clamped)
+{
+    MasterScore* score = readEncoreScore("ornaments_fingering_grandstaff.enc");
+    ASSERT_NE(score, nullptr);
+
+    // Margins clamped to minimums: LR=0.03", TB=0.10".
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddTopMargin),    0.10, 0.001);
+    EXPECT_NEAR(score->style().styleD(Sid::pageEvenTopMargin),   0.10, 0.001);
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddLeftMargin),   0.03, 0.001);
+    EXPECT_NEAR(score->style().styleD(Sid::pageEvenLeftMargin),  0.03, 0.001);
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddBottomMargin), 0.10, 0.001);
+    // printableWidth capped to pageWidth - leftMargin - minRightMargin.
+    const double pageWIn = score->style().styleD(Sid::pageWidth);
+    EXPECT_NEAR(score->style().styleD(Sid::pagePrintableWidth), pageWIn - 0.03 - 0.03, 0.01);
+
+    delete score;
+}
+
+// Verify bottom margin is correctly derived from bottomEdge.
+// bazo.enc: top=18 left=18 bEdge=824 rEdge=577 on A4 (842 pts high).
+// bottomMargin = (842 - 824) / 72 = 18 / 72 = 0.25"
+TEST_F(Tst_Structure, page_margins_wini_bottom_margin_derived)
+{
+    MasterScore* score = readEncoreScore("bazo.enc");
+    ASSERT_NE(score, nullptr);
+
+    const double expectedIn = 18.0 / 72.0;
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddBottomMargin),  expectedIn, 0.005)
+        << "bottom margin must be derived from bottomEdge and page height";
+    EXPECT_NEAR(score->style().styleD(Sid::pageEvenBottomMargin), expectedIn, 0.005);
 
     delete score;
 }
