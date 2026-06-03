@@ -120,10 +120,8 @@ bool EncMeasure::read(QDataStream& ds, const quint32 vs, const EncFormatReader& 
         elem->read(ds);
         EncMeasureElem* elemRaw = elem.get();
 
-        // Format-specific element fixups (e.g. v0xA6 pitch/tuplet byte offsets)
         fmt.postProcessElement(elemRaw, ds, elemStart);
 
-        // Format-specific REST deduplication (e.g. v0xA6 back-to-back duplicates)
         if (static_cast<EncElemType>(tp) == EncElemType::REST
             && fmt.deduplicateRest(elements, elemRaw)) {
             if (elemRaw->size > 0) {
@@ -159,7 +157,7 @@ bool EncMeasure::read(QDataStream& ds, const quint32 vs, const EncFormatReader& 
     return true;
 }
 
-void EncMeasure::calculateRealDurations()
+void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing)
 {
     std::map<std::pair<int, int>, std::vector<EncMeasureElem*> > groups;
     for (auto& elem : elements) {
@@ -188,12 +186,9 @@ void EncMeasure::calculateRealDurations()
             }
             qint16 nextTick = (j < elems.size()) ? elems[j]->tick : durTicks;
             qint16 dur = nextTick - elems[i]->tick;
-            // v0xA6 grace-note time-borrowing: grace notes stored at real tick
-            // positions, which shortens the following note's gap. Sum grace
-            // faceValues before this note; if they match the deficit, restore
-            // rdur to faceValue.
+            // v0xA6 grace time-borrowing: grace notes shorten next note's gap; see ENCORE_FORMAT.md §v0xA6 grace note time-borrowing.
             const EncNote* enCur = dynamic_cast<const EncNote*>(elems[i]);
-            if (enCur && enCur->size == 10 && dur > 0) {
+            if (hasGraceTimeBorrowing && enCur && dur > 0) {
                 const qint16 faceTicks = faceValue2ticks(enCur->faceValue);
                 if (faceTicks > dur && faceTicks <= durTicks) {
                     qint16 totalGraceFace = 0;
@@ -204,12 +199,10 @@ void EncMeasure::calculateRealDurations()
                         }
                     }
                     if (totalGraceFace == faceTicks - dur) {
-                        // grace shortened last note's gap.
                         dur = faceTicks;
                     } else if (dur > faceTicks
                                && totalGraceFace > 0
                                && (dur - faceTicks) <= totalGraceFace) {
-                        // grace(s) left extra ticks in real duration that Encore ignores.
                         dur = faceTicks;
                     }
                 }
@@ -220,5 +213,4 @@ void EncMeasure::calculateRealDurations()
         }
     }
 }
-
 } // namespace mu::iex::encore

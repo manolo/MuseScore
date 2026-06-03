@@ -50,11 +50,6 @@ static const QString ENC_DIR(QString(iex_encore_tests_DATA_ROOT) + "/data/");
 
 using namespace mu::engraving;
 
-// ---------------------------------------------------------------------------
-// Test that the importer can open each sample file without crashing
-// and produce a non-empty score
-// ---------------------------------------------------------------------------
-
 class Tst_Importer : public ::testing::Test, public MTest
 {
 protected:
@@ -124,12 +119,6 @@ TEST_F(Tst_Importer, chord_parsing)
 
 TEST_F(Tst_Importer, encore_symbols)
 {
-    // 24-measure reference file the user authored to exercise every
-    // visible symbol Encore can place: dynamics, fermatas, tremolos,
-    // mordent / trill family, fingerings, technical markings, the four
-    // articulation combos, Segno / Coda / To Coda, D.C. / D.S. variants,
-    // dotted barlines, multiple bar styles and the full lyric machinery.
-    // Provided by the user as a derivative-free demo file.
     MasterScore* score = readEncoreScore("encore_symbols.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_GT(score->nmeasures(), 0);
@@ -138,8 +127,6 @@ TEST_F(Tst_Importer, encore_symbols)
     delete score;
 }
 
-// Covers: tiny realDuration (<15 ticks) skipped, dotted rest, 2/4 time sig
-// (previously tested by Well, Licky Hear.enc)
 // No sanityCheck: swing timing files produce slight measure shortfalls (by design).
 TEST_F(Tst_Importer, swing_timing)
 {
@@ -149,13 +136,8 @@ TEST_F(Tst_Importer, swing_timing)
     delete score;
 }
 
-// Regression for the beam-layout crash on grace + adjacent beamed eighths.
-// The old importer attached grace chords to a Segment, so beam layout pulled
-// them into a beam group and Chord::pagePos asserted toChord(explicitParent())
-// against a Segment instead of the main Chord. readEncoreScore runs doLayout,
-// so just loading this fixture proves the path is crash-free. We also assert
-// the grace lives under a main chord's graceNotes() and the segment-attached
-// chord is NORMAL, which is the structural invariant the fix establishes.
+// Regression: grace chords attached to a Segment caused beam layout to assert in Chord::pagePos.
+// readEncoreScore runs doLayout; crash-free load + structural invariant (grace in graceNotes(), segment chord NORMAL).
 TEST_F(Tst_Importer, grace_with_beamed_eighths_no_layout_crash)
 {
     MasterScore* score = readEncoreScore("importer_grace_beam.enc");
@@ -190,10 +172,8 @@ TEST_F(Tst_Importer, grace_with_beamed_eighths_no_layout_crash)
     delete score;
 }
 
-// Regression for the multi-stream voice switch loop. With a single switch the
-// importer would happily place a note in a target voice that was already full
-// (e.g. occupied by a half rest), overrunning the measure. The loop fix keeps
-// switching until it finds a voice with remaining space.
+// Regression: single-switch voice overflow placed a note into a full voice (e.g. half rest),
+// overrunning the measure. Fix: loop until finding a voice with remaining space.
 TEST_F(Tst_Importer, multi_stream_switch_skips_voice_filled_by_rest)
 {
     MasterScore* score = readEncoreScore("importer_full_voice_skipped.enc");
@@ -203,16 +183,8 @@ TEST_F(Tst_Importer, multi_stream_switch_skips_voice_filled_by_rest)
     delete score;
 }
 
-// Regression: v0xC2 MIDI-recorded measures hold notes at drift ticks (not
-// aligned with the face-grid) interleaved with face-grid notes. An earlier
-// version of the implicit-silence gap snap (added for the m1 voice-0
-// reorder case below) snapped cumTick to the absolute Encore tick whenever
-// the gap exceeded CHORD_MIDI_THRESHOLD, which mis-aligned drift positions
-// and produced a zero-length rhythmic gap that aborted
-// `populateRhythmicList` during layout:
-//   Assertion failed: (rtick2 > rtick1), function strongestSubbeatLevelInRange
-// The face-grid gate (snap only when e->tick % faceTicks == 0) makes the
-// snap a no-op for drift-shifted ticks, so the file imports cleanly.
+// Regression: gap snap fired on drift ticks, producing a zero-length rhythmic gap that aborted
+// populateRhythmicList (strongestSubbeatLevelInRange assert). Fix: snap only when e->tick % faceTicks == 0.
 TEST_F(Tst_Importer, v0c2_multi_stream_drift_imports_cleanly)
 {
     MasterScore* score = readEncoreScore("importer_v0c2_multi_stream_drift.enc");
@@ -222,19 +194,8 @@ TEST_F(Tst_Importer, v0c2_multi_stream_drift_imports_cleanly)
     delete score;
 }
 
-// Regression for the implicit-silence gap snap + inflated-rdur guard, with
-// the per-staff Key transposition applied on top. The single staff in this
-// fixture has Key = "Octave Lower" (keyTransposeSemitones = -12). m1 (3/4)
-// carries:
-//   - voice 0: two quarter NOTEs at Encore ticks 240 and 480 with NO
-//     preceding REST element (the leading silence is encoded only via the
-//     tick offset). Without the gap snap, both notes squash to beats 1-2
-//     with the rest pushed to the end.
-//   - voice 1: a single quarter chord (pitches 64+73) with implicit
-//     trailing silence; the inflated-rdur guard keeps it a quarter
-//     instead of promoting it to a dotted half ratio (720).
-// Combined with Key=-12, every imported pitch sits 12 semitones below the
-// binary value so MuseScore plays at the same pitch Encore does.
+// Regression: gap snap + inflated-rdur guard with Key=-12 (Octave Lower). Voice 0 has implicit leading silence
+// (tick offsets, no REST); voice 1 has trailing silence; Key shifts all pitches by -12.
 TEST_F(Tst_Importer, v0c4_octave_lower_implicit_silences)
 {
     MasterScore* score = readEncoreScore("structure_octave_lower_implicit_silences.enc");
@@ -288,23 +249,12 @@ TEST_F(Tst_Importer, v0c4_octave_lower_implicit_silences)
     EXPECT_EQ(v1Chord->durationType().dots(), 0);
     ASSERT_EQ(v1Chord->notes().size(), 2u);
     std::set<int> pitches{ v1Chord->notes()[0]->pitch(), v1Chord->notes()[1]->pitch() };
-    EXPECT_EQ(pitches, (std::set<int>{ 64 - 12, 73 - 12 }));
+    EXPECT_EQ(pitches, (std::set<int> { 64 - 12, 73 - 12 }));
     delete score;
 }
 
-// End-to-end regression for the full v0xA6 fix chain. A boda-like
-// synthetic combines every failure mode the real-world v0xA6 file
-// exercised:
-//   - 4 instruments at the v0xA6 TK strides (header end 0xA6, TK
-//     blocks at 0xA6 / 0xE6 / 0x126 / 0x166)
-//   - per-instrument Key bytes [0, 0, -12, -12] at content +42
-//   - NOTE MIDI pitch at byte +11 (absolute, not signed offset)
-//   - tuplet byte at element +7 (where v0xC4 has grace2)
-//   - duplicate REST on one staff (m107-like pattern)
-//   - sixteenth-triplet groups on another staff (m131-like)
-// Asserts the whole pipeline lands the right pitches per staff,
-// preserves both triplet groups, collapses the duplicate REST, and
-// produces no spurious fingering / tremolo / fermata glyphs.
+// End-to-end regression for the full v0xA6 fix chain: 4 instruments, Key bytes, pitch at byte +11,
+// tuplet at byte +7, duplicate REST collapse, triplet groups, no spurious glyphs.
 TEST_F(Tst_Importer, v0xa6_boda_like_full_pipeline)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_boda_like.enc");
@@ -354,23 +304,23 @@ TEST_F(Tst_Importer, v0xa6_boda_like_full_pipeline)
 
     // Staff 0 (B1, Key=0): eighth + 2 triplet groups, 7 notes total.
     EXPECT_EQ(staffTupletGroups(0), 2u) << "B1 must hold 2 triplet groups";
-    EXPECT_EQ(staffPitches(0), (std::vector<int>{ 88, 88, 89, 88, 86, 88, 86 }))
+    EXPECT_EQ(staffPitches(0), (std::vector<int> { 88, 88, 89, 88, 86, 88, 86 }))
         << "B1 pitches survive without Key shift";
 
     // Staff 1 (B2, Key=0): rest + 2 eighths, no shift.
     EXPECT_EQ(staffElementCount(1), 3) << "B2 must hold rest + 2 chords";
-    EXPECT_EQ(staffPitches(1), (std::vector<int>{ 76, 77 }))
+    EXPECT_EQ(staffPitches(1), (std::vector<int> { 76, 77 }))
         << "B2 pitches survive without Key shift";
 
     // Staff 2 (Laud, Key=-12): duplicate REST collapsed, m_pitch = binary -12.
     EXPECT_EQ(staffElementCount(2), 3)
         << "Laud must hold exactly rest + 2 chords after duplicate-REST dedupe";
-    EXPECT_EQ(staffPitches(2), (std::vector<int>{ 76 - 12, 77 - 12 }))
+    EXPECT_EQ(staffPitches(2), (std::vector<int> { 76 - 12, 77 - 12 }))
         << "Laud pitches must drop by Key = -12";
 
     // Staff 3 (Bajo, Key=-12): 3 eighth notes shifted by -12.
     EXPECT_EQ(staffElementCount(3), 3) << "Bajo holds 3 notes";
-    EXPECT_EQ(staffPitches(3), (std::vector<int>{ 57 - 12, 60 - 12, 64 - 12 }))
+    EXPECT_EQ(staffPitches(3), (std::vector<int> { 57 - 12, 60 - 12, 64 - 12 }))
         << "Bajo pitches must drop by Key = -12";
 
     // No staff should carry spillover into voice 1.
@@ -423,15 +373,8 @@ TEST_F(Tst_Importer, v0xa6_boda_like_full_pipeline)
     delete score;
 }
 
-// Regression: the explicit tuplet byte lives at element offset +7 in
-// v0xA6 NOTE slots (where v0xC4 has grace2). The v0xC4-shaped EncNote::
-// read picks up byte +13 which lands in the padding region for v0xA6
-// (= 0). Without an override the importer never sees the 0x32 (3:2)
-// triplet marker on real Encore 2.x triplets, so 6 sixteenth-triplets
-// collapse to 4 plain sixteenths and the excess notes spill into a
-// second MuseScore voice. The fixture is a 2/8 measure carrying six
-// 16th notes with tuplet = 0x32 at +7; the imported measure must hold
-// six notes split into two Tuplet(3:2) groups.
+// Regression: v0xA6 NOTE stores the tuplet byte at offset +7 (not +13 as in v0xC4).
+// Without the override the 0x32 (3:2) marker is invisible; 6 triplet sixteenths collapse to 4 plain notes.
 TEST_F(Tst_Importer, v0xa6_triplet_byte_at_offset_7)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_triplet_byte_at_offset_7.enc");
@@ -462,7 +405,7 @@ TEST_F(Tst_Importer, v0xa6_triplet_byte_at_offset_7)
     }
     EXPECT_EQ(noteCount, 6) << "6 triplet sixteenths must survive import";
     EXPECT_EQ(tupletCount, 2) << "two 3:2 triplet groups expected";
-    const std::vector<int> expected{64, 65, 64, 62, 64, 62};
+    const std::vector<int> expected{ 64, 65, 64, 62, 64, 62 };
     EXPECT_EQ(pitches, expected) << "pitches must match the binary in order";
 
     // Voice 1 must be empty (no spillover).
@@ -472,17 +415,8 @@ TEST_F(Tst_Importer, v0xa6_triplet_byte_at_offset_7)
     delete score;
 }
 
-// Regression: v0xA6 sometimes stores two byte-identical REST elements
-// back-to-back at the same tick / staff / voice / faceValue (observed
-// roughly once per 500 rests in real Encore 2.x files). Encore renders
-// the pair as a single rest, so the importer must drop the second one.
-// Without the dedupe the second REST advanced cumTick past the measure
-// end and the following note spilled into a second MuseScore voice,
-// producing "rest, rest, note(v1)+note(v2)" instead of the user's
-// "rest, note, note". The fixture is a 3/8 measure with two byte-
-// identical 8th rests at tick 0 followed by two 8th notes (MIDI 64);
-// after the import the first measure must hold exactly three voice-0
-// elements in the right order.
+// Regression: v0xA6 can store two byte-identical REST elements at the same tick; Encore renders only one.
+// Without dedupe the second REST advanced cumTick past the bar and spilled the next note into voice 1.
 TEST_F(Tst_Importer, v0xa6_duplicate_rest_collapse)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_duplicate_rest_collapse.enc");
@@ -525,15 +459,8 @@ TEST_F(Tst_Importer, v0xa6_duplicate_rest_collapse)
     delete score;
 }
 
-// Regression: v0xA6 file header ends at 0xA6 (174 bytes), not 0xC2 (194
-// bytes) as in v0xC2 / v0xC4. EncHeader::read used to skip
-// unconditionally to 0xC2, swallowing the TK00 block on every real
-// v0xA6 file (its proper position is exactly 0xA6). The fixture places
-// TK00 at 0xA6 with Key = -12 and the legacy 0xC2 slot kept untouched.
-// With the buggy header end the importer skips past TK00@0xA6, fails to
-// find any usable instrument metadata, and the imported pitch stays at
-// the binary value (60 = C4). With the fix, TK00@0xA6 is read first,
-// Key = -12 is applied, and the imported m_pitch drops to 48 (C3).
+// Regression: v0xA6 header ends at 0xA6 (174 bytes), not 0xC2 (194). Old code skipped to 0xC2,
+// swallowing TK00 at 0xA6 so Key=-12 was never applied; pitch stayed at binary 60 instead of 48.
 TEST_F(Tst_Importer, v0xa6_header_ends_at_0xa6)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_header_ends_at_0xa6.enc");
@@ -553,23 +480,12 @@ TEST_F(Tst_Importer, v0xa6_header_ends_at_0xa6)
     ASSERT_EQ(firstChord->notes().size(), 1u);
     EXPECT_EQ(firstChord->notes()[0]->pitch(), 48)
         << "TK00 at the v0xA6 file offset 0xA6 must be parsed so its "
-           "Key = -12 actually lowers C4 (60) to C3 (48)";
+        "Key = -12 actually lowers C4 (60) to C3 (48)";
     delete score;
 }
 
-// Regression: v0xA6 (Encore 2.x) files have a 174-byte (= 0xA6) file
-// header (vs 194 = 0xC2 for v0xC2/v0xC4) and 64-byte TK blocks (vs
-// 2158-byte TK blocks in later formats). Two independent bugs combined
-// to break the per-instrument Key transposition pipeline:
-//   1. EncHeader::read unconditionally skipped to 0xC2, swallowing the
-//      first TK block on v0xA6 files. Every per-instrument metadata
-//      field was off-by-one: instr[0] got TK01's data, etc.
-//   2. The v0xC4 Key reader uses the formula PRG_BASE + n * PRG_STEP
-//      which does not apply to the compact v0xA6 TK layout; instead
-//      v0xA6 stores the signed-int8 Key byte at TK content offset +42.
-// The fixture is a single-instrument v0xA6 file with Key = -12 patched
-// at the v0xA6 location. The single note (pitch_offset = 0 -> binary
-// C4 = 60) must import at m_pitch = 48 (C3) once the offset is applied.
+// Regression: two bugs in v0xA6 Key pipeline: (1) header skipped to 0xC2 shifting all TK metadata;
+// (2) Key byte at TK+42 (not PRG_BASE+n*PRG_STEP). Both fixed: Key=-12 lowers C4(60) to C3(48).
 TEST_F(Tst_Importer, v0xa6_key_transposition_octave_lower)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_key_transposition.enc");
@@ -592,19 +508,8 @@ TEST_F(Tst_Importer, v0xa6_key_transposition_octave_lower)
     delete score;
 }
 
-// Regression: v0xA6 NOTE elements are 10 bytes long but EncNote::read
-// consumes 27 bytes from elemStart to reach articulationUp /
-// articulationDown. The extra 17 bytes are read straight out of the next
-// slot's preamble (tick, typeVoice, size, faceValue, ...). Whatever lands
-// in those two byte slots is then fed to fingering, articulation,
-// tremolo, fermata and open-string lookups. Real-world v0xA6 scores
-// generated thousands of spurious fingerings ("4" glyphs above every
-// note) and tremolos. v0xA6 NOTEs carry NO articulation data; EncNote
-// must zero the fields when the slot size is too small to actually hold
-// them. The fixture is two consecutive quarter notes in a v0xA6 2/4
-// measure, the simplest layout where the next slot's faceValue (= 3)
-// lands on the previous note's articulationUp byte; the imported score
-// must hold zero fingerings, zero articulations, and zero tremolos.
+// Regression: v0xA6 NOTE is 10 bytes but EncNote::read consumed 27, reading into the next slot's preamble
+// as articulation/fingering data, producing thousands of spurious glyphs. Fix: zero those fields when slot size < 27.
 TEST_F(Tst_Importer, v0xa6_no_spurious_articulation_glyphs)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_no_spurious_tremolo.enc");
@@ -654,18 +559,8 @@ TEST_F(Tst_Importer, v0xa6_no_spurious_articulation_glyphs)
     delete score;
 }
 
-// Regression: the implicit-silence gap snap used to convert each element's
-// Encore tick to a Fraction with denominator `4 * beatTicks`. That formula
-// assumed beatTicks always equalled 240 (the quarter), which is true only
-// for x/4 meters. Real Encore files in x/8 store beatTicks = 120 (the
-// eighth); 4 * 120 = 480 gave a whole-note denominator half the correct
-// value, the snap pushed cumTick to twice the intended Fraction, and the
-// measure overflowed by one beat. Fix: wholeTicks = beatTicks * timeSigDen
-// (= 960 across the corpus). The fixture is a 3/8 measure with beatTicks
-// = 120 and a single NOTE at Encore tick 240 (beat 3) with no preceding
-// REST -- the implicit-silence pattern that triggers the snap. The
-// imported measure must carry the leading-silence shape (rest, rest,
-// note) without spilling past the bar line.
+// Regression: gap snap used denominator 4*beatTicks (correct only for x/4). x/8 beatTicks=120 gave
+// half the correct whole-note value, overflowing by one beat. Fix: wholeTicks = beatTicks * timeSigDen.
 TEST_F(Tst_Importer, v0c4_gap_snap_eighth_meter)
 {
     MasterScore* score = readEncoreScore("importer_gap_snap_eighth_meter.enc");
@@ -696,13 +591,8 @@ TEST_F(Tst_Importer, v0c4_gap_snap_eighth_meter)
     delete score;
 }
 
-// Regression: compact-TK files (TK varsize = 112, e.g. v0xC4 SATB choir
-// scores saved by Encore 5.0.2) do NOT follow the
-// PRG_BASE + n * PRG_STEP layout the importer uses to locate per-staff
-// MIDI program and Key transposition bytes. Any non-zero byte at the
-// formula-derived Key offset would mis-shift every pitch on that staff.
-// The fixture leaves the byte at PRG_BASE - 23 set to +8 and asserts the
-// imported pitch stays at the binary value, not 76 + 8 = 84.
+// Regression: compact-TK files (varsize=112) don't follow PRG_BASE+n*PRG_STEP for Key bytes.
+// Garbage at the formula offset would mis-shift pitches; fixture asserts pitch=76, not 76+8=84.
 TEST_F(Tst_Importer, v0c4_compact_tk_ignores_key_byte)
 {
     MasterScore* score = readEncoreScore("instruments_compact_tk_ignores_key_byte.enc");
@@ -724,19 +614,12 @@ TEST_F(Tst_Importer, v0c4_compact_tk_ignores_key_byte)
     ASSERT_EQ(firstChord->notes().size(), 1u);
     EXPECT_EQ(firstChord->notes()[0]->pitch(), 76)
         << "compact-TK file: garbage Key byte at formula offset must be "
-           "ignored; imported pitch stays at binary 76 (not 76+8=84)";
+        "ignored; imported pitch stays at binary 76 (not 76+8=84)";
     delete score;
 }
 
-// Regression: Encore can leave trailing MEAS blocks in the file from
-// prior edits that it does not render. The rendered count lives in the
-// file header measureCount field at offset 0x34. Mamae_eu_quero-Bateria
-// stores 56 MEAS blocks but rendered measureCount = 36; importing all 56
-// produced 20 ghost measures of stale content past the real end of the
-// piece. The importer must stop appending MEAS blocks once it has loaded
-// header.measureCount of them. The fixture writes measureCount = 2 with
-// 6 MEAS blocks on disk and asserts the imported score has exactly 2
-// measures.
+// Regression: Encore can leave trailing stale MEAS blocks past the rendered count (header.measureCount at 0x34).
+// Importing all of them produces ghost measures; fix stops at measureCount.
 TEST_F(Tst_Importer, v0c4_header_measure_count_truncates_ghost_measures)
 {
     MasterScore* score = readEncoreScore(
@@ -754,13 +637,8 @@ TEST_F(Tst_Importer, v0c4_header_measure_count_truncates_ghost_measures)
     delete score;
 }
 
-// Regression: Encore tags every measure inside a volta with the same
-// repeatAlternative bitmask (m1=0x01, m2=0x01, m3=0x02). The importer
-// previously created one Volta per measure (3 voltas), and never set
-// begin-text on them, so the bracket rendered without "1." or "2." above.
-// Two fixes coalesce equal-bitmask runs into one Volta and set begin-text
-// from the endings list. The fixture exercises both: 3 measures with alt
-// bits 1/1/2 must import as exactly 2 voltas whose texts are "1." and "2."
+// Regression: importer created one Volta per measure (3 voltas for 1/1/2 bits) and never set begin-text.
+// Fix: coalesce equal-bitmask runs into one Volta and set begin-text from the endings list.
 TEST_F(Tst_Importer, v0c4_volta_coalesce_and_numbered_text)
 {
     MasterScore* score = readEncoreScore("importer_volta_coalesce_and_text.enc");
@@ -778,7 +656,7 @@ TEST_F(Tst_Importer, v0c4_volta_coalesce_and_numbered_text)
               [](Volta* a, Volta* b) { return a->tick() < b->tick(); });
     ASSERT_EQ(voltas.size(), 2u)
         << "consecutive measures with the same repeatAlternative bitmask "
-           "must collapse into one Volta";
+        "must collapse into one Volta";
     EXPECT_EQ(voltas[0]->beginText(), String(u"1."))
         << "first ending must render the number '1.'";
     EXPECT_EQ(voltas[1]->beginText(), String(u"2."))
@@ -789,13 +667,8 @@ TEST_F(Tst_Importer, v0c4_volta_coalesce_and_numbered_text)
     delete score;
 }
 
-// Regression: Encore stores the source measure of "To Coda" with coda-
-// byte = 0x85 (CODA1) and the destination measure carrying the Coda
-// glyph with coda-byte = 0x89 (CODA2). The importer used to map both to
-// MarkerType::CODA, losing the distinction so the user saw a duplicate
-// Coda glyph where Encore showed the "To Coda" text label. The fixture
-// places 0x85 on m1 and 0x89 on m2 and asserts the imported markers are
-// TOCODA then CODA in order.
+// Regression: both coda bytes (0x85 CODA1 and 0x89 CODA2) mapped to CODA, losing the TOCODA distinction.
+// Fix: 0x85 → TOCODA, 0x89 → CODA.
 TEST_F(Tst_Importer, v0c4_to_coda_distinct_from_coda)
 {
     MasterScore* score = readEncoreScore("importer_to_coda_vs_coda_marker.enc");
@@ -822,13 +695,8 @@ TEST_F(Tst_Importer, v0c4_to_coda_distinct_from_coda)
     delete score;
 }
 
-// Regression: legacy Spanish/Portuguese Encore files store TEXT block
-// payloads as single-byte Latin-1 rather than the UTF-16 LE encoding
-// modern Encore 5 uses by default. Forcing UTF-16 LE on a Latin-1 payload
-// turns "la 1ª vez" into "慬ㄠ₪敶" (Chinese-looking gibberish that is
-// two Latin-1 bytes mis-interpreted as one UTF-16 code unit). The reader
-// probes byte 14/15 of each entry to detect the encoding, so the imported
-// StaffText must carry the readable Latin-1 string.
+// Regression: TEXT block payloads in legacy Latin-1 files were decoded as UTF-16 LE, producing CJK gibberish.
+// Probe byte 14/15 of each entry to detect encoding.
 TEST_F(Tst_Importer, v0c4_text_block_latin1_decoding)
 {
     MasterScore* score = readEncoreScore("text_text_block_latin1_decoding.enc");
@@ -855,15 +723,8 @@ TEST_F(Tst_Importer, v0c4_text_block_latin1_decoding)
     delete score;
 }
 
-// Regression: Encore can place two dynamics + their stafftext annotations
-// inside the same measure when the measure carries two repeat directives
-// (e.g. f for the 1st volta, pp for the 2nd). The second pair is stored
-// at a tick past the measure's durTicks (sirena.enc m21 is 2/4 with
-// durTicks=480 and the 1st-volta "pp" sits at tick=960). The reader used
-// to drop every ORN whose tick exceeded durTicks; the user saw only the
-// first dynamic in MuseScore. Section-end DYN_* and STAFFTEXT ornaments
-// now pass the filter and the per-case placement clamps them to the last
-// existing ChordRest segment of the measure.
+// Regression: ORNs at tick > durTicks (volta-grouped dynamics) were dropped.
+// Fix: section-end DYN_* and STAFFTEXT pass the filter and clamp to the last ChordRest of the measure.
 TEST_F(Tst_Importer, v0c4_two_dynamics_in_one_measure)
 {
     MasterScore* score = readEncoreScore("importer_two_dynamics_in_one_measure.enc");
@@ -897,12 +758,8 @@ TEST_F(Tst_Importer, v0c4_two_dynamics_in_one_measure)
     delete score;
 }
 
-// Regression: chord-symbol elements (CHORD, type=7) carry a 36-byte
-// text slot the reader used to decode unconditionally as UTF-16 LE.
-// Legacy Spanish/Portuguese Encore files store the chord name as
-// single-byte Latin-1 (byte 0 printable, byte 1 not 0x00). The reader
-// now applies the same per-element probe used elsewhere so the chord
-// name reads as "Am" instead of the merged BMP code unit "敁" or similar.
+// Regression: CHORD symbol (type=7) text decoded unconditionally as UTF-16 LE.
+// Latin-1 chord names ("Am") read as CJK gibberish; same per-element probe applied.
 TEST_F(Tst_Importer, v0c4_chord_sym_latin1)
 {
     MasterScore* score = readEncoreScore("text_chord_sym_latin1.enc");
@@ -928,13 +785,8 @@ TEST_F(Tst_Importer, v0c4_chord_sym_latin1)
     delete score;
 }
 
-// Regression: TITL block encoding came from the TK00-derived charSize
-// heuristic. Files where TK00 offset > 250 (yielding TWO_BYTES) but the
-// TITL block content was stored as single-byte Latin-1 had their title
-// mis-decoded. The reader now uses the TITL block's own varsize to
-// decide encoding both ways (varsize < 5000 => ONE_BYTE; varsize >=
-// 10000 => TWO_BYTES). The fixture appends a Latin-1 TITL with
-// varsize=2426 (the fixed ONE_BYTE layout).
+// Regression: TITL encoding inherited TK00 charSize; files with large TK offset but Latin-1 TITL mis-decoded.
+// Fix: use TITL's own varsize (< 5000 → ONE_BYTE, >= 10000 → TWO_BYTES).
 TEST_F(Tst_Importer, v0c4_titl_latin1_small_varsize)
 {
     MasterScore* score = readEncoreScore("text_titl_latin1_small_varsize.enc");
@@ -945,12 +797,8 @@ TEST_F(Tst_Importer, v0c4_titl_latin1_small_varsize)
     delete score;
 }
 
-// Regression: when a TK block leaves the instrument name empty, the
-// importer falls back to the formula offset (NAME_BASE + n * NAME_STEP)
-// to recover a label. The fallback probed UTF-16 only and discarded
-// every Latin-1 name silently; the part fell through to the generic GM
-// template name. The reader now treats `byte 1 != 0x00 && printable`
-// as a Latin-1 marker and reads the name byte-by-byte.
+// Regression: formula-offset name recovery probed UTF-16 only; Latin-1 names were discarded silently,
+// falling through to a generic GM template. Fix: byte-by-byte read when byte 1 != 0x00 && printable.
 TEST_F(Tst_Importer, v0c4_recovered_name_latin1)
 {
     MasterScore* score = readEncoreScore("text_recovered_name_latin1.enc");
@@ -964,14 +812,8 @@ TEST_F(Tst_Importer, v0c4_recovered_name_latin1)
     delete score;
 }
 
-// Regression: WEDGESTART direction lives in bit 0 of the speguleco
-// field. Encore 5 also sets bit 1 on the same byte, so real files show
-// crescendo as 0x02 and diminuendo as 0x03 (the legacy 0x00 / 0x01
-// pair still occurs but is no longer the only encoding). The previous
-// `speguleco == 0` check treated every Encore 5 hairpin as diminuendo,
-// flipping every cresc/dim pair on disk. The fixture's first hairpin
-// uses 0x02 and the second 0x03; their imported types must be CRESC
-// and DIM in that order.
+// Regression: speguleco direction lives in bit 0; Encore 5 also sets bit 1 (0x02=cresc, 0x03=dim).
+// Old `speguleco==0` check treated every Encore 5 hairpin as diminuendo.
 TEST_F(Tst_Importer, v0c4_hairpin_speguleco_bit0)
 {
     MasterScore* score = readEncoreScore("importer_hairpin_speguleco_bit0.enc");
@@ -992,16 +834,8 @@ TEST_F(Tst_Importer, v0c4_hairpin_speguleco_bit0)
     delete score;
 }
 
-// Regression: Encore renders a `mf<f>mf` chain with each hairpin
-// terminating exactly at the next dynamic glyph on the same track,
-// not at the bar line of its alMezuro target measure. The pre-fix
-// importer extended every hairpin to the end of its alMezuro measure,
-// so adjacent hairpins overlapped visually. The post-fix resolver
-// scans forward for the first Dynamic on the same track within the
-// alMezuro window and stops the hairpin there. Fixture: 4/4 measure
-// with mf at tick=0, crescendo from tick=240 (alMezuro=0), f at
-// tick=720; the crescendo must stop at tick=720, not at the bar
-// line at tick=960.
+// Regression: importer extended hairpins to the end of their alMezuro measure, overlapping adjacent hairpins.
+// Fix: scan forward for the first Dynamic within the alMezuro window and stop there.
 TEST_F(Tst_Importer, v0c4_hairpin_ends_at_next_dynamic)
 {
     MasterScore* score = readEncoreScore("importer_hairpin_ends_at_next_dynamic.enc");
@@ -1020,19 +854,12 @@ TEST_F(Tst_Importer, v0c4_hairpin_ends_at_next_dynamic)
         << "hairpin must start at the WEDGESTART tick";
     EXPECT_EQ(found->tick2(), Fraction(3, 4))
         << "hairpin must end at the next Dynamic (tick=720, beat 4), "
-           "not at the bar line of its alMezuro target measure";
+        "not at the bar line of its alMezuro target measure";
     delete score;
 }
 
-// Regression: SLURSTART carries a pair of layout-x fields (`xoffset`
-// at the start, `xoffset2` at the end) that map onto the same ruler
-// as note xoffsets. Their difference equals the pixel distance between
-// the first and last covered notes; the importer used to ignore them
-// and anchor every slur on the last ChordRest of the alMezuro target
-// measure, so a 3-note slur grew to cover every remaining note in the
-// measure. The post-pass now resolves the end tick by snapping
-// `firstNote.xoffset + slurXoffset2 - slurXoffset` to the closest note
-// xoffset in the start measure.
+// Regression: slur end was anchored on the last ChordRest of the alMezuro measure, covering all remaining notes.
+// Fix: snap firstNote.xoffset + (xoffset2 - xoffset) to the closest note xoffset in the start measure.
 TEST_F(Tst_Importer, v0c4_slur_pixel_span)
 {
     MasterScore* score = readEncoreScore("importer_slur_pixel_span.enc");
@@ -1051,17 +878,12 @@ TEST_F(Tst_Importer, v0c4_slur_pixel_span)
         << "slur start at the SLURSTART tick (beat 1)";
     EXPECT_EQ(found->tick2(), Fraction(1, 2))
         << "slur end snaps to note 3 at tick=480 (target xoff 70 matches "
-           "note xoff 70 exactly); not the last note of the measure";
+        "note xoff 70 exactly); not the last note of the measure";
     delete score;
 }
 
-// Regression: the slur pixel-span heuristic deliberately skips
-// cross-measure slurs (alMezuro >= 1) because xoffsets reset at each
-// bar line; bridging the two layout-x rulers would need a per-measure
-// pixel calibration. This test pins down the fallback behaviour so a
-// future refactor of the pixel-span path does not accidentally apply
-// it across the bar: a slur with alMezuro=1 must anchor on the last
-// ChordRest of the target measure (here m2 tick=720, beat 4).
+// Regression: pixel-span heuristic skips cross-measure slurs (alMezuro >= 1) because xoffsets reset at barlines.
+// Pins the fallback: alMezuro=1 slur must anchor on the last ChordRest of the target measure.
 TEST_F(Tst_Importer, v0c4_slur_cross_measure_fallback)
 {
     MasterScore* score = readEncoreScore("importer_slur_cross_measure_fallback.enc");
@@ -1079,23 +901,15 @@ TEST_F(Tst_Importer, v0c4_slur_cross_measure_fallback)
     ASSERT_NE(found, nullptr);
     EXPECT_EQ(found->tick(), Fraction(0, 1))
         << "slur start at the SLURSTART tick (m1 beat 1)";
-    // m2 begins at tick=1 (one full 4/4 measure after m1); its last
-    // ChordRest is the 4th quarter, at m2.tick + 3/4 = 7/4.
+    // m2.tick=1; last ChordRest = 4th quarter = 7/4.
     EXPECT_EQ(found->tick2(), Fraction(7, 4))
         << "cross-measure slur must fall back to the last ChordRest of "
-           "the alMezuro target measure (m2 beat 4 = absolute tick 7/4)";
+        "the alMezuro target measure (m2 beat 4 = absolute tick 7/4)";
     delete score;
 }
 
-// Regression: Encore tags an attached ornament (dynamic, wedge) at
-// the CHORD-REST AT OR AFTER its rendered position but records the
-// visible layout x in the ornament's xoffset. When the ornament's
-// xoffset is smaller than the tagged chord-rest's xoffset, Encore
-// visually pulls the glyph back to the previous chord-rest. The
-// importer used to plant the dynamic on the tagged tick, so users saw
-// it one chord later than in Encore. Fixture: dynamic at the tick of
-// note B but with xoffset matching note A's region; the importer must
-// place the dynamic at note A's tick.
+// Regression: ORN xoffset < tagged chord-rest xoffset means the glyph belongs to the preceding chord.
+// Old importer planted the dynamic at the tagged tick; users saw it one chord later than in Encore.
 TEST_F(Tst_Importer, v0c4_dyn_snap_back_by_xoffset)
 {
     MasterScore* score = readEncoreScore("importer_dyn_snap_back_by_xoffset.enc");
@@ -1120,15 +934,13 @@ TEST_F(Tst_Importer, v0c4_dyn_snap_back_by_xoffset)
     ASSERT_NE(found, nullptr) << "expected one Dynamic in the measure";
     EXPECT_EQ(foundTick, Fraction(1, 8))
         << "dynamic must snap from the tagged eighth (tick 1/4) back to "
-           "the previous eighth (tick 1/8) because its xoffset matches "
-           "that note's region";
+        "the previous eighth (tick 1/8) because its xoffset matches "
+        "that note's region";
     delete score;
 }
 
-// Regression: same snap-back convention applies to WEDGESTART. A half
-// note + eighth pair where the binary tags the wedge at the eighth but
-// the wedge's xoffset falls inside the half note's region. The
-// importer must anchor the hairpin start on the half note.
+// Regression: same snap-back convention for WEDGESTART: xoffset falls inside the half note's region,
+// so the hairpin anchors on the half note, not the tagged eighth.
 TEST_F(Tst_Importer, v0c4_wedge_snap_back_by_xoffset)
 {
     MasterScore* score = readEncoreScore("importer_wedge_snap_back_by_xoffset.enc");
@@ -1145,17 +957,13 @@ TEST_F(Tst_Importer, v0c4_wedge_snap_back_by_xoffset)
     ASSERT_NE(found, nullptr) << "expected one Hairpin";
     EXPECT_EQ(found->tick(), Fraction(0, 1))
         << "hairpin must snap back from the tagged eighth (tick 1/2) to "
-           "the start of the half note (tick 0) because its xoffset is "
-           "less than the eighth's xoffset";
+        "the start of the half note (tick 0) because its xoffset is "
+        "less than the eighth's xoffset";
     delete score;
 }
 
-// Regression: when xoffset2 of a cross-measure hairpin is smaller than
-// the first NOTE's xoffset in the target measure, Encore draws the
-// hairpin ending right before any visible note content (= at the bar
-// line). Without this clamp the dim from m1 bleeds into m2 and
-// overlaps the cresc that starts there. The dim must end at the target
-// measure's start tick (= bar line between m1 and m2).
+// Regression: hairpin xoffset2 < first-note xoffset in target measure means Encore ends at the bar line.
+// Without the clamp the hairpin bleeds into the next measure and overlaps adjacent hairpins.
 TEST_F(Tst_Importer, v0c4_hairpin_barline_clamp)
 {
     MasterScore* score = readEncoreScore("importer_hairpin_barline_clamp.enc");
@@ -1182,11 +990,8 @@ TEST_F(Tst_Importer, v0c4_hairpin_barline_clamp)
     delete score;
 }
 
-// Regression: Encore can write the same dynamic twice on the same
-// (staff, voice) at the same tick with slightly different xoffsets
-// (observed as duplicate MF ornaments in real plectro band scores).
-// Encore renders only one. The importer must drop the second when it
-// would land on the same segment as the first.
+// Regression: Encore sometimes writes duplicate dynamics on the same (staff, voice, tick) with different xoffsets.
+// Importer must drop the second when it lands on the same segment.
 TEST_F(Tst_Importer, v0c4_dyn_dedup)
 {
     MasterScore* score = readEncoreScore("importer_dyn_dedup.enc");
@@ -1204,16 +1009,12 @@ TEST_F(Tst_Importer, v0c4_dyn_dedup)
     }
     EXPECT_EQ(dynCount, 1)
         << "two identical MF ORNs at the same tick must collapse to one "
-           "Dynamic on the segment";
+        "Dynamic on the segment";
     delete score;
 }
 
-// Regression: a dynamic ORN with yoffset > 0 was rendered by the user
-// above its stored staff, meaning it visually belongs to the staff ABOVE
-// (staffIdx - 1). Encore stores it on staff N but renders it on N-1.
-// The importer must reroute it so the Dynamic lands on the correct
-// instrument in MuseScore. Fixture: MF ornament on staff 1 with
-// yoffset=+16; imported Dynamic must appear on staff 0.
+// Regression: dynamic ORN with yoffset > 0 visually belongs to staffIdx-1 (stored on N, rendered on N-1).
+// Importer must reroute it to the correct staff.
 TEST_F(Tst_Importer, v0c4_dyn_displaced_to_staff_above)
 {
     MasterScore* score = readEncoreScore("importer_dyn_displaced_to_staff_above.enc");
@@ -1225,13 +1026,21 @@ TEST_F(Tst_Importer, v0c4_dyn_displaced_to_staff_above)
     bool foundOnStaff0 = false;
     bool foundOnStaff1 = false;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
-        if (!mb->isMeasure()) continue;
+        if (!mb->isMeasure()) {
+            continue;
+        }
         for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s;
              s = s->next(SegmentType::ChordRest)) {
             for (EngravingItem* ann : s->annotations()) {
-                if (!ann || !ann->isDynamic()) continue;
-                if (ann->track() == trackStaff0) foundOnStaff0 = true;
-                if (ann->track() == trackStaff1) foundOnStaff1 = true;
+                if (!ann || !ann->isDynamic()) {
+                    continue;
+                }
+                if (ann->track() == trackStaff0) {
+                    foundOnStaff0 = true;
+                }
+                if (ann->track() == trackStaff1) {
+                    foundOnStaff1 = true;
+                }
             }
         }
     }
@@ -1242,17 +1051,8 @@ TEST_F(Tst_Importer, v0c4_dyn_displaced_to_staff_above)
     delete score;
 }
 
-// Regression: a WEDGESTART placed at tick == durTicks (= the bar line)
-// has no chord-rest element at that tick in the source measure. The snap-
-// start lambda used to return the default tick (= start of the next
-// measure) making the hairpin zero-span after endpoint clamping. The fix
-// extends the backwards scan to also fire when no chord-rest is found at
-// the default tick, so the scan finds the latest note in m1 with
-// xoffset <= the ornament's xoffset and anchors the start there.
-// Fixture: notes at xoffs 30/60/90/120 (ticks 0/240/480/720), WEDGE at
-// tick=960 xoffset=110 alMezuro=1, MF in m2. The dim must start at
-// tick=720 (note xoff=120 is the latest with xoff <= 110... wait, 120>110.
-// Latest with xoff<=110 is tick=480 xoff=90). The dim must NOT be dropped.
+// Regression: WEDGE at tick==durTicks (bar line) had no ChordRest; snap-start returned next measure's tick,
+// giving zero-span. Fix: backwards scan also fires when no ChordRest at the default tick.
 TEST_F(Tst_Importer, v0c4_hairpin_snapstart_at_barline)
 {
     MasterScore* score = readEncoreScore("importer_hairpin_snapstart_at_barline.enc");
@@ -1268,13 +1068,10 @@ TEST_F(Tst_Importer, v0c4_hairpin_snapstart_at_barline)
         }
     }
     ASSERT_NE(dim, nullptr) << "dim hairpin starting at end of m1 must not be dropped";
-    // The hairpin must start INSIDE m1 (< m2.tick = 1/1), not at the bar line.
-    // WEDGE xoffset=110: backwards scan finds latest note with xoff<=110.
-    // m1 notes: xoff=30(t=0), 60(t=240), 90(t=480), 120(t=720).
-    // Latest with xoff <= 110: tick=480 (xoff=90). Start = Fraction(1,2).
+    // Backwards scan: latest note with xoff<=110 is tick=480 (xoff=90). Start = Fraction(1,2).
     EXPECT_LT(dim->tick(), Fraction(1, 1))
         << "hairpin start must be inside m1 (snap from bar-line tick to last "
-           "note with xoff <= ornament.xoffset)";
+        "note with xoff <= ornament.xoffset)";
     EXPECT_EQ(dim->tick(), Fraction(1, 2))
         << "start must snap to tick=480 (xoff=90, latest note with xoff<=110)";
     // MF in m2 at tick=240 xoffset=70 (>= note@240 xoff=60 -> no snap-back)
@@ -1284,12 +1081,8 @@ TEST_F(Tst_Importer, v0c4_hairpin_snapstart_at_barline)
     delete score;
 }
 
-// Regression: when a cross-measure hairpin has xoffset2 < firstNoteXoff
-// in the target measure AND a Dynamic exists within the alMezuro window,
-// the Dynamic endpoint must win. The bar-line clamp (xoffset2 heuristic)
-// must only apply when NO Dynamic is found. Fixture: dim alMezuro=1 with
-// xoffset2=5 (small, would clamp to bar line) and MF at m2.240. The dim
-// must end at m2.240, not at m2.0.
+// Regression: bar-line clamp (xoffset2 < firstNoteXoff) must yield to next-Dynamic endpoint when one exists.
+// xoffset2=5 would clamp to bar line, but MF at m2.240 wins: hairpin must end at m2.240.
 TEST_F(Tst_Importer, v0c4_hairpin_endpoint_dynamic_wins)
 {
     MasterScore* score = readEncoreScore("importer_hairpin_endpoint_dynamic_wins.enc");
@@ -1307,32 +1100,31 @@ TEST_F(Tst_Importer, v0c4_hairpin_endpoint_dynamic_wins)
     const Fraction m2tick = Fraction(1, 1);
     EXPECT_GT(dim->tick2(), m2tick)
         << "hairpin must end at MF dynamic in m2 (after bar line), not at m2.tick; "
-           "next-dynamic endpoint must win over bar-line clamp";
+        "next-dynamic endpoint must win over bar-line clamp";
     // Specifically at m2 + 1/4 (= where MF is placed after snap-back)
     EXPECT_EQ(dim->tick2(), m2tick + Fraction(1, 4))
         << "hairpin must end at the MF dynamic tick (m2 + 1/4)";
     delete score;
 }
 
-// Regression: Encore stores single-chord tremolos as size-16 ORN elements
-// with tipo=0xAF (standard triple tremolo for plectro instruments) separate
-// from the articulation-byte encoding already supported. The ORN can appear
-// at the chord's tick (normal case) or at tick == durTicks (Encore places
-// it at the measure end on long notes). Both must attach a
-// TremoloSingleChord / R32 to the corresponding chord.
+// Regression: single-chord tremolos encoded as size-16 ORN (tipo=0xAF), not the articulation byte.
+// ORN can appear at the chord's tick or at durTicks (measure end); both must attach TremoloSingleChord.
 TEST_F(Tst_Importer, v0c4_tremolo_orn_normal_and_barline_tick)
 {
     MasterScore* score = readEncoreScore("ornaments_tremolo_orn.enc");
     ASSERT_NE(score, nullptr) << "Failed to load ornaments_tremolo_orn.enc";
 
-    // Collect all TremoloSingleChord elements across all chords.
-    std::vector<std::pair<Fraction, TremoloType>> trems;
+    std::vector<std::pair<Fraction, TremoloType> > trems;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
-        if (!mb->isMeasure()) continue;
+        if (!mb->isMeasure()) {
+            continue;
+        }
         for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s;
              s = s->next(SegmentType::ChordRest)) {
             EngravingItem* el = s->element(0);
-            if (!el || !el->isChord()) continue;
+            if (!el || !el->isChord()) {
+                continue;
+            }
             Chord* c = toChord(el);
             if (c->tremoloSingleChord()) {
                 trems.push_back({ s->tick(), c->tremoloSingleChord()->tremoloType() });
@@ -1341,7 +1133,7 @@ TEST_F(Tst_Importer, v0c4_tremolo_orn_normal_and_barline_tick)
     }
     ASSERT_EQ(trems.size(), 2u)
         << "expected exactly 2 TremoloSingleChord: one at m1.0 (normal tick) "
-           "and one at m2.beat-4 (from ORN at measure end tick)";
+        "and one at m2.beat-4 (from ORN at measure end tick)";
     // m1 tremolo: at tick=0 (half note, tipo=0xAF at same tick)
     EXPECT_EQ(trems[0].first, Fraction(0, 1));
     EXPECT_EQ(trems[0].second, TremoloType::R32);
@@ -1351,16 +1143,41 @@ TEST_F(Tst_Importer, v0c4_tremolo_orn_normal_and_barline_tick)
     delete score;
 }
 
-// Regression: the m87 pattern from real boda.enc. A leading grace
-// (g1=0x20) followed by regular notes whose Encore ticks land exactly
-// on the face grid of their face value (tick=150 on 30-tick grid for
-// 32nd, tick=180 on 60-tick grid for 16th, tick=240 on 120-tick grid
-// for 8th). Without the stolenTicks snap guard, the snap fires for each
-// of these notes (gap = 30 ticks = grace face value), inserting spurious
-// 32nd rests BETWEEN the regular notes (the "fs" extra note the user saw
-// between the 32nd and 16th). The fix suppresses the snap for every note
-// whose gap <= stolenTicks. A trailing rest equal to the stolen ticks
-// remains at measure end (unavoidable; Encore renders this as silence).
+// Regression: tremolo ORN is always in voice 0 regardless of the actual note voice.
+// Resolver must widen to all staff voices when voice 0 yields no chord.
+TEST_F(Tst_Importer, v0c4_tremolo_orn_cross_voice_attaches)
+{
+    MasterScore* score = readEncoreScore("ornaments_tremolo_orn_crossvoice.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load ornaments_tremolo_orn_crossvoice.enc";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    bool foundTremolo = false;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            for (int v = 0; v < static_cast<int>(VOICES); ++v) {
+                EngravingItem* el = s->element(static_cast<track_idx_t>(v));
+                if (!el || !el->isChord()) {
+                    continue;
+                }
+                if (toChord(el)->tremoloSingleChord()) {
+                    EXPECT_EQ(toChord(el)->tremoloSingleChord()->tremoloType(), TremoloType::R32);
+                    foundTremolo = true;
+                }
+            }
+        }
+    }
+    EXPECT_TRUE(foundTremolo)
+        << "TremoloSingleChord must attach to the chord even when ORN is in a different voice";
+    delete score;
+}
+
+// Regression: after a grace note, regular notes at exact face-grid ticks triggered the gap snap (gap=stolenTicks),
+// inserting spurious rests. Fix: suppress snap when gap <= stolenTicks.
 TEST_F(Tst_Importer, v0xa6_grace_ongrid_snap_suppressed)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_grace_ongrid_snap_suppressed.enc");
@@ -1377,7 +1194,9 @@ TEST_F(Tst_Importer, v0xa6_grace_ongrid_snap_suppressed)
     int graceCount = 0;
     for (Segment* s = m1->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
-        if (!el) continue;
+        if (!el) {
+            continue;
+        }
         if (el->isRest()) {
             // A rest immediately after a chord (and not the last element)
             // is suspicious -- it means the snap fired creating an inter-note gap.
@@ -1393,20 +1212,13 @@ TEST_F(Tst_Importer, v0xa6_grace_ongrid_snap_suppressed)
     }
     EXPECT_FALSE(hasSpuriousInterNoteRest)
         << "spurious rest between regular notes detected; "
-           "stolenTicks snap suppression likely missing for post-grace notes on face grid";
+        "stolenTicks snap suppression likely missing for post-grace notes on face grid";
     EXPECT_EQ(graceCount, 1) << "expected exactly 1 grace (leading 32nd)";
     delete score;
 }
 
-// Regression: the m57 pattern from real boda.enc: a v0xA6 grace group
-// with a LEADING grace (g1=0x20) followed by an INNER grace (g1=0x10)
-// that is shorter (higher faceValue) than the leader. Without inner-
-// grace detection the inner note was treated as a regular note, producing:
-//   - a spurious gap rest before the leading grace (face-grid snap fired
-//     while the grace queue was non-empty)
-//   - the inner note rendered as a regular chord rather than a grace
-// The corrupted structure caused a SIGSEGV in the MuseScore GUI layout.
-// sanityCheck() must pass AND no spurious rests may appear in the measure.
+// Regression: inner grace (g1=0x10) shorter than the leader (g1=0x20) was treated as a regular note,
+// producing a spurious rest before the grace group and causing a SIGSEGV in GUI layout.
 TEST_F(Tst_Importer, v0xa6_inner_grace_group)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_inner_grace_group.enc");
@@ -1425,11 +1237,11 @@ TEST_F(Tst_Importer, v0xa6_inner_grace_group)
     std::vector<DurationType> regularTypes;
     for (Segment* s = m1->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
-        if (!el) continue;
+        if (!el) {
+            continue;
+        }
         if (el->isRest()) {
-            // A rest that appears RIGHT BEFORE a grace-note chord is spurious:
-            // it was created by the face-grid snap firing while graces were
-            // pending. This particular structure caused the SIGSEGV.
+            // A rest immediately before a grace-note chord is spurious (snap fired while graces were pending).
             Segment* nx = s->next(SegmentType::ChordRest);
             if (nx) {
                 EngravingItem* nxEl = nx->element(0);
@@ -1451,7 +1263,7 @@ TEST_F(Tst_Importer, v0xa6_inner_grace_group)
     // No rest immediately before the grace group (= the crash-inducing structure).
     EXPECT_FALSE(hasSpuriousPreGraceRest)
         << "Rest found immediately before grace-note chord; "
-           "this corrupted structure crashes the MuseScore GUI layout";
+        "this corrupted structure crashes the MuseScore GUI layout";
     // Both leading (32nd) and inner (64th) graces must be recognised.
     EXPECT_EQ(graceCount, 2)
         << "expected 2 graces (32nd leader + 64th inner)";
@@ -1462,13 +1274,8 @@ TEST_F(Tst_Importer, v0xa6_inner_grace_group)
     delete score;
 }
 
-// Regression: v0xA6 grace notes are stored at their actual tick positions,
-// which shifts subsequent real notes forward and leaves the last real
-// note in the measure with realDuration < faceValue. calculateRealDurations
-// now detects that the deficit equals the total face value of grace notes
-// that preceded the real note and restores the real note to its face duration.
-// Fixture: 3/8 measure with [8th, grace-32nd, 16th, 16th, 8th]. Without the
-// fix the last 8th renders as 16th + rest because rawGap = 90 < face = 120.
+// Regression: v0xA6 grace notes shift subsequent real notes forward, leaving the last note with realDuration < face.
+// calculateRealDurations detects the deficit and restores the face duration. Without fix: last 8th becomes 16th+rest.
 TEST_F(Tst_Importer, v0xa6_grace_restores_face_value)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_grace_restores_face_value.enc");
@@ -1477,10 +1284,12 @@ TEST_F(Tst_Importer, v0xa6_grace_restores_face_value)
     Measure* m1 = score->firstMeasure();
     ASSERT_NE(m1, nullptr);
 
-    std::vector<std::pair<DurationType, bool>> elements;
+    std::vector<std::pair<DurationType, bool> > elements;
     for (Segment* s = m1->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
-        if (!el) continue;
+        if (!el) {
+            continue;
+        }
         if (el->isRest()) {
             elements.push_back({ toRest(el)->durationType().type(), false });
         } else if (el->isChord()) {
@@ -1496,26 +1305,32 @@ TEST_F(Tst_Importer, v0xa6_grace_restores_face_value)
     // Expected: 8th (regular), 32nd (grace), 16th, 16th, 8th — no rests
     ASSERT_EQ(elements.size(), 5u)
         << "grace time-borrowing correction must restore the last 8th and "
-           "eliminate spurious rests; got " << elements.size() << " elements";
-    EXPECT_EQ(elements[0].second, false); EXPECT_EQ(elements[0].first, DurationType::V_EIGHTH);
-    EXPECT_EQ(elements[1].second, true);  EXPECT_EQ(elements[1].first, DurationType::V_32ND);
-    EXPECT_EQ(elements[2].second, false); EXPECT_EQ(elements[2].first, DurationType::V_16TH);
-    EXPECT_EQ(elements[3].second, false); EXPECT_EQ(elements[3].first, DurationType::V_16TH);
-    EXPECT_EQ(elements[4].second, false); EXPECT_EQ(elements[4].first, DurationType::V_EIGHTH)
+        "eliminate spurious rests; got " << elements.size() << " elements";
+    EXPECT_EQ(elements[0].second, false);
+    EXPECT_EQ(elements[0].first, DurationType::V_EIGHTH);
+    EXPECT_EQ(elements[1].second, true);
+    EXPECT_EQ(elements[1].first, DurationType::V_32ND);
+    EXPECT_EQ(elements[2].second, false);
+    EXPECT_EQ(elements[2].first, DurationType::V_16TH);
+    EXPECT_EQ(elements[3].second, false);
+    EXPECT_EQ(elements[3].first, DurationType::V_16TH);
+    EXPECT_EQ(elements[4].second, false);
+    EXPECT_EQ(elements[4].first, DurationType::V_EIGHTH)
         << "last note must be an eighth (face value), not a 16th from rawGap=90";
     delete score;
 }
 
-// Regression: many octave-transposing instruments (laud, classical guitar,
-// electric bass, ...) are written in Encore with a plain G clef even
 // Binary-driven clef rule: G clef + Key=+12 → G8_VA. No template required.
 TEST_F(Tst_Importer, v0c4_g_clef_8va_from_key)
 {
     MasterScore* score = readEncoreScore("structure_g_clef_8va_from_key.enc");
     ASSERT_NE(score, nullptr);
-    Measure* m = score->firstMeasure(); ASSERT_NE(m, nullptr);
-    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick()); ASSERT_NE(seg, nullptr);
-    EngravingItem* el = seg->element(0); ASSERT_TRUE(el && el->isClef());
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick());
+    ASSERT_NE(seg, nullptr);
+    EngravingItem* el = seg->element(0);
+    ASSERT_TRUE(el && el->isClef());
     EXPECT_EQ(toClef(el)->clefType(), ClefType::G8_VA)
         << "G clef + Key=+12 must yield G8_VA";
     delete score;
@@ -1526,9 +1341,12 @@ TEST_F(Tst_Importer, v0c4_f_clef_8vb_from_key)
 {
     MasterScore* score = readEncoreScore("structure_f_clef_8vb_from_key.enc");
     ASSERT_NE(score, nullptr);
-    Measure* m = score->firstMeasure(); ASSERT_NE(m, nullptr);
-    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick()); ASSERT_NE(seg, nullptr);
-    EngravingItem* el = seg->element(0); ASSERT_TRUE(el && el->isClef());
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick());
+    ASSERT_NE(seg, nullptr);
+    EngravingItem* el = seg->element(0);
+    ASSERT_TRUE(el && el->isClef());
     EXPECT_EQ(toClef(el)->clefType(), ClefType::F8_VB)
         << "F clef + Key=-12 must yield F8_VB";
     delete score;
@@ -1539,9 +1357,12 @@ TEST_F(Tst_Importer, v0c4_f_clef_8va_from_key)
 {
     MasterScore* score = readEncoreScore("structure_f_clef_8va_from_key.enc");
     ASSERT_NE(score, nullptr);
-    Measure* m = score->firstMeasure(); ASSERT_NE(m, nullptr);
-    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick()); ASSERT_NE(seg, nullptr);
-    EngravingItem* el = seg->element(0); ASSERT_TRUE(el && el->isClef());
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick());
+    ASSERT_NE(seg, nullptr);
+    EngravingItem* el = seg->element(0);
+    ASSERT_TRUE(el && el->isClef());
     EXPECT_EQ(toClef(el)->clefType(), ClefType::F_8VA)
         << "F clef + Key=+12 must yield F_8VA";
     delete score;
@@ -1553,23 +1374,19 @@ TEST_F(Tst_Importer, v0c4_non_octave_key_keeps_clef)
 {
     MasterScore* score = readEncoreScore("structure_non_octave_key_keeps_clef.enc");
     ASSERT_NE(score, nullptr);
-    Measure* m = score->firstMeasure(); ASSERT_NE(m, nullptr);
-    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick()); ASSERT_NE(seg, nullptr);
-    EngravingItem* el = seg->element(0); ASSERT_TRUE(el && el->isClef());
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Segment* seg = m->findSegment(SegmentType::HeaderClef, m->tick());
+    ASSERT_NE(seg, nullptr);
+    EngravingItem* el = seg->element(0);
+    ASSERT_TRUE(el && el->isClef());
     EXPECT_EQ(toClef(el)->clefType(), ClefType::G)
         << "G clef + Key=-7 (non-octave) must keep plain G";
     delete score;
 }
 
-// Regression: octave-transposing instruments (laud, classical guitar, …)
-// are written in Encore with a plain G clef but Key = -12. The binary-
-// driven rule maps G + Key=-12 → G8_VB. The fixture is a Laud staff.
-// though their MuseScore instrument template carries the octave-bassa
-// variant (G8_VB). When the Encore Key transposition matches the template
-// clef's octave decoration, the importer overrides the staff clef with
-// the template's so the notes sit at the same staff position the user saw
-// in Encore. The fixture is a Laud staff with Key = -12 and a plain G in
-// Encore; the imported staff must carry G8_VB.
+// Regression: laud has plain G clef in Encore but Key=-12. Binary-driven rule maps G+Key=-12 → G8_VB.
+// Importer must override the staff clef with the template's octave-bassa variant.
 TEST_F(Tst_Importer, v0c4_octave_bassa_clef_override)
 {
     MasterScore* score = readEncoreScore("structure_octave_bassa_clef_override.enc");
@@ -1591,11 +1408,9 @@ TEST_F(Tst_Importer, v0c4_octave_bassa_clef_override)
     ASSERT_TRUE(clefEl->isClef());
     EXPECT_EQ(toClef(clefEl)->clefType(), ClefType::G8_VB)
         << "laud staff must carry G8_VB (template clef), not the plain G "
-           "stored by Encore";
+        "stored by Encore";
 
-    // The Key = -12 stored in the binary must also apply: written pitch 76
-    // becomes m_pitch 64. Combined with the G8_VB clef, the note sits at the
-    // E5 staff position the user saw in Encore while sounding E4.
+    // Key=-12 applies: written pitch 76 → m_pitch 64; with G8_VB the note sits at E5 sounding E4.
     Chord* firstChord = nullptr;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
@@ -1610,10 +1425,8 @@ TEST_F(Tst_Importer, v0c4_octave_bassa_clef_override)
     delete score;
 }
 
-// Regression: bass guitar with Encore F clef and Key = -12. The binary-
-// driven clef rule maps F + Key=-12 → F8_VB regardless of the instrument
-// template. The staff must carry F8_VB, not the plain F transposing clef
-// the template would previously have preferred.
+// Regression: bass guitar F clef + Key=-12 must yield F8_VB (binary-driven rule),
+// not the plain F transposing clef the template previously preferred.
 TEST_F(Tst_Importer, v0c4_bass_guitar_transposing_clef)
 {
     MasterScore* score = readEncoreScore("instruments_bass_guitar_transposing_clef.enc");
@@ -1626,7 +1439,7 @@ TEST_F(Tst_Importer, v0c4_bass_guitar_transposing_clef)
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(inst->transpose().chromatic, -12)
         << "matched instrument template must be a bass-guitar variant "
-           "(transposeChromatic = -12)";
+        "(transposeChromatic = -12)";
 
     Measure* m = score->firstMeasure();
     ASSERT_NE(m, nullptr);
@@ -1637,7 +1450,7 @@ TEST_F(Tst_Importer, v0c4_bass_guitar_transposing_clef)
     ASSERT_TRUE(clefEl->isClef());
     EXPECT_EQ(toClef(clefEl)->clefType(), ClefType::F8_VB)
         << "F clef + Key=-12 must yield F8_VB (binary-driven rule); "
-           "template transposing clef (plain F) is no longer preferred";
+        "template transposing clef (plain F) is no longer preferred";
 
     Chord* firstChord = nullptr;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
@@ -1654,16 +1467,8 @@ TEST_F(Tst_Importer, v0c4_bass_guitar_transposing_clef)
     delete score;
 }
 
-// Regression: Encore's Staff Sheet exposes a per-instrument "Key" dropdown
-// that adds a chromatic transposition at playback time (range 2 Octaves
-// Higher .. Major 20th Lower). The value lives in the binary as a signed
-// int8 at PRG_BASE - 23 + n * PRG_STEP and the importer adds it to every
-// NOTE's semiTonePitch before setPitch so the resulting MuseScore m_pitch
-// matches what Encore plays. The fixture carries two instruments with
-// DIFFERENT Key values: staff 0 = Sounds as Written (0), staff 1 = Octave
-// Lower (-12). Both staves play the same pitch A4 (binary 69) at m1 beat
-// 1; the importer must apply the offset PER STAFF, leaving staff 0 at 69
-// and shifting staff 1 to 57.
+// Regression: Key offset (signed int8 at PRG_BASE-23+n*PRG_STEP) must be applied per-staff.
+// Fixture: staff 0 Key=0 (pitch 69 unchanged), staff 1 Key=-12 (pitch 69 → 57).
 TEST_F(Tst_Importer, v0c4_key_transposition_per_staff)
 {
     MasterScore* score = readEncoreScore("structure_key_per_staff.enc");
@@ -1695,19 +1500,8 @@ TEST_F(Tst_Importer, v0c4_key_transposition_per_staff)
     delete score;
 }
 
-// Regression for the voice >= VOICES filter combined with the short-name
-// instrument-template fallback. The fixture mirrors an SATB choir layout:
-// four parts labelled S / C / T / B (1 char each), where the bass staff
-// stores its notes with voice = 4 in the typeVoice byte while the lyric
-// elements stay on voice 0. Previously the importer accepted voice = 4
-// only for ORNAMENT (system-level marks) and silently dropped any other
-// element with voice >= VOICES, so the bass staff imported empty. After
-// the fix every out-of-range voice maps to voice 0 on the same staff,
-// letting the chords land and the lyric-attachment pass anchor onto them.
-// Separately, short instrument names (1-3 chars) skip the name+MIDI
-// matcher and the MIDI-only fallback (both unreliable in compact-TK
-// files); every part falls through to the neutral Grand Piano template,
-// preserving the original Encore label as the part's long name.
+// Regression: voice >= VOICES (e.g. voice=4) was silently dropped; fix maps out-of-range voices to voice 0.
+// Also: short names (1-3 chars) skip name+MIDI matcher and fall through to Grand Piano template.
 TEST_F(Tst_Importer, v0c4_satb_short_names_with_voice4_bass_lyrics)
 {
     MasterScore* score = readEncoreScore("text_satb_short_names_voice4_lyrics.enc");
@@ -1755,12 +1549,8 @@ TEST_F(Tst_Importer, v0c4_satb_short_names_with_voice4_bass_lyrics)
     delete score;
 }
 
-// Regression for the non-tuplet branch of the second cap. An explicit-but-
-// isolated tuplet note that gets treated as plain (tupAdv != remaining) had
-// its chord placed with the face value, but the cumTick advance was capped
-// to fit the remaining measure space. Without updating the chord's ticks the
-// voice overran by face - capped. The fix always sets the chord duration to
-// the capped value.
+// Regression: isolated explicit tuplet note placed with face value but cumTick advance was capped;
+// voice overran by face - capped. Fix: always set chord duration to the capped value.
 TEST_F(Tst_Importer, isolated_explicit_tuplet_caps_chord_ticks)
 {
     MasterScore* score = readEncoreScore("importer_isolated_explicit_tuplet_capped.enc");
@@ -1770,12 +1560,8 @@ TEST_F(Tst_Importer, isolated_explicit_tuplet_caps_chord_ticks)
     delete score;
 }
 
-// Regression for treating a rest as a chord-extension anchor. Previously both
-// notes and rests updated prevMidiTick, so a note arriving at the same MIDI
-// tick as a recent rest was mis-detected as a chord extension; the importer
-// then silently replaced the rest's segment with the note's chord while
-// cumTick still carried the rest's contribution, producing voice/cumTick
-// mismatch and a measure that fails sanityCheck.
+// Regression: both notes and rests updated prevMidiTick; a note at the same tick as a rest was mis-detected
+// as chord extension, replacing the rest's segment while cumTick was already advanced past it.
 TEST_F(Tst_Importer, rest_does_not_anchor_chord_extension)
 {
     MasterScore* score = readEncoreScore("importer_rest_not_chord_anchor.enc");
@@ -1785,11 +1571,8 @@ TEST_F(Tst_Importer, rest_does_not_anchor_chord_extension)
     delete score;
 }
 
-// Regression for the rest path's second cap. A rest arriving with a tuplet
-// still open had its first cap skipped; the tuplet then closed (rest has no
-// tuplet bytes); the second cap shortened the cumTick advance but left the
-// rest's ticks at the uncapped face value. cr->actualTicks() then exceeded
-// the actual cumTick advance and the voice overran the measure.
+// Regression: rest with open tuplet skipped first cap; tuplet closed; second cap shortened cumTick advance
+// but left rest ticks at uncapped face value. cr->actualTicks() exceeded cumTick advance, overrunning the measure.
 TEST_F(Tst_Importer, rest_caps_its_ticks_when_advance_is_capped)
 {
     MasterScore* score = readEncoreScore("importer_rest_caps_in_open_tuplet.enc");
@@ -1799,14 +1582,8 @@ TEST_F(Tst_Importer, rest_caps_its_ticks_when_advance_is_capped)
     delete score;
 }
 
-// Regression for the duplicate `if (tt.inTuplet()) tt.placedTicks += advance;`
-// in the rest path. The bug double-counted a rest's contribution to the
-// tuplet's placedTicks, masking the tuplet's undershoot and skipping the
-// closeTuplet shrink. checkMeasure then reported the resulting non-standard
-// gap as Incomplete measure. The fixture has a 3:2 quarter triplet whose
-// first member is a quarter rest, followed by two eighth-note chords; total
-// content sums to 1/3 of the 2/4 measure (= 1/6 + 1/12 + 1/12) and the
-// tuplet must shrink to 1/3 so the remaining 1/6 can be filled by checkMeasure.
+// Regression: duplicate tt.placedTicks += advance in rest path double-counted the rest's contribution,
+// masking the undershoot and skipping closeTuplet shrink. checkMeasure reported "Incomplete measure".
 TEST_F(Tst_Importer, rest_in_tuplet_does_not_double_count_placed_ticks)
 {
     MasterScore* score = readEncoreScore("importer_rest_in_tuplet.enc");
@@ -1859,9 +1636,6 @@ ENC_SANITY_TEST(dynamics_size16,            "ornaments_dynamics.enc")
 ENC_SANITY_TEST(dynamics_full,              "ornaments_dynamics_full.enc")
 ENC_SANITY_TEST(wedgestart_at_measure_end,  "ornaments_wedgestart_at_measure_end.enc")
 ENC_SANITY_TEST(double_barline_multi_staff, "ornaments_double_barline_multi_staff.enc")
-// ===========================================================================
-// FEATURE: Multi-staff score with correct voice assignments
-// ===========================================================================
 
 TEST_F(Tst_Importer, orchestra_loads_with_all_parts)
 {
@@ -1881,10 +1655,6 @@ TEST_F(Tst_Importer, orchestra_sanity_check)
     EXPECT_TRUE(ret) << "kordorkestro should pass sanityCheck: " << ret.text();
     delete score;
 }
-
-// ===========================================================================
-// FEATURE: Title from TITL block
-// ===========================================================================
 
 TEST_F(Tst_Importer, title_frame_created)
 {
@@ -1911,10 +1681,7 @@ TEST_F(Tst_Importer, no_title_frame_when_empty)
 
 TEST_F(Tst_Importer, title_frame_instruction_and_copyright)
 {
-    // text_title_instruction_copyright.enc: TITL block with title,
-    // subtitle, instruction (arranger), author (composer), and copyright.
-    // instruction[0] must appear in the VBox as LYRICIST; copyright[0] must
-    // be stored in the score "copyright" metadata tag.
+    // TITL block: title, subtitle, instruction → LYRICIST, author → COMPOSER, copyright → metadata tag.
     MasterScore* score = readEncoreScore("text_title_instruction_copyright.enc");
     ASSERT_NE(score, nullptr);
 
@@ -1954,15 +1721,7 @@ TEST_F(Tst_Importer, title_frame_instruction_and_copyright)
 
 TEST_F(Tst_Importer, title_frame_headers_footers)
 {
-    // text_titl_headers_footers.enc carries two header lines and
-    // two footer lines with non-trivial alignment bytes:
-    //   header[0] = "Header Right"   align=0x02 (RIGHT)
-    //   header[1] = "Header Center"  align=0x06 (CENTER)
-    //   footer[0] = "Footer Center"  align=0x06 (CENTER)
-    //   footer[1] = "Footer Right"   align=0x02 (RIGHT)
-    // The importer must apply the texts to BOTH the odd- and even-page Sids
-    // so they show on every page regardless of page parity, and place each
-    // text in the column the alignment byte selects.
+    // Two header lines (RIGHT + CENTER) and two footer lines (CENTER + RIGHT); applied to odd+even Sids.
     MasterScore* score = readEncoreScore("text_titl_headers_footers.enc");
     ASSERT_NE(score, nullptr);
 
@@ -1974,9 +1733,7 @@ TEST_F(Tst_Importer, title_frame_headers_footers)
     EXPECT_EQ(styleText(Sid::evenHeaderR), String(u"Header Right"));
     EXPECT_EQ(styleText(Sid::oddHeaderC),  String(u"Header Center"));
     EXPECT_EQ(styleText(Sid::evenHeaderC), String(u"Header Center"));
-    // Left header columns are not overwritten by the importer because no
-    // header line was tagged LEFT in the fixture. The defaults that ship
-    // with MuseScore (e.g. evenHeaderL = "$p") must therefore survive.
+    // No left-aligned header in fixture; default Sids (e.g. "$p") must survive unchanged.
     EXPECT_NE(styleText(Sid::oddHeaderL),  String(u"Header Right"));
     EXPECT_NE(styleText(Sid::oddHeaderL),  String(u"Header Center"));
     EXPECT_NE(styleText(Sid::evenHeaderL), String(u"Header Right"));
@@ -1993,10 +1750,6 @@ TEST_F(Tst_Importer, title_frame_headers_footers)
 
     delete score;
 }
-
-// ===========================================================================
-// FEATURE: Chord symbols (Harmony elements)
-// ===========================================================================
 
 TEST_F(Tst_Importer, chord_symbols_present)
 {
@@ -2028,10 +1781,6 @@ TEST_F(Tst_Importer, chord_symbols_present)
     delete score;
 }
 
-// ===========================================================================
-// FEATURE: Multiple voices (opeco_vochoj)
-// ===========================================================================
-
 TEST_F(Tst_Importer, multiple_voices_loaded)
 {
     // opeco_vochoj.enc has multiple voices per staff
@@ -2059,13 +1808,6 @@ TEST_F(Tst_Importer, multiple_voices_loaded)
     delete score;
 }
 
-// ===========================================================================
-// FEATURE: End-to-end coverage on the encore_symbols reference file.
-// The user authored encore_symbols.enc to exercise every visible symbol
-// Encore can place. This test pins the per-category counts that the
-// importer is expected to recover -- a regression on any of the symbol
-// families decoded in this directory will trip this case immediately.
-// ===========================================================================
 TEST_F(Tst_Importer, encore_symbols_full_coverage)
 {
     MasterScore* score = readEncoreScore("encore_symbols.enc");
@@ -2095,8 +1837,12 @@ TEST_F(Tst_Importer, encore_symbols_full_coverage)
         }
         Measure* m = toMeasure(mb);
         for (EngravingItem* e : m->el()) {
-            if (e && e->isMarker()) ++markers;
-            if (e && e->isJump()) ++jumps;
+            if (e && e->isMarker()) {
+                ++markers;
+            }
+            if (e && e->isJump()) {
+                ++jumps;
+            }
         }
         // Dotted end barline
         Segment* endBar = m->findSegment(SegmentType::EndBarLine, m->endTick());
@@ -2112,46 +1858,66 @@ TEST_F(Tst_Importer, encore_symbols_full_coverage)
         for (Segment* s = m->first(SegmentType::ChordRest);
              s; s = s->next(SegmentType::ChordRest)) {
             for (EngravingItem* e : s->annotations()) {
-                if (e && e->isDynamic()) ++dynamics;
-                if (e && e->isFermata()) ++fermatas;
+                if (e && e->isDynamic()) {
+                    ++dynamics;
+                }
+                if (e && e->isFermata()) {
+                    ++fermatas;
+                }
             }
             EngravingItem* el = s->element(0);
             if (!el || !el->isChord()) {
                 continue;
             }
             Chord* c = toChord(el);
-            if (c->arpeggio()) ++arpeggios;
-            if (c->tremoloSingleChord()) ++tremolos;
+            if (c->arpeggio()) {
+                ++arpeggios;
+            }
+            if (c->tremoloSingleChord()) {
+                ++tremolos;
+            }
             for (Articulation* a : c->articulations()) {
                 using mu::engraving::SymId;
                 switch (a->symId()) {
                 case SymId::articStaccatoAbove: case SymId::articStaccatoBelow:
-                    ++staccatos; break;
+                    ++staccatos;
+                    break;
                 case SymId::articTenutoAbove: case SymId::articTenutoBelow:
-                    ++tenutos; break;
+                    ++tenutos;
+                    break;
                 case SymId::articAccentAbove: case SymId::articAccentBelow:
-                    ++accents; break;
+                    ++accents;
+                    break;
                 case SymId::articMarcatoAbove: case SymId::articMarcatoBelow:
-                    ++marcatos; break;
+                    ++marcatos;
+                    break;
                 case SymId::articStaccatissimoAbove: case SymId::articStaccatissimoBelow:
-                    ++staccatissimos; break;
+                    ++staccatissimos;
+                    break;
                 case SymId::ornamentTrill:
-                    ++trills; break;
-                case SymId::ornamentShortTrill:  // <inverted-mordent>
+                    ++trills;
+                    break;
+                case SymId::ornamentShortTrill:    // <inverted-mordent>
+                case SymId::ornamentTremblement:   // <inverted-mordent long="yes">
                 case SymId::ornamentMordent:
-                    ++mordents; break;
+                    ++mordents;
+                    break;
                 default: break;
                 }
             }
             for (Note* n : c->notes()) {
                 for (EngravingItem* nel : n->el()) {
-                    if (nel && nel->isFingering()) ++fingerings;
+                    if (nel && nel->isFingering()) {
+                        ++fingerings;
+                    }
                 }
             }
         }
     }
     for (auto& [tick, sp] : score->spannerMap().map()) {
-        if (sp->isHairpin()) ++hairpins;
+        if (sp->isHairpin()) {
+            ++hairpins;
+        }
     }
     EXPECT_GE(dynamics,      13) << "all 13 Encore dynamics expected";
     EXPECT_GE(fermatas,       2);
@@ -2171,10 +1937,6 @@ TEST_F(Tst_Importer, encore_symbols_full_coverage)
     EXPECT_GE(dotted_barlines, 1);
     delete score;
 }
-
-// ===========================================================================
-// FEATURE: Corrupt files load without crash (regression tests)
-// ===========================================================================
 
 TEST_F(Tst_Importer, beethoven_no_crash)
 {
@@ -2232,7 +1994,6 @@ TEST_F(Tst_Importer, key_transposition_non_octave_oboe)
     EXPECT_TRUE(ret) << ret.text();
     delete score;
 }
-
 
 // Percussion file: two WINI/TITL/PREC blocks, large ghost MEAS blocks embedded in binary data.
 // Must import cleanly: correct measure count, no DOM corruption.

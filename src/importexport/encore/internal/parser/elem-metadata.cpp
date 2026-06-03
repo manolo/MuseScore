@@ -22,6 +22,8 @@
 
 #include "elements.h"
 
+#include "encoding.h"
+
 namespace mu::iex::encore {
 // ---------------------------------------------------------------------------
 // EncInstrument
@@ -30,20 +32,16 @@ namespace mu::iex::encore {
 bool EncInstrument::read(QDataStream& ds, quint32 vs, bool probeEncoding)
 {
     offset = vs & 0xFFFF;
-    // Encoding probe: printable b0 + b1==0 → UTF-16 LE; else Latin-1.
-    // Overrides charSize(): Encore 5.0.2 uses UTF-16 even when TK offset ≤ 250,
-    // legacy files use Latin-1 even when offset > 250.
-    // Without this, "Tropa" decodes as "牔燯a".
+    // Encoding probe overrides charSize(); see ENCORE_FORMAT.md §Encoding probe.
     EncCharSize cs = charSize();
     if (probeEncoding) {
         const qint64 savedPos = ds.device()->pos();
         quint8 b0 = 0, b1 = 0;
         ds >> b0 >> b1;
         ds.device()->seek(savedPos);
-        const bool printable = (b0 >= 0x20 && b0 < 0x7F);
-        if (printable && b1 == 0x00) {
+        if (probeUtf16LE(b0, b1)) {
             cs = EncCharSize::TWO_BYTES;
-        } else if (printable && b1 != 0x00 && b1 >= 0x20 && b1 < 0xFF) {
+        } else if (b0 >= 0x20 && b0 < 0x7F && b1 != 0x00 && b1 >= 0x20 && b1 < 0xFF) {
             cs = EncCharSize::ONE_BYTE;
         }
     }
