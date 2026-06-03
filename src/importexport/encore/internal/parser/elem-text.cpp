@@ -21,14 +21,14 @@
  */
 
 #include "elements.h"
-
+#include "reader.h"
 
 namespace mu::iex::encore {
 // ---------------------------------------------------------------------------
 // EncHeader
 // ---------------------------------------------------------------------------
 
-bool EncHeader::read(QDataStream& ds)
+bool EncHeader::readMagicAndVersion(QDataStream& ds)
 {
     for (int i = 0; i < 4; ++i) {
         quint8 ch;
@@ -43,13 +43,18 @@ bool EncHeader::read(QDataStream& ds)
         return false;
     }
     ds >> chuMagio;
+    return true;
+}
+
+bool EncHeader::read(QDataStream& ds, const EncFormatReader& fmt)
+{
     ds.skipRawData(0x28 - 5);
     ds >> chuVersio >> nekon1 >> fiksa1 >> lineCount >> pageCount;
     ds >> instrumentCount >> staffPerSystem >> measureCount;
-    // v0xA6 header ends at 0xA6 (TK00 starts there). v0xC2/v0xC4 go to 0xC2.
-    // Reading past 0xC2 on v0xA6 would consume TK00 and shift all instrument slots.
-    const qint64 headerEnd = isVeryOldFormat() ? 0xA6 : 0xC2;
-    ds.skipRawData(headerEnd - 0x36);
+    // Skip to the first block. v0xA6 header ends at 0xA6 (TK00 starts there);
+    // v0xC2/v0xC4 go to 0xC2. Reading past the end on v0xA6 would consume TK00
+    // and shift all instrument slots.
+    ds.skipRawData(fmt.headerEnd() - 0x36);
     return true;
 }
 
@@ -59,20 +64,7 @@ bool EncHeader::read(QDataStream& ds)
 
 bool EncTextBlock::read(QDataStream& ds, quint32 varSize)
 {
-    // Block layout (varSize bytes total):
-    //   +0..+1: 0x0000 sync
-    //   +2..+3: entry count
-    //   +4..+7: content size (= sum of all entries)
-    //   then `count` entries; each:
-    //     +0..+1: payload size S
-    //     +2..+S+1: payload
-    //       +0..+13: 14 bytes of fields not fully decoded
-    //       +14..+S-5: UTF-16 LE text
-    //       +S-4..+S-1: 0x04 0x00 0x00 0x00 terminator
-    //
-    // The N-th entry is referenced by an ornament's `tind` byte (+32).
-    // Encore writes the text in storage order regardless of measure order;
-    // the ornament's tind picks the matching entry directly.
+    // See ENCORE_FORMAT.md §TEXT block for layout. Entry N referenced by ORN tind byte (+32).
     if (varSize < 8) {
         ds.skipRawData(varSize);
         return true;
@@ -97,9 +89,7 @@ bool EncTextBlock::read(QDataStream& ds, quint32 varSize)
             break;
         }
         consumed += entrySize;
-        // Text at payload[14], ends at first 0x04 0x00 terminator.
-        // Probe: printable b14 + b15==0 → UTF-16 LE; else Latin-1.
-        // Old reader forced UTF-16 and mis-decoded Latin-1 (e.g. "la 1ª vez" → gibberish).
+        // Payload text at +14, probe picks UTF-16 LE or Latin-1; see ENCORE_FORMAT.md §Encoding probe.
         QString text;
         if (entrySize >= 16) {
             const quint8 b14 = static_cast<quint8>(payload[14]);
@@ -137,5 +127,4 @@ bool EncTextBlock::read(QDataStream& ds, quint32 varSize)
     }
     return true;
 }
-
 } // namespace mu::iex::encore

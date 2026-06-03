@@ -31,6 +31,8 @@
 #include <QtGlobal>
 
 #include "../parser/elements.h"
+#include "../parser/reader.h"
+#include "tuplets.h"
 #include "engraving/types/fraction.h"
 #include "engraving/types/symid.h"
 #include "engraving/dom/lyrics.h"
@@ -40,10 +42,9 @@
 #include "engraving/dom/ornament.h"
 #include "engraving/dom/marker.h"
 
-namespace mu::engraving { class MasterScore; }
+using namespace mu::engraving;
 
 namespace mu::iex::encore {
-
 // Pending intents collected during note-import, resolved in resolveAll().
 struct PendingSlur {
     Fraction startTick;
@@ -70,8 +71,6 @@ struct PendingHairpin {
     int staffIdx;
     int encVoice;
 };
-std::vector<PendingHairpin> pendingHairpins;
-std::vector<PendingSlur> pendingSlurs;
 
 // Arpeggio intents deferred: ORN comes before chord notes in MEAS order,
 // so the chord does not exist yet at parse time.
@@ -79,7 +78,6 @@ struct PendingArpeggio {
     Fraction tick;
     track_idx_t track;
 };
-std::vector<PendingArpeggio> pendingArpeggios;
 
 // Single-chord tremolo intents (tipo 0xAF/0xEF), deferred like ARPEGGIO.
 // Post-pass falls back to latest chord before the stored tick.
@@ -90,21 +88,18 @@ struct PendingOrnTremolo {
     int msVoice;
     TremoloType tremType;
 };
-std::vector<PendingOrnTremolo> pendingOrnTremolos;
 
 // Trill intents (tipo 0x35/0x36/0x37), deferred for the same reason as ARPEGGIO.
 struct PendingTrill {
     Fraction tick;
     track_idx_t track;
 };
-std::vector<PendingTrill> pendingTrills;
 
 // Staccato intents (tipo 0xC9), deferred for the same reason as ARPEGGIO.
 struct PendingStaccato {
     Fraction tick;
     track_idx_t track;
 };
-std::vector<PendingStaccato> pendingStaccatos;
 
 // Bowing/stroke intents (tipo 0xC4=upbow, 0xC5=downbow), deferred like ARPEGGIO.
 struct PendingBowing {
@@ -114,7 +109,6 @@ struct PendingBowing {
     int measIdx = -1;       // source measure index
     bool crossMeasure = false;  // no voice=0 note at same raw Encore tick; belongs to next measure
 };
-std::vector<PendingBowing> pendingBowings;
 
 // Fingering number intents from stand-alone ORN elements (tipo 0xB9..0xBD),
 // deferred because the chord segment is not built yet at ORN parse time.
@@ -126,26 +120,12 @@ struct PendingOrnFingering {
     bool crossMeasure = false;   // ORN at last v0 tick, no v4 note there: belongs to next measure
     bool preferSibling = false;  // more ORNs than v0 notes at tick: belongs to 2nd-staff chord
 };
-std::vector<PendingOrnFingering> pendingOrnFingerings;
 
 // Segno/Coda markers (tipo 0xA2/0xA6), attached to the measure, not a chord.
 struct PendingMarker {
     Fraction tick;
     MarkerType type;
 };
-std::vector<PendingMarker> pendingMarkers;
-
-// Volta being coalesced: Encore tags every measure in the ending with the
-// same bitmask; equal-bitmask runs collapse into one Volta.
-Volta* activeVolta = nullptr;
-quint8 activeVoltaBits = 0;
-
-// Tuplet state per (staffIdx, msVoice).
-std::map<std::pair<int, int>, TupletTracker> tuplets;
-
-// Pending tie-start notes: key=(staffIdx, voice, pitch), value=Note* to tie FROM.
-// Persists across measures for ties across barlines.
-std::map<std::tuple<int, int, int>, Note*> pendingTieNote;
 
 // Lyric syllables queued for attachment. Tick stored so we can find the
 // closest chord at measure end (queue index shifts with ORN elements).
@@ -155,75 +135,82 @@ struct PendingLyric {
     bool hyphenBefore;  // a "-" LYRIC element preceded this syllable
     bool hyphenAfter;   // a "-" LYRIC element follows this syllable
 };
-std::map<track_idx_t, std::vector<PendingLyric> > pendingLyrics;
-// True when the next syllable follows a hyphen. Reset at measure boundary.
-std::map<track_idx_t, bool> nextLyricHyphenBefore;
-
-// All maps keyed by (staffIdx, msVoice). Notes placed at cumTick, not MIDI tick.
-// MIDI ticks used only for chord grouping (same MIDI tick = same chord).
-std::map<std::pair<int, int>, Fraction> cumTick;      // accumulated written position
-std::map<std::pair<int, int>, int> prevMidiTick;       // last MIDI tick placed (chord detection)
-// Encore voice of last note placed. Prevents misdetecting a chord extension
-// when two Encore voices share the same MuseScore voice via streamOffset.
-std::map<std::pair<int, int>, int> prevEncVoice;
-std::map<std::pair<int, int>, Fraction> lastChordPos;  // MuseScore tick of last chord root
-
-// Grace chords held detached; attached via Chord::add() to the next normal chord.
-// NOT added to a Segment: that crashes beam layout (Chord::pagePos asserts non-Segment parent).
-// Cleared per measure.
-std::map<std::pair<int, int>, std::vector<Chord*> > pendingGraces;
-
-// Stream-overflow voice assignment: when cumTick fills and a new note arrives,
-// it belongs to another recording stream; assign it to the next MuseScore voice.
-// Reset each measure; overflow from one measure must not affect the next.
-std::map<std::pair<int, int>, int> streamOffset;  // key=(staffIdx,encVoice), val=extra offset
-
-// Pitches placed in voice 0 for the current measure, keyed by staffIdx.
-// Used to suppress stream-duplicate notes overflowing to voice 1+: any overflow
-// note whose pitch already exists in voice 0 is a recording-stream artifact.
-// Cleared per measure.
-std::map<int, std::set<int>> v0PitchesInMeasure;
-
-// v0xA6 inner-grace tracking: leading grace fv stored here so inner graces
-// (g1=0x10) with higher fv are also classified as graces. Cleared on flush.
-std::map<std::pair<int, int>, quint8> v0xA6LeadingGraceFv;
-
-// Face ticks of the last flushed grace group. Used to suppress spurious
-// gap rests when the next note's tick is shifted by exactly that amount.
-std::map<std::pair<int, int>, int> v0xA6GraceStolenTicks;
-
 
 // Shared state for all build phases: setup, measures, notes, resolvers.
 struct BuildCtx
 {
     mu::engraving::MasterScore* score;
-    const EncFile&           enc;
+    const EncFile& enc;
+    const EncFormatReader* fmt { nullptr };    // set in buildScore(), non-owning
+
+    // Format capability flags, set from fmt in buildScore() so that importer
+    // phases do not need to query the reader directly.
+    bool impliedTuplets  { false };    // v0xC2: tuplet membership by rdur/faceValue mismatch
+    bool g1LowTieSender  { false };    // v0xC2: grace1 low nibble encodes tie-sender indicator
 
     // Populated by buildParts():
-    int                      totalStaves = 0;
-    std::vector<int>         staffPitchOffset;
-    std::vector<ClefType>    staffTemplateConcertClef;
-    std::vector<ClefType>    staffTemplateTransposingClef;
+    int totalStaves = 0;
+    std::vector<int> staffPitchOffset {};
+    std::vector<ClefType> staffTemplateConcertClef {};
+    std::vector<ClefType> staffTemplateTransposingClef {};
 
     // Populated by buildMeasures(): nominal time sig of the score (differs from
     // measures[0] when the first measure is a pickup / anacrusis).
-    Fraction                 nominalTimeSig { 4, 4 };
+    Fraction nominalTimeSig { 4, 4 };
 
     // Populated by buildNoteLoop():
-    std::vector<Measure*>    measuresByIdx;
-    std::vector<PendingHairpin>    pendingHairpins;
-    std::vector<PendingSlur>       pendingSlurs;
-    std::vector<PendingArpeggio>   pendingArpeggios;
-    std::vector<PendingOrnTremolo> pendingOrnTremolos;
-    std::vector<PendingTrill>         pendingTrills;
-    std::vector<PendingStaccato>      pendingStaccatos;
-    std::vector<PendingBowing>        pendingBowings;
-    std::vector<PendingOrnFingering>  pendingOrnFingerings;
-    std::vector<PendingMarker>        pendingMarkers;
-    std::map<track_idx_t, std::vector<PendingLyric> > pendingLyrics;
+    std::vector<Measure*> measuresByIdx {};
+    std::vector<PendingHairpin> pendingHairpins {};
+    std::vector<PendingSlur> pendingSlurs {};
+    std::vector<PendingArpeggio> pendingArpeggios {};
+    std::vector<PendingOrnTremolo> pendingOrnTremolos {};
+    std::vector<PendingTrill> pendingTrills {};
+    std::vector<PendingStaccato> pendingStaccatos {};
+    std::vector<PendingBowing> pendingBowings {};
+    std::vector<PendingOrnFingering> pendingOrnFingerings {};
+    std::vector<PendingMarker> pendingMarkers {};
+    std::map<track_idx_t, std::vector<PendingLyric> > pendingLyrics {};
+
+    // Per-measure note loop state (keyed by (staffIdx, msVoice) unless noted).
+    // All start empty; BuildCtx is constructed fresh for every import.
+
+    // Volta being coalesced: equal-bitmask runs collapse into one Volta.
+    Volta* activeVolta { nullptr };
+    quint8 activeVoltaBits { 0 };
+
+    // Tuplet state per (staffIdx, msVoice).
+    std::map<std::pair<int, int>, TupletTracker> tuplets {};
+
+    // Pending tie-start notes: key=(staffIdx, voice, pitch), value=Note* to tie FROM.
+    // Persists across measures for ties across barlines.
+    std::map<std::tuple<int, int, int>, Note*> pendingTieNote {};
+
+    // Accumulated written position per (staffIdx, msVoice).
+    std::map<std::pair<int, int>, Fraction> cumTick {};
+    // Last MIDI tick placed (chord detection — same MIDI tick = same chord).
+    std::map<std::pair<int, int>, int> prevMidiTick {};
+    // Encore voice of last note placed. Prevents chord-extension misdetection.
+    std::map<std::pair<int, int>, int> prevEncVoice {};
+    // MuseScore tick of last chord root.
+    std::map<std::pair<int, int>, Fraction> lastChordPos {};
+
+    // Grace chords held detached; attached to the next normal chord.
+    std::map<std::pair<int, int>, std::vector<Chord*> > pendingGraces {};
+
+    // Stream-overflow voice assignment; reset each measure.
+    std::map<std::pair<int, int>, int> streamOffset {};
+
+    // Pitches placed in voice 0 for the current measure (per staffIdx); cleared each measure.
+    std::map<int, std::set<int> > v0PitchesInMeasure {};
+
+    // v0xA6 inner-grace tracking; cleared on flush.
+    std::map<std::pair<int, int>, quint8> v0xA6LeadingGraceFv {};
+    // Face ticks of the last flushed grace group; used to suppress spurious gap rests.
+    std::map<std::pair<int, int>, int> v0xA6GraceStolenTicks {};
+
+    // True when the next syllable follows a hyphen; reset at measure boundary.
+    std::map<track_idx_t, bool> nextLyricHyphenBefore {};
 };
-
-
 } // namespace mu::iex::encore
 
 #endif // MU_IMPORTEXPORT_ENC_IMPORT_CTX_H

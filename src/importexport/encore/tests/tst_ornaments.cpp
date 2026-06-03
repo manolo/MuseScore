@@ -68,12 +68,8 @@ protected:
 
 TEST_F(Tst_Ornaments, no_nan_crash_from_open_slurs)
 {
-    // Before fix: Beethoven/Opus27 had SLURSTART without SLURSTOP.
-    // The resulting slur with no endpoints caused NaN in computeBezier → crash.
-    // After fix: all open slurs are removed from the score.
-    // notes_corrupted.enc has a SLURSTART ornament with no matching SLURSTOP.
-    // Before fix: the resulting slur had no endpoints → NaN in Bezier layout.
-    // After fix: open slurs are removed; all remaining spanners have valid tick ranges.
+    // notes_corrupted.enc has SLURSTART without SLURSTOP. No endpoints → NaN in Bezier layout.
+    // Fix: remove all open slurs; all remaining spanners must have valid tick ranges.
     MasterScore* score = readEncoreScore("notes_corrupted.enc");
     ASSERT_NE(score, nullptr) << "Corrupted file should load without NaN crash";
     for (auto& [tick, sp] : score->spannerMap().map()) {
@@ -85,19 +81,13 @@ TEST_F(Tst_Ornaments, no_nan_crash_from_open_slurs)
 
 TEST_F(Tst_Ornaments, no_nan_crash_opus27)
 {
-    // Re-uses the same synthetic file; verifies the fix is robust.
     MasterScore* score = readEncoreScore("notes_corrupted.enc");
     ASSERT_NE(score, nullptr);
     delete score;
 }
 
 // ===========================================================================
-// BUG FIX: Non-standard tuplet ticks do not assert in beam layout
-// 3 quarters + 1 plain 8th + 2 explicit 8th triplets where the 2nd note is
-// capped at the measure boundary.  closeTuplet() would set non-standard
-// placedTicks (11/96) on the tuplet; beam.cpp called TDuration(tuplet->ticks())
-// without truncate and asserted.  The fix snaps placedTicks to the nearest
-// standard fraction before setTicks().
+// REGRESSION: Capped 3:2 triplet produces non-TDuration placedTicks; closeTuplet must not assert in beam layout.
 // ===========================================================================
 
 TEST_F(Tst_Ornaments, beamed_triplet_capped_no_beam_assert)
@@ -106,7 +96,6 @@ TEST_F(Tst_Ornaments, beamed_triplet_capped_no_beam_assert)
     ASSERT_NE(score, nullptr) << "File should load without beam-layout assert";
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
-    // All spanners (if any) must have positive span
     for (auto& [tick, sp] : score->spannerMap().map()) {
         EXPECT_LT(sp->tick(), sp->tick2()) << "Spanner has non-positive span";
     }
@@ -114,10 +103,7 @@ TEST_F(Tst_Ornaments, beamed_triplet_capped_no_beam_assert)
 }
 
 // ===========================================================================
-// REGRESSION: WEDGESTART with alMezuro=0 produces a hairpin with positive span.
-// Encore .enc binaries do not contain a separate WEDGESTOP; the end is encoded
-// inside the WEDGESTART (alMezuro = number of measures forward). When alMezuro
-// is 0 the hairpin must span the current measure, not collapse to zero.
+// REGRESSION: WEDGESTART with alMezuro=0 must span the current measure, not collapse to zero.
 // ===========================================================================
 
 TEST_F(Tst_Ornaments, zero_length_hairpin_dropped_cleanly)
@@ -126,7 +112,6 @@ TEST_F(Tst_Ornaments, zero_length_hairpin_dropped_cleanly)
     ASSERT_NE(score, nullptr) << "File should load without Spanner::setTicks assert";
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
-    // Every spanner must have positive span.
     for (auto& [tick, sp] : score->spannerMap().map()) {
         EXPECT_LT(sp->tick(), sp->tick2()) << "Spanner has non-positive span";
     }
@@ -134,10 +119,7 @@ TEST_F(Tst_Ornaments, zero_length_hairpin_dropped_cleanly)
 }
 
 // ===========================================================================
-// REGRESSION: Partial 3:2 quarter triplet must not crash beam layout.
-// closeTuplet would previously set tuplet->ticks() to placedTicks = 1/3, which
-// is not a TDuration fraction. Beam::calcBeamBreaks then constructs
-// TDuration(ticks, /*truncate*/false) and asserts in debug builds.
+// REGRESSION: Partial 3:2 quarter triplet (placedTicks=1/3, not a TDuration fraction) must not assert in beam layout.
 // ===========================================================================
 
 TEST_F(Tst_Ornaments, partial_quarter_triplet_layout_does_not_assert)
@@ -156,8 +138,7 @@ TEST_F(Tst_Ornaments, articulations_mapped_beyond_fermata)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    // Layout may flip Above -> Below based on stem direction. Normalize by
-    // checking the type predicate rather than the exact SymId.
+    // Check by type predicate rather than exact SymId; layout may flip Above<->Below per stem direction.
     enum class ArtKind { Staccato, Accent, Tenuto, Marcato, Other };
     auto kindOf = [](Articulation* a) -> ArtKind {
         if (a->isStaccato()) {
@@ -201,11 +182,7 @@ TEST_F(Tst_Ornaments, articulations_mapped_beyond_fermata)
 }
 
 // ===========================================================================
-// FEATURE: Combo articulation bytes emit multiple Articulation elements.
-// Encore packs two glyphs into one byte (e.g. 0x24 = tenuto + staccato).
-// Treating each byte as a single SymId would silently drop ~85 % of the
-// articulations in encore-symbols.enc m8-m13. The new fixture exercises
-// every combo byte; the importer must add both glyphs to the chord.
+// FEATURE: Combo articulation bytes (e.g. 0x24 = tenuto + staccato) expand to two Articulation elements.
 // ===========================================================================
 TEST_F(Tst_Ornaments, articulation_combos_expand_to_two_glyphs)
 {
@@ -232,9 +209,8 @@ TEST_F(Tst_Ornaments, articulation_combos_expand_to_two_glyphs)
             return K::Other;
         }
     };
-    // Per-chord expected set of articulations, in the binary's note order:
-    //   m1: 0x24 (ten+stacc), 0x17 (acc+stacc), 0x27 (marc+ten), 0x15 (marc+stacc)
-    //   m2: 0x23 (acc+ten),   0x2D (ten+statiss), 0x2B (acc+statiss), 0x24 (ten+stacc)
+    // m1: 0x24 ten+stacc, 0x17 acc+stacc, 0x27 marc+ten, 0x15 marc+stacc;
+    // m2: 0x23 acc+ten, 0x2D ten+stiss, 0x2B acc+stiss, 0x24 ten+stacc.
     const std::vector<std::set<K> > expected = {
         { K::Tenuto, K::Staccato },
         { K::Accent, K::Staccato },
@@ -273,11 +249,7 @@ TEST_F(Tst_Ornaments, articulation_combos_expand_to_two_glyphs)
 }
 
 // ===========================================================================
-// FEATURE: Per-chord staccato from size-16 ORN tipo=0xC9.
-// Encore stores staccato as a separate ORN at the same tick as the chord;
-// its MusicXML exporter drops the byte but the dot is visible. The
-// importer must add Staccato per ORN and dedup against the per-note
-// artic byte 0x1D (which produces the same glyph).
+// FEATURE: Per-chord staccato from size-16 ORN tipo=0xC9; deduped against per-note artic byte 0x1D.
 // ===========================================================================
 TEST_F(Tst_Ornaments, staccato_from_orn_c9)
 {
@@ -308,9 +280,7 @@ TEST_F(Tst_Ornaments, staccato_from_orn_c9)
             EXPECT_LE(staccatoCount, 1) << "no duplicate staccato per chord";
         }
     }
-    // Expected sequence: chord 0 has staccato (0xC9), chord 1 has
-    // staccato (0xC9), chord 2 has none, chord 3 has staccato (both
-    // 0xC9 and the per-note artic byte 0x1D -- must dedup).
+    // chords 0,1,3 have staccato; chord 2 has none; chord 3 dedupes 0xC9 + artic byte 0x1D.
     const std::vector<bool> expected = { true, true, false, true };
     EXPECT_EQ(seen, expected);
     delete score;
@@ -350,11 +320,7 @@ TEST_F(Tst_Ornaments, trill_spanner_start_markers)
 }
 
 // ===========================================================================
-// FEATURE: Per-note technical markings from artic byte.
-//   0x0D..0x11 -> fingering 1..5 (Fingering text "1".."5")
-//   0x46       -> open-string (Fingering STRING_NUMBER text "0")
-//   0x44, 0x45 -> thumb-position (Articulation stringsThumbPosition)
-//   0x1E, 0x1F -> harmonic (Articulation stringsHarmonic)
+// FEATURE: Per-note technical markings: fingering 1..5 (0x0D..0x11), open-string (0x46), thumb (0x44/0x45), harmonic (0x1E/0x1F).
 // ===========================================================================
 TEST_F(Tst_Ornaments, technical_markings_per_note_artic_byte)
 {
@@ -400,13 +366,7 @@ TEST_F(Tst_Ornaments, technical_markings_per_note_artic_byte)
 }
 
 // ===========================================================================
-// FEATURE: Fermata anchored on segment, direction follows artic slot.
-// Encore stores the fermata above/below distinction by which artic slot
-// carries the byte: articUp=0x20 -> upright (above), articDown=0x21 ->
-// inverted (below). The importer must attach a Fermata to the chord's
-// segment (not the chord) so MusicXML exports <fermata> instead of
-// <other-articulation smufl="..."/>, and the PlacementV must follow the
-// slot so the type attribute renders correctly.
+// FEATURE: Fermata anchored on segment (not chord); direction from artic slot: articUp=0x20 (above), articDown=0x21 (below).
 // ===========================================================================
 TEST_F(Tst_Ornaments, fermatas_emit_segment_anchored_element)
 {
@@ -438,10 +398,7 @@ TEST_F(Tst_Ornaments, fermatas_emit_segment_anchored_element)
 }
 
 // ===========================================================================
-// FEATURE: Single-note tremolos derived from per-note artic byte.
-// Encore packs the stroke count in the low nibble of articulationUp /
-// articulationDown for byte values 0x41/0x42/0x43/0x03. The importer
-// attaches a TremoloSingleChord with TremoloType::R8/R16/R32.
+// FEATURE: Single-note tremolos from per-note artic byte (0x41/0x42/0x43/0x03 → R8/R16/R32).
 // ===========================================================================
 TEST_F(Tst_Ornaments, tremolos_from_per_note_artic_byte)
 {
@@ -474,10 +431,7 @@ TEST_F(Tst_Ornaments, tremolos_from_per_note_artic_byte)
 }
 
 // ===========================================================================
-// FEATURE: Trill-mark / mordent / inverted-mordent from per-note artic byte.
-// Encore stores ornament glyphs in the same articulationUp byte as plain
-// articulations. The importer wraps them in Ornament (an Articulation
-// subclass) so MuseScore's MusicXML export emits them under <ornaments>.
+// FEATURE: Trill-mark / mordent / inverted-mordent from per-note artic byte, emitted as Ornament for MusicXML.
 // ===========================================================================
 TEST_F(Tst_Ornaments, trill_mordent_from_per_note_artic_byte)
 {
@@ -513,11 +467,7 @@ TEST_F(Tst_Ornaments, trill_mordent_from_per_note_artic_byte)
 }
 
 // ===========================================================================
-// FEATURE: End-of-measure DOUBLE barline lands on every staff.
-// Encore renders barline graphics across every instrument on the system,
-// while MuseScore stores the barline per staff. The importer must apply
-// BarLineType::DOUBLE to every track, not only track 0 (the Beethoven
-// Plectro m26 double bar reproduced the original off-by-tracks bug).
+// REGRESSION: DOUBLE barline must be applied to every staff, not only track 0.
 // ===========================================================================
 TEST_F(Tst_Ornaments, double_barline_lands_on_every_staff)
 {
@@ -550,10 +500,7 @@ TEST_F(Tst_Ornaments, double_barline_lands_on_every_staff)
 }
 
 // ===========================================================================
-// FEATURE: WEDGESTART tick == durTicks (measure-end boundary) is kept.
-// Encore stores hairpins whose visible start sits on the bar line at
-// tick == measure->durTicks. The importer used to drop these along with
-// notes/rests beyond the bar; this test guards against the regression.
+// REGRESSION: WEDGESTART at tick == durTicks (measure-end boundary) must not be dropped.
 // ===========================================================================
 TEST_F(Tst_Ornaments, wedgestart_at_measure_end_boundary)
 {
@@ -575,9 +522,7 @@ TEST_F(Tst_Ornaments, wedgestart_at_measure_end_boundary)
 }
 
 // ===========================================================================
-// FEATURE: Dynamics from size-16 ORN cluster (0x81=pp, 0x82=p, 0x85=f,
-// 0x86=ff). The mapping was reverse-engineered against Beethoven Sinfonia
-// 7 II Allegretto Plectro cross-referenced with the Encore MusicXML export.
+// FEATURE: Dynamics from size-16 ORN cluster (0x81=pp, 0x82=p, 0x85=f, 0x86=ff).
 // ===========================================================================
 TEST_F(Tst_Ornaments, dynamics_from_size16_ornaments)
 {
@@ -608,13 +553,7 @@ TEST_F(Tst_Ornaments, dynamics_from_size16_ornaments)
 }
 
 // ===========================================================================
-// FEATURE: Voice=4 ORN with staffByte high bit, full dynamic ladder.
-// Encore writes system-level ornaments (dynamics, tremolos, technical
-// markings, etc.) with voice=4 and the staffByte high bit (0x40) set.
-// The importer must (a) accept voice=4 ORN elements as system marks
-// rather than dropping them, and (b) map the extended tipo ladder
-// 0x80..0x8A to the full DynamicType set. encore-symbols.enc reproduces
-// this; with the previous voice<VOICES filter every dynamic was lost.
+// FEATURE: Voice=4 ORN with staffByte high bit (0x40) produces system-level dynamics (full 0x80..0x8A ladder).
 // ===========================================================================
 TEST_F(Tst_Ornaments, dynamics_full_ladder_voice4_system_mark)
 {
@@ -648,10 +587,7 @@ TEST_F(Tst_Ornaments, dynamics_full_ladder_voice4_system_mark)
 }
 
 // ===========================================================================
-// FEATURE: Arpeggios from ORN tipo=0x22.
-// The synthetic file has a quarter-note C major triad at tick 0 with an
-// ORN tipo=0x22 attached. The importer must add an Arpeggio element to
-// the chord; no second arpeggio should appear elsewhere.
+// FEATURE: Arpeggio from ORN tipo=0x22 attaches to the chord.
 // ===========================================================================
 TEST_F(Tst_Ornaments, arpeggio_attaches_to_chord)
 {
@@ -686,11 +622,7 @@ TEST_F(Tst_Ornaments, arpeggio_attaches_to_chord)
 }
 
 // ===========================================================================
-// FIX: SLURSTART resolves end tick from alMezuro after the measure pass.
-// Two slurs: a multi-measure slur (alMezuro=2) and a same-measure one
-// (alMezuro=0). Encore .enc binaries do not emit SLURSTOP; the importer
-// collects intents and anchors them on the last ChordRest in the target
-// measure once measures are populated.
+// FIX: SLURSTART resolves end tick from alMezuro after the measure pass (no SLURSTOP in .enc binaries).
 // ===========================================================================
 
 TEST_F(Tst_Ornaments, multi_measure_slur_resolved_from_almezuro)
@@ -715,10 +647,7 @@ TEST_F(Tst_Ornaments, multi_measure_slur_resolved_from_almezuro)
 }
 
 // ===========================================================================
-// FIX: Multi-measure hairpin resolves end tick from WEDGESTART's alMezuro.
-// Two hairpins:
-//   - crescendo from measure 0 tick=0 with alMezuro=2 -> ends at end of measure 2
-//   - diminuendo from measure 1 tick=480 with alMezuro=1 -> ends at end of measure 2
+// FIX: Multi-measure hairpin end tick resolved from WEDGESTART's alMezuro (cresc alMezuro=2, dim alMezuro=1).
 // ===========================================================================
 
 TEST_F(Tst_Ornaments, multi_measure_hairpin_resolved_from_almezuro)
@@ -759,10 +688,7 @@ TEST_F(Tst_Ornaments, multi_measure_hairpin_resolved_from_almezuro)
 }
 
 // ===========================================================================
-// FEATURE: Bowing marks from stand-alone size-16 ORN elements.
-// tipo 0xC5 = down-bow (П), tipo 0xC4 = up-bow (V). Placed at the same
-// tick as the chord; the importer defers them in pendingBowings and attaches
-// an Articulation (stringsDownBow / stringsUpBow) during resolveAll().
+// FEATURE: Bowing marks from size-16 ORN tipo 0xC5 (down-bow) and 0xC4 (up-bow).
 // ===========================================================================
 TEST_F(Tst_Ornaments, bowing_marks_from_orn_c4_c5)
 {
@@ -799,9 +725,7 @@ TEST_F(Tst_Ornaments, bowing_marks_from_orn_c4_c5)
 }
 
 // ===========================================================================
-// FEATURE: Stand-alone fingering from ORN elements tipo 0xB9..0xBD.
-// tipo = 0xB8 + finger (1..5). The importer defers them in pendingOrnFingerings
-// and attaches a Fingering with xmlText "1".."5" to the top note of the chord.
+// FEATURE: Stand-alone fingering from ORN tipo 0xB9..0xBD (tipo = 0xB8 + finger 1..5).
 // ===========================================================================
 TEST_F(Tst_Ornaments, fingering_from_orn_b9_bd)
 {
@@ -832,5 +756,153 @@ TEST_F(Tst_Ornaments, fingering_from_orn_b9_bd)
     }
     const std::vector<String> expected = { u"1", u"2", u"3", u"4", u"5" };
     EXPECT_EQ(fingerings, expected);
+    delete score;
+}
+
+// ===========================================================================
+// FIX: Grand-staff FINGER ORN routing: cross-measure (Pattern A) and multi-note same-tick (Pattern B).
+// ===========================================================================
+TEST_F(Tst_Ornaments, fingering_grandstaff_routing)
+{
+    MasterScore* score = readEncoreScore("ornaments_fingering_grandstaff.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    // Navigate to a measure by 0-based index (Encore measure order).
+    auto measureAt = [&](int idx) -> Measure* {
+        int n = 0;
+        for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+            if (!mb->isMeasure()) {
+                continue;
+            }
+            if (n++ == idx) {
+                return toMeasure(mb);
+            }
+        }
+        return nullptr;
+    };
+
+    // Collect fingerings attached to the first chord on `tr` in `m`.
+    auto fingeringsOnFirstChord = [](Measure* m, track_idx_t tr) -> std::vector<String> {
+        std::vector<String> out;
+        if (!m) {
+            return out;
+        }
+        for (Segment* s = m->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(tr);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Note* n : toChord(el)->notes()) {
+                for (EngravingItem* e : n->el()) {
+                    if (e && e->isFingering()) {
+                        out.push_back(toFingering(e)->plainText());
+                    }
+                }
+            }
+            break;
+        }
+        return out;
+    };
+
+    // Collect all fingerings on `tr` across every chord in `m`.
+    auto fingeringsOnTrack = [](Measure* m, track_idx_t tr) -> std::vector<String> {
+        std::vector<String> out;
+        if (!m) {
+            return out;
+        }
+        for (Segment* s = m->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(tr);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Note* n : toChord(el)->notes()) {
+                for (EngravingItem* e : n->el()) {
+                    if (e && e->isFingering()) {
+                        out.push_back(toFingering(e)->plainText());
+                    }
+                }
+            }
+        }
+        return out;
+    };
+
+    const track_idx_t staff1 = 0;
+    const track_idx_t staff2 = VOICES;
+
+    // Pattern A: 4 ORNs from m2's last voice=0 tick must land on m3 staff 2, not m2 staff 1.
+    Measure* m2 = measureAt(1);
+    ASSERT_NE(m2, nullptr);
+    Measure* m3 = measureAt(2);
+    ASSERT_NE(m3, nullptr);
+
+    // Last chord of m2, staff 1: must NOT carry the cross-measure fingerings.
+    {
+        std::vector<String> m2s1last;
+        Segment* lastSeg = nullptr;
+        for (Segment* s = m2->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            if (s->element(staff1) && s->element(staff1)->isChord()) {
+                lastSeg = s;
+            }
+        }
+        if (lastSeg) {
+            for (Note* n : toChord(lastSeg->element(staff1))->notes()) {
+                for (EngravingItem* e : n->el()) {
+                    if (e && e->isFingering()) {
+                        m2s1last.push_back(toFingering(e)->plainText());
+                    }
+                }
+            }
+        }
+        EXPECT_TRUE(m2s1last.empty())
+            << "Last chord of m2 staff 1 should have no fingerings (Pattern A regression)";
+    }
+
+    // First chord of m3, staff 2: receives the 4 Pattern A fingerings.
+    {
+        auto f = fingeringsOnFirstChord(m3, staff2);
+        EXPECT_EQ(f.size(), 4u) << "m3 staff 2 should have 4 fingerings from Pattern A";
+        if (f.size() == 4) {
+            EXPECT_EQ(f[0], u"1");
+            EXPECT_EQ(f[1], u"1");
+            EXPECT_EQ(f[2], u"3");
+            EXPECT_EQ(f[3], u"4");
+        }
+    }
+
+    // Staff 1 m3 melody fingerings are unaffected by the fix.
+    {
+        auto f = fingeringsOnTrack(m3, staff1);
+        EXPECT_EQ(f, (std::vector<String>{ u"1", u"2", u"4" }));
+    }
+
+    // Pattern B: more ORNs at m11 tick=0 than voice=0 notes must land on staff 2, not staff 1.
+    Measure* m11 = measureAt(10);
+    ASSERT_NE(m11, nullptr);
+
+    // First chord of m11, staff 1: must NOT carry the Pattern B fingerings.
+    {
+        auto f = fingeringsOnFirstChord(m11, staff1);
+        // Staff 1 may legitimately have its own single fingering; check it has <=1.
+        EXPECT_LE(f.size(), 1u)
+            << "m11 staff 1 first chord should not carry 4 Pattern B fingerings";
+    }
+
+    // First chord of m11, staff 2: receives the 4 Pattern B fingerings.
+    {
+        auto f = fingeringsOnFirstChord(m11, staff2);
+        EXPECT_EQ(f.size(), 4u) << "m11 staff 2 should have 4 fingerings from Pattern B";
+        if (f.size() == 4) {
+            EXPECT_EQ(f[0], u"1");
+            EXPECT_EQ(f[1], u"2");
+            EXPECT_EQ(f[2], u"4");
+            EXPECT_EQ(f[3], u"4");
+        }
+    }
+
     delete score;
 }
