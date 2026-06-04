@@ -906,3 +906,63 @@ TEST_F(Tst_Ornaments, fingering_grandstaff_routing)
 
     delete score;
 }
+
+// ===========================================================================
+// BUG FIX: articulationDown=0x21 on a non-tuplet note must create fermataBelow;
+// on a tuplet note it must be suppressed (same dual-meaning rule as 0x20 above).
+// ===========================================================================
+TEST_F(Tst_Ornaments, fermata_below_kept_on_non_tuplet_suppressed_on_tuplet)
+{
+    MasterScore* score = readEncoreScore("ornaments_fermata_below_not_in_tuplet.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m1 = score->firstMeasure();
+    ASSERT_NE(m1, nullptr);
+
+    int fermataCount = 0;
+    SymId sym = SymId::noSym;
+    for (Segment* s = m1->first(SegmentType::ChordRest); s;
+         s = s->next(SegmentType::ChordRest)) {
+        for (EngravingItem* e : s->annotations()) {
+            if (e && e->isFermata()) {
+                ++fermataCount;
+                sym = toFermata(e)->symId();
+            }
+        }
+    }
+    EXPECT_EQ(fermataCount, 1) << "only the non-tuplet note must produce a fermata";
+    EXPECT_EQ(sym, SymId::fermataBelow) << "articDown=0x21 on non-tuplet must be fermataBelow";
+    delete score;
+}
+
+// ===========================================================================
+// BUG FIX companion: when the tremolo ORN resolves to a chord with no incoming
+// tie, the tremolo must stay on that chord (no spurious backwards walk).
+// ===========================================================================
+TEST_F(Tst_Ornaments, tremolo_orn_stays_on_untied_chord)
+{
+    MasterScore* score = readEncoreScore("ornaments_tremolo_orn_no_tie.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m1 = score->firstMeasure();
+    ASSERT_NE(m1, nullptr);
+
+    Chord* tremoloChord = nullptr;
+    for (Segment* s = m1->first(SegmentType::ChordRest); s;
+         s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord() && toChord(el)->tremoloSingleChord()) {
+            tremoloChord = toChord(el);
+        }
+    }
+    ASSERT_NE(tremoloChord, nullptr) << "TremoloSingleChord not found";
+    EXPECT_EQ(tremoloChord->tick(), Fraction(0, 1))
+        << "tremolo must land on the quarter (tick=0); no spurious tie-back walk";
+    EXPECT_EQ(tremoloChord->notes().front()->tieBack(), nullptr)
+        << "the chord carrying the tremolo must have no incoming tie";
+    delete score;
+}
