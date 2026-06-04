@@ -337,7 +337,7 @@ TEST_F(Tst_Text, measure_header_bpm_drives_initial_tempo_and_changes)
     EXPECT_TRUE(ret) << ret.text();
 
     // Collect every TempoText in the score with its host measure index.
-    struct Found { int measureIdx; double bps; String text; };
+    struct Found { int measureIdx; double bps; String xmlText; };
     std::vector<Found> seen;
     int mi = -1;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
@@ -350,7 +350,7 @@ TEST_F(Tst_Text, measure_header_bpm_drives_initial_tempo_and_changes)
             for (EngravingItem* e : s->annotations()) {
                 if (e && e->isTempoText()) {
                     TempoText* tt = toTempoText(e);
-                    seen.push_back({ mi, tt->tempo().val, tt->plainText() });
+                    seen.push_back({ mi, tt->tempo().val, tt->xmlText() });
                 }
             }
         }
@@ -359,7 +359,7 @@ TEST_F(Tst_Text, measure_header_bpm_drives_initial_tempo_and_changes)
     ASSERT_EQ(seen.size(), 5u);
     EXPECT_EQ(seen[0].measureIdx, 0);
     EXPECT_NEAR(seen[0].bps, 100.0 / 60.0, 1e-6);
-    EXPECT_EQ(seen[0].text, u"♩ = 100");
+    EXPECT_EQ(seen[0].xmlText, u"<sym>metNoteQuarterUp</sym> = 100");
     EXPECT_EQ(seen[1].measureIdx, 1);
     EXPECT_NEAR(seen[1].bps, 60.0 / 60.0, 1e-6);
     EXPECT_EQ(seen[2].measureIdx, 2);
@@ -406,8 +406,62 @@ TEST_F(Tst_Text, orn_tempo_compound_meter_dotted_quarter_bpm)
     ASSERT_NE(tt, nullptr) << "No TempoText found in score";
     EXPECT_NEAR(tt->tempo().val, 120.0 / 60.0, 1e-6)
         << "ORN TEMPO=80 in 6/8 must produce quarterBpm=120 (BPS=2.0), not 80/60";
-    EXPECT_EQ(tt->plainText(), u"♩. = 80")
-        << "Displayed tempo must be dotted quarter = 80, not dotted quarter = 53";
+    EXPECT_EQ(tt->xmlText(),
+              u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = 80")
+        << "Compound-meter tempo must use dotted-quarter sym tags; displayed value must be 80";
+
+    delete score;
+}
+
+// ===========================================================================
+// BUG FIX: MEAS-header and ORN tempo texts used a raw Unicode note symbol
+// (U+2669 "♩") in their xmlText.  TempoText::updateTempo() matches against
+// TempoPattern strings that use <sym>metNoteQuarterUp</sym>, so the Unicode
+// form never matched and editing the displayed BPM had no effect on playback.
+// Fix: tempoXmlText() now emits <sym> tags; all numeric BPM TempoTexts also
+// get followText=true so MuseScore keeps the tempo map in sync on edit.
+// ===========================================================================
+TEST_F(Tst_Text, tempo_text_uses_sym_tags_and_follow_text_enabled)
+{
+    MasterScore* score = readEncoreScore("ornaments_tempo_sym_followtext.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    struct Found { String xmlText; bool followText; double bps; };
+    std::vector<Found> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isTempoText()) {
+                    TempoText* tt = toTempoText(e);
+                    seen.push_back({ tt->xmlText(), tt->followText(), tt->tempo().val });
+                }
+            }
+        }
+    }
+    // The fixture has 2 custom measures plus fill measures; at least 2 TempoTexts expected.
+    ASSERT_GE(seen.size(), 2u);
+
+    // m1: 4/4 bpm=100 -> simple meter -> quarter sym
+    EXPECT_EQ(seen[0].xmlText, u"<sym>metNoteQuarterUp</sym> = 100")
+        << "Simple-meter tempo must use metNoteQuarterUp sym tag, not raw unicode";
+    EXPECT_TRUE(seen[0].followText)
+        << "MEAS-header TempoText must have followText=true so BPM edits update playback";
+    EXPECT_NEAR(seen[0].bps, 100.0 / 60.0, 1e-6);
+
+    // m2: 6/8 bpm=80 beat-unit (dotted quarter) -> compound meter
+    EXPECT_EQ(seen[1].xmlText,
+              u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = 80")
+        << "Compound-meter tempo must use dotted-quarter sym tags, not raw unicode";
+    EXPECT_TRUE(seen[1].followText)
+        << "Compound-meter TempoText must have followText=true";
+    // MEAS header bpm=120 (quarter-note BPM); BPS = 120/60 = 2.0
+    EXPECT_NEAR(seen[1].bps, 120.0 / 60.0, 1e-6);
 
     delete score;
 }

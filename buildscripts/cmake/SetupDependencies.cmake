@@ -48,6 +48,9 @@ else()
 endif()
 
 set(REMOTE_ROOT_URL https://raw.githubusercontent.com/musescore/muse_deps/main)
+if (NOT FETCHCONTENT_BASE_DIR)
+    set(FETCHCONTENT_BASE_DIR ${PROJECT_BINARY_DIR}/_deps)
+endif()
 set(LOCAL_ROOT_PATH ${FETCHCONTENT_BASE_DIR})
 
 function(populate name remote_suffix)
@@ -78,4 +81,8 @@ endfunction()
 
 if (MUSE_MODULE_DOCKWINDOW_KDDOCKWIDGETS_V2)
     populate(kddockwidgets "kddockwidgets/2.4")
+endif()
+
+if (MUSE_MODULE_AUDIO_EXPORT)
+    populate(fdk-aac "fdk-aac/2.0.3")
 endif()
