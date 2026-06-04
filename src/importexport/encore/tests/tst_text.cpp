@@ -50,6 +50,7 @@
 #include "engraving/dom/timesig.h"
 #include "engraving/dom/tuplet.h"
 
+#include "../internal/importer/noteloop-internal.h"
 #include "testbase.h"
 
 static const QString ENC_DIR(QString(iex_encore_tests_DATA_ROOT) + "/data/");
@@ -552,4 +553,53 @@ TEST_F(Tst_Text, staff_text_placement_from_yoffset)
     EXPECT_EQ(placements[u"ten"], PlacementV::BELOW)
         << "yoffset=-10 (Cartesian below) must map to PlacementV::BELOW";
     delete score;
+}
+
+// ===========================================================================
+// UNIT: tempoXmlText() — pure-function tests, no score needed.
+// Verifies that the note symbol is always emitted as a <sym> tag (not raw
+// Unicode), that compound meters use the dotted-quarter variant, and that
+// non-compound meters with denominator 8 (e.g. 7/8) use the plain quarter.
+// ===========================================================================
+TEST(Tst_TempoXmlText, simple_meter_quarter_sym)
+{
+    using namespace mu::iex::encore;
+    // 4/4: quarter sym
+    EXPECT_EQ(tempoXmlText(120, Fraction(4, 4)),
+              String(u"<sym>metNoteQuarterUp</sym> = 120"));
+    // 3/4: quarter sym
+    EXPECT_EQ(tempoXmlText(80, Fraction(3, 4)),
+              String(u"<sym>metNoteQuarterUp</sym> = 80"));
+    // 2/4: quarter sym
+    EXPECT_EQ(tempoXmlText(100, Fraction(2, 4)),
+              String(u"<sym>metNoteQuarterUp</sym> = 100"));
+}
+
+TEST(Tst_TempoXmlText, compound_meter_dotted_quarter_sym)
+{
+    using namespace mu::iex::encore;
+    // 6/8: compound (6%3==0 && 6>3 && den==8) -> dotted quarter
+    // dottedBpm = (120*2+1)/3 = 80
+    EXPECT_EQ(tempoXmlText(120, Fraction(6, 8)),
+              String(u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = 80"));
+    // 9/8: compound -> dottedBpm = (120*2+1)/3 = 80
+    EXPECT_EQ(tempoXmlText(120, Fraction(9, 8)),
+              String(u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = 80"));
+    // 12/8: compound -> dottedBpm = (120*2+1)/3 = 80
+    EXPECT_EQ(tempoXmlText(120, Fraction(12, 8)),
+              String(u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = 80"));
+}
+
+TEST(Tst_TempoXmlText, non_compound_eighth_denominators_use_quarter_sym)
+{
+    using namespace mu::iex::encore;
+    // 7/8: denominator is 8 but 7%3 != 0 -> not compound -> quarter sym
+    EXPECT_EQ(tempoXmlText(156, Fraction(7, 8)),
+              String(u"<sym>metNoteQuarterUp</sym> = 156"));
+    // 3/8: denominator is 8 but numerator 3 is NOT > 3 -> not compound
+    EXPECT_EQ(tempoXmlText(80, Fraction(3, 8)),
+              String(u"<sym>metNoteQuarterUp</sym> = 80"));
+    // 6/4: denominator is 4, not 8 -> not compound
+    EXPECT_EQ(tempoXmlText(120, Fraction(6, 4)),
+              String(u"<sym>metNoteQuarterUp</sym> = 120"));
 }
