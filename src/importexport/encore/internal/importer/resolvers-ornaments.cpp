@@ -26,6 +26,8 @@
 #include "engraving/dom/tremolosinglechord.h"
 #include "engraving/dom/ornament.h"
 #include "engraving/dom/chord.h"
+#include "engraving/dom/note.h"
+#include "engraving/dom/tie.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
@@ -119,6 +121,15 @@ void resolveOrnaments(BuildCtx& ctx)
             continue;
         }
         Chord* c = toChord(el);
+        // If the resolved chord is the tied-to continuation, walk back to the tie start.
+        // Encore places the tremolo ORN after the tied-from note in the stream, so the
+        // ORN tick lands on the continuation chord; the tremolo belongs on the first note.
+        if (!c->notes().empty() && c->notes().front()->tieBack()) {
+            Chord* prev = c->notes().front()->tieBack()->startNote()->chord();
+            if (prev) {
+                c = prev;
+            }
+        }
         if (c->tremoloSingleChord()) {
             continue;   // already has a tremolo from the articulation byte
         }

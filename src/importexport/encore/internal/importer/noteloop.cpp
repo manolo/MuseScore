@@ -141,9 +141,9 @@ String tempoXmlText(int quarterBpm, const Fraction& timeSig)
                     && timeSig.numerator() > 3;
     if (compound) {
         int dottedBpm = (quarterBpm * 2 + 1) / 3;
-        return String(u"♩. = %1").arg(dottedBpm);
+        return String(u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = %1").arg(dottedBpm);
     }
-    return String(u"♩ = %1").arg(quarterBpm);
+    return String(u"<sym>metNoteQuarterUp</sym> = %1").arg(quarterBpm);
 }
 
 void buildNoteLoop(BuildCtx& ctx)
@@ -753,6 +753,7 @@ void buildNoteLoop(BuildCtx& ctx)
                 tt->setTrack(0);
                 tt->setTempo(BeatsPerSecond(bps));
                 tt->setXmlText(tempoXmlText(bpm, m->timesig()));
+                tt->setFollowText(true);
                 seg->add(tt);
                 score->setTempo(measTick, BeatsPerSecond(bps));
             }
