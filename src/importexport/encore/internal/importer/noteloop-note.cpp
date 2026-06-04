@@ -532,6 +532,11 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
             }
             // Fermatas anchor on the segment (not the chord) for MusicXML <fermata>. Slot 0 = above, slot 1 = below.
             if (isFermataSymId(sid) && chordSeg) {
+                // 0x20/0x21 doubles as a "tuplet bracket placement" flag on the last note
+                // of a tuplet group; Encore never exports it as a <fermata> in that context.
+                if ((ab == 0x20 || ab == 0x21) && en->tuplet != 0) {
+                    continue;
+                }
                 Fermata* ferm = Factory::createFermata(chordSeg);
                 ferm->setTrack(track);
                 SymId resolved = sid;
