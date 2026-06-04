@@ -57,9 +57,9 @@ The plaintext `SCOW` equivalent is structurally different, so re-saving from Enc
 |----------|--------|-----------------------------------------|
 | 0x00     | 4      | magic (`SCOW` or `SCO5`)                |
 | 0x04     | 1      | format version (see above)              |
-| 0x28     | 2      | unknown                                 |
-| 0x2A     | 2      | unknown                                 |
-| 0x2C     | 2      | unknown                                 |
+| 0x28     | 2      | Encore application version (uint16 LE): 592=4.0 773/775=4.x 1056=5.0 |
+| 0x2A     | 2      | purpose unconfirmed (varies per file, possibly total LINE-staff entries) |
+| 0x2C     | 2      | default beatTicks for measures (uint16 LE): 240=quarter-note grid (0x00F0), matches MEAS header +0x04 |
 | 0x2E     | 2      | number of system blocks                 |
 | 0x30     | 2      | number of pages                         |
 | 0x32     | 1      | number of instrument blocks             |
@@ -212,7 +212,22 @@ After the 3-byte header every element starts with: 1-byte size + 1-byte staffIdx
 | 8      | REST        |
 | 9      | NOTE        |
 
-**Type 0xB.** Real files emit elements with high nibble 0xB; structure undecoded, payload ignored.
+**Type 0xB (MIDI CC events).** Elements with high nibble 0xB (`EncElemType::UNKNOWN2`) are MIDI
+Control Change events stored inline for playback-only use; they have no visual representation.
+Observed always with size=12 (total 12 bytes from element start). Byte layout:
+```
+d[0..1]  tick (uint16 LE)
+d[2]     typeVoice = 0xBn (type=11, voice=n)
+d[3]     size = 12
+d[4]     MIDI channel / track index
+d[5]     MIDI CC event marker (0xB0 = CC channel-0)
+d[6..9]  zeros
+d[10]    MIDI CC controller number (64=sustain pedal, 7=volume, 1=modulation)
+d[11]    MIDI CC value (127=max/on, 0=off)
+```
+Examples observed: `40 7F` (sustain pedal ON), `40 00` (sustain off), `07 6A` (volume 106).
+The importer reads these as `EncGenericElem` and skips them; MuseScore playback uses its own
+expression/velocity system.
 
 ### Multi-stream voices
 
@@ -316,7 +331,14 @@ Type 5. Variable size. Offsets from element start:
 | 0xC9    | STACCATO      | per-chord staccato dot                                                           |
 | 0xEF    | TREMOLO_32B   | alternate triple tremolo (ORN at tick == durTicks); also maps to R32             |
 
-**Undecoded subtypes.** `0xBE`, `0xC0`, `0xC6`, `0xC8`, `0xEE`, plus rare values. Silently ignored.
+**Undecoded subtypes.** Silently ignored; observed in corpus:
+
+| Tipo  | Count | Files | Hypothesis |
+|-------|------:|-------|------------|
+| 0xBE  |  12+  | TieYellow | unknown; appears at tick=0, possibly a mark/flag |
+| 0xC0  |   3   | Boda-LA, Beethoven | unknown |
+| 0xB0  |  11   | TieYellow | unknown; possibly hairpin sub-type |
+| 0xC6, 0xC8, 0xEE | rare | various | unknown |
 
 ### Hairpin direction (speguleco bit 0)
 
