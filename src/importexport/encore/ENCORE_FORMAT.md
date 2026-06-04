@@ -481,7 +481,7 @@ Each byte holds one or two glyphs:
 | 0x19         | down bow                  |
 | 0x1C         | tenuto (`--`)             |
 | 0x1D         | staccato (`-.`)           |
-| 0x20–0x22    | fermata variants          |
+| 0x20–0x22    | fermata variants; **but 0x20/0x21 on a note with tuplet != 0 means "tuplet bracket above/below" (not a fermata)** |
 | 0x24         | tenuto + staccato         |
 | 0x25         | marcato + tenuto          |
 | 0x28–0x2D    | staccatissimo combos      |
