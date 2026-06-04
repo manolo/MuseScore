@@ -1938,6 +1938,40 @@ TEST_F(Tst_Importer, encore_symbols_full_coverage)
     delete score;
 }
 
+// ===========================================================================
+// BUG FIX: articulationUp=0x20 on the last note of a tuplet group is Encore's
+// "tuplet bracket placement above" flag, not a fermata. The importer must not
+// create a Fermata element when the note has tuplet != 0.
+// Real-world case: Paloteos de Moncalvillo (4/4 + 7/8), where every triplet's
+// last note had articulationUp=0x20, producing spurious fermatas on all measures.
+// ===========================================================================
+TEST_F(Tst_Importer, v0c4_fermata_suppressed_on_tuplet_last_note)
+{
+    MasterScore* score = readEncoreScore("ornaments_fermata_not_in_tuplet.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load ornaments_fermata_not_in_tuplet.enc";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m1 = score->firstMeasure();
+    ASSERT_NE(m1, nullptr);
+
+    int fermataCount = 0;
+    for (Segment* s = m1->first(SegmentType::ChordRest); s;
+         s = s->next(SegmentType::ChordRest)) {
+        for (EngravingItem* e : s->annotations()) {
+            if (e && e->isFermata()) {
+                ++fermataCount;
+            }
+        }
+    }
+    // Only the non-tuplet note (tick=0) has articUp=0x20 and must get a fermata.
+    // The three triplet notes also have articUp=0x20 but must NOT produce fermatas.
+    EXPECT_EQ(fermataCount, 1)
+        << "Only the non-tuplet note must get a fermata; tuplet notes with "
+           "articUp=0x20 encode bracket placement, not a fermata";
+    delete score;
+}
+
 TEST_F(Tst_Importer, beethoven_no_crash)
 {
     MasterScore* score = readEncoreScore("notes_corrupted.enc");
