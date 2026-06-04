@@ -1995,6 +1995,48 @@ TEST_F(Tst_Importer, key_transposition_non_octave_oboe)
     delete score;
 }
 
+// ===========================================================================
+// BUG FIX: tremolo ORN on the tied-from note of a quarter->eighth tie.
+// The ORN's cumTick position falls on or past the eighth (tie-continuation),
+// so the "last chord" fallback resolves to the eighth. The importer must
+// check tieBack() on the resolved chord and walk back to the tie-start chord.
+// Real-world case: Alborada de Mayo, measure 1, percussion staff.
+// ===========================================================================
+TEST_F(Tst_Importer, v0c4_tremolo_orn_on_tied_from_note)
+{
+    MasterScore* score = readEncoreScore("ornaments_tremolo_orn_tied_from.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load ornaments_tremolo_orn_tied_from.enc";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m1 = score->firstMeasure();
+    ASSERT_NE(m1, nullptr);
+
+    Chord* tremoloChord = nullptr;
+    for (Segment* s = m1->first(SegmentType::ChordRest); s;
+         s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) {
+            Chord* c = toChord(el);
+            if (c->tremoloSingleChord()) {
+                tremoloChord = c;
+            }
+        }
+    }
+    ASSERT_NE(tremoloChord, nullptr) << "TremoloSingleChord not found in measure 1";
+    EXPECT_EQ(tremoloChord->tremoloSingleChord()->tremoloType(), TremoloType::R32);
+    // Must be on the quarter (tick=0), not the eighth continuation (tick=1/4).
+    EXPECT_EQ(tremoloChord->tick(), Fraction(0, 1))
+        << "Tremolo must land on the tie-start quarter (tick=0), not the eighth continuation";
+    // The chord carrying the tremolo must be the tie-start.
+    ASSERT_FALSE(tremoloChord->notes().empty());
+    EXPECT_NE(tremoloChord->notes().front()->tieFor(), nullptr)
+        << "The tremolo chord must have an outgoing tie (it is the quarter note)";
+    EXPECT_EQ(tremoloChord->notes().front()->tieBack(), nullptr)
+        << "The tremolo chord must NOT have an incoming tie";
+    delete score;
+}
+
 // Percussion file: two WINI/TITL/PREC blocks, large ghost MEAS blocks embedded in binary data.
 // Must import cleanly: correct measure count, no DOM corruption.
 TEST_F(Tst_Importer, percussion_drum_kit_no_crash)

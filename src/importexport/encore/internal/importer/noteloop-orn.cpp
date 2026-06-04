@@ -219,6 +219,7 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
             const double bps = quarterBpm / 60.0;
             tt2->setTempo(BeatsPerSecond(bps));
             tt2->setXmlText(tempoXmlText(quarterBpm, measure->timesig()));
+            tt2->setFollowText(true);
             seg->add(tt2);
             score->setTempo(elemTick, BeatsPerSecond(bps));
         }
