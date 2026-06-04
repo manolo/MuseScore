@@ -457,6 +457,15 @@ staffIdx, msVoice, tremType). The post-pass:
    (filler) measure which has only a whole rest. The fallback re-anchors
    to `pt.measTick` (the source measure) and takes the LAST chord-rest
    segment there.
+3. **Tied-note correction.** After resolving to a chord (via either
+   path), if that chord's first note has `tieBack() != null`, the
+   tremolo belongs on the tie-START note: the post-pass walks back via
+   `tieBack()->startNote()->chord()` and attaches the tremolo there.
+   Encore places the tremolo ORN in the stream AFTER the tied-from note;
+   the stream cursor (`cumTick`) therefore lands on the continuation
+   chord's tick, which resolves via fallback to that continuation chord.
+   Without the correction the tremolo would appear on the shorter tied-to
+   note instead of the longer tied-from note.
 
 Tipo `0xBE` appears rarely (3 times in Beethoven Plectro) on quarter
 notes at measure starts, always with `byte+14 = 0xF4`. Its semantics
@@ -479,6 +488,10 @@ unmapped values are silently dropped.
   `<other-articulation smufl="..."/>`. The upright/inverted
   variant follows the artic slot: `articUp` -> above/upright,
   `articDown` -> below/inverted (via `Fermata::placementV`).
+  **Exception:** bytes 0x20 and 0x21 on a note with `tuplet != 0`
+  encode "tuplet bracket placement above/below" (as exported by Encore
+  as `<tuplet type="stop" placement="above/below"/>` in MusicXML), not
+  a fermata. The importer skips fermata creation in that case.
 
 **Technical markings (per-note artic byte):**
 
