@@ -640,7 +640,27 @@ TEST_F(Tst_Ornaments, double_barline_lands_on_every_staff)
         << "DOUBLE barline must be present on every staff, not only track 0";
     delete score;
 }
-// wedgestart_at_measure_end_boundary: deferred to B8.
+// ===========================================================================
+// REGRESSION: WEDGESTART at tick == durTicks (measure-end boundary) must not be dropped.
+// ===========================================================================
+TEST_F(Tst_Ornaments, wedgestart_at_measure_end_boundary)
+{
+    MasterScore* score = readEncoreScore("ornaments_wedgestart_at_measure_end.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int hairpinCount = 0;
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (sp->isHairpin()) {
+            ++hairpinCount;
+            EXPECT_LT(sp->tick(), sp->tick2()) << "hairpin span must be positive";
+        }
+    }
+    EXPECT_EQ(hairpinCount, 1)
+        << "WEDGESTART at tick == durTicks must produce a hairpin";
+    delete score;
+}
 
 // ===========================================================================
 // FEATURE: Dynamics from size-16 ORN cluster (0x81=pp, 0x82=p, 0x85=f, 0x86=ff).
@@ -775,7 +795,45 @@ TEST_F(Tst_Ornaments, arpeggio_attaches_to_chord)
         << "arpeggio must sit on the 3-note C major triad";
     delete score;
 }
-// multi_measure_hairpin_resolved_from_almezuro: deferred to B8.
+// ===========================================================================
+// FIX: Multi-measure hairpin end tick resolved from WEDGESTART's alMezuro (cresc alMezuro=2, dim alMezuro=1).
+// ===========================================================================
+TEST_F(Tst_Ornaments, multi_measure_hairpin_resolved_from_almezuro)
+{
+    MasterScore* score = readEncoreScore("ornaments_multi_measure_hairpin.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int hairpinCount = 0;
+    bool foundCresc = false;
+    bool foundDim = false;
+    const Fraction wholeMeasure(4, 4);
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (!sp->isHairpin()) {
+            continue;
+        }
+        ++hairpinCount;
+        Hairpin* hp = toHairpin(sp);
+        EXPECT_LT(hp->tick(), hp->tick2()) << "hairpin span must be positive";
+        if (hp->hairpinType() == HairpinType::CRESC_HAIRPIN) {
+            foundCresc = true;
+            // start at measure 0 / tick 0, end at end of measure 2 (= 3 * 4/4)
+            EXPECT_EQ(hp->tick(), Fraction(0, 1));
+            EXPECT_EQ(hp->tick2(), wholeMeasure * 3);
+        } else if (hp->hairpinType() == HairpinType::DIM_HAIRPIN) {
+            foundDim = true;
+            // start at measure 1 / beat 2 (480 enc ticks = 2/4),
+            // end at end of measure 2 (= 3 * 4/4)
+            EXPECT_EQ(hp->tick(), wholeMeasure + Fraction(2, 4));
+            EXPECT_EQ(hp->tick2(), wholeMeasure * 3);
+        }
+    }
+    EXPECT_EQ(hairpinCount, 2);
+    EXPECT_TRUE(foundCresc);
+    EXPECT_TRUE(foundDim);
+    delete score;
+}
 // bowing_marks_from_orn_c4_c5: deferred to B13.
 // v0xc2_orn_c4_is_accent_not_upbow: deferred to B13.
 // v0xc4_orn_be_is_accent: deferred to B13.
@@ -1959,4 +2017,3 @@ TEST_F(Tst_Ornaments, encore_symbols_full_coverage)
     EXPECT_GE(hairpins,       2);
     EXPECT_GE(dotted_barlines, 1);
     delete score;
-}
