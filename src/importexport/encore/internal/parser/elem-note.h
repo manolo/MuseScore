@@ -51,6 +51,13 @@ struct EncMeasureElem {
     quint8 xoffset  { 0 };
     qint16 realDuration { -1 };
 
+    // Raw staff byte (staffWithin<<6)|staffIdx, identical to instrStaffIdx in the LINE block.
+    // Importers reverse-map it to a LINE slot (see buildLineSlotByRawByte).
+    quint8 rawStaffByte() const
+    {
+        return static_cast<quint8>((static_cast<quint8>(staffWithin) << 6) | static_cast<quint8>(staffIdx));
+    }
+
     // Nonzero = tuplet member; sort tuplet notes first at their tick so they create the chord.
     virtual quint8 tupletByte() const { return 0; }
     // Raw faceValue byte (low nibble = duration, high nibble = notehead); 0 for elements without one.
@@ -66,6 +73,8 @@ struct EncMeasureElem {
     virtual bool read(QDataStream& ds);
 };
 
+// A pitched note: face value (duration + notehead), MIDI pitch, articulations, tuplet ratio,
+// and grace/tie flags derived during parsing.
 struct EncNote : EncMeasureElem {
     quint8 faceValue       { 0 };
     quint8 grace1          { 0 };
@@ -75,6 +84,9 @@ struct EncNote : EncMeasureElem {
     quint8 dotControl      { 0 };
     quint8 semiTonePitch   { 0 };
     quint16 playbackDurTicks{ 0 };
+    // Parsed for format completeness; not consumed by any emitter. velocity is Encore's per-note
+    // MIDI velocity and alterationGlyph its explicit-accidental glyph selector; MuseScore derives
+    // both from the score model (dynamics / key + pitch) instead.
     quint8 velocity        { 0 };
     quint8 options         { 0 };
     quint8 alterationGlyph { 0 };
@@ -107,6 +119,7 @@ struct EncNote : EncMeasureElem {
     bool read(QDataStream& ds) override;
 };
 
+// A rest; mrestCount > 1 marks an Encore multi-measure rest (v0xC4) shown as one symbol.
 struct EncRest : EncMeasureElem {
     quint8 faceValue  { 0 };
     quint8 tuplet     { 0 };
@@ -130,6 +143,7 @@ struct EncRest : EncMeasureElem {
     bool read(QDataStream& ds) override;
 };
 
+// Mid-measure key-signature change (tipo = Encore key index).
 struct EncKeyChange : EncMeasureElem {
     quint8 tipo { 0 };
 
@@ -138,6 +152,7 @@ struct EncKeyChange : EncMeasureElem {
     bool read(QDataStream& ds) override;
 };
 
+// Mid-measure clef change.
 struct EncClefChange : EncMeasureElem {
     EncClefType clefType { EncClefType::G };
 
@@ -146,6 +161,7 @@ struct EncClefChange : EncMeasureElem {
     bool read(QDataStream& ds) override;
 };
 
+// Placeholder for element types the importer does not model; carried through but not emitted.
 struct EncGenericElem : EncMeasureElem {
     using EncMeasureElem::EncMeasureElem;
 
