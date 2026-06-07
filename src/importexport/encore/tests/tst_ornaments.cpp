@@ -139,7 +139,9 @@ TEST_F(Tst_Ornaments, articulations_mapped_beyond_fermata)
     EXPECT_TRUE(ret) << ret.text();
 
     // Check by type predicate rather than exact SymId; layout may flip Above<->Below per stem direction.
-    enum class ArtKind { Staccato, Accent, Tenuto, Marcato, Other };
+    enum class ArtKind {
+        Staccato, Accent, Tenuto, Marcato, Other
+    };
     auto kindOf = [](Articulation* a) -> ArtKind {
         if (a->isStaccato()) {
             return ArtKind::Staccato;
@@ -191,7 +193,9 @@ TEST_F(Tst_Ornaments, articulation_combos_expand_to_two_glyphs)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    enum class K { Tenuto, Staccato, Accent, Marcato, Staccatissimo, Other };
+    enum class K {
+        Tenuto, Staccato, Accent, Marcato, Staccatissimo, Other
+    };
     auto kindOf = [](Articulation* a) -> K {
         using mu::engraving::SymId;
         switch (a->symId()) {
@@ -287,8 +291,12 @@ TEST_F(Tst_Ornaments, staccato_from_orn_c9)
 }
 
 // ===========================================================================
-// FEATURE: Size-28 ORN tipos 0x36 / 0x37 produce trill-mark ornaments;
-// tipo 0x35 is the trill-span end marker and adds nothing.
+// FIX: Size-28 ORN 0x36 (TRILL_START) + 0x35 (TRILL_END) now create a Trill spanner
+// (tr + wavy line) instead of a glyph-only Ornament. ORN 0x37 (TRILL_ALT) remains
+// an Ornament glyph (secondary marker within the span). 0x35 is consumed as the span
+// endpoint and produces no visible element of its own.
+// Fixture: 0x36 at tick=0, 0x37 at tick=240, 0x35 at tick=480 in a 4/4 measure.
+// Expected: one Trill spanner (from 0x36 to 0x35) + one Ornament glyph (from 0x37).
 // ===========================================================================
 TEST_F(Tst_Ornaments, trill_spanner_start_markers)
 {
@@ -297,7 +305,18 @@ TEST_F(Tst_Ornaments, trill_spanner_start_markers)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    int trillCount = 0;
+    // Count Trill spanners (0x36 → 0x35)
+    int trillSpanners = 0;
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (sp->isTrill()) {
+            ++trillSpanners;
+        }
+    }
+    EXPECT_EQ(trillSpanners, 1)
+        << "0x36 + 0x35 must create exactly one Trill spanner (tr + wavy line)";
+
+    // Count Ornament glyphs (0x37 stays as glyph, secondary tr mark within the span)
+    int ornamentGlyphs = 0;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
         if (!mb->isMeasure()) {
             continue;
@@ -310,12 +329,108 @@ TEST_F(Tst_Ornaments, trill_spanner_start_markers)
             }
             for (Articulation* a : toChord(el)->articulations()) {
                 if (a->symId() == SymId::ornamentTrill) {
-                    ++trillCount;
+                    ++ornamentGlyphs;
                 }
             }
         }
     }
-    EXPECT_EQ(trillCount, 2) << "0x36 and 0x37 should add one trill each; 0x35 adds nothing";
+    EXPECT_EQ(ornamentGlyphs, 1)
+        << "0x37 (TRILL_ALT) must remain an Ornament glyph (secondary tr, not a spanner)";
+
+    // Verify the Trill spanner covers from the TRILL_START tick to the TRILL_END tick.
+    if (trillSpanners == 1) {
+        for (auto& [tick, sp] : score->spannerMap().map()) {
+            if (sp->isTrill()) {
+                const Fraction startQ = sp->tick();    // 0 quarters from measure start
+                const Fraction endQ   = sp->tick2();   // 2 quarters in (where 0x35 was)
+                EXPECT_EQ(startQ.numerator() % startQ.denominator(), 0)
+                    << "Trill spanner start must align to a beat";
+                EXPECT_GT(endQ, startQ)
+                    << "Trill spanner must have positive duration";
+            }
+        }
+    }
+
+    delete score;
+}
+
+// ===========================================================================
+// REGRESSION: TRILL_START (0x36) with no TRILL_END and alMezuro=0 must
+// fall back to Ornament glyph. No Trill spanner must be created.
+// ===========================================================================
+TEST_F(Tst_Ornaments, trill_no_end_marker_creates_glyph_not_spanner)
+{
+    MasterScore* score = readEncoreScore("ornaments_trill_no_end_marker.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int trillSpanners = 0;
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (sp->isTrill()) {
+            ++trillSpanners;
+        }
+    }
+    EXPECT_EQ(trillSpanners, 0)
+        << "0x36 without 0x35 and alMezuro=0 must NOT create a Trill spanner";
+
+    int ornGlyphs = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (el && el->isChord()) {
+                for (Articulation* a : toChord(el)->articulations()) {
+                    if (a->symId() == SymId::ornamentTrill) {
+                        ++ornGlyphs;
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_EQ(ornGlyphs, 1)
+        << "0x36 without span info must produce exactly one Ornament glyph";
+
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: TRILL_START with alMezuro=2 creates a Trill spanner spanning
+// to the end of the 2nd measure after the start measure.
+// ===========================================================================
+TEST_F(Tst_Ornaments, trill_cross_measure_span_from_almezuro)
+{
+    MasterScore* score = readEncoreScore("ornaments_trill_cross_measure.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int trillSpanners = 0;
+    Fraction spanStart, spanEnd;
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (sp->isTrill()) {
+            ++trillSpanners;
+            spanStart = sp->tick();
+            spanEnd   = sp->tick2();
+        }
+    }
+    EXPECT_EQ(trillSpanners, 1)
+        << "alMezuro=2 must create exactly one Trill spanner";
+
+    if (trillSpanners == 1) {
+        // The spanner starts at tick=0 (start of TRILL_START note).
+        EXPECT_EQ(spanStart, Fraction(0, 1))
+            << "Trill spanner must start at tick=0 (TRILL_START note)";
+        // alMezuro=2 targets ctx.measuresByIdx[0+2] = measure 2.
+        // In 4/4, each measure = Fraction(1,1) whole note, so measure 2 ends at Fraction(3,1).
+        // The span end must reach past measure 1 (Fraction(2,1)).
+        EXPECT_GT(spanEnd, Fraction(2, 1))
+            << "Trill spanner with alMezuro=2 must end at or beyond the 2nd measure boundary";
+    }
+
     delete score;
 }
 
@@ -877,7 +992,7 @@ TEST_F(Tst_Ornaments, fingering_grandstaff_routing)
     // Staff 1 m3 melody fingerings are unaffected by the fix.
     {
         auto f = fingeringsOnTrack(m3, staff1);
-        EXPECT_EQ(f, (std::vector<String>{ u"1", u"2", u"4" }));
+        EXPECT_EQ(f, (std::vector<String> { u"1", u"2", u"4" }));
     }
 
     // Pattern B: more ORNs at m11 tick=0 than voice=0 notes must land on staff 2, not staff 1.

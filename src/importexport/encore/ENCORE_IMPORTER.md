@@ -471,6 +471,35 @@ Tipo `0xBE` appears rarely (3 times in Beethoven Plectro) on quarter
 notes at measure starts, always with `byte+14 = 0xF4`. Its semantics
 are not yet decoded; it is currently silently ignored.
 
+## Trill spans (TRILL_START / TRILL_END)
+
+Encore encodes trill spans with three ORN subtypes:
+
+| Subtype | Value | Role |
+|---------|-------|------|
+| `TRILL_START` | `0x36` | Start of trill span; `alMezuro` = measures forward to end |
+| `TRILL_ALT`   | `0x37` | Secondary trill mark within the span (not a span start)    |
+| `TRILL_END`   | `0x35` | End of span (no visible glyph); ignored by Encore's MusicXML exporter |
+
+**Resolution (in `resolvers-ornaments.cpp`):**
+
+For each `TRILL_START` the importer determines whether the span endpoint is
+known:
+
+1. **Same-measure span:** a `TRILL_END` (0x35) on the same track with a tick
+   greater than the trill start → creates a `Trill` spanner from
+   `startTick` to the `TRILL_END` tick.
+2. **Cross-measure span:** `alMezuro > 0` → creates a `Trill` spanner to the
+   `endTick()` of `ctx.measuresByIdx[measIdx + alMezuro]`.
+3. **No span info** (`alMezuro == 0` and no matching `TRILL_END`) → falls back
+   to an `Ornament` glyph (`ornamentTrill`) — the single-beat `tr` mark.
+
+`TRILL_ALT` (0x37) always produces an `Ornament` glyph, never a spanner; it
+marks a note within the span that Encore annotates with a redundant `tr`.
+
+`TRILL_END` ticks are stored in `ctx.pendingTrillEnds` (keyed by track) and
+cleared by the resolver.
+
 ## Articulations, technical markings, tremolos
 
 `encArticulation2SymIds` (in `enc-mapping.cpp`) maps the byte
@@ -614,6 +643,73 @@ to 0 for all element types and lets the multi-stream /
 chord-extension machinery handle conflicts with existing voice-0
 content on the same staff, the same way it does for normal
 voices.
+
+## Chord symbol (harmony) import
+
+Encore stores chord symbols as CHORD elements (type 7) in the measure element stream.
+The importer (`handleChordSym` in `noteloop.cpp`) creates a `Harmony` element and calls
+`setHarmony()` for each one.
+
+### Two encoding modes
+
+**Text mode** (`tipo & 0x01 == 1`): the chord name is stored verbatim in `teksto`
+(36-byte UTF-16 LE or Latin-1 slot, same encoding probe as lyrics). The text is passed
+directly to `setHarmony()`. Example: `teksto="Am"` → `Am`.
+
+**Numeric mode** (`tipo & 0x01 == 0`): the chord is encoded as three bytes:
+
+| Field   | Meaning |
+|---------|---------|
+| `radiko`| Root note: lower nibble = note name (0=C..6=B), upper nibble = accidental (0=natural, 0x10=sharp, 0x20=flat) |
+| `toniko`| Chord quality index 0-62 into the `kChordQuality[]` table (`elements.cpp`). Index 0 = major (no suffix), 1 = "m", 4 = "7", 12 = "maj7", etc. See `ENCORE_FORMAT.md §CHORD element`. |
+| `baso`  | Slash bass note, same encoding as `radiko`. Active only when `tipo & 0x02`. |
+
+`EncChordSym::chordName()` constructs the string `root + quality [+ "/" + bass]` and
+passes it to `setHarmony()`. Examples: `radiko=0x26 + toniko=0` → `Bb`;
+`radiko=0x03 + toniko=24` → `F7`; `radiko=0x00 + toniko=1 + baso=0x04, tipo=2` → `Cm/G`.
+
+### Fallback for undefined quality indices
+
+Several `toniko` indices (16, 20, 23, 28-31, 39) are undefined in the Encore format.
+`kChordQuality[i] == ""` for those entries, so the chord degrades to just the root note
+(treated as major). This is a safe fallback for files that use undocumented chord types.
+
+### MuseScore parser normalization
+
+After `setHarmony()`, `harmonyName()` returns the MuseScore-canonical form, which may
+differ from the raw input string (e.g. `"Cmaj7"` → `"CMaj7"`, `"F7"` → `"F7"`).
+Test assertions on `harmonyName()` must use the normalized form.
+
+### Tests
+
+- `tst_parser_chord.cpp`: unit tests for `EncChordSym::chordName()` in isolation.
+  Covers all natural roots, sharps, flats, major/minor/dom7/aug/dim/sus4/slash, and edge cases (invalid radiko, out-of-range toniko, text mode passthrough).
+- `tst_importer.cpp` → `numeric_chord_symbols`: integration test loading `chord_parsing.enc`
+  (64 measures, one numeric chord each, all toniko 0-63). Verifies C, Cm, C+, C7, Cdim, CMaj7.
+- `tst_importer.cpp` → `numeric_chord_with_bass_note`: integration test loading `akordo.enc`,
+  verifies slash chord `Ab13sus4/F#` (tipo=2, bass note present).
+
+## Duplicate NOTE elements in chord clusters
+
+Some Encore files encode the same note pitch twice in the same chord cluster. The two NOTE
+elements are identical in tick/staff/voice/pitch but differ in `grace1 bit 0x40`: one copy
+has the bit clear (the "root" chord note), the other has it set (a chord-extension marker).
+When both are added to MuseScore's Chord, the result is two noteheads at the same stem
+position — visually a double-headed notehead the user must delete manually.
+
+**Detection:** `grace1 & 0x40` marks the chord-extension copy. The importer suppresses it
+when the concert pitch is already present in the chord (`chord->findNote(concertPitch)`).
+This guard is scoped to `grace1 & 0x40` to avoid false positives on v0xC2 chord clusters,
+where the `semiTonePitch` field holds an unreliable value before the v0xA6 pitch fix and
+multiple cluster notes can share the same raw byte value.
+
+**Source:** `handleNote` in `noteloop-note.cpp` (~line 490).
+
+### Tests
+
+- `tst_notes.cpp` → `duplicate_pitch_in_chord_cluster_suppressed`: integration test loading
+  `notes_chord_duplicate.enc` (a synthetic fixture with two identical NOTE elements at tick=0,
+  pitch=60, grace1=0x00 and grace1=0x40). Verifies the chord has exactly one note.
 
 ## Lyric attachment
 

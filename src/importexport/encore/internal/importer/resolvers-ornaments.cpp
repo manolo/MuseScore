@@ -34,6 +34,7 @@
 #include "engraving/dom/segment.h"
 #include "engraving/dom/marker.h"
 #include "engraving/dom/articulation.h"
+#include "engraving/dom/trill.h"
 
 using namespace mu::engraving;
 
@@ -182,7 +183,9 @@ void resolveOrnaments(BuildCtx& ctx)
         c->add(art);
     }
 
-    // Resolve trill intents: same deferred pattern as ARPEGGIO.
+    // Resolve trill intents.
+    // When Encore marks a trill span (TRILL_END in the same measure, or alMezuro>0),
+    // create a Trill spanner (tr + wavy line). Otherwise create only the Ornament glyph.
     for (const PendingTrill& pt : ctx.pendingTrills) {
         Measure* m = score->tick2measure(pt.tick);
         if (!m) {
@@ -196,11 +199,60 @@ void resolveOrnaments(BuildCtx& ctx)
         if (!el || !el->isChord()) {
             continue;
         }
-        Chord* c = toChord(el);
-        Ornament* orn = Factory::createOrnament(c);
-        orn->setTrack(pt.track);
-        orn->setSymId(SymId::ornamentTrill);
-        c->add(orn);
+
+        // TRILL_ALT (0x37): secondary trill mark within a span → always Ornament glyph.
+        // TRILL_START (0x36): create Trill spanner when the span endpoint is known:
+        //   1. TRILL_END in the same measure (first end tick > pt.tick on this track).
+        //   2. alMezuro > 0: span to the end of the target measure.
+        //   3. Neither: fall back to Ornament glyph.
+        Fraction endTick;
+        bool hasSpan = !pt.isAlt;
+
+        if (hasSpan) {
+            hasSpan = false;
+            // Check for a TRILL_END marker on this track
+            auto it = ctx.pendingTrillEnds.find(pt.track);
+            if (it != ctx.pendingTrillEnds.end()) {
+                for (const Fraction& endT : it->second) {
+                    if (endT > pt.tick) {
+                        endTick = endT;
+                        hasSpan = true;
+                        break;
+                    }
+                }
+            }
+
+            // Cross-measure span via alMezuro
+            if (!hasSpan && pt.alMezuro > 0) {
+                const size_t endMeasIdx = pt.measIdx + static_cast<size_t>(pt.alMezuro);
+                if (endMeasIdx < ctx.measuresByIdx.size()) {
+                    Measure* endMeas = ctx.measuresByIdx[endMeasIdx];
+                    if (endMeas) {
+                        endTick = endMeas->endTick();
+                        hasSpan = true;
+                    }
+                }
+            }
+        }
+
+        if (hasSpan && endTick > pt.tick) {
+            // Create Trill spanner (renders tr + wavy line from startTick to endTick).
+            Trill* trill = Factory::createTrill(score->dummy());
+            trill->setTrack(pt.track);
+            trill->setTrack2(pt.track);
+            trill->setTick(pt.tick);
+            trill->setTick2(endTick);
+            trill->setTrillType(TrillType::TRILL_LINE);
+            score->addElement(trill);
+        } else {
+            // No span info — keep the original Ornament glyph behaviour.
+            Chord* c = toChord(el);
+            Ornament* orn = Factory::createOrnament(c);
+            orn->setTrack(pt.track);
+            orn->setSymId(SymId::ornamentTrill);
+            c->add(orn);
+        }
     }
+    ctx.pendingTrillEnds.clear();
 }
 } // namespace mu::iex::encore

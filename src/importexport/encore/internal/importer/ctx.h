@@ -93,6 +93,10 @@ struct PendingOrnTremolo {
 struct PendingTrill {
     Fraction tick;
     track_idx_t track;
+    int alMezuro { 0 };           // measures forward to the trill end (0 = same measure)
+    size_t measIdx  { 0 };        // index into ctx.measuresByIdx for the start measure
+    int xoffset2 { 0 };           // end x-position hint (for same-measure endpoint detection)
+    bool isAlt    { false };        // TRILL_ALT (0x37): secondary mark, always Ornament glyph
 };
 
 // Staccato intents (tipo 0xC9), deferred for the same reason as ARPEGGIO.
@@ -165,6 +169,8 @@ struct BuildCtx
     std::vector<PendingArpeggio> pendingArpeggios {};
     std::vector<PendingOrnTremolo> pendingOrnTremolos {};
     std::vector<PendingTrill> pendingTrills {};
+    // TRILL_END (0x35) ticks by track; consumed by resolveOrnaments() to compute span endpoints.
+    std::map<track_idx_t, std::vector<mu::engraving::Fraction> > pendingTrillEnds {};
     std::vector<PendingStaccato> pendingStaccatos {};
     std::vector<PendingBowing> pendingBowings {};
     std::vector<PendingOrnFingering> pendingOrnFingerings {};
