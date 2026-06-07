@@ -132,18 +132,16 @@ void NoteLoopMeasCtx::closeTupletWithFill(BuildCtx& ctx, TupletTracker& tt,
     tt.closeTuplet();
 }
 
-// Render tempo text for `quarterBpm` (quarter-note BPM). For compound meters
-// (6/8, 9/8, 12/8) Encore displays the dotted-quarter BPM, so convert.
-String tempoXmlText(int quarterBpm, const Fraction& timeSig)
+// Render tempo text. displayBpm is the beat-unit BPM that Encore shows the user.
+// beatTicks=360 means the beat unit is a dotted quarter; beatTicks=240 is a quarter.
+// For the MEAS header, bpm is QPM so displayBpm = bpm*2/3 when beatTicks=360.
+// For ORN TEMPO, eo->tempo is already the displayed beat-unit value.
+String tempoXmlText(int displayBpm, int beatTicks)
 {
-    bool compound = timeSig.denominator() == 8
-                    && timeSig.numerator() % 3 == 0
-                    && timeSig.numerator() > 3;
-    if (compound) {
-        int dottedBpm = (quarterBpm * 2 + 1) / 3;
-        return String(u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = %1").arg(dottedBpm);
+    if (beatTicks == 360) {
+        return String(u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = %1").arg(displayBpm);
     }
-    return String(u"<sym>metNoteQuarterUp</sym> = %1").arg(quarterBpm);
+    return String(u"<sym>metNoteQuarterUp</sym> = %1").arg(displayBpm);
 }
 
 void buildNoteLoop(BuildCtx& ctx)
@@ -516,11 +514,12 @@ void buildNoteLoop(BuildCtx& ctx)
 
             auto handleChordSym = [&]() {
                 const EncChordSym* ecs = static_cast<const EncChordSym*>(e);
-                if (!ecs->teksto.isEmpty()) {
+                const QString raw = ecs->chordName();
+                if (!raw.isEmpty()) {
                     Segment* seg = measure->getSegment(SegmentType::ChordRest, elemTick);
                     Harmony* h = Factory::createHarmony(score->dummy()->segment());
                     h->setTrack(track);
-                    h->setHarmony(String(ecs->teksto));
+                    h->setHarmony(String(raw));
                     seg->add(h);
                 }
             };
@@ -723,7 +722,11 @@ void buildNoteLoop(BuildCtx& ctx)
         ++measIdx;
     }
 
-    // Apply per-measure BPM from MEAS header; emit TempoText only when BPM changes. Skip when an ORN TEMPO or STAFFTEXT tempo is already present at the segment.
+    // Apply per-measure BPM from MEAS header; emit TempoText only when BPM changes.
+    // Skip when an ORN TEMPO or STAFFTEXT tempo is already present ANYWHERE in the measure,
+    // not just at measTick. ORN TEMPO elements are placed at their note's tick (which may
+    // differ from measTick when the measure starts with a rest), so the old per-segment
+    // guard missed them and created a duplicate tempo mark.
     {
         quint16 lastBpm = 0;
         for (size_t mi = 0; mi < enc.measures.size() && mi < ctx.measuresByIdx.size(); ++mi) {
@@ -741,18 +744,31 @@ void buildNoteLoop(BuildCtx& ctx)
                 continue;
             }
             bool hasExisting = false;
-            for (EngravingItem* e : seg->annotations()) {
-                if (e && e->isTempoText()) {
-                    hasExisting = true;
-                    break;
+            for (Segment* s = m->first(SegmentType::ChordRest); s && !hasExisting;
+                 s = s->next(SegmentType::ChordRest)) {
+                for (EngravingItem* e : s->annotations()) {
+                    if (e && e->isTempoText()) {
+                        hasExisting = true;
+                        break;
+                    }
                 }
             }
             if (!hasExisting) {
-                const double bps = bpm / 60.0;
+                // Detect dotted-quarter beat: MEAS header beatTicks=360, OR compound time sig
+                // (6/8, 9/8, 12/8). Old fixtures store beatTicks=240 even for 6/8, so keep
+                // the timesig fallback for backward compatibility.
+                const quint16 rawBeatTicks = enc.measures[mi].beatTicks;
+                const Fraction mts = m->timesig();
+                const bool cmpd = (rawBeatTicks == 360)
+                                  || (mts.denominator() == 8
+                                      && mts.numerator() % 3 == 0
+                                      && mts.numerator() > 3);
+                const double bps = bpm / 60.0;    // bpm is QPM; correct for playback
+                const int displayBpm = cmpd ? (bpm * 2 + 1) / 3 : static_cast<int>(bpm);
                 TempoText* tt = Factory::createTempoText(seg);
                 tt->setTrack(0);
                 tt->setTempo(BeatsPerSecond(bps));
-                tt->setXmlText(tempoXmlText(bpm, m->timesig()));
+                tt->setXmlText(tempoXmlText(displayBpm, cmpd ? 360 : 240));
                 tt->setFollowText(true);
                 seg->add(tt);
                 score->setTempo(measTick, BeatsPerSecond(bps));
