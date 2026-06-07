@@ -282,7 +282,8 @@ jobs:
     if: |
       github.event_name != 'pull_request' &&
       inputs.framework_ref == '' &&
-      (github.event_name != 'workflow_dispatch' || contains(inputs.platforms, 'windows_portable'))
+      (github.event_name != 'workflow_dispatch' || contains(inputs.platforms, 'windows_portable')) &&
+      (github.event_name != 'workflow_call' || contains(inputs.platforms, 'windows_portable'))
     runs-on: windows-2025
     steps:
     - name: Clone repository
