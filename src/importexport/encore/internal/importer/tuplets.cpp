@@ -157,7 +157,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
             tup = static_cast<const EncRest*>(e)->tuplet;
         }
         int a = tup >> 4, n = tup & 0x0F;
-        if ((a == 3 && n == 2) || (a == 5 && n == 4) || (a == 6 && n == 4)) {
+        if ((a == 3 && n == 2) || (a == 4 && n == 3) || (a == 5 && n == 4) || (a == 6 && n == 4)) {
             outActual=a;
             outNormal=n;
         }
@@ -223,8 +223,16 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
             }
 
             if (isExplicit) {
-                // Explicit: group by face-value sum (actualN × baseLen). A mixed group ({8,8,16,16} in 3:2) closes at 3/8, not after 3 notes.
-                // Only complete groups are marked; partial remainders handled by isolated-fill-remaining in the main element loop.
+                // Explicit: group by face-value sum using a no-downdate baseLen rule.
+                // baseLen starts as the first note's face value and only updates to a
+                // smaller value when the current faceSum still fits within the new
+                // (lower) threshold. This correctly handles mixed-duration brackets:
+                //   {Q,E}/3:2: baseLen=Q, threshold=3Q. Before E: faceSum=Q<=3E → update
+                //              baseLen=E, threshold=3E. faceSum(Q+E)=3E → close. ✓
+                //   {Q,Q,8,8}/3:2: before 8th: faceSum=2Q>3/8 → no update. threshold stays
+                //              3Q. faceSum(Q+Q+8+8)=3Q → close after 4. ✓
+                //   {Q,Q,Q,Q}/4:3: uniform Q, threshold=4Q. Closes after 4. ✓
+                //   {Q,Q}/4:3 partial: faceSum(2Q)<4Q → continues. ✓
                 Fraction baseLen = getFaceValue(chords[i]);
                 if (baseLen <= Fraction(0, 1)) {
                     ++i;
@@ -239,17 +247,33 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     if (a2 != actualN || n2 != normalN) {
                         break;
                     }
-                    faceSum += getFaceValue(chords[i]);
-                    ++i;
-                    if (faceSum >= threshold) {
-                        // Complete group: mark all in [groupStart, i-1]
-                        for (int j = groupStart; j < i; ++j) {
-                            for (const EncMeasureElem* e : chords[j]) {
-                                result.insert(e);
-                            }
+                    // No-downdate: update baseLen only when the NEW smaller face value
+                    // still fits within the new threshold given the CURRENT faceSum.
+                    const Fraction fv_i = getFaceValue(chords[i]);
+                    if (fv_i > Fraction(0, 1) && fv_i < baseLen) {
+                        const Fraction newThreshold = fv_i * actualN;
+                        if (faceSum <= newThreshold) {
+                            baseLen    = fv_i;
+                            threshold  = newThreshold;
                         }
-                        faceSum = Fraction(0, 1);
-                        groupStart = i;
+                    }
+                    faceSum += fv_i;
+                    ++i;
+                    if (faceSum < threshold) {
+                        continue;
+                    }
+                    // Complete group: mark all in [groupStart, i-1]
+                    for (int j = groupStart; j < i; ++j) {
+                        for (const EncMeasureElem* e : chords[j]) {
+                            result.insert(e);
+                        }
+                    }
+                    faceSum   = Fraction(0, 1);
+                    groupStart = i;
+                    // Reset baseLen for the next group (may start with a different face value)
+                    if (i < n) {
+                        baseLen   = getFaceValue(chords[i]);
+                        threshold = baseLen * actualN;
                     }
                 }
                 // Mark a partial end group only when rdur fills to exact measure end AND face-value sum would overflow without tuplet scaling.
