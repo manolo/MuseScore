@@ -90,8 +90,9 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec);
 void handleRest(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec);
 void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec);
 
-// Render tempo text for quarterBpm. Defined in noteloop.cpp (shared with noteloop-orn.cpp).
-mu::engraving::String tempoXmlText(int quarterBpm, const mu::engraving::Fraction& timeSig);
+// Render tempo text for displayBpm at the given beat unit (beatTicks: 360=dotted-quarter, 240=quarter).
+// Defined in noteloop.cpp (shared with noteloop-orn.cpp).
+mu::engraving::String tempoXmlText(int displayBpm, int beatTicks);
 } // namespace mu::iex::encore
 
 #endif // MU_IEX_ENCORE_NOTELOOP_INTERNAL_H

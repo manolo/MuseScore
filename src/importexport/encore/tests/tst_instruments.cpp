@@ -220,6 +220,60 @@ TEST_F(Tst_Instruments, instrument_empty_name_midi_resolves_to_cello)
 }
 
 // ===========================================================================
+// FIX: Bb clarinet (MIDI 72, Key=0) must not fall back to Grand Piano, and
+// its transposition must be zeroed (encKey=0 means 'sounds as written' in
+// Encore so no chromatic shift should be applied at display time).
+// ===========================================================================
+TEST_F(Tst_Instruments, instrument_clarinet_midi72_key0_resolves_not_piano)
+{
+    MasterScore* score = readEncoreScore("instruments_instr_clarinet_midi72_key0.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->id(), String(u"bb-clarinet"))
+        << "Clarinete + MIDI 72 + Key=0 must resolve to bb-clarinet (step2), not Grand Piano";
+    EXPECT_EQ(inst->transpose().chromatic, 0)
+        << "encKey=0 means Encore stores written pitch with no shift; template transposition "
+        "must be zeroed so notes display at their Encore written pitch";
+    delete score;
+}
+
+// ===========================================================================
+// FIX: nameless Bb clarinet (MIDI 72, Key=0) must not fall back to Grand Piano.
+// When name is too short to trigger step 2, only step 5 (MIDI-only) can fire.
+// The old transposition filter in step 5 rejected bb-clarinet (tmplChr=-2)
+// whenever encKey==0, causing piano fallback.
+// ===========================================================================
+TEST_F(Tst_Instruments, instrument_empty_name_midi_clarinet_resolves_not_piano)
+{
+    MasterScore* score = readEncoreScore("instruments_instr_empty_name_midi_clarinet.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->id(), String(u"bb-clarinet"))
+        << "Empty name + MIDI 72 + Key=0 must resolve to bb-clarinet (step5), not Grand Piano";
+    delete score;
+}
+
+// ===========================================================================
+// REGRESSION: Bb clarinet with Key=-2 (correctly configured) must still work.
+// Guards against a fix for Key=0 accidentally breaking the correct-Key path.
+// ===========================================================================
+TEST_F(Tst_Instruments, instrument_clarinet_midi72_key_neg2_resolves_correctly)
+{
+    MasterScore* score = readEncoreScore("instruments_instr_clarinet_midi72_key_neg2.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->id(), String(u"bb-clarinet"))
+        << "Clarinete + MIDI 72 + Key=-2 must still resolve to bb-clarinet via transposition filter";
+    delete score;
+}
+
+// ===========================================================================
 // FIX: compact v0xC4 with short header (LINE block before offset 390) must not read MIDI from inside LINE.
 // Byte 0x30=48 at offset 390 is LINE layout data; guard must fall back to Grand Piano.
 // ===========================================================================
@@ -279,23 +333,55 @@ TEST_F(Tst_Instruments, instrument_count_padding)
     delete score;
 }
 
-TEST_F(Tst_Instruments, transposition_filter_rejects_mismatched_key)
+TEST_F(Tst_Instruments, transposition_filter_prefers_compatible_key)
 {
-    // encKeySemitones=0 must reject Castilian Dulzaina (chromatic=6). ENC_KEY_NO_FILTER must still find it.
+    // The transposition filter is a PREFERENCE, not a hard rejection. When no
+    // transposition-compatible match exists (e.g. no C-pitched Dulzaina template),
+    // the function falls back to the best name+MIDI match instead of returning nullptr.
+    // This prevents transposing instruments from becoming Grand Piano when the Encore
+    // Key field is not set (encKey=0).
     MasterScore* score = readEncoreScore("instruments_instrument_count_padding.enc");
     ASSERT_NE(score, nullptr);
     delete score;
 
     using namespace mu::iex::encore;
 
+    // encKey=0, only Castilian Dulzaina template exists (chromatic=6, no C-Dulzaina).
+    // Filter prefers a compatible match; since none exists it falls back to best name match.
     const InstrumentTemplate* filtered = findEncoreInstrumentTemplate(
         QStringLiteral("Dulzaina 2"), -1, 0);
-    EXPECT_EQ(filtered, nullptr)
-        << "Transposing dulzaina template (chromatic=6) must be rejected when encKey=0";
+    ASSERT_NE(filtered, nullptr)
+        << "When no transposition-compatible match exists, must fall back to best name match "
+        "(not nullptr) to avoid Grand Piano fallback";
+    EXPECT_EQ(filtered->transpose.chromatic, 6)
+        << "Castilian Dulzaina (chromatic=6) is the only dulzaina template, so it is the fallback";
 
+    // Unfiltered call must return the same result.
     const InstrumentTemplate* unfiltered = findEncoreInstrumentTemplate(
         QStringLiteral("Dulzaina 2"), -1);
     ASSERT_NE(unfiltered, nullptr);
     EXPECT_EQ(unfiltered->transpose.chromatic, 6)
-        << "Unfiltered call must find Castilian Dulzaina (chromatic=6)";
+        << "Unfiltered call must also find Castilian Dulzaina (chromatic=6)";
+}
+
+// ===========================================================================
+// FIX: v0xC4 files with no TK blocks use fallback instruments (contentFilePos=-1,
+// offset=0). The compact MIDI/Key offsets (390/367) have 0, but the standard
+// large-TK offsets (2278/2255) have the real values. The importer must probe
+// the large-TK positions when contentFilePos<0 (no TK blocks found).
+// ===========================================================================
+TEST_F(Tst_Instruments, no_tk_blocks_reads_midi_and_key_from_large_tk_offsets)
+{
+    // instruments_no_tk_blocks_midi_key.enc: TK00 magic zeroed, MIDI=69 at 2278, Key=6 at 2255.
+    // Expected: oboe template selected (MIDI 68 0-indexed = oboe), transposition +6.
+    MasterScore* score = readEncoreScore("instruments_no_tk_blocks_midi_key.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->id(), String(u"oboe"))
+        << "MIDI=69 (oboe) must be read from large-TK offset 2278 even when TK blocks are absent";
+    EXPECT_EQ(inst->transpose().chromatic, 6)
+        << "Key=6 must be read from large-TK offset 2255 and applied as transposition";
+    delete score;
 }

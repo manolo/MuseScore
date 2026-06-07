@@ -142,24 +142,23 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
     }
 
     // Step 5: MIDI program lookup (skip for RHYTHM staves — program 0 would select Grand Piano).
-    // Rejects result when its non-octave transposition conflicts with encKey.
+    // Accept any MIDI match as better than Grand Piano fallback; log when transposition differs.
     if (!tmpl && !isRhythm && instr.midiProgram > 0) {
         const InstrumentTemplate* midiTmpl = findTemplateByMidi(instr.midiProgram - 1);
         if (midiTmpl) {
             const int tmplChr = midiTmpl->transpose.chromatic;
-            // C/octave templates always OK; non-octave must match encKey mod 12.
-            const bool ok = (tmplChr % 12 == 0)
-                            || (encKey % 12 != 0
-                                && (((encKey % 12) + 12) % 12 == ((tmplChr % 12) + 12) % 12));
-            if (ok) {
-                tmpl = midiTmpl;
-                matchStep = 5;
-            } else {
+            const bool transpMismatch = (tmplChr % 12 != 0)
+                                        && (encKey % 12 != 0)
+                                        && ((((encKey % 12) + 12) % 12) != (((tmplChr % 12) + 12) % 12));
+            if (transpMismatch) {
                 LOGD() << "  instrument \"" << instr.name.toStdString()
-                       << "\": MIDI match \"" << midiTmpl->trackName.toStdString()
-                       << "\" rejected (template chromatic=" << tmplChr
-                       << " vs encKey=" << encKey << "), using fallback";
+                       << "\": MIDI " << instr.midiProgram << " match \""
+                       << midiTmpl->trackName.toStdString()
+                       << "\" transposition differs (template chromatic=" << tmplChr
+                       << " vs encKey=" << encKey << ")";
             }
+            tmpl = midiTmpl;
+            matchStep = 5;
         }
     }
 
@@ -235,12 +234,11 @@ void buildParts(BuildCtx& ctx)
         const int pitchOffset = static_cast<int>(instr.keyTransposeSemitones);
         // Non-octave transposition: set on the instrument so display shows written pitch (Encore's stored pitch).
         // Octave offsets are handled by pickStaffClef() and the template's own transposition.
-        if (pitchOffset != 0 && std::abs(pitchOffset) % 12 != 0) {
-            Instrument* instrument = part->instrument();
-            if (instrument) {
+        Instrument* instrument = part->instrument();
+        if (instrument) {
+            if (pitchOffset != 0 && std::abs(pitchOffset) % 12 != 0) {
                 const Interval iv(pitchOffset);
                 instrument->setTranspose(iv);
-                // Note that sounds when written C is played (mod-12 of the offset).
                 static const char* const keyNames[] = {
                     "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"
                 };
@@ -248,6 +246,19 @@ void buildParts(BuildCtx& ctx)
                 LOGD() << "  instrument \"" << instr.name.toStdString()
                        << "\": transposition in " << keyNames[keyIdx]
                        << " (chromatic=" << iv.chromatic << " diatonic=" << iv.diatonic << ")";
+            } else if (pitchOffset == 0) {
+                // encKey=0: Encore's Key field is not set, meaning "sounds as written"
+                // (ENCORE_FORMAT.md: 0 = sounds as written). Zero out any non-octave
+                // transposition that the selected template may carry (e.g. Bb clarinet
+                // selected via MIDI fallback has transposeChromatic=-2). Without this,
+                // written notes would be shifted by the template's interval, displaying
+                // the wrong pitch (Bb4 → C5 for Bb clarinet template).
+                const Interval tmplT = instrument->transpose();
+                if (!tmplT.isZero() && tmplT.chromatic % 12 != 0) {
+                    instrument->setTranspose(Interval(0, 0));
+                    LOGD() << "  instrument \"" << instr.name.toStdString()
+                           << "\": encKey=0 (sounds as written) → zeroing template transposition";
+                }
             }
         }
         for (int s = 0; s < ns; ++s) {

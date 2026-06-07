@@ -74,7 +74,10 @@ TEST_F(Tst_Text, lyrics_hyphen_separators_dropped_and_set_syllabic)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    struct Entry { String text; LyricsSyllabic syll; };
+    struct Entry {
+        String text;
+        LyricsSyllabic syll;
+    };
     std::vector<Entry> seen;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
         if (!mb->isMeasure()) {
@@ -260,9 +263,9 @@ TEST_F(Tst_Text, staff_text_promoted_to_tempo_for_italian_terms)
             }
         }
     }
-    EXPECT_EQ(tempoTexts, (std::vector<String>{ u"Allegro", u"a tempo" }))
+    EXPECT_EQ(tempoTexts, (std::vector<String> { u"Allegro", u"a tempo" }))
         << "Allegro and 'a tempo' must reach the score as TempoText, not StaffText";
-    EXPECT_EQ(staffTexts, (std::vector<String>{ u"ten." }))
+    EXPECT_EQ(staffTexts, (std::vector<String> { u"ten." }))
         << "Non-tempo words remain plain StaffText";
     delete score;
 }
@@ -338,7 +341,11 @@ TEST_F(Tst_Text, measure_header_bpm_drives_initial_tempo_and_changes)
     EXPECT_TRUE(ret) << ret.text();
 
     // Collect every TempoText in the score with its host measure index.
-    struct Found { int measureIdx; double bps; String xmlText; };
+    struct Found {
+        int measureIdx;
+        double bps;
+        String xmlText;
+    };
     std::vector<Found> seen;
     int mi = -1;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
@@ -393,7 +400,9 @@ TEST_F(Tst_Text, orn_tempo_compound_meter_dotted_quarter_bpm)
 
     TempoText* tt = nullptr;
     for (MeasureBase* mb = score->first(); mb && !tt; mb = mb->next()) {
-        if (!mb->isMeasure()) { continue; }
+        if (!mb->isMeasure()) {
+            continue;
+        }
         for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
              s && !tt; s = s->next(SegmentType::ChordRest)) {
             for (EngravingItem* e : s->annotations()) {
@@ -429,7 +438,11 @@ TEST_F(Tst_Text, tempo_text_uses_sym_tags_and_follow_text_enabled)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    struct Found { String xmlText; bool followText; double bps; };
+    struct Found {
+        String xmlText;
+        bool followText;
+        double bps;
+    };
     std::vector<Found> seen;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
         if (!mb->isMeasure()) {
@@ -488,7 +501,6 @@ TEST_F(Tst_Text, header_footer_tokens_translated_to_mscore_macros)
     EXPECT_EQ(score->style().styleSt(mu::engraving::Sid::evenFooterL), u"Time $m");
     delete score;
 }
-
 
 // ===========================================================================
 // FIX: STAFFTEXT 0x1E (ORN tind byte +32) indexes into the TEXT block for the display string.
@@ -558,48 +570,122 @@ TEST_F(Tst_Text, staff_text_placement_from_yoffset)
 // ===========================================================================
 // UNIT: tempoXmlText() — pure-function tests, no score needed.
 // Verifies that the note symbol is always emitted as a <sym> tag (not raw
-// Unicode), that compound meters use the dotted-quarter variant, and that
-// non-compound meters with denominator 8 (e.g. 7/8) use the plain quarter.
+// Unicode), that beatTicks=360 (dotted quarter) uses the dotted-quarter variant,
+// and that beatTicks=240 (quarter) uses the plain quarter.
+// displayBpm is always the beat-unit BPM as displayed; no conversion happens inside.
 // ===========================================================================
 TEST(Tst_TempoXmlText, simple_meter_quarter_sym)
 {
     using namespace mu::iex::encore;
-    // 4/4: quarter sym
-    EXPECT_EQ(tempoXmlText(120, Fraction(4, 4)),
+    // beatTicks=240 (quarter beat): quarter sym
+    EXPECT_EQ(tempoXmlText(120, 240),
               String(u"<sym>metNoteQuarterUp</sym> = 120"));
-    // 3/4: quarter sym
-    EXPECT_EQ(tempoXmlText(80, Fraction(3, 4)),
+    EXPECT_EQ(tempoXmlText(80, 240),
               String(u"<sym>metNoteQuarterUp</sym> = 80"));
-    // 2/4: quarter sym
-    EXPECT_EQ(tempoXmlText(100, Fraction(2, 4)),
+    EXPECT_EQ(tempoXmlText(100, 240),
               String(u"<sym>metNoteQuarterUp</sym> = 100"));
 }
 
-TEST(Tst_TempoXmlText, compound_meter_dotted_quarter_sym)
+TEST(Tst_TempoXmlText, dotted_quarter_beat_sym)
 {
     using namespace mu::iex::encore;
-    // 6/8: compound (6%3==0 && 6>3 && den==8) -> dotted quarter
-    // dottedBpm = (120*2+1)/3 = 80
-    EXPECT_EQ(tempoXmlText(120, Fraction(6, 8)),
+    // beatTicks=360 (dotted-quarter beat): dotted-quarter sym; displayBpm is already the beat-unit value.
+    // (For MEAS BPM the caller converts QPM to displayBpm via bpm*2/3 before calling tempoXmlText.)
+    EXPECT_EQ(tempoXmlText(80, 360),
               String(u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = 80"));
-    // 9/8: compound -> dottedBpm = (120*2+1)/3 = 80
-    EXPECT_EQ(tempoXmlText(120, Fraction(9, 8)),
-              String(u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = 80"));
-    // 12/8: compound -> dottedBpm = (120*2+1)/3 = 80
-    EXPECT_EQ(tempoXmlText(120, Fraction(12, 8)),
+    // beatTicks=360 for 3/8 (dotted-quarter beat, previously incorrectly treated as quarter)
+    EXPECT_EQ(tempoXmlText(80, 360),
               String(u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = 80"));
 }
 
-TEST(Tst_TempoXmlText, non_compound_eighth_denominators_use_quarter_sym)
+TEST(Tst_TempoXmlText, non_dotted_eighth_denominators_use_quarter_sym)
 {
     using namespace mu::iex::encore;
-    // 7/8: denominator is 8 but 7%3 != 0 -> not compound -> quarter sym
-    EXPECT_EQ(tempoXmlText(156, Fraction(7, 8)),
+    // beatTicks=120 (eighth-note beat, e.g. 7/8 with eighth as beat unit): quarter sym
+    EXPECT_EQ(tempoXmlText(156, 120),
               String(u"<sym>metNoteQuarterUp</sym> = 156"));
-    // 3/8: denominator is 8 but numerator 3 is NOT > 3 -> not compound
-    EXPECT_EQ(tempoXmlText(80, Fraction(3, 8)),
-              String(u"<sym>metNoteQuarterUp</sym> = 80"));
-    // 6/4: denominator is 4, not 8 -> not compound
-    EXPECT_EQ(tempoXmlText(120, Fraction(6, 4)),
+    // Other non-dotted beat values also use quarter sym
+    EXPECT_EQ(tempoXmlText(120, 240),
               String(u"<sym>metNoteQuarterUp</sym> = 120"));
+}
+
+// ===========================================================================
+// FIX: 3/8 pieces with beatTicks=360 (dotted-quarter beat) played at 2/3 speed.
+// Old compound check: `numerator > 3` excluded 3/8 (numerator=3). Fix: also
+// check beatTicks==360 from the MEAS header so 3/8 files get the 1.5x BPS
+// adjustment the same as 6/8.
+// Expected: ORN TEMPO=80 in 3/8 (beatTicks=360) → BPS = 80*1.5/60 = 2.0.
+// ===========================================================================
+TEST_F(Tst_Text, orn_tempo_3_8_dotted_quarter_bps_correct)
+{
+    MasterScore* score = readEncoreScore("text_orn_tempo_3_8_dotted_quarter.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    TempoText* tt = nullptr;
+    for (MeasureBase* mb = score->first(); mb && !tt; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s && !tt; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isTempoText()) {
+                    tt = toTempoText(e);
+                    break;
+                }
+            }
+        }
+    }
+    ASSERT_NE(tt, nullptr) << "No TempoText found in score";
+    EXPECT_NEAR(tt->tempo().val, 80.0 * 1.5 / 60.0, 1e-5)
+        << "ORN TEMPO=80 in 3/8 (beatTicks=360) must give BPS=2.0 (dotted-quarter 80), "
+        "not 1.333 (plain quarter 80)";
+    EXPECT_EQ(tt->xmlText(),
+              u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = 80")
+        << "Display must show dotted-quarter=80, not quarter=80";
+
+    delete score;
+}
+
+// ===========================================================================
+// FIX: When ORN TEMPO is placed at a later tick (first NOTE, not first REST),
+// the MEAS-header BPM guard only checked the segment at measTick (the rest
+// segment). It missed the ORN TEMPO, creating two conflicting tempo marks.
+// Fix: widen guard to scan all segments in the measure.
+// Expected: only ONE TempoText, from ORN TEMPO=63 (not the MEAS BPM=160).
+// ===========================================================================
+TEST_F(Tst_Text, meas_bpm_suppressed_when_orn_tempo_at_later_tick)
+{
+    MasterScore* score = readEncoreScore("text_meas_bpm_suppressed_by_orn_tempo_later_tick.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<double> bpsValues;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isTempoText()) {
+                    bpsValues.push_back(toTempoText(e)->tempo().val);
+                }
+            }
+        }
+    }
+
+    EXPECT_EQ(bpsValues.size(), 1u)
+        << "Only ONE TempoText must exist (ORN TEMPO=63); MEAS BPM=160 must be "
+        "suppressed because ORN TEMPO already exists in the same measure";
+
+    if (!bpsValues.empty()) {
+        EXPECT_NEAR(bpsValues[0], 63.0 / 60.0, 1e-5)
+            << "The surviving TempoText must be the ORN TEMPO (BPS=63/60), not the MEAS BPM (160/60)";
+    }
+
+    delete score;
 }

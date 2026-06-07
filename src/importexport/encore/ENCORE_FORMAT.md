@@ -90,10 +90,15 @@ instrument n → file offset  base + n * step
 "Key" dropdown (`0` = sounds as written, `-12` = octave lower, range ±33 semitones).
 Encore shifts every note pitch by this value.
 
-**Compact format (no TK blocks).** Single-instrument files store the MIDI program at fixed
-offset 390 and the key transposition at `390 - 23 = 367`, using the same relative offset
-as the TK-based format. Multi-instrument compact files use a different layout and their
-key transpositions are not currently read.
+**No-TK-block files.** Some v0xC4 files have no TK blocks at all; the parser creates fallback
+instruments (name="Part N"). These files come in two sub-layouts determined by where the first
+PAGE/LINE/MEAS block starts:
+
+- **Compact layout** (first block ≤ offset 2278): MIDI at offset 390, Key at 367.
+  Single-instrument only for Key; multi-instrument Key is not read.
+- **Large-TK layout** (first block > offset 2278): MIDI at base 2278, Key at 2255,
+  using the same offsets as TK-based files. This handles Encore 5 files exported
+  without TK blocks but with the standard instrument metadata tables.
 
 **Percussion quirk.** Percussion tracks always report MIDI program 1 (GM Grand Piano);
 infer the actual kit from the track name.
@@ -244,6 +249,75 @@ Naive cumulative placement collapses this gap; the importer must detect on-grid 
 
 ---
 
+## CHORD element
+
+Type 7. Variable size. Encodes a chord symbol (harmony marking) above the staff.
+
+### Byte layout (content bytes, after the 5-byte element header)
+
+| Offset | Size | Field    | Description |
+|--------|------|----------|-------------|
+| +0     | 1    | `toniko` | Chord quality type (index 0-62 into the quality table below) |
+| +1     | 1    | `tipo`   | Flags: bit 0 = text present, bit 1 = bass note present |
+| +2-4   | 3    | —        | skipped |
+| +5     | 1    | `xoffset`| Horizontal display offset |
+| +6     | 1    | —        | skipped |
+| +7     | 1    | `radiko` | Root note (see note encoding below) |
+| +8     | 1    | `baso`   | Bass note for slash chords (same encoding as `radiko`; valid only when `tipo & 0x02`) |
+| +9     | 36   | `teksto` | Chord text slot (only present when `tipo & 0x01`; UTF-16 LE or Latin-1, byte 0/1 probe) |
+
+Trailing bytes (beyond `+9` when no text, beyond `+45` when text is present) are skipped using the element `size` field.
+
+### Root note encoding (`radiko` / `baso`)
+
+`lower nibble (bits 0-3)` = note name: 0=C, 1=D, 2=E, 3=F, 4=G, 5=A, 6=B
+
+`upper nibble (bits 4-7)` = accidental: 0x0=natural, 0x1=sharp, 0x2=flat
+
+Examples: `0x05`=A, `0x26`=Bb, `0x13`=F#, `0x21`=Db.
+
+### Chord quality table (`toniko`)
+
+When `tipo & 0x01` is set, `teksto` overrides `toniko` and `radiko` (the chord name is taken directly from the text field). When `tipo & 0x01` is clear, the chord name is constructed as `root + quality` from the table below.
+
+| Index | Quality suffix | Index | Quality suffix |
+|-------|---------------|-------|---------------|
+|  0 | (major, no suffix) | 32 | 9 |
+|  1 | m | 33 | 9(b5) |
+|  2 | + | 34 | 11 |
+|  3 | dim | 35 | 13 |
+|  4 | 7 | 36 | 13(b5) |
+|  5 | 5 | 37 | 13(b9) |
+|  6 | 6 | 38 | 13(#9) |
+|  7 | 6/9 | 39 | (undefined) |
+|  8 | (add2) | 40 | +7 |
+|  9 | (add9) | 41 | +7(b9) |
+| 10 | (omit3) | 42 | +7(#9) |
+| 11 | (omit5) | 43 | +9 |
+| 12 | maj7 | 44 | sus2 |
+| 13 | maj7(b5) | 45 | sus2sus4 |
+| 14 | maj7(6/9) | 46 | sus4 |
+| 15 | maj7(#5) | 47 | 7sus4 |
+| 16 | (undefined) | 48 | 9sus4 |
+| 17 | maj9 | 49 | 13sus4 |
+| 18 | maj9(b5) | 50 | m(add2) |
+| 19 | maj9(#5) | 51 | m(add9) |
+| 20 | (undefined) | 52 | m6 |
+| 21 | maj13 | 53 | m6/9 |
+| 22 | maj13(b5) | 54 | m7 |
+| 23 | (undefined) | 55 | m(maj7) |
+| 24 | 7 (alternate) | 56 | m7(b5) |
+| 25 | 7(b5) | 57 | m7(add4) |
+| 26 | 7(b9) | 58 | m7(add11) |
+| 27 | 7(#9) | 59 | m9 |
+| 28-31 | (undefined) | 60 | m(maj9) |
+|  | | 61 | m11 |
+|  | | 62 | m13 |
+
+Indices 16, 20, 23, 28-31, 39 are undefined in the Encore format; the importer treats them as major (empty suffix). Index 45 in the original Encore encoding is "sus2,sus4"; the comma is removed to avoid conflicts with MuseScore's chord parser.
+
+---
+
 ## KEYCHANGE element
 
 Type 2. Size 6 bytes. Byte at +5 = key index into the fifths table:
@@ -299,9 +373,10 @@ Type 5. Variable size. Offsets from element start:
 | 0x21    | SLURSTART     | slur; endpoint encoded by alMezuro and xoffset2                                  |
 | 0x22    | ARPEGGIO      | chord arpeggio                                                                   |
 | 0x32    | TEMPO         | tempo; BPM at +30 (reserved, unused — tempo travels as STAFFTEXT)                |
-| 0x35    | TRILL_END     | end of trill+wavy-line span; no visible glyph                                    |
-| 0x36    | TRILL_START   | trill-mark start                                                                 |
-| 0x37    | TRILL_ALT     | second trill-span start                                                          |
+| 0x35    | TRILL_END     | end of trill+wavy-line span; no visible glyph. Consumed as span endpoint.        |
+| 0x36    | TRILL_START   | trill span start → MuseScore `Trill` spanner (tr + wavy line) when 0x35 or      |
+|         |               | `alMezuro>0` is present; otherwise falls back to Ornament glyph.                |
+| 0x37    | TRILL_ALT     | secondary trill mark within a span → always Ornament glyph (not a spanner).     |
 | 0x41    | SLURSTOP      | reserved, not emitted in practice                                                |
 | 0x4D    | WEDGESTOP     | reserved, not emitted in practice                                                |
 | 0x80    | DYN_PPP       | dynamic `ppp` (size-16)                                                          |
@@ -484,6 +559,35 @@ Syllabic role (begin/middle/end/single) derived from hyphen-before / hyphen-afte
 Byte +9 is staff-position (e.g. 11 for B4 in treble clef counting), NOT pitch.
 Byte +11 is the playable MIDI value.
 
+---
+
+## REST element
+
+### v0xC4 (size = 18)
+
+| Offset   | Size   | Description                                                                      |
+|----------|--------|----------------------------------------------------------------------------------|
+| +5       | 1      | face value — same encoding as Note element                                       |
+| +10      | 1      | layout x-position                                                                |
+| +13      | 1      | tuplet byte — high nibble = actualN, low nibble = normalN (same as note)         |
+| +14      | 1      | dotControl — **bitmask flag, NOT a tick count**. Bit 0 = dotted display hint.   |
+
+**dotControl semantics.** dotControl is a **bitmask**, not a sounding tick value:
+
+| Bit | Meaning                        |
+|-----|--------------------------------|
+| 0   | dotted display flag (1 = dotted) |
+| others | visual/layout hints, ignore  |
+
+Do NOT pass dotControl as a raw tick count to `calcDots()` — it will return 0 in most
+cases. Instead:
+1. Try `calcDots(dotControl, fv)` (works when dotControl happens to equal a dotted tick count).
+2. Fallback to `calcDotsSnap(realDuration, fv)` (handles exact or ±1-tick-accurate rdur).
+3. If both return 0 AND `dotControl & 1`, force 1 dot. This handles MIDI timing drift
+   where rdur is 10–20 ticks off from the theoretical dotted value.
+
+---
+
 ### Articulation bytes
 
 Each byte holds one or two glyphs:
@@ -551,12 +655,21 @@ and can be computed reliably as `(durTicks * timeSigDen) / timeSigNum`. Do NOT u
 Notated duration = face value + dot count + tuplet byte.
 The playback duration at +16 diverges (live recording, ties, tuplets).
 
-**Tuplets.** Either explicit byte `(actualN << 4) | normalN` (3:2, 5:4, 6:4) or implicit
-(playback duration ≈ faceTicks × 2/3 or 4/5).
-The face value is authoritative for notation.
+**Tuplets.** Either explicit byte `(actualN << 4) | normalN` or implicit (playback duration
+≈ faceTicks × 2/3 or 4/5). Supported explicit ratios: 3:2 (`0x32`), 4:3 (`0x43`), 5:4 (`0x54`),
+6:4 (`0x64`). Implicit detection applies only to v0xC2 files.
+
+**Beat-relative face values.** In compound and simple meters where one beat equals an eighth
+(e.g. 6/8, 8/8, 12/8), Encore stores the face value as the number of "beats", not as an
+absolute note value. A Q-face note (`fv=3`) in an 8/8 3:2 triplet thus represents one eighth
+beat, not one quarter note. The actual written duration is `rdur × (actualN / normalN)`; when
+that product equals a standard tick count (E=120, Q=240, …), it overrides the face value.
+Detection: `rdur == beatTicks × (normalN / actualN)` (one beat per tuplet slot).
 
 **Dotted notes.** Dot count at +14.
-Can be inferred from `playbackTicks == faceTicks × 3/2` (one dot), `7/4` (two dots), with ±1-tick tolerance.
+Can be inferred from `playbackTicks == faceTicks × 3/2` (one dot), `7/4` (two dots), with ±1-tick
+tolerance. For rests, dotControl (+10) is a bitmask flag, NOT a tick count; use
+`calcDotsSnap(realDuration, fv)` as the authoritative dot source.
 
 ---
 
@@ -699,3 +812,14 @@ accepts this (guard requires `bottomEdge > 0 && rightEdge > 0`).
 - Glyphs dropped by Encore's own MusicXML exporter (per-chord staccato `0xC9`, trill-end `0x35`)
   are recoverable directly from the `.enc` binary.
 - Largest legitimate block ≈ 2 KiB; a longer run of unrecognised bytes suggests a corrupt file.
+- **Duplicate NOTE elements in chord clusters.** Some Encore files encode the same pitch twice in
+  the same chord cluster: two NOTE elements with identical tick/staff/voice/pitch. Two variants:
+  (a) the second copy has `grace1 bit 0x40` set (chord-extension marker), the first does not; or
+  (b) both copies have `grace1 = 0` (seen in some v0xC2 files). In both cases adding both creates
+  two noteheads at the same stem position. The importer suppresses any note whose pitch is already
+  present in the current chord, regardless of the `grace1` value.
+- **Key=0 and template transposition.** When Encore's Key field is 0 (`0 = sounds as written`),
+  the importer stores notes at written pitch with no chromatic shift (`staffPitchOffset = 0`).
+  If the MIDI program causes a transposing template to be selected (e.g. Bb clarinet for MIDI 72),
+  the template's non-octave transposition is zeroed out so that the stored written pitch is
+  displayed as-is. Octave transpositions from the template (e.g. guitar, bass) are preserved.
