@@ -1,0 +1,169 @@
+name: 'Build: Encore Importer Preview'
+
+on:
+  push:
+    branches:
+      - feature/enc-importer-action
+
+jobs:
+
+  build_mac:
+    uses: ./.github/workflows/build_macos.yml
+    with:
+      build_mode: devel
+      publish: 'off'
+    secrets: inherit
+
+  build_windows:
+    uses: ./.github/workflows/build_windows.yml
+    with:
+      platforms: windows_x64
+      build_mode: devel
+      publish: 'off'
+    secrets: inherit
+
+  build_linux:
+    uses: ./.github/workflows/build_linux.yml
+    with:
+      platforms: linux_x64
+      build_mode: devel
+      publish: 'off'
+    secrets: inherit
+
+  # Extract arm64-only zip from the universal macOS DMG.
+  # Uses ditto --arch to thin the whole .app bundle in one step,
+  # then re-signs ad-hoc (no Apple Developer cert needed for preview).
+  package_mac_arm64_zip:
+    needs: [build_mac]
+    runs-on: macos-latest
+    steps:
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'MU4_*_Mac_*'
+          merge-multiple: true
+          path: ./raw/mac
+
+      - name: Extract arm64 .app from DMG and zip
+        run: |
+          set -e
+          DMG=$(find ./raw/mac -name "*.dmg" | head -1)
+          echo "Using DMG: $DMG"
+
+          MOUNT_POINT=$(mktemp -d)
+          hdiutil attach "$DMG" -mountpoint "$MOUNT_POINT" -nobrowse -quiet
+
+          APP=$(find "$MOUNT_POINT" -name "*.app" -maxdepth 2 | head -1)
+          echo "Found app: $APP"
+
+          # Thin entire bundle (binary + all frameworks/dylibs) to arm64 only
+          ditto --arch arm64 "$APP" MuseScore-enc-preview.app
+
+          hdiutil detach "$MOUNT_POINT" -quiet
+
+          # Ad-hoc re-sign (required after thinning)
+          codesign --force --deep --sign - MuseScore-enc-preview.app
+
+          zip -r --symlinks MuseScore-Studio-enc-importer-preview-mac-arm64.zip MuseScore-enc-preview.app
+
+      - name: Upload arm64 zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: enc-preview-mac-arm64-zip
+          path: MuseScore-Studio-enc-importer-preview-mac-arm64.zip
+
+  package_preview:
+    needs: [build_mac, build_windows, build_linux, package_mac_arm64_zip]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for README files)
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: Binarios/EncoreImporter
+          sparse-checkout-cone-mode: false
+
+      - name: Download macOS universal artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'MU4_*_Mac_*'
+          merge-multiple: true
+          path: ./raw/mac
+
+      - name: Download macOS arm64 zip
+        uses: actions/download-artifact@v4
+        with:
+          name: enc-preview-mac-arm64-zip
+          path: ./raw/mac-arm64
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'MU4_*_Win_x64*'
+          merge-multiple: true
+          path: ./raw/win
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'MU4_*_Lin_x64*'
+          merge-multiple: true
+          path: ./raw/linux
+
+      - name: Assemble preview package
+        run: |
+          set -e
+          mkdir -p preview
+          DATE=$(date -u +"%Y-%m-%d")
+
+          # macOS universal: .dmg (arm64 + x86_64)
+          DMG=$(find ./raw/mac -name "*.dmg" | head -1)
+          if [ -n "$DMG" ]; then
+            cp "$DMG" "preview/MuseScore-Studio-enc-importer-preview-${DATE}-mac.dmg"
+            echo "macOS universal: $DMG"
+          else
+            echo "WARNING: no .dmg found"; ls ./raw/mac/
+          fi
+
+          # macOS arm64 zip
+          ZIP=$(find ./raw/mac-arm64 -name "*.zip" | head -1)
+          if [ -n "$ZIP" ]; then
+            cp "$ZIP" "preview/MuseScore-Studio-enc-importer-preview-${DATE}-mac-arm64.zip"
+            echo "macOS arm64: $ZIP"
+          else
+            echo "WARNING: no arm64 zip found"; ls ./raw/mac-arm64/
+          fi
+
+          # Windows: .msi
+          MSI=$(find ./raw/win -name "*.msi" | head -1)
+          if [ -n "$MSI" ]; then
+            cp "$MSI" "preview/MuseScore-Studio-enc-importer-preview-${DATE}-win-x86_64.msi"
+            echo "Windows: $MSI"
+          else
+            echo "WARNING: no .msi found"; ls ./raw/win/
+          fi
+
+          # Linux: .AppImage
+          APPIMG=$(find ./raw/linux -name "*.AppImage" ! -name "*.zsync" | head -1)
+          if [ -n "$APPIMG" ]; then
+            cp "$APPIMG" "preview/MuseScore-Studio-enc-importer-preview-${DATE}-linux-x86_64.AppImage"
+            echo "Linux: $APPIMG"
+          else
+            echo "WARNING: no .AppImage found"; ls ./raw/linux/
+          fi
+
+          # README files
+          cp Binarios/EncoreImporter/README-mac.txt          preview/
+          cp Binarios/EncoreImporter/README-mac-arm64.txt    preview/
+          cp Binarios/EncoreImporter/README-win-x86_64.txt   preview/
+          cp Binarios/EncoreImporter/README-linux-x86_64.txt preview/
+
+          echo ""
+          echo "Preview package contents:"
+          ls -lh preview/
+
+      - name: Upload preview package
+        uses: actions/upload-artifact@v4
+        with:
+          name: MuseScore-enc-importer-preview
+          path: preview/
+          retention-days: 90
