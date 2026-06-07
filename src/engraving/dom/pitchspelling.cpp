@@ -627,7 +627,22 @@ int computeWindow(const std::vector<Note*>& notes, int start, int end)
     while (i < end) {
         pitch[k] = notes[i]->pitch() % 12;
         Fraction tick = notes[i]->chord()->tick();
-        key[k]   = int(notes[i]->staff()->key(tick)) + 7;
+        // For transposing instruments, spell relative to the concert key so that the
+        // concert-pitch note is penalized correctly. Using the written key causes the
+        // algorithm to prefer enharmonically equivalent spellings that are diatonic in
+        // the written key but wrong for the concert-key context (e.g. choosing Cb over
+        // B natural for a Dulzaina-in-F# instrument when the piece is written in F major).
+        {
+            const Staff* ns = notes[i]->staff();
+            Key spellingKey = ns ? ns->key(tick) : Key::C;
+            if (ns && ns->part() && ns->part()->instrument(tick)) {
+                const Interval& t = ns->part()->instrument(tick)->transpose();
+                if (!t.isZero() && t.chromatic % PITCH_DELTA_OCTAVE != 0) {
+                    spellingKey = ns->concertKey(tick);
+                }
+            }
+            key[k] = int(spellingKey) + 7;
+        }
         if (key[k] < 0 || key[k] > 14) {
             LOGD("illegal key at tick %d: %d, window %d-%d",
                  tick.ticks(), key[k] - 7, start, end);

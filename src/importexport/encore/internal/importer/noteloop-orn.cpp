@@ -207,18 +207,21 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
             }
             TempoText* tt2 = Factory::createTempoText(seg);
             tt2->setTrack(track);
-            // eo->tempo is beat-unit BPM; compound meters (6/8, 9/8, 12/8) use dotted-quarter beat, so scale by 3/2 for the tempo map.
-            // Use nominal timesig so a pickup measure inherits the main sig's compound/simple classification.
+            // eo->tempo is the displayed beat-unit BPM. Detect dotted-quarter beat using
+            // both beatTicks=360 (real Encore files like 3/8 dotted-quarter feel) and
+            // compound time-sig check (old fixtures store beatTicks=240 even for 6/8).
+            // The old compound check excluded 3/8 (numerator > 3 is false for 3); beatTicks
+            // handles that case.
+            const quint16 rawBeatTicks = encMeas.beatTicks;
+            // Use nominal timesig so a pickup measure inherits the main sig's classification.
             const Fraction mts = measure->timesig();
-            const bool cmpd = mts.denominator() == 8
-                              && mts.numerator() % 3 == 0
-                              && mts.numerator() > 3;
-            const int quarterBpm = cmpd
-                                   ? static_cast<int>(eo->tempo * 3.0 / 2.0 + 0.5)
-                                   : static_cast<int>(eo->tempo);
-            const double bps = quarterBpm / 60.0;
+            const bool cmpd = (rawBeatTicks == 360)
+                              || (mts.denominator() == 8
+                                  && mts.numerator() % 3 == 0
+                                  && mts.numerator() > 3);
+            const double bps = cmpd ? eo->tempo * 1.5 / 60.0 : eo->tempo / 60.0;
             tt2->setTempo(BeatsPerSecond(bps));
-            tt2->setXmlText(tempoXmlText(quarterBpm, measure->timesig()));
+            tt2->setXmlText(tempoXmlText(static_cast<int>(eo->tempo), cmpd ? 360 : 240));
             tt2->setFollowText(true);
             seg->add(tt2);
             score->setTempo(elemTick, BeatsPerSecond(bps));
@@ -245,11 +248,23 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     case EncOrnamentType::TRILL_START:
     case EncOrnamentType::TRILL_ALT: {
         // Chord not built yet; defer to post-measure pass.
-        // TRILL_END (0x35) is dropped: the start markers already place the trill glyph.
-        ctx.pendingTrills.push_back({ elemTick, track });
+        // TRILL_START (0x36): can become a Trill spanner when a TRILL_END or alMezuro marks the end.
+        // TRILL_ALT (0x37): secondary trill mark within a span; always creates an Ornament glyph.
+        PendingTrill pt;
+        pt.tick    = elemTick;
+        pt.track   = track;
+        pt.isAlt   = (eo->ornType() == EncOrnamentType::TRILL_ALT);
+        if (!pt.isAlt) {
+            pt.alMezuro = static_cast<int>(eo->alMezuro);
+            pt.measIdx  = static_cast<size_t>(measIdx);
+            pt.xoffset2 = static_cast<int>(eo->xoffset2);
+        }
+        ctx.pendingTrills.push_back(pt);
         break;
     }
     case EncOrnamentType::TRILL_END:
+        // Record the tick so the resolver can use it as the trill span endpoint.
+        ctx.pendingTrillEnds[track].push_back(elemTick);
         break;
     case EncOrnamentType::SEGNO:
     case EncOrnamentType::TO_CODA:
