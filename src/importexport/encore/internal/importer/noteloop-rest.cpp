@@ -53,12 +53,16 @@ void handleRest(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         return;
     }
     DurationType dt = realDuration2DurationType(er->realDuration, er->faceValue);
-    // Use dotControl (actual sounding duration stored by Encore) for dot count.
-    // realDuration comes from MIDI tick spacing and may be wrong due to timing drift.
-    qint16 durForDots = (er->dotControl > 0)
-                        ? static_cast<qint16>(er->dotControl)
-                        : er->realDuration;
-    int dots = calcDots(durForDots, er->faceValue);
+    // Mirror the note handler: try dotControl first; fall back to snapping realDuration.
+    // dotControl in Encore rests is a bitmask (bit 0 = dotted flag), not a tick count, so
+    // calcDots on it almost always returns 0. The fallback covers that case.
+    int dots;
+    if (er->dotControl > 0) {
+        const int dByCtrl = calcDots(static_cast<qint16>(er->dotControl), er->faceValue);
+        dots = (dByCtrl > 0) ? dByCtrl : calcDotsSnap(er->realDuration, er->faceValue);
+    } else {
+        dots = calcDotsSnap(er->realDuration, er->faceValue);
+    }
     // Cap rest duration to remaining space. Also cap when the current tuplet group is full (it's closed before this rest, making it plain).
     {
         const auto& ttPre = ctx.tuplets[trackKey];
@@ -88,6 +92,7 @@ void handleRest(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         int actualNr = er->actualNotes();
         int normalNr = er->normalNotes();
         bool isStdExplicitR = (actualNr == 3 && normalNr == 2)
+                              || (actualNr == 4 && normalNr == 3)
                               || (actualNr == 5 && normalNr == 4)
                               || (actualNr == 6 && normalNr == 4);
         if (!isStdExplicitR) {

@@ -31,6 +31,7 @@ set(MODULE_TEST_SRC
     ${CMAKE_CURRENT_LIST_DIR}/tst_text.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tst_instruments.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tst_parser_ticks.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tst_parser_chord.cpp
 )
 
 set(MODULE_TEST_LINK
