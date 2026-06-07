@@ -227,6 +227,7 @@ struct EncChordSym : EncMeasureElem {
     using EncMeasureElem::EncMeasureElem;
 
     bool read(QDataStream& ds) override;
+    QString chordName() const;
 };
 
 struct EncOrnament : EncMeasureElem {
