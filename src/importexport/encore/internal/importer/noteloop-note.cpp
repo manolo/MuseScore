@@ -172,7 +172,8 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     // Explicit tuplet notes use faceValue for dt (rdur may be truncated by the next MIDI event and give wrong duration).
     {
         int preA = en->actualNotes(), preN = en->normalNotes();
-        bool stdE = (preA == 3 && preN == 2) || (preA == 5 && preN == 4) || (preA == 6 && preN == 4);
+        bool stdE = (preA == 3 && preN == 2) || (preA == 4 && preN == 3)
+                    || (preA == 5 && preN == 4) || (preA == 6 && preN == 4);
         if (!stdE) {
             preA = 0;
             preN = 0;
@@ -187,14 +188,49 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     }
     int preACheck = en->actualNotes(), preNCheck = en->normalNotes();
     bool isStandardExplicit = (preACheck == 3 && preNCheck == 2)
+                              || (preACheck == 4 && preNCheck == 3)
                               || (preACheck == 5 && preNCheck == 4)
                               || (preACheck == 6 && preNCheck == 4);
 
-    // Explicit tuplet: faceValue -> dt. All other notes: realDuration -> dt (drift-tolerant).
+    // Explicit tuplet: written note value from rdur × (actualN/normalN).
+    // In files where fv encodes "beats" rather than absolute note values (e.g. 8/8 where
+    // fv=Q means one eighth beat), scaling rdur by the ratio gives the correct MuseScore
+    // duration. In 4/4 files this is identical to faceValue2DurationType (rdur×ratio=fv_ticks).
     DurationType dt;
     int dots;
     if (isStandardExplicit) {
-        dt   = faceValue2DurationType(en->faceValue);
+        // In files where the face-value byte encodes "beats" rather than absolute note
+        // values (e.g. 8/8 where fv=Q means one eighth beat), rdur equals exactly
+        // beatTicks × (normalN/actualN). Use rdur in that case; otherwise trust fv.
+        // This distinguishes beat-relative face values (rdur=beatTicks×ratio) from
+        // truncated rdur (last note in a measure, rdur shortened by a following rest).
+        dt = faceValue2DurationType(en->faceValue);
+        if (en->realDuration > 0 && preACheck > 0 && preNCheck > 0
+            && mc.encMeas && mc.encMeas->beatTicks > 0) {
+            const int bt = static_cast<int>(mc.encMeas->beatTicks);
+            const int expectedBeatAdv = (bt * preNCheck + preACheck / 2) / preACheck;
+            if (static_cast<int>(en->realDuration) == expectedBeatAdv) {
+                // rdur == one beat per tuplet slot: beat-relative face value.
+                // Derive the true written note from rdur × ratio.
+                const int faceTicks = (static_cast<int>(en->realDuration) * preACheck
+                                       + preNCheck / 2) / preNCheck;
+                // Choose fv so realDuration2DurationType doesn't hit the
+                // "realDur < faceValue2ticks(fv)" fallback.
+                static constexpr int kFaceTicks[] = { 0, 960, 480, 240, 120, 60, 30, 15, 7 };
+                quint8 computedFv = en->faceValue;
+                for (int f = 1; f <= 8; ++f) {
+                    if (kFaceTicks[f] <= faceTicks) {
+                        computedFv = static_cast<quint8>(f);
+                        break;
+                    }
+                }
+                const DurationType dtRdur = realDuration2DurationType(
+                    static_cast<qint16>(faceTicks), computedFv);
+                if (dtRdur != DurationType::V_INVALID) {
+                    dt = dtRdur;
+                }
+            }
+        }
         dots = 0;
         // Partial measure-end groups only: reduce dt when the tuplet advance overshoots remaining space.
         if (partialEndGroup.count(e)) {
@@ -213,15 +249,22 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         }
     } else {
         dt   = realDuration2DurationType(en->realDuration, en->faceValue);
-        // dotControl stores Encore's sounding duration; prefer it for dot calculation. Fall back to snapping realDuration when dotControl gives 0 dots.
+        // dotControl is a bitmask (bit 0 = dotted flag, not a tick count).
+        // Try calcDots(dotControl) first (works when dotControl happens to be a tick value).
+        // Fallback 1: calcDotsSnap(realDuration) handles exact or near-exact rdur.
+        // Fallback 2: when rdur has MIDI timing drift (>±1 tick), trust bit 0 of dotControl.
         if (en->dotControl > 0) {
             int dByCtrl = calcDots(static_cast<qint16>(en->dotControl),
                                    en->faceValue);
             if (dByCtrl > 0) {
-                dots = dByCtrl; // dotControl gives a clear dotted value
+                dots = dByCtrl;
             } else {
-                // dotControl didn't identify dots; try snapping realDuration
                 dots = calcDotsSnap(en->realDuration, en->faceValue);
+                if (dots == 0 && (en->dotControl & 1)) {
+                    // Bit 0 set = Encore's dotted flag; force single dot when
+                    // rdur drift is too large for calcDotsSnap to detect it.
+                    dots = 1;
+                }
             }
         } else {
             dots = calcDotsSnap(en->realDuration, en->faceValue);
@@ -359,6 +402,21 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
             chord->setTuplet(tt.currentTuplet);
             tt.currentTuplet->add(chord);
 
+            // No-downdate: update fullFaceSum only when a smaller face value arrives AND
+            // the current (pre-add) tally still fits in the new lower threshold.
+            // {Q,E}/3:2: before E, faceTicks=Q=1/4, new threshold=3E=3/8: 1/4≤3/8 → update. ✓
+            // {Q,Q,8,8}/3:2: before 8th, faceTicks=2Q=1/2 > 3/8 → no update (stays 3Q). ✓
+            // {Q,Q,Q,Q}/4:3: Q is not < currentBaseLen(Q) → no update; fullFaceSum stays 4Q. ✓
+            if (tt.actualN > 0 && tt.fullFaceSum > Fraction(0, 1)) {
+                const Fraction thisFace = TDuration(dt).fraction();
+                const Fraction currentBaseLen = tt.fullFaceSum / tt.actualN;
+                if (thisFace > Fraction(0, 1) && thisFace < currentBaseLen) {
+                    const Fraction newThreshold = thisFace * tt.actualN;
+                    if (tt.faceTicks <= newThreshold) {
+                        tt.fullFaceSum = newThreshold;
+                    }
+                }
+            }
             tt.faceTicks += TDuration(dt).fraction();
         } else {
             if (tt.groupFull()) {
@@ -429,8 +487,19 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         // for the NEXT regular note needs to read it.
     }
 
+    const int concertPitch = en->semiTonePitch + ctx.staffPitchOffset[staffIdx];
+    if (chord->findNote(concertPitch)) {
+        // Suppress duplicate pitch in the same chord. Encore can encode the same
+        // pitch twice at identical tick/staff/voice in two ways:
+        //   (a) chord-extension copy (grace1 bit 0x40 set on the second element), or
+        //   (b) two identical NOTE elements with grace1=0 (seen in some v0xC2 files).
+        // In both cases the second note would produce a redundant notehead on the same
+        // stem position. Standard notation never places two identical pitches in one
+        // chord, so suppressing here is always safe.
+        return;
+    }
     Note* note = Factory::createNote(chord);
-    applyConcertPitch(note, en->semiTonePitch + ctx.staffPitchOffset[staffIdx]);
+    applyConcertPitch(note, concertPitch);
     chord->add(note);
     if (msVoice == 0) {
         ctx.v0PitchesInMeasure[staffIdx].insert(note->pitch());

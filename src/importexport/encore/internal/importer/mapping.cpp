@@ -212,23 +212,35 @@ void addTitleFrame(MasterScore* score, const EncTitle& titleBlock)
 void addInitialKeySig(MasterScore* score, int staffIdx, quint8 encKey)
 {
     int fifths = encKeyToFifths(encKey);
-    if (fifths == 0) {
-        return;
-    }
     Staff* staff = score->staff(staffIdx);
     if (!staff) {
         return;
     }
-    Fraction tick = Fraction(0, 1);
-    KeySigEvent ke;
     Key writtenKey = Key(fifths);
     // Encore's key field is the written key for the instrument. Convert to concert
     // key for the staff timeline; the written key is stored explicitly for display.
     Interval v = staff->part()->instrument()->transpose();
     Key concertKey = v.isZero() ? writtenKey : Transpose::transposeKey(writtenKey, v);
+    // Prefer sharp enharmonics (F# over Gb, B over Cb) when transposeKey returns an extreme
+    // flat key. Transpose::transposeKey(Key::C, Interval(3,6)) returns Key::Gb (-6) for a
+    // +6 (augmented-4th) transposing instrument, causing pitch2tpc to spell concert B4 as Cb
+    // and the written note as Gbb. Using F# instead gives the correct spelling (F).
+    if (static_cast<int>(concertKey) <= -6) {
+        concertKey = Key(static_cast<int>(concertKey) + 12);
+    }
+    // Always store the concert key on the staff's key timeline so Staff::concertKey() returns
+    // the normalized value. Without this, C-major (fifths==0) returns early and the staff
+    // computes the concert key on-the-fly from the instrument transposition, which may return
+    // the flat enharmonic and produce double-flat note spellings.
+    Fraction tick = Fraction(0, 1);
+    KeySigEvent ke;
     ke.setConcertKey(concertKey);
     ke.setKey(writtenKey);
     staff->setKey(tick, ke);
+    // For C major written key, no visible key signature is needed in the score.
+    if (fifths == 0) {
+        return;
+    }
 
     Measure* m = score->tick2measure(tick);
     if (!m) {
@@ -477,7 +489,8 @@ static bool transpCompatibleWith(int tmplChromatic, int encKeySemitones)
 }
 
 // Find best non-drumset template by name+MIDI score (trackName exact +4, contain +2; MIDI +6; "common" +1).
-// With encKeySemitones filter, returns nullptr if no transposition-compatible match is found.
+// With encKeySemitones filter, prefers transposition-compatible match; falls back to best name+MIDI
+// match when no compatible match exists (e.g. encKey=0 and no C-pitched variant for this MIDI program).
 const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, int encMidiProgram,
                                                        int encKeySemitones)
 {
@@ -582,7 +595,7 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
             }
         }
     }
-    return filterTransp ? bestCompatible : best;
+    return filterTransp ? (bestCompatible ? bestCompatible : best) : best;
 }
 
 // Find best drumset template by name score (exact match only, no substring).

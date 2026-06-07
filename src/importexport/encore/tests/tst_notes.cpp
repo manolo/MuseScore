@@ -1078,6 +1078,64 @@ TEST_F(Tst_Notes, dotted_note_capped_to_remaining_space)
 }
 
 // ===========================================================================
+// BUG FIX: Dotted note with MIDI timing drift (rdur off by > 1 tick)
+// ===========================================================================
+
+TEST_F(Tst_Notes, dotted_note_dotctrl_bit0_with_rdur_drift)
+{
+    // notes_dotted_ctrl_bit0_drift.enc: 2/4 measure with four notes.
+    // Note 0 (fv=E): rdur=163 instead of 180 (17-tick MIDI drift), dotControl=0x1D
+    // (bit 0 = 1, Encore's "dotted" flag). calcDotsSnap(163, E) returns 0 because
+    // 17 ticks exceeds the ±1 snap tolerance. Without the fix, note 0 imports as a
+    // plain eighth note and a phantom 16th rest appears at the end of the measure.
+    //
+    // Fix: when calcDots and calcDotsSnap both return 0, trust bit 0 of dotControl
+    // and force dots=1. Note 0 must be a dotted eighth; measure must be clean.
+    MasterScore* score = readEncoreScore("notes_dotted_ctrl_bit0_drift.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load notes_dotted_ctrl_bit0_drift.enc";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Dotted note with rdur drift must not corrupt measure: " << ret.text();
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->timesig(), Fraction(2, 4));
+
+    // Collect chords (no rests expected — measure must be clean)
+    std::vector<Chord*> chords;
+    std::vector<Rest*> rests;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (!e) {
+            continue;
+        }
+        if (e->isChord()) {
+            chords.push_back(toChord(e));
+        } else if (e->isRest()) {
+            Rest* r = toRest(e);
+            if (!r->isGap()) {
+                rests.push_back(r);
+            }
+        }
+    }
+    ASSERT_EQ(chords.size(), 4u) << "Measure must have exactly 4 chords";
+    EXPECT_EQ(rests.size(), 0u) << "No phantom rests: measure must fill exactly 2/4";
+
+    // First chord: dotted-eighth (fv=E, dotControl bit 0 forces dots=1 despite drift)
+    EXPECT_EQ(chords[0]->durationType().type(), DurationType::V_EIGHTH)
+        << "Note 0 base type must be eighth";
+    EXPECT_EQ(chords[0]->dots(), 1)
+        << "Note 0 must have 1 dot (dotControl bit 0 = dotted flag)";
+    // Remaining chords: plain durations (no dot)
+    EXPECT_EQ(chords[1]->durationType().type(), DurationType::V_16TH);
+    EXPECT_EQ(chords[1]->dots(), 0);
+    EXPECT_EQ(chords[2]->durationType().type(), DurationType::V_EIGHTH);
+    EXPECT_EQ(chords[2]->dots(), 0);
+    EXPECT_EQ(chords[3]->durationType().type(), DurationType::V_EIGHTH);
+    EXPECT_EQ(chords[3]->dots(), 0);
+    delete score;
+}
+
+// ===========================================================================
 // BUG FIX: Mixed-face-value tuplet group gets exact ticks; isolated note
 //          that exactly fills remaining space becomes a partial tuplet
 // ===========================================================================
@@ -1370,6 +1428,67 @@ TEST_F(Tst_Notes, mixed_duration_triplet_face_value_sum_grouping)
     EXPECT_NE(crs[5]->tuplet(), nullptr) << "Element 5 in second tuplet";
     EXPECT_NE(crs[6]->tuplet(), nullptr) << "Element 6 in second tuplet";
     EXPECT_NE(crs[0]->tuplet(), crs[4]->tuplet()) << "Two different tuplets";
+    delete score;
+}
+
+// ===========================================================================
+// BUG FIX: Mixed-duration bracket {Q,E} in 3:2 now closes after 2 notes
+// ===========================================================================
+
+TEST_F(Tst_Notes, mixed_baseLen_QE_bracket_closes_after_two_notes)
+{
+    // ornaments_tuplet_mixed_baseLen.enc: 4/4 measure with structure:
+    //   plain-Q  +  {Q,E} triplet bracket  +  {Q,Q,Q} triplet bracket
+    //
+    // Bug: the old threshold algorithm used baseLen=Q so the target was 3Q=3/4.
+    // faceSum(Q+E)=3/8 never reached it, pulling the following Q into the same
+    // bracket and causing a measure overrun.
+    //
+    // Fix: close the group when faceSum/actualN is a valid TDuration.
+    // {Q,E}/3 = E, valid → closes after 2 notes.
+    // {Q,Q,Q}/3 = Q, valid → closes after 3 notes.
+    // Sum: Q + Q*(2/3) + E*(2/3) + 3*Q*(2/3) = 1/4+1/6+1/12+1/2 = 4/4. PASS.
+    MasterScore* score = readEncoreScore("ornaments_tuplet_mixed_baseLen.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Mixed baseLen brackets should produce clean 4/4: " << ret.text();
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->timesig(), Fraction(4, 4));
+
+    std::vector<Chord*> chords;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChord()) {
+            chords.push_back(toChord(e));
+        }
+    }
+    ASSERT_EQ(chords.size(), 6u) << "plain-Q + 2 in bracket1 + 3 in bracket2";
+
+    // chords[0]: plain quarter — not in a tuplet
+    EXPECT_EQ(chords[0]->tuplet(), nullptr) << "Plain Q must not be in a tuplet";
+
+    // chords[1] (Q) and chords[2] (E): first bracket {Q,E}
+    ASSERT_NE(chords[1]->tuplet(), nullptr) << "First Q in bracket 1";
+    ASSERT_NE(chords[2]->tuplet(), nullptr) << "E in bracket 1";
+    EXPECT_EQ(chords[1]->tuplet(), chords[2]->tuplet()) << "Q and E in same bracket";
+
+    // chords[3-5]: second bracket {Q,Q,Q}
+    ASSERT_NE(chords[3]->tuplet(), nullptr) << "Q 1 in bracket 2";
+    ASSERT_NE(chords[4]->tuplet(), nullptr) << "Q 2 in bracket 2";
+    ASSERT_NE(chords[5]->tuplet(), nullptr) << "Q 3 in bracket 2";
+    EXPECT_EQ(chords[3]->tuplet(), chords[4]->tuplet()) << "All three in same bracket";
+    EXPECT_EQ(chords[3]->tuplet(), chords[5]->tuplet());
+
+    // The two brackets must be distinct
+    EXPECT_NE(chords[1]->tuplet(), chords[3]->tuplet()) << "Two separate brackets";
+
+    // Verify actual advances: Q-face rdur=160 in 3:2 → Q*(2/3)=1/6; E-face rdur=80 → E*(2/3)=1/12.
+    EXPECT_EQ(chords[0]->actualTicks(), Fraction(1, 4)) << "Plain Q = 1/4";
+    EXPECT_EQ(chords[1]->actualTicks(), Fraction(1, 6)) << "Q in 3:2 = Q*(2/3) = 1/6";
+    EXPECT_EQ(chords[2]->actualTicks(), Fraction(1, 12)) << "E in 3:2 = E*(2/3) = 1/12";
+    EXPECT_EQ(chords[3]->actualTicks(), Fraction(1, 6)) << "Q in 3:2 = 1/6";
     delete score;
 }
 
@@ -1786,6 +1905,66 @@ TEST_F(Tst_Notes, chord_cluster_5tick_v0c2)
 }
 
 // ===========================================================================
+// BUG FIX: Encore files sometimes encode the same pitch twice in the same
+// chord cluster (two NOTE elements with identical tick/staff/voice/pitch).
+// The second copy must be suppressed regardless of the grace1 0x40 bit.
+// ===========================================================================
+
+// Regression: notes_chord_duplicate.enc: two identical NOTE elements at
+// tick=0 pitch=60 (grace1=0x00 and grace1=0x40). After import the chord must
+// have exactly one note.
+TEST_F(Tst_Notes, duplicate_pitch_in_chord_cluster_suppressed)
+{
+    MasterScore* score = readEncoreScore("notes_chord_duplicate.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    Segment* firstSeg = m->first(SegmentType::ChordRest);
+    ASSERT_NE(firstSeg, nullptr);
+    EngravingItem* elem = firstSeg->element(0);
+    ASSERT_NE(elem, nullptr) << "Expected a chord at tick=0";
+    ASSERT_TRUE(elem->isChord()) << "Expected a Chord, got something else";
+
+    Chord* chord = toChord(elem);
+    EXPECT_EQ(chord->notes().size(), 1u)
+        << "Duplicate pitch (tick=0, pitch=60 encoded twice) must produce exactly one notehead";
+
+    delete score;
+}
+
+// ===========================================================================
+// FIX: Duplicate note with NEITHER copy having grace1 bit 0x40 must also be
+// suppressed. Some Encore files (e.g. v0xC2) produce two identical NOTE
+// elements without the chord-extension marker; the old check was too narrow.
+// ===========================================================================
+TEST_F(Tst_Notes, duplicate_pitch_no_ext_bit_suppressed)
+{
+    // notes_chord_duplicate_no_ext_bit.enc: two notes at tick=0 pitch=60,
+    // both grace1=0x00 (no chord-extension bit). Must produce exactly 1 note.
+    MasterScore* score = readEncoreScore("notes_chord_duplicate_no_ext_bit.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Segment* firstSeg = m->first(SegmentType::ChordRest);
+    ASSERT_NE(firstSeg, nullptr);
+    EngravingItem* elem = firstSeg->element(0);
+    ASSERT_NE(elem, nullptr) << "Expected a chord at tick=0";
+    ASSERT_TRUE(elem->isChord());
+
+    EXPECT_EQ(toChord(elem)->notes().size(), 1u)
+        << "Duplicate pitch (both grace1=0x00, no ext bit) must produce exactly one notehead";
+
+    delete score;
+}
+
+// ===========================================================================
 // BUG FIX: Partial measure-end triplet with gap-snap unreduced Fraction
 //          caused TDuration assertion in Fix-3 of the partial-group path
 // ===========================================================================
@@ -1797,5 +1976,40 @@ TEST_F(Tst_Notes, partial_triplet_unreduced_cumtick_no_crash)
     MasterScore* score = readEncoreScore("notes_partial_triplet_unreduced_cumtick.enc");
     ASSERT_NE(score, nullptr) << "File must import without TDuration assertion failure";
     EXPECT_GT(score->nmeasures(), 0);
+    delete score;
+}
+
+// ===========================================================================
+// FIX: Transposing instruments (Key≠0) must have correct written-pitch TPC.
+// Root cause: Score::spell() used the WRITTEN key to penalize note spellings,
+// choosing Cb over B for pitch=71 in F major (both non-diatonic, equal penalty).
+// Then tpc2 = transposeTpc(Cb=7, -6) = Gbb=1 (displayed as Gbb instead of F).
+// Fix: computeWindow uses the CONCERT key for transposing instrument staves.
+// Fixture: MIDI=69 (oboe), Key=+6. Written F4 (semiTonePitch=65) → concert B4
+// (65+6=71). Expected written TPC: 13 (F natural), not 1 (Gbb) or 7 (Cb).
+// ===========================================================================
+TEST_F(Tst_Notes, transposing_instrument_written_tpc_not_double_flat)
+{
+    MasterScore* score = readEncoreScore("notes_transposing_written_tpc.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Segment* seg = m->first(SegmentType::ChordRest);
+    ASSERT_NE(seg, nullptr);
+    EngravingItem* e = seg->element(0);
+    ASSERT_NE(e, nullptr);
+    ASSERT_TRUE(e->isChord());
+    Note* note = toChord(e)->upNote();
+    ASSERT_NE(note, nullptr);
+
+    EXPECT_EQ(note->pitch(), 71)
+        << "Concert pitch must be 65 (written F4) + 6 = 71 (B4)";
+    EXPECT_EQ(note->tpc2(), 13)
+        << "Written TPC must be 13 (F natural), not 1 (Gbb) or 7 (Cb); "
+        "double-flat spellings indicate the wrong key context in computeWindow";
+
     delete score;
 }
