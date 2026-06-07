@@ -1915,6 +1915,9 @@ TEST_F(Tst_Importer, encore_symbols_full_coverage)
         }
     }
     for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (sp->isTrill()) {
+            ++trills;   // Trill spanners (TRILL_START + TRILL_END → tr + wavy line)
+        }
         if (sp->isHairpin()) {
             ++hairpins;
         }
@@ -1968,7 +1971,7 @@ TEST_F(Tst_Importer, v0c4_fermata_suppressed_on_tuplet_last_note)
     // The three triplet notes also have articUp=0x20 but must NOT produce fermatas.
     EXPECT_EQ(fermataCount, 1)
         << "Only the non-tuplet note must get a fermata; tuplet notes with "
-           "articUp=0x20 encode bracket placement, not a fermata";
+        "articUp=0x20 encode bracket placement, not a fermata";
     delete score;
 }
 
@@ -2086,8 +2089,8 @@ TEST_F(Tst_Importer, sintetico_all_features_imports_cleanly)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "sanityCheck failed: " << ret.text();
 
-    EXPECT_EQ(score->parts().size(), 2u)   << "2 instruments expected";
-    EXPECT_EQ(score->nmeasures(), 20)      << "20 measures expected";
+    EXPECT_EQ(score->parts().size(), 2u) << "2 instruments expected";
+    EXPECT_EQ(score->nmeasures(), 20) << "20 measures expected";
 
     // Count selected element types across the whole score.
     int fermatas=0, tuplets=0, lyrics_count=0, hairpins=0, spanners=0;
@@ -2103,7 +2106,9 @@ TEST_F(Tst_Importer, sintetico_all_features_imports_cleanly)
         }
         // Markers live on the measure directly (added to measure's own element list)
         for (EngravingItem* me : m->el()) {
-            if (me && me->isMarker()) { ++markers; }
+            if (me && me->isMarker()) {
+                ++markers;
+            }
         }
         for (Segment* s = m->first(SegmentType::ChordRest); s;
              s = s->next(SegmentType::ChordRest)) {
@@ -2111,9 +2116,15 @@ TEST_F(Tst_Importer, sintetico_all_features_imports_cleanly)
                 if (!e) {
                     continue;
                 }
-                if (e->isFermata())    { ++fermatas; }
-                if (e->isDynamic())    { ++dynamics; }
-                if (e->isTempoText())  { ++tempos; }
+                if (e->isFermata()) {
+                    ++fermatas;
+                }
+                if (e->isDynamic()) {
+                    ++dynamics;
+                }
+                if (e->isTempoText()) {
+                    ++tempos;
+                }
             }
             for (int ti = 0; ti < static_cast<int>(score->nstaves() * VOICES); ++ti) {
                 EngravingItem* el = s->element(static_cast<track_idx_t>(ti));
@@ -2121,9 +2132,17 @@ TEST_F(Tst_Importer, sintetico_all_features_imports_cleanly)
                     continue;
                 }
                 Chord* c = toChord(el);
-                if (c->tremoloSingleChord())  { ++tremolos; }
-                if (c->arpeggio())            { ++arpeggios; }
-                for (Lyrics* ly : c->lyrics()) { if (ly) { ++lyrics_count; } }
+                if (c->tremoloSingleChord()) {
+                    ++tremolos;
+                }
+                if (c->arpeggio()) {
+                    ++arpeggios;
+                }
+                for (Lyrics* ly : c->lyrics()) {
+                    if (ly) {
+                        ++lyrics_count;
+                    }
+                }
             }
             if (s->isChordRestType()) {
                 Tuplet* tup = nullptr;
@@ -2139,24 +2158,176 @@ TEST_F(Tst_Importer, sintetico_all_features_imports_cleanly)
     }
     for (const auto& kv : score->spanner()) {
         Spanner* sp = kv.second;
-        if (sp && sp->isHairpin()) { ++hairpins; }
+        if (sp && sp->isHairpin()) {
+            ++hairpins;
+        }
     }
 
-    EXPECT_GE(fermatas,     1)  << "at least 1 fermata (non-tuplet note with articUp=0x20)";
-    EXPECT_GE(tuplets,      2)  << "at least 2 tuplet groups (triplets in m3)";
-    EXPECT_GE(lyrics_count, 4)  << "4 lyrics syllables (do re mi fa)";
-    EXPECT_GE(dynamics,     8)  << "at least 8 of the 13 dynamics (pp-ppp-p-mp-mf-f-ff-fff-sfz...)";
-    EXPECT_GE(tempos,       3)  << "at least 3 TempoText marks (initial + bpm change + 6/8)";
-    EXPECT_GE(hairpins,     1)  << "at least 1 hairpin (crescendo or decrescendo)";
-    EXPECT_GE(tremolos,     1)  << "at least 1 TremoloSingleChord";
-    EXPECT_GE(arpeggios,    1)  << "at least 1 arpeggio";
-    EXPECT_GE(markers,      2)  << "at least 2 section markers (segno, coda, to-coda)";
-    EXPECT_GE(spanners,     1)  << "at least 1 repeat-start barline";
+    EXPECT_GE(fermatas,     1) << "at least 1 fermata (non-tuplet note with articUp=0x20)";
+    EXPECT_GE(tuplets,      2) << "at least 2 tuplet groups (triplets in m3)";
+    EXPECT_GE(lyrics_count, 4) << "4 lyrics syllables (do re mi fa)";
+    EXPECT_GE(dynamics,     8) << "at least 8 of the 13 dynamics (pp-ppp-p-mp-mf-f-ff-fff-sfz...)";
+    EXPECT_GE(tempos,       3) << "at least 3 TempoText marks (initial + bpm change + 6/8)";
+    EXPECT_GE(hairpins,     1) << "at least 1 hairpin (crescendo or decrescendo)";
+    EXPECT_GE(tremolos,     1) << "at least 1 TremoloSingleChord";
+    EXPECT_GE(arpeggios,    1) << "at least 1 arpeggio";
+    EXPECT_GE(markers,      2) << "at least 2 section markers (segno, coda, to-coda)";
+    EXPECT_GE(spanners,     1) << "at least 1 repeat-start barline";
 
     delete score;
 }
 
+// ===========================================================================
+// BUG FIX: mixed-duration explicit tuplet bracket {Q,E} in a 3:2 group
+// was not closing correctly. faceSum(Q+E)=3/8 never reached the old
+// threshold 3Q=3/4, pulling subsequent notes into the same bracket and
+// causing a measure overrun (Incomplete measure error).
+//
+// Fix: close a group when faceSum/actualN is a valid standard TDuration.
+// {Q,E}/3 = E, valid → closes after 2 notes. Next {Q,Q,Q}/3 = Q, valid → 3.
+//   Q (tied) + (Q+E)*2/3 + (Q+Q+Q)*2/3 = Q + Q + 2Q = 4Q = 4/4 exact
+// ===========================================================================
+TEST_F(Tst_Importer, v0c4_mixed_duration_tuplet_bracket_closes_correctly)
+{
+    MasterScore* score = readEncoreScore("ornaments_tuplet_mixed_baseLen.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load ornaments_tuplet_mixed_baseLen.enc";
+
+    // No measure corruption — the sanityCheck must pass
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Measure is corrupt (overrun): " << ret.text();
+
+    Measure* m1 = score->firstMeasure();
+    ASSERT_NE(m1, nullptr);
+
+    // Count tuplet groups in measure 1
+    std::set<Tuplet*> tuplets;
+    int noteCount = 0;
+    for (Segment* s = m1->first(SegmentType::ChordRest); s;
+         s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        ++noteCount;
+        Chord* c = toChord(el);
+        if (c->tuplet()) {
+            tuplets.insert(c->tuplet());
+        }
+    }
+
+    // 6 notes: 1 plain Q + 2 in bracket1 + 3 in bracket2
+    EXPECT_EQ(noteCount, 6);
+    // Exactly 2 separate tuplet brackets
+    EXPECT_EQ(tuplets.size(), 2u)
+        << "Must form 2 tuplet brackets: {Q,E} and {Q,Q,Q}, not one big group";
+    delete score;
+}
+
+// ===========================================================================
+// BUG FIX: 4:3 quadruplet (tup=0x43) was not recognized; notes appeared
+// as plain, with wrong advance (Q instead of E per slot). The fix adds
+// 4:3 to getExplicit() and derives note duration from rdur x (actualN/normalN)
+// so beat-relative face values (e.g. fv=Q meaning one eighth in 8/8) map to
+// the correct MuseScore duration and advance.
+// ===========================================================================
+TEST_F(Tst_Importer, v0c4_4to3_quadruplet_correct_advance)
+{
+    MasterScore* score = readEncoreScore("tuplet_4to3_quadruplet.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load tuplet_4to3_quadruplet.enc";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "4:3 quadruplet must import without measure corruption: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    // Collect chords from measure 1
+    std::vector<Chord*> chords;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChord()) {
+            chords.push_back(toChord(e));
+        }
+    }
+    ASSERT_EQ(chords.size(), 4u) << "Must have 4 chords in the 4:3 quadruplet";
+
+    // All 4 chords must be in the same 4:3 tuplet
+    for (int i = 0; i < 4; ++i) {
+        ASSERT_NE(chords[i]->tuplet(), nullptr) << "Chord " << i << " must be in a 4:3 tuplet";
+        EXPECT_EQ(chords[i]->tuplet(), chords[0]->tuplet()) << "All 4 in same bracket";
+    }
+    // Ratio must be 4:3
+    EXPECT_EQ(chords[0]->tuplet()->ratio(), Fraction(4, 3)) << "Ratio must be 4:3";
+    // Actual advance per note: E * (3/4) = 3/32 of whole note
+    EXPECT_EQ(chords[0]->actualTicks(), Fraction(3, 32)) << "E in 4:3 = E*(3/4) = 3/32";
+    delete score;
+}
+
+// ===========================================================================
+// BUG FIX: dotted rests were not recognised because dotControl (a bitmask flag)
+// was passed as a tick count to calcDots, always yielding 0 dots. The fix adds
+// a calcDotsSnap(realDuration) fallback matching the note handler. Without the
+// fix a dotted-quarter rest in 7/8 became a plain quarter rest, leaving a
+// gap eighth rest AFTER the notes instead of BEFORE them.
+// ===========================================================================
+TEST_F(Tst_Importer, v0c4_dotted_rest_correct_duration)
+{
+    MasterScore* score = readEncoreScore("rest_dotted_before_notes.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load rest_dotted_before_notes.enc";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Dotted rest must import without measure corruption: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->timesig(), Fraction(7, 8));
+
+    // First ChordRest in measure must be a dotted-quarter REST (not a plain quarter).
+    // Without the fix the plain quarter rest (240 ticks) leaves a 120-tick gap
+    // filled by a phantom eighth rest that is placed AFTER the notes.
+    Segment* first = m->first(SegmentType::ChordRest);
+    ASSERT_NE(first, nullptr);
+    EngravingItem* el = first->element(0);
+    ASSERT_NE(el, nullptr);
+    ASSERT_TRUE(el->isRest()) << "First element must be a rest";
+    Rest* rest = toRest(el);
+    // Dotted quarter = Q + E = 3/8 of measure duration
+    EXPECT_EQ(rest->durationType().type(), DurationType::V_QUARTER) << "Base type: quarter";
+    EXPECT_EQ(rest->dots(), 1) << "Must have 1 dot (dotted-quarter rest)";
+    // Actual ticks: dotted-quarter = 3/8 of whole note
+    EXPECT_EQ(rest->ticks(), Fraction(3, 8)) << "Dotted-quarter rest spans 3/8";
+    delete score;
+}
+
 // Percussion file: two WINI/TITL/PREC blocks, large ghost MEAS blocks embedded in binary data.
+// ===========================================================================
+// BUG FIX: Dotted note not recognised when MIDI timing drift makes rdur
+//          > 1 tick off from the theoretical dotted value. dotControl bit 0
+//          (Encore's "dotted" flag) now overrides when calcDotsSnap returns 0.
+// ===========================================================================
+TEST_F(Tst_Importer, v0c4_dotted_note_dotctrl_bit0_drift)
+{
+    MasterScore* score = readEncoreScore("notes_dotted_ctrl_bit0_drift.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load notes_dotted_ctrl_bit0_drift.enc";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "dotControl bit-0 dotted note with rdur drift must not corrupt: "
+                     << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->timesig(), Fraction(2, 4));
+
+    Segment* first = m->first(SegmentType::ChordRest);
+    ASSERT_NE(first, nullptr);
+    EngravingItem* el = first->element(0);
+    ASSERT_NE(el, nullptr);
+    ASSERT_TRUE(el->isChord()) << "First element must be a chord, not a rest";
+    Chord* c = toChord(el);
+    EXPECT_EQ(c->durationType().type(), DurationType::V_EIGHTH)
+        << "First note base type: eighth";
+    EXPECT_EQ(c->dots(), 1)
+        << "dotControl bit 0 forces 1 dot when calcDotsSnap misses due to rdur drift";
+    delete score;
+}
+
 // Must import cleanly: correct measure count, no DOM corruption.
 TEST_F(Tst_Importer, percussion_drum_kit_no_crash)
 {
@@ -2165,5 +2336,85 @@ TEST_F(Tst_Importer, percussion_drum_kit_no_crash)
     EXPECT_EQ(score->nmeasures(), 36);
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
+    delete score;
+}
+
+// Regression: chord symbols stored without text (tipo bit0 == 0) were silently skipped.
+// chord_parsing.enc has 64 measures each with one numeric-only chord (teksto empty).
+// All must now be imported as Harmony elements decoded from radiko + toniko fields.
+TEST_F(Tst_Importer, numeric_chord_symbols)
+{
+    MasterScore* score = readEncoreScore("chord_parsing.enc");
+    ASSERT_NE(score, nullptr);
+
+    // Collect the first harmony per measure (by 0-based measure index).
+    std::map<int, String> harmonyByMeasure;
+    int measureIdx = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* ann : s->annotations()) {
+                if (ann && ann->isHarmony()) {
+                    harmonyByMeasure[measureIdx] = toHarmony(ann)->harmonyName();
+                }
+            }
+        }
+        ++measureIdx;
+    }
+
+    // chord_parsing.enc measure layout (all radiko=0 = root C, toniko varies):
+    // m0: toniko=0  (major)     -> C
+    // m1: toniko=1  (minor)     -> Cm
+    // m2: toniko=2  (augmented) -> C+
+    // m3: toniko=6  (6th)       -> C6
+    // m4: toniko=24 (dom7 alt)  -> C7
+    // m8: toniko=3  (dim)       -> Cdim
+    // m9: toniko=12 (maj7)      -> Cmaj7
+    EXPECT_FALSE(harmonyByMeasure.empty()) << "numeric chord symbols must be imported (were silently dropped)";
+    EXPECT_EQ(harmonyByMeasure[0], String(u"C")) << "toniko=0 (major)";
+    EXPECT_EQ(harmonyByMeasure[1], String(u"Cm")) << "toniko=1 (minor)";
+    EXPECT_EQ(harmonyByMeasure[2], String(u"C+")) << "toniko=2 (augmented)";
+    EXPECT_EQ(harmonyByMeasure[4], String(u"C7")) << "toniko=24 (dom7 alternate)";
+    EXPECT_EQ(harmonyByMeasure[8], String(u"Cdim")) << "toniko=3 (diminished)";
+    EXPECT_EQ(harmonyByMeasure[9], String(u"CMaj7")) << "toniko=12 (maj7): MuseScore normalizes 'maj' to 'Maj'";
+
+    delete score;
+}
+
+// Regression: numeric chord with bass note (tipo bit 1 set) should produce a slash chord.
+// akordo.enc measure 1 has toniko=49 (13sus4), radiko=0x25 (Ab), baso=0x13 (F#), tipo=2.
+TEST_F(Tst_Importer, numeric_chord_with_bass_note)
+{
+    MasterScore* score = readEncoreScore("akordo.enc");
+    ASSERT_NE(score, nullptr);
+
+    Harmony* slashChord = nullptr;
+    for (MeasureBase* mb = score->first(); mb && !slashChord; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s && !slashChord; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* ann : s->annotations()) {
+                if (ann && ann->isHarmony()) {
+                    Harmony* h = toHarmony(ann);
+                    if (h->harmonyName().contains(u"/")) {
+                        slashChord = h;
+                    }
+                }
+            }
+        }
+    }
+
+    ASSERT_NE(slashChord, nullptr) << "akordo.enc must have a slash chord (tipo=2, bass note present)";
+    const String name = slashChord->harmonyName();
+    EXPECT_TRUE(name.startsWith(u"Ab"))
+        << "root should be Ab (radiko=0x25): " << name.toStdString();
+    EXPECT_TRUE(name.contains(u"/F#"))
+        << "bass should be F# (baso=0x13): " << name.toStdString();
+
     delete score;
 }
