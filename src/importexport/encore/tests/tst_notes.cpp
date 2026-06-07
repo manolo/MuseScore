@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Note import: pitch and tick scaling, dotted values, boundary/overflow handling, and the general
+// note-element decoding shared across formats. See ENCORE_FORMAT.md §Note element.
+
 #include <gtest/gtest.h>
 
 #include "engraving/dom/arpeggio.h"
@@ -30,7 +33,9 @@
 #include "engraving/dom/dynamic.h"
 #include "engraving/dom/fermata.h"
 #include "engraving/dom/fingering.h"
+#include "engraving/dom/fret.h"
 #include "engraving/dom/hairpin.h"
+#include "engraving/dom/harmony.h"
 #include "engraving/dom/jump.h"
 #include "engraving/dom/keysig.h"
 #include "engraving/dom/lyrics.h"
@@ -78,30 +83,22 @@ protected:
     void SetUp() override { setRootDir(ENC_DIR); }
 };
 
-// ===========================================================================
-// FEATURE: Note pitches and tick scaling (Encore 240 ticks/q → MuseScore 480)
-// ===========================================================================
-
+// Encore ticks (240/quarter) scale to MuseScore (480/quarter), so quarter positions land on 480 multiples.
 TEST_F(Tst_Notes, tick_scaling_quarter_positions)
 {
-    // In a 4/4 measure with 4 quarter notes (ticks 0, 240, 480, 720 in Encore),
-    // they should be at MS positions 0, 480, 960, 1440 within the measure.
-    // Chord Parsing measure 2 has quarter notes at these standard positions.
     MasterScore* score = readEncoreScore("chord_parsing.enc");
     ASSERT_NE(score, nullptr);
-    Measure* m = measureAt(score, 1);  // measure 2 (0-indexed = 1)
+    Measure* m = measureAt(score, 1);
     ASSERT_NE(m, nullptr);
     Fraction mTick = m->tick();
 
-    // Collect ChordRest ticks relative to measure start in voice 0
     std::vector<int> relTicks;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
-        EngravingItem* e = s->element(0);  // track 0 = staff 0, voice 0
+        EngravingItem* e = s->element(0);
         if (e && e->isChordRest()) {
             relTicks.push_back((s->tick() - mTick).ticks());
         }
     }
-    // Positions must all be multiples of 480 (quarter note in MuseScore)
     for (int t : relTicks) {
         EXPECT_EQ(t % 480, 0) << "Note at rel tick " << t << " should be on a quarter-note boundary";
     }
@@ -110,10 +107,8 @@ TEST_F(Tst_Notes, tick_scaling_quarter_positions)
 
 TEST_F(Tst_Notes, note_pitches_whole_note)
 {
-    // akordo.enc has whole notes at known pitches. Find any chord and check pitch validity.
     MasterScore* score = readEncoreScore("akordo.enc");
     ASSERT_NE(score, nullptr);
-    // Find the first chord anywhere in the score
     Chord* foundChord = nullptr;
     for (MeasureBase* mb = score->first(); mb && !foundChord; mb = mb->next()) {
         if (!mb->isMeasure()) {
@@ -135,19 +130,13 @@ TEST_F(Tst_Notes, note_pitches_whole_note)
     delete score;
 }
 
-// ===========================================================================
-// FEATURE: Dotted notes
-// ===========================================================================
-
+// A rest of 180 Encore ticks must import as a dotted eighth (V_EIGHTH + 1 dot).
 TEST_F(Tst_Notes, dotted_quarter_note)
 {
-    // "Well, Licky Hear" measure 1 has a dotted eighth rest at tick 0 (180 Encore ticks).
-    // After fix: realDuration=180 → V_EIGHTH + 1 dot.
     MasterScore* score = readEncoreScore("notes_swing.enc");
     ASSERT_NE(score, nullptr);
     Measure* m = measureAt(score, 0);
     ASSERT_NE(m, nullptr);
-    // Find the first rest in voice 0
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* e = s->element(0);
         if (e && e->isRest()) {
@@ -161,15 +150,9 @@ TEST_F(Tst_Notes, dotted_quarter_note)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: Notes at tick >= durTicks skipped
-// ===========================================================================
-
+// A note at tick == durTicks belongs to the next measure and must not overflow the current one.
 TEST_F(Tst_Notes, boundary_notes_not_in_current_measure)
 {
-    // Chord Parsing measures 22, 30, 48 had notes at tick=960 (= durTicks for 4/4).
-    // Before fix: those notes were added to the CURRENT measure causing 2/1 overflow.
-    // After fix: those notes are skipped → measures 22, 30, 48 pass sanityCheck.
     MasterScore* score = readEncoreScore("chord_parsing.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -179,7 +162,6 @@ TEST_F(Tst_Notes, boundary_notes_not_in_current_measure)
 
 TEST_F(Tst_Notes, measures_do_not_overflow_4_4)
 {
-    // All 4/4 measures in Chord Parsing should not exceed 4/4 worth of notes.
     MasterScore* score = readEncoreScore("chord_parsing.enc");
     ASSERT_NE(score, nullptr);
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
@@ -197,16 +179,9 @@ TEST_F(Tst_Notes, measures_do_not_overflow_4_4)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: calculateRealDurations used > instead of >= for durTicks
-// ===========================================================================
-
+// A note at tick == durTicks has zero real duration and must be skipped, so no chord ends up V_MEASURE.
 TEST_F(Tst_Notes, last_note_real_duration_not_zero)
 {
-    // Before the >= fix: a note at tick==durTicks got realDuration=0 → V_QUARTER by default.
-    // After fix: it's skipped. All remaining notes must have realDuration > 0.
-    // Verify by checking that no chord in any measure has V_MEASURE duration
-    // (which would come from a 0-duration note falling through).
     MasterScore* score = readEncoreScore("chord_parsing.enc");
     ASSERT_NE(score, nullptr);
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
@@ -220,7 +195,6 @@ TEST_F(Tst_Notes, last_note_real_duration_not_zero)
                     continue;
                 }
                 Chord* chord = toChord(e);
-                // A chord with V_MEASURE would indicate a 0-duration note
                 EXPECT_NE(chord->durationType().type(), DurationType::V_MEASURE)
                     << "No chord should have V_MEASURE type (indicates zero real duration)";
             }
@@ -229,15 +203,9 @@ TEST_F(Tst_Notes, last_note_real_duration_not_zero)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: Tick scaling ×2 (Encore 240 ticks/quarter → MuseScore 480)
-// ===========================================================================
-
+// After tick scaling every segment must fall within its measure's tick range (no notes placed outside).
 TEST_F(Tst_Notes, tick_scaling_no_note_outside_measure)
 {
-    // Before tick-scaling fix, notes at Encore tick 240 ended up at MS 1/8 instead of 1/4.
-    // This caused notes to be placed at wrong positions and overlap.
-    // After fix: all notes should be within their measure's tick range.
     MasterScore* score = readEncoreScore("bando.enc");
     ASSERT_NE(score, nullptr);
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
@@ -257,15 +225,9 @@ TEST_F(Tst_Notes, tick_scaling_no_note_outside_measure)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: Invalid faceValue (0 or > 8) skipped
-// ===========================================================================
-
+// An invalid faceValue (0 or > 8) must be skipped rather than yielding a garbage duration and crashing.
 TEST_F(Tst_Notes, invalid_facevalue_no_crash)
 {
-    // Opus 27 has faceValue=0 (measure 35) and faceValue=28 (measure 78).
-    // Before fix: these fell through with garbage duration types causing crashes.
-    // After fix: they are skipped, file loads without crash.
     MasterScore* score = readEncoreScore("notes_corrupted.enc");
     ASSERT_NE(score, nullptr) << "Opus 27 should load despite faceValue=0/28 corruption";
     EXPECT_GT(score->nmeasures(), 0);
@@ -274,7 +236,6 @@ TEST_F(Tst_Notes, invalid_facevalue_no_crash)
 
 TEST_F(Tst_Notes, invalid_facevalue_notes_have_valid_duration_type)
 {
-    // All notes in the score should have valid duration types (not V_ZERO or invalid).
     MasterScore* score = readEncoreScore("notes_corrupted.enc");
     ASSERT_NE(score, nullptr);
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
@@ -297,25 +258,15 @@ TEST_F(Tst_Notes, invalid_facevalue_notes_have_valid_duration_type)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: Small realDuration (< 15 ticks) skipped, MIDI timing artifacts
-// ===========================================================================
-
+// Notes only a few ticks apart are MIDI timing artifacts (realDuration < 15); dropping them must leave no
+// two chords sharing a tick in voice 0.
 TEST_F(Tst_Notes, tiny_duration_notes_do_not_create_overlaps)
 {
-    // "Well, Licky Hear" had notes at tick=180 and tick=182 (2 ticks = 0.5ms apart).
-    // These are MIDI timing artifacts with realDuration < 15 Encore ticks.
-    // After fix: such notes are skipped so they don't pollute voice 0.
-    // The file loads without crash. The remaining notes (triplets at 265, 341, 420)
-    // have non-quantized swing positions, we verify the file loads, not strict ordering.
-    // notes_swing.enc: note at tick=180 (realDur=2) is skipped; note at
-    // tick=182 survives.  Voice 0 of measure 1 has the rest + the surviving note only.
     MasterScore* score = readEncoreScore("notes_swing.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_GT(score->nmeasures(), 0);
     Measure* m = measureAt(score, 0);
     ASSERT_NE(m, nullptr);
-    // Verify no two chords share the same tick in voice 0 (no overlap from tiny notes).
     std::set<Fraction> seenTicks;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* e = s->element(0);
@@ -329,19 +280,10 @@ TEST_F(Tst_Notes, tiny_duration_notes_do_not_create_overlaps)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: Voice >= 4 skipped (not clamped to voice 3)
-// ===========================================================================
-
+// A voice >= VOICES must be skipped, not clamped to voice 3 (which collided with real voice-3 elements);
+// no element's track may exceed maxTrack.
 TEST_F(Tst_Notes, no_voice_conflict_from_clamping)
 {
-    // Before fix: voice=8 was clamped to voice=3, conflicting with real voice 3 elements.
-    // This caused "add(Rest): there is already a Chord" errors and layout crashes.
-    // After fix: voice >= 4 elements are simply skipped.
-    // Verify: Opus 27 loads without crash.
-    // notes_corrupted.enc contains a note with voice=4 (>= VOICES=4).
-    // Before fix: it was clamped to voice=3 causing conflicts.
-    // After fix: it is skipped entirely; no track index exceeds maxTrack.
     MasterScore* score = readEncoreScore("notes_corrupted.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_GT(score->nmeasures(), 0);
@@ -363,10 +305,8 @@ TEST_F(Tst_Notes, no_voice_conflict_from_clamping)
     delete score;
 }
 
-// ===========================================================================
-// FIX: Encore encodes leading silences via absolute tick offsets, not REST elements.
-// The importer snaps cumTick to that tick (when gap > CHORD_MIDI_THRESHOLD) to preserve beat positions.
-// ===========================================================================
+// Encore encodes leading silence via an absolute tick offset, not a REST element; the importer snaps to
+// that tick so beat positions are preserved.
 TEST_F(Tst_Notes, implicit_leading_rest_keeps_note_positions)
 {
     MasterScore* score = readEncoreScore("notes_implicit_leading_rest.enc");
@@ -442,18 +382,10 @@ TEST_F(Tst_Notes, inflated_rdur_keeps_face_value_quarter_chord)
     delete score;
 }
 
-// ===========================================================================
-// FIX: eighth-note chord whose next note stayed at its original quarter position
-// has rdur=240 (gap-to-next-event) but faceValue=4 (eighth=120).  Before the fix,
-// realDuration2DurationType(240, 4) returned V_QUARTER because case 240 had no
-// inflatedDottedPromotion guard.  After the fix the guard fires and V_EIGHTH is returned.
-// ===========================================================================
+// An eighth chord whose next note kept its original quarter position has an inflated rdur (gap to next);
+// the face value (eighth) must win over that rdur so the chord imports as an eighth, not a quarter.
 TEST_F(Tst_Notes, inflated_rdur_eighth_chord_keeps_face_value)
 {
-    // notes_chord_inflated_rdur_keeps_eighth.enc: 4/4 with F4(q)+chord(G4,A4)(e)+B4(q)+C5(q).
-    // G4 and A4 are at tick=240 with fv=4 (eighth).  B4 is at tick=480 (original quarter position,
-    // not shifted to 360 after the duration change), so realDur[G4]=240.  The chord must import as
-    // eighth (V_EIGHTH), not quarter.
     MasterScore* score = readEncoreScore("notes_chord_inflated_rdur_keeps_eighth.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -481,10 +413,7 @@ TEST_F(Tst_Notes, inflated_rdur_eighth_chord_keeps_face_value)
     delete score;
 }
 
-// ===========================================================================
-// FIX: triplet-spaced rdur (80, 40, ...) no longer promotes past the face value;
-// a 16th note with MIDI gap=80 stays a 16th instead of becoming an eighth and overflowing.
-// ===========================================================================
+// A triplet-spaced rdur (e.g. 80) must not promote past the face value: a 16th stays a 16th, not an eighth.
 TEST_F(Tst_Notes, note_rdur_80_stays_16th_face_value)
 {
     MasterScore* score = readEncoreScore("notes_rdur_80_stays_16th.enc");
@@ -508,25 +437,50 @@ TEST_F(Tst_Notes, note_rdur_80_stays_16th_face_value)
     delete score;
 }
 
-// grace_notes_only_on_short_facevalues deferred to B12 (grace note emission).
+// Grace notes are detected only for eighth-or-shorter face values; grace chords live in graceNotes() while
+// segment-attached chords stay NORMAL.
+TEST_F(Tst_Notes, grace_notes_only_on_short_facevalues)
+{
+    MasterScore* score = readEncoreScore("notes_grace.enc");
+    ASSERT_NE(score, nullptr);
+    bool foundGrace = false;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->elist()) {
+                if (!e || !e->isChord()) {
+                    continue;
+                }
+                Chord* c = toChord(e);
+                EXPECT_EQ(c->noteType(), NoteType::NORMAL)
+                    << "Segment-attached chord must be NORMAL; grace chords belong in graceNotes()";
+                for (Chord* gc : c->graceNotes()) {
+                    if (gc->noteType() != NoteType::NORMAL) {
+                        foundGrace = true;
+                        DurationType dt = gc->durationType().type();
+                        bool shortEnough = (dt == DurationType::V_EIGHTH
+                                            || dt == DurationType::V_16TH
+                                            || dt == DurationType::V_32ND
+                                            || dt == DurationType::V_64TH);
+                        EXPECT_TRUE(shortEnough)
+                            << "Grace note must have eighth or shorter duration (fv<4 filter), got "
+                            << int(dt);
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_TRUE(foundGrace) << "Should have at least one grace note (from the fv=4 eighth)";
+    delete score;
+}
 
-// ===========================================================================
-// BUG FIX: Triple-dotted note advance used wrong multiplier (7/4 instead of 15/8)
-// ===========================================================================
-
-// ===========================================================================
-// BUG FIX: Off-beat MIDI ticks land at canonical positions via faceValue cumTick
-// ===========================================================================
-
+// Off-beat MIDI ticks (a note 1 tick late) must be placed by cumulative face value, not the raw MIDI tick,
+// so notes land at canonical positions without spurious gap fills.
 TEST_F(Tst_Notes, offbeat_notes_canonical_placement)
 {
-    // notes_offbeat_canonical.enc: 2/4, 2 quarter notes.
-    //   Note 1: MIDI tick=0,   fv=3 (quarter) → cumTick=0,   placed at tick 0
-    //   Note 2: MIDI tick=241, fv=3 (quarter) → cumTick=1/4, placed at tick 1/4
-    // MIDI tick 241 is 1 tick late (MIDI timing drift). With the old tick-based
-    // placement this created a 1-tick gap at positions 0..241, triggering gap fills.
-    // With faceValue-cumulative placement: position comes from cumTick, not MIDI tick.
-    // Both notes land at exact canonical positions. No gap fills. sanityCheck passes.
     MasterScore* score = readEncoreScore("notes_offbeat_canonical.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -534,7 +488,6 @@ TEST_F(Tst_Notes, offbeat_notes_canonical_placement)
                      << ret.text();
     Measure* m = measureAt(score, 0);
     ASSERT_NE(m, nullptr);
-    // Verify both notes exist and are at exact canonical positions (0 and 1/4)
     std::vector<Fraction> noteTicks;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* e = s->element(0);
@@ -548,18 +501,10 @@ TEST_F(Tst_Notes, offbeat_notes_canonical_placement)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: 5-line PERC staff: note positions derived from Encore position byte
-// ===========================================================================
-
+// On a PERC staff, note lines come from the Encore position byte and noteheads from the faceValue high
+// nibble, so distinct positions map to distinct lines instead of all collapsing to line 0.
 TEST_F(Tst_Notes, perc_clef_note_positions_from_encore_position_byte)
 {
-    // notes_perc_clef_positions.enc: 4/4 PERC clef staff with three pitches at
-    // Encore position bytes 1, 3, 12. faceValue high nibble: 0=normal, 5=cross.
-    //
-    // Without fix: all pitches registered at line=0 with HEAD_SLASH.
-    // With fix: each pitch at a distinct line derived from position_byte;
-    //   HEAD_CROSS for fv high nibble=5, HEAD_NORMAL for high nibble=0.
     MasterScore* score = readEncoreScore("notes_perc_clef_positions.enc");
     ASSERT_NE(score, nullptr);
     Measure* m = measureAt(score, 0);
@@ -581,11 +526,7 @@ TEST_F(Tst_Notes, perc_clef_note_positions_from_encore_position_byte)
     EXPECT_EQ(notes[1]->pitch(), 65);
     EXPECT_EQ(notes[2]->pitch(), 81);
 
-    // Lines derived from Encore position byte via: line = max(-4, 10 - position).
-    // MuseScore PERC clef has A4 at line=5 (middle), so:
-    //   pitch 62, position=1  → line=9  (bottom line, D in PERC clef)
-    //   pitch 65, position=3  → line=7  (2nd line, F in PERC clef)
-    //   pitch 81, position=12 → line=-2 (above staff, A5 in PERC clef)
+    // Line is derived from the Encore position byte as line = max(-4, 10 - position).
     EXPECT_EQ(notes[0]->line(),  9) << "pitch 62 position=1 must be at line 9";
     EXPECT_EQ(notes[1]->line(),  7) << "pitch 65 position=3 must be at line 7";
     EXPECT_EQ(notes[2]->line(), -2) << "pitch 81 position=12 must be at line -2";
@@ -596,11 +537,9 @@ TEST_F(Tst_Notes, perc_clef_note_positions_from_encore_position_byte)
     const Drumset* ds = notes[0]->part()->instrument()->drumset();
     ASSERT_NE(ds, nullptr) << "Staff must have a drumset assigned (PERC clef)";
 
-    // faceValue high nibble=5 (pitch 81) → registered as HEAD_XCIRCLE (X with circle)
     EXPECT_EQ(ds->noteHead(81), NoteHeadGroup::HEAD_XCIRCLE)
         << "fv high nibble=5 must register HEAD_XCIRCLE in drumset";
 
-    // faceValue high nibble=0 (pitch 62, 65) → registered as HEAD_NORMAL
     EXPECT_EQ(ds->noteHead(62), NoteHeadGroup::HEAD_NORMAL)
         << "fv high nibble=0 must register HEAD_NORMAL in drumset";
     EXPECT_EQ(ds->noteHead(65), NoteHeadGroup::HEAD_NORMAL)
@@ -609,16 +548,10 @@ TEST_F(Tst_Notes, perc_clef_note_positions_from_encore_position_byte)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: faceValue overrides standard drumset notehead for pre-populated pitches
-// ===========================================================================
-
+// The faceValue notehead must override the standard drumset's pre-registered head: a normal-head note on
+// pitch 40 (which the standard drumset registers as HEAD_SLASH) must become HEAD_NORMAL.
 TEST_F(Tst_Notes, perc_clef_facevalue_overrides_standard_drumset_notehead)
 {
-    // notes_perc_clef_standard_drumset_notehead.enc: PERC-clef staff with one note
-    // at pitch 40 (Electric Snare), faceValue high nibble=0 (normal head in Encore).
-    // Standard MIDI drumset pre-registers pitch 40 as HEAD_SLASH; the importer must
-    // override that with HEAD_NORMAL based on faceValue.
     MasterScore* score = readEncoreScore("notes_perc_clef_standard_drumset_notehead.enc");
     ASSERT_NE(score, nullptr);
     Measure* m = measureAt(score, 0);
@@ -645,15 +578,10 @@ TEST_F(Tst_Notes, perc_clef_facevalue_overrides_standard_drumset_notehead)
     delete score;
 }
 
-// ===========================================================================
-// FEATURE: All 10 faceValue high-nibble notehead types map to correct
-// MuseScore NoteHeadGroups. Non-zero nibbles use note->setFixed(true) to
-// prevent segmentlayout from overriding the head from the shared drumset entry.
-// ===========================================================================
+// All 10 faceValue high-nibble notehead types map to the correct NoteHeadGroup; non-zero nibbles set
+// note->setFixed(true) so layout does not override the head from the shared drumset entry.
 TEST_F(Tst_Notes, perc_notehead_all_nibble_types)
 {
-    // notes_perc_notehead_all_nibbles.enc: 10 notes on PERC-clef staff,
-    // pitches 50-59, faceValue (nibble<<4)|3. One note per nibble 0..9.
     MasterScore* score = readEncoreScore("notes_perc_notehead_all_nibbles.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -703,19 +631,10 @@ TEST_F(Tst_Notes, perc_notehead_all_nibble_types)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: Shared-pitch notes with different notehead nibbles must each keep
-// their own headGroup after layout. The drumset entry is shared per pitch, so
-// the second note's update would override the first if setFixed(true) were not
-// called for all non-normal nibbles (3 and 7 were missing setFixed).
-// ===========================================================================
+// Two PERC notes at the same pitch but different faceValue nibbles must each keep their own notehead;
+// they cannot both defer to the single shared drumset entry.
 TEST_F(Tst_Notes, perc_shared_pitch_two_nibbles_stay_fixed)
 {
-    // notes_perc_shared_pitch_nibbles.enc: two PERC notes both at pitch=60.
-    //   beat 0: nibble=7 → HEAD_SLASH
-    //   beat 1: nibble=8 → HEAD_LARGE_DIAMOND
-    // Without fix: note 1 (nibble=8) updates drumset[60]=LARGE_DIAMOND; layout
-    // overrides note 0 (nibble=7, not fixed) to LARGE_DIAMOND. Or vice versa.
     MasterScore* score = readEncoreScore("notes_perc_shared_pitch_nibbles.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -744,14 +663,10 @@ TEST_F(Tst_Notes, perc_shared_pitch_two_nibbles_stay_fixed)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: Near-simultaneous chord notes (MIDI timing drift) no longer lost
-// ===========================================================================
-
+// Notes a few ticks apart (MIDI drift) must merge into one chord: the near-simultaneous cluster is skipped
+// in the rdur calc so the first note is not dropped by the short-rdur filter.
 TEST_F(Tst_Notes, near_simultaneous_notes_form_chord)
 {
-    // Ticks 0 and 3 (3-tick MIDI drift) must form one chord. Without fix, rdur=3 (<15) caused C4 to be skipped.
-    // CHORD_CLUSTER_THRESHOLD=4 skips near-simultaneous elements in rdur calc, giving rdur=240 for the first note.
     MasterScore* score = readEncoreScore("notes_v0c2_near_simultaneous_chord.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -761,7 +676,6 @@ TEST_F(Tst_Notes, near_simultaneous_notes_form_chord)
     ASSERT_NE(m, nullptr);
     EXPECT_EQ(m->timesig(), Fraction(2, 4));
 
-    // The first non-rest segment must be a chord with 2 notes (C4 + E4)
     Chord* first = nullptr;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* e = s->element(0);
@@ -776,20 +690,15 @@ TEST_F(Tst_Notes, near_simultaneous_notes_form_chord)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: Triple-dotted note advance multiplier, docs/verify ticks match advance
-// ===========================================================================
-
+// A triple-dotted eighth advances by 15/64, not 14/64, so the following chord starts flush with no overrun.
 TEST_F(Tst_Notes, triple_dotted_advance_matches_chord_ticks)
 {
-    // Triple-dotted 8th (rdur=225, dots=3, ticks=15/64). Bug: advance used 7/4 giving 14/64 instead of 15/64.
     MasterScore* score = readEncoreScore("notes_triple_dotted_advance.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Triple-dotted advance must equal chord ticks: " << ret.text();
     Measure* m = measureAt(score, 0);
     ASSERT_NE(m, nullptr);
-    // First chord: triple-dotted 8th. Verify ticks=15/64 (dots=3).
     Chord* first = nullptr;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* e = s->element(0);
@@ -801,8 +710,6 @@ TEST_F(Tst_Notes, triple_dotted_advance_matches_chord_ticks)
     ASSERT_NE(first, nullptr);
     EXPECT_EQ(first->ticks(), Fraction(15, 64)) << "Must be triple-dotted 8th (15/64)";
     EXPECT_EQ(first->dots(), 3) << "Must have 3 augmentation dots";
-    // Second chord: plain 8th immediately after, its position must be measTick+15/64,
-    // NOT measTick+14/64 (which would be a 1/64 overrun causing a stray fill).
     Chord* second = nullptr;
     for (Segment* s = first->segment()->next(SegmentType::ChordRest);
          s; s = s->next(SegmentType::ChordRest)) {
@@ -818,15 +725,10 @@ TEST_F(Tst_Notes, triple_dotted_advance_matches_chord_ticks)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: dotControl byte used for note dot count (not MIDI realDuration)
-// ===========================================================================
-
+// The dotControl byte (not the MIDI-drifted realDuration) must decide a note's dot count: a dotted eighth
+// stays dotted even when the next note's start makes rdur look undotted.
 TEST_F(Tst_Notes, dotted_note_uses_dotcontrol_byte)
 {
-    // notes_dotted_note.enc: first note is a dotted 8th (dotControl=180)
-    // but the next note is at MIDI tick=86 (drift), giving rdur=86.
-    // calcDots(86, 8th)=0 (wrong); calcDots(180, 8th)=1 (correct via dotControl).
     MasterScore* score = readEncoreScore("notes_dotted_note.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -851,13 +753,9 @@ TEST_F(Tst_Notes, dotted_note_uses_dotcontrol_byte)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: dotControl byte used for rest dot count (not MIDI realDuration)
-// ===========================================================================
-
+// Same dotControl rule for rests: a dotted eighth rest stays dotted despite a MIDI-drifted rdur.
 TEST_F(Tst_Notes, dotted_rest_uses_dotcontrol_byte)
 {
-    // Dotted 8th rest with dotControl=180; rdur=154 (MIDI drift) gives calcDots=0. Fix: use dotControl when non-zero.
     MasterScore* score = readEncoreScore("notes_dotted_rest.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -867,7 +765,6 @@ TEST_F(Tst_Notes, dotted_rest_uses_dotcontrol_byte)
     ASSERT_NE(m, nullptr);
     EXPECT_EQ(m->timesig(), Fraction(3, 4));
 
-    // Find the rest (second ChordRest segment, first is the quarter note chord)
     Rest* dottedRest = nullptr;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* e = s->element(0);
@@ -884,13 +781,9 @@ TEST_F(Tst_Notes, dotted_rest_uses_dotcontrol_byte)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: calcDotsSnap, 1-tick rdur tolerance identifies dotted notes
-// ===========================================================================
-
+// With dotControl=0, an rdur 1 tick off a double-dotted value must snap to the dotted count (tolerance 1).
 TEST_F(Tst_Notes, rdur_snap_corrects_dot_count)
 {
-    // rdur=211 is 1 tick from dd8th=210; dotControl=0 gives 0 dots. Fix: calcDotsSnap with tolerance=1 gives 2 dots.
     MasterScore* score = readEncoreScore("notes_rdur_snap.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -915,16 +808,10 @@ TEST_F(Tst_Notes, rdur_snap_corrects_dot_count)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: 32nd rest with rdur shortened by next note's MIDI start kept
-// ===========================================================================
-
+// A 32nd rest whose rdur is shortened by the next note's MIDI start must be kept in order: for face value
+// >= 32nd the face value is trusted over the short rdur, so the rest is not dropped or reordered.
 TEST_F(Tst_Notes, rest_before_note_midi_slop_keeps_rest)
 {
-    // 5/8 measure: E8 | R32 | N16. | E8 | E8 | E8.
-    // The 32nd rest has rdur=5 (<15) because the next note starts 5 ticks after
-    // the rest's MIDI tick (MIDI timing slop). Fix: when face value >= 32nd
-    // (faceTicks >= 30), trust the face value and keep the rest in order.
     MasterScore* score = readEncoreScore("notes_rest_before_note_midi_slop.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -933,7 +820,6 @@ TEST_F(Tst_Notes, rest_before_note_midi_slop_keeps_rest)
     Measure* m = measureAt(score, 0);
     ASSERT_NE(m, nullptr);
 
-    // Collect ChordRest elements in order
     std::vector<ChordRest*> crs;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* e = s->element(0);
@@ -942,30 +828,23 @@ TEST_F(Tst_Notes, rest_before_note_midi_slop_keeps_rest)
         }
     }
     ASSERT_GE(crs.size(), 6u) << "Must have 6 ChordRest elements in M1";
-    // [0] eighth note
     EXPECT_TRUE(crs[0]->isChord())
         << "First element must be a chord (eighth note)";
     EXPECT_EQ(crs[0]->durationType().type(), DurationType::V_EIGHTH);
-    // [1] 32nd REST must be second (before the dotted-16th)
     EXPECT_TRUE(crs[1]->isRest())
         << "Second element must be a rest (32nd); without fix it appears last";
     EXPECT_EQ(crs[1]->durationType().type(), DurationType::V_32ND)
         << "Rest must be a 32nd (face value preserved despite rdur=5)";
-    // [2] dotted 16th note
     EXPECT_TRUE(crs[2]->isChord())
         << "Third element must be a chord (dotted 16th)";
     EXPECT_EQ(crs[2]->durationType().type(), DurationType::V_16TH);
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: prevMidiTick self-reference bypassed rdur<15 filter for non-chord-ext notes
-// ===========================================================================
-
+// A short-rdur note that is not a chord extension must still be filtered as a MIDI artifact; the chord-ext
+// test must use the previous element's tick so a lone 64th (rdur=11) is not mistaken for a chord tone.
 TEST_F(Tst_Notes, rdur_non_chord_ext_filtered)
 {
-    // 64th C4 at tick=240 (rdur=11, not a tie-start). Bug: prevMidiTick set too early made it look like a chord ext.
-    // Fix: isChordExt uses OLD prevMidiTick (set by the rest); gap=240>=4 → not chord ext → filtered.
     MasterScore* score = readEncoreScore("notes_rdur_non_chord_ext_filtered.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1026,14 +905,9 @@ TEST_F(Tst_Notes, grace1_cascade_filter)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: 5-tick live-recorded chord cluster split into multiple chords
-// ===========================================================================
-
+// Four live-recorded notes a few ticks apart must form one chord (not split), tied to a 4-note receiver.
 TEST_F(Tst_Notes, chord_cluster_5tick_v0c2)
 {
-    // 4 live-recorded notes at ticks 100,103,104,105 must form one chord tied to 4 receiver notes at tick=240.
-    // Fixes: (A) rdur==CHORD_CLUSTER_THRESHOLD not filtered; (B) CHORD_MIDI_THRESHOLD=2*CLUSTER; (C) g1low=1 as tie indicator.
     MasterScore* score = readEncoreScore("notes_v0c2_chord_cluster_5tick.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1042,7 +916,6 @@ TEST_F(Tst_Notes, chord_cluster_5tick_v0c2)
     Measure* m = measureAt(score, 0);
     ASSERT_NE(m, nullptr);
 
-    // Collect all chords (non-rests) in voice 0
     std::vector<Chord*> chords;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
@@ -1051,14 +924,10 @@ TEST_F(Tst_Notes, chord_cluster_5tick_v0c2)
         }
     }
 
-    // Expect exactly 2 chords: the 4-note sender chord and the 4-note receiver chord.
     ASSERT_EQ(chords.size(), 2u) << "Must have exactly 2 chords (sender + receiver)";
-
-    // Sender chord must have all 4 notes, not split.
     EXPECT_EQ(chords[0]->notes().size(), 4u)
         << "All 4 live-recorded chord notes must be in one chord, not split";
 
-    // All 4 sender notes must be tied to the receiver chord.
     int tiedCount = 0;
     for (Note* n : chords[0]->notes()) {
         if (n->tieFor() && n->tieFor()->endNote()) {
@@ -1068,22 +937,14 @@ TEST_F(Tst_Notes, chord_cluster_5tick_v0c2)
     EXPECT_EQ(tiedCount, 4)
         << "All 4 sender notes must have outgoing ties to the receiver chord";
 
-    // Receiver chord must also have all 4 notes.
     EXPECT_EQ(chords[1]->notes().size(), 4u)
         << "Receiver chord must have all 4 notes";
 
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: Encore files sometimes encode the same pitch twice in the same
-// chord cluster (two NOTE elements with identical tick/staff/voice/pitch).
-// The second copy must be suppressed regardless of the grace1 0x40 bit.
-// ===========================================================================
-
-// Regression: notes_chord_duplicate.enc: two identical NOTE elements at
-// tick=0 pitch=60 (grace1=0x00 and grace1=0x40). After import the chord must
-// have exactly one note.
+// A pitch encoded twice in the same chord cluster must collapse to one notehead, regardless of the
+// grace1 0x40 chord-extension bit.
 TEST_F(Tst_Notes, duplicate_pitch_in_chord_cluster_suppressed)
 {
     MasterScore* score = readEncoreScore("notes_chord_duplicate.enc");
@@ -1107,15 +968,9 @@ TEST_F(Tst_Notes, duplicate_pitch_in_chord_cluster_suppressed)
     delete score;
 }
 
-// ===========================================================================
-// FIX: Duplicate note with NEITHER copy having grace1 bit 0x40 must also be
-// suppressed. Some Encore files (e.g. v0xC2) produce two identical NOTE
-// elements without the chord-extension marker; the old check was too narrow.
-// ===========================================================================
+// Duplicate suppression must also fire when neither copy carries the chord-extension bit (some v0xC2 files).
 TEST_F(Tst_Notes, duplicate_pitch_no_ext_bit_suppressed)
 {
-    // notes_chord_duplicate_no_ext_bit.enc: two notes at tick=0 pitch=60,
-    // both grace1=0x00 (no chord-extension bit). Must produce exactly 1 note.
     MasterScore* score = readEncoreScore("notes_chord_duplicate_no_ext_bit.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1135,20 +990,8 @@ TEST_F(Tst_Notes, duplicate_pitch_no_ext_bit_suppressed)
     delete score;
 }
 
-// ===========================================================================
-// FIX: Transposing instruments (Key≠0) must have correct written-pitch TPC.
-// Root cause: Score::spell() used the WRITTEN key to penalize note spellings,
-// choosing Cb over B for pitch=71 in F major (both non-diatonic, equal penalty).
-// ===========================================================================
-// grandstaff_staffwithin_routes_voices_to_correct_staff
-//
-// Piano/grand-staff files encode multi-staff notes via the high 2 bits of the
-// raw staff byte (staffWithin = rawStaff >> 6). Voices 2,3 with staffWithin=1
-// must land on staff 2; voices 0,1 with staffWithin=0 stay on staff 1.
-// Fixture: 1 Piano (MIDI=0), 2 staves, 1 measure with 4 quarter notes:
-//   treble C5 (MIDI=72, voice=0, bit6=0) and E5 (MIDI=76, voice=1, bit6=0)
-//   bass   C3 (MIDI=48, voice=2, bit6=1) and E3 (MIDI=52, voice=3, bit6=1)
-// ===========================================================================
+// Grand-staff files encode the target staff in the high bits of the raw staff byte (staffWithin), so
+// voices marked staffWithin=1 must land on staff 2 while staffWithin=0 stays on staff 1.
 TEST_F(Tst_Notes, grandstaff_staffwithin_routes_voices_to_correct_staff)
 {
     MasterScore* score = readEncoreScore("notes_grandstaff_bit6_second_staff.enc");
@@ -1192,12 +1035,7 @@ TEST_F(Tst_Notes, grandstaff_staffwithin_routes_voices_to_correct_staff)
     delete score;
 }
 
-// ===========================================================================
-// grandstaff_staffwithin_rest_on_second_staff
-//
-// A REST element with staffWithin=1 (bit 6 set) must land on staff 2.
-// Fixture: treble C5 note on staff 1 + quarter rest on staff 2 (voice=2, staffWithin=1).
-// ===========================================================================
+// A REST with staffWithin=1 must land on staff 2, like notes do.
 TEST_F(Tst_Notes, grandstaff_staffwithin_rest_on_second_staff)
 {
     MasterScore* score = readEncoreScore("notes_grandstaff_staffwithin_rest_on_second_staff.enc");
@@ -1208,7 +1046,6 @@ TEST_F(Tst_Notes, grandstaff_staffwithin_rest_on_second_staff)
     Measure* m = score->firstMeasure();
     ASSERT_NE(m, nullptr);
 
-    // Staff 2 (idx=1) must have a rest, not a note
     bool hasRestOnStaff2 = false;
     for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
         for (int v = 0; v < static_cast<int>(VOICES); ++v) {
@@ -1220,7 +1057,6 @@ TEST_F(Tst_Notes, grandstaff_staffwithin_rest_on_second_staff)
     }
     EXPECT_TRUE(hasRestOnStaff2) << "Rest with staffWithin=1 must land on staff 2";
 
-    // Staff 1 (idx=0) must have the C5 note (pitch=72), not a rest
     bool hasNoteOnStaff1 = false;
     for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
         EngravingItem* e = seg->element(0);
@@ -1233,14 +1069,7 @@ TEST_F(Tst_Notes, grandstaff_staffwithin_rest_on_second_staff)
     delete score;
 }
 
-// ===========================================================================
-// grandstaff_staffwithin_tie_on_second_staff
-//
-// A TIE element with staffWithin=1 must tie notes on staff 2, not staff 1.
-// Fixture: 2-measure score; measure 1 has bass E3 (voice=2, staffWithin=1)
-// with a TIE; measure 2 has the continuation. The tie must be resolved on
-// staff 2 with the note, not leave a dangling pending tie on staff 1.
-// ===========================================================================
+// A TIE with staffWithin=1 must resolve on staff 2 (with its note), not leave a dangling tie on staff 1.
 TEST_F(Tst_Notes, grandstaff_staffwithin_tie_on_second_staff)
 {
     // Single 4/4 measure: treble C5 half+half, bass E3 half tied to E3 half.
@@ -1256,7 +1085,6 @@ TEST_F(Tst_Notes, grandstaff_staffwithin_tie_on_second_staff)
     Measure* m = score->firstMeasure();
     ASSERT_NE(m, nullptr);
 
-    // Find the first bass E3 on staff 2 (pitch=52)
     Note* tieStart = nullptr;
     for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
         for (int v = 0; v < static_cast<int>(VOICES); ++v) {
@@ -1285,14 +1113,8 @@ TEST_F(Tst_Notes, grandstaff_staffwithin_tie_on_second_staff)
     delete score;
 }
 
-// ===========================================================================
-// grandstaff_staffwithin_four_voices
-//
-// All four Encore voices (0,1 on treble; 2,3 on bass) correctly distributed:
-// voice 0 → staff 1 MS-voice 0, voice 1 → staff 1 MS-voice 1,
-// voice 2 → staff 2 MS-voice 0, voice 3 → staff 2 MS-voice 1.
-// Fixture: C5/E5 on treble, G3/B3 on bass, all at tick=0.
-// ===========================================================================
+// All four Encore voices distribute correctly across the grand staff: voices 0-1 to the treble staff,
+// voices 2-3 to the bass staff.
 TEST_F(Tst_Notes, grandstaff_staffwithin_four_voices)
 {
     MasterScore* score = readEncoreScore("notes_grandstaff_staffwithin_four_voices.enc");
@@ -1334,6 +1156,61 @@ TEST_F(Tst_Notes, grandstaff_staffwithin_four_voices)
     delete score;
 }
 
+// A voice number above the staff-2 marker (voice 5..7, staffWithin 0) is a genuine extra voice on
+// its OWN staff, not a request to move to the next staff. On a grand-staff instrument the old
+// voice>=VOICES rule pushed a voice-7 top-staff note onto the bass staff. Fixture: a voice-7 note
+// (raw_staff = top staff) on a Piano grand staff must land on staff 0, not staff 1.
+TEST_F(Tst_Notes, grandstaff_high_voice_stays_on_own_staff)
+{
+    MasterScore* score = readEncoreScore("notes_grandstaff_high_voice_own_staff.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    bool onTopStaff = false, onBassStaff = false;
+    for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        for (int tr = 0; tr < 2 * static_cast<int>(VOICES); ++tr) {
+            EngravingItem* e = seg->element(static_cast<track_idx_t>(tr));
+            if (e && e->isChord() && !toChord(e)->notes().empty()
+                && toChord(e)->notes().front()->pitch() == 67) {
+                (tr < static_cast<int>(VOICES) ? onTopStaff : onBassStaff) = true;
+            }
+        }
+    }
+    EXPECT_TRUE(onTopStaff) << "the voice-7 note must stay on its own (top) staff";
+    EXPECT_FALSE(onBassStaff) << "the voice-7 note must not be pushed onto the bass staff";
+    delete score;
+}
+
+// On a single-staff instrument, Encore voice nibble 4 is a genuine second melodic voice (not the
+// grand-staff silent-voice marker), so it must import as a separate voice 1 rather than being
+// concatenated onto voice 0 (which produced overfull, non-dyadic bars that failed to open).
+TEST_F(Tst_Notes, singlestaff_voice4_second_voice)
+{
+    MasterScore* score = readEncoreScore("notes_singlestaff_voice4_second_voice.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    auto countChordsInVoice = [&](int voice) {
+        int count = 0;
+        for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+            EngravingItem* e = seg->element(static_cast<track_idx_t>(voice));
+            if (e && e->isChord()) {
+                ++count;
+            }
+        }
+        return count;
+    };
+
+    EXPECT_EQ(countChordsInVoice(0), 4) << "voice 0 must hold only its own four notes";
+    EXPECT_EQ(countChordsInVoice(1), 4) << "the voice-4 second voice must import as a separate voice 1";
+    delete score;
+}
+
 // ===========================================================================
 // grandstaff_staffwithin_sequential
 //
@@ -1371,14 +1248,8 @@ TEST_F(Tst_Notes, grandstaff_staffwithin_sequential)
     delete score;
 }
 
-// ===========================================================================
-// transposing_instrument_written_tpc_not_double_flat
-//
-// Then tpc2 = transposeTpc(Cb=7, -6) = Gbb=1 (displayed as Gbb instead of F).
-// Fix: computeWindow uses the CONCERT key for transposing instrument staves.
-// Fixture: MIDI=69 (oboe), Key=+6. Written F4 (semiTonePitch=65) → concert B4
-// (65+6=71). Expected written TPC: 13 (F natural), not 1 (Gbb) or 7 (Cb).
-// ===========================================================================
+// A transposing instrument's written spelling must use the concert key, so a written F4 does not drift to
+// a double-flat (Gbb) spelling.
 TEST_F(Tst_Notes, transposing_instrument_written_tpc_not_double_flat)
 {
     MasterScore* score = readEncoreScore("notes_transposing_written_tpc.enc");
@@ -1405,20 +1276,9 @@ TEST_F(Tst_Notes, transposing_instrument_written_tpc_not_double_flat)
     delete score;
 }
 
-// ===========================================================================
-// transposing_melody_no_double_flat_after_spell
-//
-// score->spell() is a context/window heuristic; on a transposing staff whose
-// written key is heavily flat (Eb, 3 flats) while the concert key is sharp
-// (A major) it drifted a whole melody to double-flats: concert E/B/G# became
-// Fb/Cb/Ab and the written notes became Cbb/Gbb/Ebb. The single-note
-// computeWindow fix does not catch this (the drift only appears with a melody).
-// respellTransposingStaves re-derives the TPC of notes on transposing staves
-// from the sounding pitch + concert key after spell().
-// Fixture: oboe (MIDI 69), Key=+6 (aug4), written key Eb (tipo=3), written
-// pitches 70/65/62/58 -> concert 76/71/68/64 (E5/B4/G#4/E4).
-// Expected concert TPC 18/19/22/18, written TPC 12/13/16/12; never tpc <= 5.
-// ===========================================================================
+// score->spell() can drift a whole transposing-staff melody to double-flats when the written key is flat
+// but the concert key is sharp; respellTransposingStaves re-derives TPCs from sounding pitch + concert key
+// so no note ends up double-flat. The single-note fix does not catch this, hence the melody fixture.
 TEST_F(Tst_Notes, transposing_melody_no_double_flat_after_spell)
 {
     MasterScore* score = readEncoreScore("notes_transposing_respell_melody.enc");
@@ -1565,7 +1425,6 @@ TEST_F(Tst_Notes, scale_no_anchor_produces_no_circles)
     delete score;
 }
 
-
 // ===========================================================================
 // REGRESSION: Standalone string-number ORN (0xE6 = string 2) must NOT duplicate
 // the string number that the per-note hasScaleStringAnchors options-bit-0 path
@@ -1616,7 +1475,6 @@ TEST_F(Tst_Notes, string_num_orn_does_not_duplicate_anchor_path_number)
     delete score;
 }
 
-
 // voice_overflow_notes_dropped_not_routed_to_voice2
 TEST_F(Tst_Notes, voice_overflow_notes_dropped_not_routed_to_voice2)
 {
@@ -1665,23 +1523,14 @@ TEST_F(Tst_Notes, chord_symbol_snaps_to_beat1_despite_midi_offset)
     Segment* firstSeg = m->first(SegmentType::ChordRest);
     ASSERT_NE(firstSeg, nullptr);
 
-    bool harmonyOnBeat1 = false;
-    for (EngravingItem* ann : firstSeg->annotations()) {
-        if (ann && ann->isHarmony()) {
-            harmonyOnBeat1 = true;
-            break;
-        }
-    }
-    EXPECT_TRUE(harmonyOnBeat1)
+    EXPECT_NE(segmentHarmony(firstSeg), nullptr)
         << "Chord symbol with tick=6 (MIDI offset from note at tick=0) must snap to beat-1 segment";
 
     // The second segment must NOT have the Harmony.
     Segment* secondSeg = firstSeg->next(SegmentType::ChordRest);
     if (secondSeg) {
-        for (EngravingItem* ann : secondSeg->annotations()) {
-            EXPECT_FALSE(ann && ann->isHarmony())
-                << "Chord symbol must NOT land on beat-2 segment due to MIDI drift";
-        }
+        EXPECT_EQ(segmentHarmony(secondSeg), nullptr)
+            << "Chord symbol must NOT land on beat-2 segment due to MIDI drift";
     }
 
     delete score;
@@ -1698,14 +1547,7 @@ TEST_F(Tst_Notes, chord_symbol_large_midi_drift_still_on_beat1)
     Segment* first = m->first(SegmentType::ChordRest);
     ASSERT_NE(first, nullptr);
 
-    bool harmonyOnBeat1 = false;
-    for (EngravingItem* ann : first->annotations()) {
-        if (ann && ann->isHarmony()) {
-            harmonyOnBeat1 = true;
-            break;
-        }
-    }
-    EXPECT_TRUE(harmonyOnBeat1)
+    EXPECT_NE(segmentHarmony(first), nullptr)
         << "CHD@87 (large drift from note@0) must still snap to beat-1 segment";
 
     delete score;
@@ -1727,48 +1569,85 @@ TEST_F(Tst_Notes, chord_symbol_snaps_to_beat_not_nearby_subdivision)
     EXPECT_EQ(beat1seg->tick() - m->tick(), Fraction(0, 1))
         << "First segment must be at tick=0 (beat 1)";
 
-    bool harmonyOnBeat1 = false;
-    for (EngravingItem* ann : beat1seg->annotations()) {
-        if (ann && ann->isHarmony()) {
-            harmonyOnBeat1 = true;
-            break;
-        }
-    }
-    EXPECT_TRUE(harmonyOnBeat1)
+    EXPECT_NE(segmentHarmony(beat1seg), nullptr)
         << "CHD@62 with note at tick=60 only 2t away must NOT snap to tick=60; "
         "beat-floor forces it to tick=0 (beat 1)";
 
     // Second segment (tick=60) must NOT have a harmony
     Segment* seg60 = beat1seg->next(SegmentType::ChordRest);
     if (seg60) {
-        for (EngravingItem* ann : seg60->annotations()) {
-            EXPECT_FALSE(ann && ann->isHarmony())
-                << "CHD must not land on the tick=60 subdivision segment";
-        }
+        EXPECT_EQ(segmentHarmony(seg60), nullptr)
+            << "CHD must not land on the tick=60 subdivision segment";
     }
 
     delete score;
 }
 
-// ===========================================================================
-// FEATURE: Multi-instrument compact rawStaff routing
-// ===========================================================================
+TEST_F(Tst_Notes, chord_symbol_gets_fretboard_diagram)
+{
+    // A FretDiagram is drawn only when Encore's fret-frame bit is set, independent of whether MuseScore's
+    // chord database recognizes the name (gating on database recognition alone put a frame under every chord).
+    MasterScore* score = readEncoreScore("notes_chord_symbol_fretboard.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
 
+    auto scanSeg = [](Segment* s, FretDiagram** fdOut, Harmony** bareOut) {
+        *fdOut = nullptr;
+        *bareOut = nullptr;
+        for (EngravingItem* ann : s->annotations()) {
+            if (ann && ann->isFretDiagram()) {
+                *fdOut = toFretDiagram(ann);
+            } else if (ann && ann->isHarmony()) {
+                *bareOut = toHarmony(ann);
+            }
+        }
+    };
+
+    // Measure 0: "Am" with frame bit -> FretDiagram wrapping the Harmony.
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+    Segment* s0 = m0->first(SegmentType::ChordRest);
+    ASSERT_NE(s0, nullptr);
+    FretDiagram* fd0 = nullptr;
+    Harmony* bare0 = nullptr;
+    scanSeg(s0, &fd0, &bare0);
+    ASSERT_NE(fd0, nullptr) << "\"Am\" with the frame bit must be wrapped in a FretDiagram";
+    EXPECT_FALSE(fd0->isClear()) << "FretDiagram for \"Am\" must be populated from the database";
+    ASSERT_NE(fd0->harmony(), nullptr) << "FretDiagram must carry the Harmony as its child";
+    EXPECT_EQ(fd0->harmony()->harmonyName(), String(u"Am"));
+    EXPECT_EQ(bare0, nullptr)
+        << "Harmony must live under the FretDiagram, not directly on the segment";
+
+    // Measure 1: "Am" WITHOUT the frame bit -> plain Harmony, no FretDiagram.
+    Measure* m1 = measureAt(score, 1);
+    ASSERT_NE(m1, nullptr);
+    Segment* s1 = m1->first(SegmentType::ChordRest);
+    ASSERT_NE(s1, nullptr);
+    FretDiagram* fd1 = nullptr;
+    Harmony* bare1 = nullptr;
+    scanSeg(s1, &fd1, &bare1);
+    EXPECT_EQ(fd1, nullptr)
+        << "\"Am\" WITHOUT the frame bit must NOT get a FretDiagram, even though the database knows it";
+    EXPECT_NE(bare1, nullptr) << "\"Am\" without the frame bit must remain a plain Harmony";
+
+    // Measure 2: "Zzz" with frame bit but unknown chord -> plain Harmony (no diagram to draw).
+    Measure* m2 = measureAt(score, 2);
+    ASSERT_NE(m2, nullptr);
+    Segment* s2 = m2->first(SegmentType::ChordRest);
+    ASSERT_NE(s2, nullptr);
+    FretDiagram* fd2 = nullptr;
+    Harmony* bare2 = nullptr;
+    scanSeg(s2, &fd2, &bare2);
+    EXPECT_EQ(fd2, nullptr) << "Unknown chord \"Zzz\" must NOT get a FretDiagram";
+    EXPECT_NE(bare2, nullptr) << "Unknown chord \"Zzz\" must remain a plain Harmony";
+
+    delete score;
+}
+
+// Compact rawStaff encodes staffWithin in the high bits and the instrument index in the low bits; the low
+// bits must not be read as a LINE slot, or the second instrument's notes land on the first's staves.
 TEST_F(Tst_Notes, notes_multiinstr_compact_routing)
 {
-    // notes_multiinstr_compact_routing.enc has 2 instruments x 2 staves each.
-    // Notes use compact rawStaff encoding: rawStaff = (staffWithin<<6)|instrIdx
-    // (same byte format as LINE block instrStaffIdx).
-    //
-    // Expected layout:
-    //   staff 0 (instr 0 treble): C4 = pitch 60
-    //   staff 1 (instr 0 bass):   C3 = pitch 48
-    //   staff 2 (instr 1 treble): E4 = pitch 64
-    //   staff 3 (instr 1 bass):   E3 = pitch 52
-    //
-    // Bug (before fix): importer treated rawStaff low-6-bits as LINE slot index,
-    // so organ notes (instrIdx=1) were placed on piano-bass staff (LINE slot 1).
-    // All four notes ended up on staffs 0 and 1 only; staves 2 and 3 were empty.
     MasterScore* score = readEncoreScore("notes_multiinstr_compact_routing.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_EQ(score->nstaves(), 4) << "score must have 4 staves (2 instruments x 2 each)";
@@ -1827,10 +1706,8 @@ TEST_F(Tst_Notes, notes_v0c2_multiinstr_compact_routing)
     delete score;
 }
 
-
-// v0xC2 size=24 notes: MIDI pitch is at offset +13 (tuplet slot), same as size=22.
-// Articulation byte is at offset +22. Before this fix, size=24 notes used offset +15
-// for pitch (which is 0 in v0xC2 files), producing C-1 instead of the correct note.
+// v0xC2 size=24 notes carry pitch and articulation at the same offsets as size=22; reading the v0xC4 pitch
+// slot yields 0 (C-1). See ENCORE_FORMAT.md §v0xC2 note (size 22 or 24).
 TEST_F(Tst_Notes, notes_v0c2_size24_correct_pitch_and_artic)
 {
     MasterScore* score = readEncoreScore("notes_v0c2_size24_artic_pitch.enc");
@@ -1871,9 +1748,8 @@ TEST_F(Tst_Notes, notes_v0c2_size24_correct_pitch_and_artic)
     delete score;
 }
 
-// v0xC2 size=24 notes where tuplet==0 and the MIDI pitch is already stored in
-// semiTonePitch (not in the tuplet slot). Found in some Encore 4.x files (e.g.
-// TUVEHAMB.ENC). The pitch-swap must be skipped so the correct pitch is preserved.
+// In some v0xC2 size=24 notes the pitch is already in semiTonePitch (tuplet==0); the pitch-swap must be
+// skipped so it is preserved.
 TEST_F(Tst_Notes, notes_v0c2_size24_semitone_pitch)
 {
     MasterScore* score = readEncoreScore("notes_v0c2_size24_semitonepitch.enc");
@@ -1930,15 +1806,8 @@ TEST_F(Tst_Notes, trailing_space_uses_invisible_gap_rests)
     delete score;
 }
 
-// ===========================================================================
-// BUG regression: a 16th note whose MIDI rdur from calculateRealDurations
-// equals 112 was falsely assigned 3 augmentation dots because
-// calcDotsSnap computed the triple-dotted threshold as (60*15)/8 = 112 via
-// C++ integer truncation (true value 112.5).  The note advanced 15/128 of a
-// whole note instead of 1/16, misaligning the rest of the measure.
-// Fixture: NOTE@0(16th) followed by NOTE@112, so calculateRealDurations
-// gives rdur=112 for the first note.
-// ===========================================================================
+// A 16th note with rdur=112 must not become triple-dotted: 112 is the integer-truncated triple-dot
+// threshold (true value 112.5), which used to misalign the rest of the measure.
 TEST_F(Tst_Notes, rdur112_16th_note_not_triple_dotted)
 {
     MasterScore* score = readEncoreScore("notes_16th_rdur112_no_triple_dot.enc");
@@ -1962,20 +1831,10 @@ TEST_F(Tst_Notes, rdur112_16th_note_not_triple_dotted)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: Two explicit REST elements at the same Encore tick (for voices 5
-// and 6, both routing to MuseScore voice=0) must not cause a cumTick drift.
-// Without fix: the second REST at tick=120 finds encTickFrac < cumTick and
-// places itself at cumTick=1/4 (tick=240 MuseScore) instead of being absorbed,
-// shifting all subsequent notes by one eighth note.
-// With fix: the second REST is recognized as a duplicate at the already-filled
-// position and does not advance cumTick again.
-// ===========================================================================
+// Two explicit RESTs at the same tick (voices routing to the same MuseScore voice) must not both advance
+// cumTick: the second is a duplicate at an already-filled position, or subsequent notes shift by an eighth.
 TEST_F(Tst_Notes, dual_explicit_rests_same_tick_no_cumtick_drift)
 {
-    // voices 5+6 both route to voice=0; each has REST at enc tick=120 (eighth).
-    // After the D3+F#3 chord (tick=0) and one rest (tick=120), notes at enc
-    // tick=480 must land at MuseScore tick=960 (not 720, the buggy result).
     MasterScore* score = readEncoreScore("notes_dual_rests_same_tick_routing.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1985,7 +1844,6 @@ TEST_F(Tst_Notes, dual_explicit_rests_same_tick_no_cumtick_drift)
     ASSERT_NE(m, nullptr);
     const Fraction measTick = m->tick();
 
-    // Collect chord ticks in voice=0 (track=0) of measure 0.
     std::vector<Fraction> chordTicks;
     int restCount = 0;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
@@ -2000,7 +1858,6 @@ TEST_F(Tst_Notes, dual_explicit_rests_same_tick_no_cumtick_drift)
         }
     }
 
-    // Expected: chord at 0, one rest, chord at half-measure (960 MuseScore ticks).
     ASSERT_EQ(static_cast<int>(chordTicks.size()), 2)
         << "Expected exactly two chords: D3+F#3 at start, B2+D3 at half-measure";
 
@@ -2017,7 +1874,6 @@ TEST_F(Tst_Notes, dual_explicit_rests_same_tick_no_cumtick_drift)
     EXPECT_GE(restCount, 1)
         << "At least one rest must appear for the enc tick=120 explicit rest";
 
-    // Verify pitches of the second chord.
     Segment* seg2 = m->findSegment(SegmentType::ChordRest, measTick + Fraction(960, 1920));
     if (seg2) {
         EngravingItem* el2 = seg2->element(0);
@@ -2034,18 +1890,10 @@ TEST_F(Tst_Notes, dual_explicit_rests_same_tick_no_cumtick_drift)
     delete score;
 }
 
-// ===========================================================================
-// FIX: v0xC2 notes whose dotControl has bit 0 coincidentally set (e.g. 0x39)
-// but whose realDuration == faceValue2ticks(fv) (exact plain match) must NOT
-// receive a spurious dot. Before the fix, computeDotCount's bit-0 fallback
-// fired on these notes, turning plain 16ths into dotted 16ths (90t each) and
-// overflowing the measure by 60t, which truncated the last 8th note.
-// ===========================================================================
+// A v0xC2 note whose dotControl bit 0 is coincidentally set but whose realDuration exactly matches the
+// plain face value must not be dotted; the bit-0 fallback must not fire and overflow the measure.
 TEST_F(Tst_Notes, v0c2_plain_sixteenth_with_spurious_dotctrl_bit0_no_dot)
 {
-    // notes_v0c2_plain_sixteenth_no_spurious_dot.enc: 4/4 measure.
-    // 2 x 16th (dotControl=0x39, bit 0 set) + 3 x 8th = 480t.
-    // Old bug: first two notes become dotted 16ths (90t each) -> 540t overflow.
     MasterScore* score = readEncoreScore("notes_v0c2_plain_sixteenth_no_spurious_dot.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -2152,7 +2000,6 @@ TEST_F(Tst_Notes, swing_timing)
 
 TEST_F(Tst_Notes, multiple_voices_loaded)
 {
-    // opeco_vochoj.enc has multiple voices per staff
     MasterScore* score = readEncoreScore("opeco_vochoj.enc");
     ASSERT_NE(score, nullptr);
     bool foundVoice1 = false;
@@ -2163,7 +2010,6 @@ TEST_F(Tst_Notes, multiple_voices_loaded)
         Measure* m = toMeasure(mb);
         for (Segment* s = m->first(SegmentType::ChordRest);
              s; s = s->next(SegmentType::ChordRest)) {
-            // Check voice 1 (track 1 = staff 0, voice 1)
             if (s->element(1) && s->element(1)->isChordRest()) {
                 foundVoice1 = true;
                 break;
@@ -2211,13 +2057,8 @@ TEST_F(Tst_Notes, rest_in_tuplet_does_not_double_count_placed_ticks)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: dotted rests were not recognised because dotControl (a bitmask flag)
-// was passed as a tick count to calcDots, always yielding 0 dots. The fix adds
-// a calcDotsSnap(realDuration) fallback matching the note handler. Without the
-// fix a dotted-quarter rest in 7/8 became a plain quarter rest, leaving a
-// gap eighth rest AFTER the notes instead of BEFORE them.
-// ===========================================================================
+// A dotted rest must be recognized via the realDuration snap fallback (matching the note handler); passing
+// the dotControl bitmask as a tick count yielded 0 dots, turning a dotted-quarter rest into a plain one.
 TEST_F(Tst_Notes, v0c4_dotted_rest_correct_duration)
 {
     MasterScore* score = readEncoreScore("rest_dotted_before_notes.enc");
@@ -2241,11 +2082,8 @@ TEST_F(Tst_Notes, v0c4_dotted_rest_correct_duration)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: Dotted note not recognised when MIDI timing drift makes rdur
-//          > 1 tick off from the theoretical dotted value. dotControl bit 0
-//          (Encore's "dotted" flag) now overrides when calcDotsSnap returns 0.
-// ===========================================================================
+// When MIDI drift puts rdur more than 1 tick off the dotted value, the dotControl bit-0 flag must still
+// mark the note dotted (overriding calcDotsSnap's 0).
 TEST_F(Tst_Notes, v0c4_dotted_note_dotctrl_bit0_drift)
 {
     MasterScore* score = readEncoreScore("notes_dotted_ctrl_bit0_drift.enc");
@@ -2417,11 +2255,8 @@ TEST_F(Tst_Notes, v0c2_multi_stream_drift_imports_cleanly)
     delete score;
 }
 
-// ===========================================================================
-// Regression guard: 2/2 with the CORRECT beatTicks=480 still imports all
-// notes correctly after wholeTicks was changed from beatTicks*timeSigDen
-// to the constant 960.
-// ===========================================================================
+// Regression guard: 2/2 with the correct beatTicks=480 still imports all notes after wholeTicks became the
+// constant 960 (was beatTicks*timeSigDen).
 TEST_F(Tst_Notes, v0c4_2_2_beatticks480_correct_encoding_still_works)
 {
     MasterScore* score = readEncoreScore("importer_2_2_beatticks480_correct.enc");
@@ -2451,10 +2286,8 @@ TEST_F(Tst_Notes, v0c4_2_2_beatticks480_correct_encoding_still_works)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: 2/2 with non-standard beatTicks=240 causes gap-snap to fire at
-// the wrong positions. Fix: use wholeTicks = 960 (Encore always uses 960 ticks per whole note).
-// ===========================================================================
+// With a non-standard beatTicks=240 in 2/2, gap-snap must use the constant 960 ticks/whole so it does not
+// fire at the wrong positions and drop notes.
 TEST_F(Tst_Notes, v0c4_2_2_beatticks240_gap_snap_no_false_fire)
 {
     MasterScore* score = readEncoreScore("importer_2_2_beatticks240_gap_snap.enc");
@@ -2501,7 +2334,6 @@ TEST_F(Tst_Notes, v0c4_2_2_beatticks240_gap_snap_no_false_fire)
     delete score;
 }
 
-// Lightweight test macro (re-declared here for use within the Tst_Notes fixture).
 #ifndef ENC_SANITY_TEST_NOTES
 #define ENC_SANITY_TEST_NOTES(testName, fileName) \
     TEST_F(Tst_Notes, testName) { \
