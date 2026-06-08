@@ -619,30 +619,42 @@ keeps every ORNAMENT up to and including `tick == durTicks` and
 only excludes ones strictly beyond it. The chord/note filter
 remains a strict `>= durTicks`.
 
-## Out-of-range voice (voice >= VOICES)
+## Multi-staff routing: staffWithin and out-of-range voice
 
-A naive `voice >= VOICES` filter would drop every element whose
-encoded voice nibble lies outside 0..3 (MuseScore's voice range).
-Two distinct cases need the value mapped down to voice 0 of the
-same staff instead of dropped:
+Encore encodes which staff of a multi-staff instrument an element belongs to using
+the high 2 bits of the element's staff byte (`staffWithin = staffByte >> 6`).
+See ENCORE_FORMAT.md §Multi-staff instruments for the format details.
 
-- **System-level ornaments.** Dynamics, mordents, tremolos and
-  technical markings are written with `voice = 4` plus the staff
-  byte's `0x40` bit set. They are system-wide marks that anchor
-  visually on voice 0.
-- **Bass-staff regular elements.** A separate Encore quirk
-  observed on at least one v0xC4 SATB choir score: the bass
-  staff's NOTE / REST / BEAM elements carry `voice = 4` on the
-  element header byte (no staff-byte high bit set), while the
-  matching LYRIC elements on the same staff use `voice = 0`. The
-  notes are real content; dropping them imports the bass staff
-  empty.
+The importer handles this in two paths:
 
-The importer therefore maps EVERY out-of-range voice value down
-to 0 for all element types and lets the multi-stream /
-chord-extension machinery handle conflicts with existing voice-0
-content on the same staff, the same way it does for normal
-voices.
+### Path A: staffWithin > 0 (high bits of staff byte)
+
+Piano, harp, and similar grand-staff instruments use this encoding. All notes
+share `systemStaffIdx = 0` in the element stream; `staffWithin` selects the
+destination staff. The importer:
+
+1. Reads `staffWithin = rawStaffByte >> 6` into `EncMeasureElem::staffWithin`.
+2. In the note-loop element dispatch, when `staffWithin > 0`:
+   - `staffIdx += staffWithin` — route to the correct staff.
+   - `voice -= staffWithin * (VOICES / 2)` — remap voice to 0-based within that staff.
+3. The TIE-start pre-pass applies the same routing so tie keys are consistent.
+
+For a 2-staff piano: voices 0/1 stay on staff 0, voices 2/3 (staffWithin=1) route
+to staff 1 as voices 0/1.
+
+### Path B: voice >= VOICES (voice nibble out of range)
+
+Two distinct cases require mapping voice >= 4 down to voice 0:
+
+- **System-level ornaments.** Dynamics and technical marks are written with
+  `voice = 4` plus `staffWithin = 1` (0x40 bit set). They anchor on voice 0
+  of the target staff.
+- **Bass-staff SATB elements.** Some v0xC4 choir scores carry bass-staff
+  NOTE/REST/BEAM with `voice = 4` and no valid staffWithin. Notes are real
+  content; dropping them leaves the bass staff empty.
+
+Path B fires first (before the staffWithin check), ensuring system ornaments
+are not accidentally routed to a second instrument staff.
 
 ## Chord symbol (harmony) import
 
