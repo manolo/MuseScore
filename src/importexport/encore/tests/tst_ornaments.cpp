@@ -582,6 +582,39 @@ TEST_F(Tst_Ornaments, trill_mordent_from_per_note_artic_byte)
 }
 
 // ===========================================================================
+// BUG FIX: articulationUp=0x08 (ornamentTurn) must create an Ornament element,
+// not a plain Articulation. MuseScore's layout code calls Ornament-specific
+// methods (computeNotesAboveAndBelow, cueNoteChord) on ornament-family SymIds;
+// if the object is a plain Articulation the virtual dispatch fails with SIGSEGV.
+// ===========================================================================
+TEST_F(Tst_Ornaments, ornament_turn_created_as_ornament_not_articulation)
+{
+    MasterScore* score = readEncoreScore("ornaments_ornament_turn.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Segment* seg = m->first(SegmentType::ChordRest);
+    ASSERT_NE(seg, nullptr);
+    EngravingItem* el = seg->element(0);
+    ASSERT_NE(el, nullptr);
+    ASSERT_TRUE(el->isChord());
+    const auto& arts = toChord(el)->articulations();
+    ASSERT_EQ(arts.size(), 1u) << "One ornament expected on the first note";
+
+    Articulation* art = arts.front();
+    EXPECT_EQ(art->symId(), SymId::ornamentTurn)
+        << "SymId must be ornamentTurn";
+    EXPECT_TRUE(art->isOrnament())
+        << "ornamentTurn must be stored as Ornament, not plain Articulation; "
+        "a plain Articulation with an ornament SymId causes SIGSEGV in layout";
+
+    delete score;
+}
+
+// ===========================================================================
 // REGRESSION: DOUBLE barline must be applied to every staff, not only track 0.
 // ===========================================================================
 TEST_F(Tst_Ornaments, double_barline_lands_on_every_staff)

@@ -580,7 +580,8 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         return s == SymId::ornamentTrill
                || s == SymId::ornamentShortTrill
                || s == SymId::ornamentTremblement
-               || s == SymId::ornamentMordent;
+               || s == SymId::ornamentMordent
+               || s == SymId::ornamentTurn;
     };
     auto isFermataSymId = [](SymId s) {
         return s == SymId::fermataAbove
