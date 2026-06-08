@@ -32,8 +32,10 @@ namespace mu::iex::encore {
 
 bool EncMeasureElem::read(QDataStream& ds)
 {
-    ds >> size >> staffIdx;
-    staffIdx &= 0x3F;
+    quint8 rawStaff;
+    ds >> size >> rawStaff;
+    staffIdx    = rawStaff & 0x3F;
+    staffWithin = rawStaff >> 6;
     return true;
 }
 
