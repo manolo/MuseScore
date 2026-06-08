@@ -296,12 +296,25 @@ void buildNoteLoop(BuildCtx& ctx)
             return false;         // stable for equal keys
         });
 
-        // Collect TIE-START positions; exclude arc-only markers (would falsely mark notes as tie-senders).
+        // Collect TIE-START positions using routed (staffIdx, voice) so that
+        // ties on bit6-encoded second-staff notes are found correctly.
         for (const EncMeasureElem* e : sortedElems) {
             if (static_cast<EncElemType>(e->type) == EncElemType::TIE) {
                 const EncTie* et = static_cast<const EncTie*>(e);
                 if (et->isTieStart) {
-                    mc.tieStartSet.insert({ (int)e->staffIdx, (int)e->voice, (int)e->tick });
+                    int si = static_cast<int>(e->staffIdx);
+                    int v  = static_cast<int>(e->voice);
+                    if (v >= static_cast<int>(VOICES)) {
+                        v = 0;
+                    } else if (e->staffWithin > 0) {
+                        const int sw = static_cast<int>(e->staffWithin);
+                        const int vBase = sw * (static_cast<int>(VOICES) / 2);
+                        if (v >= vBase && si + sw < ctx.totalStaves) {
+                            si += sw;
+                            v  -= vBase;
+                        }
+                    }
+                    mc.tieStartSet.insert({ si, v, (int)e->tick });
                 }
             }
         }
@@ -356,8 +369,10 @@ void buildNoteLoop(BuildCtx& ctx)
             if (staffIdx >= ctx.totalStaves) {
                 continue;
             }
-            // voice>=VOICES: grand-staff second staff slot. Route to staffIdx+1 if LINE confirms multi-staff.
-            // See ENCORE_FORMAT.md §Known quirks (system-level ornaments / voice=4).
+            // Multi-staff routing: two encodings exist.
+            // (A) voice >= VOICES: out-of-band voice slot (voice=4+); route to staffIdx+1, voice=0.
+            // (B) staffWithin > 0 (high 2 bits of raw staff byte): route to staffIdx+staffWithin,
+            //     remap voice down by staffWithin*(VOICES/2) so each staff uses voices 0..VOICES/2-1.
             if (voice >= static_cast<int>(VOICES)) {
                 if (staffIdx < nLineStaves) {
                     const int instrIdx = lineStaffInstrIdx[staffIdx];
@@ -370,6 +385,19 @@ void buildNoteLoop(BuildCtx& ctx)
                     }
                 }
                 voice = 0;
+            } else if (e->staffWithin > 0) {
+                const int sw    = static_cast<int>(e->staffWithin);
+                const int vBase = sw * (static_cast<int>(VOICES) / 2);
+                if (voice >= vBase && staffIdx < nLineStaves) {
+                    const int instrIdx = lineStaffInstrIdx[staffIdx];
+                    if (instrIdx >= 0
+                        && instrIdx < static_cast<int>(enc.instruments.size())
+                        && enc.instruments[instrIdx].nstaves > sw
+                        && staffIdx + sw < ctx.totalStaves) {
+                        staffIdx += sw;
+                        voice    -= vBase;
+                    }
+                }
             }
 
             auto encVoiceKey = std::make_pair(staffIdx, voice);

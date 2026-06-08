@@ -1983,6 +1983,241 @@ TEST_F(Tst_Notes, partial_triplet_unreduced_cumtick_no_crash)
 // FIX: Transposing instruments (Key≠0) must have correct written-pitch TPC.
 // Root cause: Score::spell() used the WRITTEN key to penalize note spellings,
 // choosing Cb over B for pitch=71 in F major (both non-diatonic, equal penalty).
+// ===========================================================================
+// grandstaff_staffwithin_routes_voices_to_correct_staff
+//
+// Piano/grand-staff files encode multi-staff notes via the high 2 bits of the
+// raw staff byte (staffWithin = rawStaff >> 6). Voices 2,3 with staffWithin=1
+// must land on staff 2; voices 0,1 with staffWithin=0 stay on staff 1.
+// Fixture: 1 Piano (MIDI=0), 2 staves, 1 measure with 4 quarter notes:
+//   treble C5 (MIDI=72, voice=0, bit6=0) and E5 (MIDI=76, voice=1, bit6=0)
+//   bass   C3 (MIDI=48, voice=2, bit6=1) and E3 (MIDI=52, voice=3, bit6=1)
+// ===========================================================================
+TEST_F(Tst_Notes, grandstaff_staffwithin_routes_voices_to_correct_staff)
+{
+    MasterScore* score = readEncoreScore("notes_grandstaff_bit6_second_staff.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    ASSERT_EQ(score->nstaves(), 2) << "Piano grand staff must have 2 staves";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    auto notesOnStaff = [&](int staffIdx) {
+        std::vector<int> pitches;
+        for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+            for (int v = 0; v < static_cast<int>(VOICES); ++v) {
+                EngravingItem* e = seg->element(static_cast<track_idx_t>(staffIdx * VOICES + v));
+                if (e && e->isChord()) {
+                    for (Note* n : toChord(e)->notes()) {
+                        pitches.push_back(n->pitch());
+                    }
+                }
+            }
+        }
+        return pitches;
+    };
+
+    auto s1 = notesOnStaff(0);
+    auto s2 = notesOnStaff(1);
+
+    EXPECT_EQ(s1.size(), 2u) << "Treble staff must have 2 notes";
+    EXPECT_EQ(s2.size(), 2u) << "Bass staff must have 2 notes (bit6 routing broken)";
+
+    for (int p : s1) {
+        EXPECT_GE(p, 60) << "Treble staff note must be middle C or above";
+    }
+    for (int p : s2) {
+        EXPECT_LT(p, 60) << "Bass staff note must be below middle C";
+    }
+
+    delete score;
+}
+
+// ===========================================================================
+// grandstaff_staffwithin_rest_on_second_staff
+//
+// A REST element with staffWithin=1 (bit 6 set) must land on staff 2.
+// Fixture: treble C5 note on staff 1 + quarter rest on staff 2 (voice=2, staffWithin=1).
+// ===========================================================================
+TEST_F(Tst_Notes, grandstaff_staffwithin_rest_on_second_staff)
+{
+    MasterScore* score = readEncoreScore("notes_grandstaff_staffwithin_rest_on_second_staff.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+    ASSERT_EQ(score->nstaves(), 2);
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    // Staff 2 (idx=1) must have a rest, not a note
+    bool hasRestOnStaff2 = false;
+    for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        for (int v = 0; v < static_cast<int>(VOICES); ++v) {
+            EngravingItem* e = seg->element(static_cast<track_idx_t>(1 * VOICES + v));
+            if (e && e->isRest()) {
+                hasRestOnStaff2 = true;
+            }
+        }
+    }
+    EXPECT_TRUE(hasRestOnStaff2) << "Rest with staffWithin=1 must land on staff 2";
+
+    // Staff 1 (idx=0) must have the C5 note (pitch=72), not a rest
+    bool hasNoteOnStaff1 = false;
+    for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        EngravingItem* e = seg->element(0);
+        if (e && e->isChord()) {
+            hasNoteOnStaff1 = true;
+        }
+    }
+    EXPECT_TRUE(hasNoteOnStaff1) << "Treble note (staffWithin=0) must stay on staff 1";
+
+    delete score;
+}
+
+// ===========================================================================
+// grandstaff_staffwithin_tie_on_second_staff
+//
+// A TIE element with staffWithin=1 must tie notes on staff 2, not staff 1.
+// Fixture: 2-measure score; measure 1 has bass E3 (voice=2, staffWithin=1)
+// with a TIE; measure 2 has the continuation. The tie must be resolved on
+// staff 2 with the note, not leave a dangling pending tie on staff 1.
+// ===========================================================================
+TEST_F(Tst_Notes, grandstaff_staffwithin_tie_on_second_staff)
+{
+    // Single 4/4 measure: treble C5 half+half, bass E3 half tied to E3 half.
+    // Both bass notes use voice=2, staffWithin=1 (raw staff byte = 0x40).
+    // The TIE element also carries staffWithin=1; the tieStartSet routing must
+    // key the tie by the ROUTED (staffIdx=1, voice=0) rather than the raw values
+    // to correctly link the two E3 chords on staff 2.
+    MasterScore* score = readEncoreScore("notes_grandstaff_staffwithin_tie_on_second_staff.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+    ASSERT_EQ(score->nstaves(), 2);
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    // Find the first bass E3 on staff 2 (pitch=52)
+    Note* tieStart = nullptr;
+    for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        for (int v = 0; v < static_cast<int>(VOICES); ++v) {
+            EngravingItem* e = seg->element(static_cast<track_idx_t>(1 * VOICES + v));
+            if (e && e->isChord()) {
+                for (Note* n : toChord(e)->notes()) {
+                    if (n->pitch() == 52 && !tieStart) {
+                        tieStart = n;
+                    }
+                }
+            }
+        }
+    }
+    ASSERT_NE(tieStart, nullptr) << "Bass E3 (pitch=52) must be on staff 2";
+    EXPECT_NE(tieStart->tieFor(), nullptr)
+        << "First E3 on staff 2 must carry tie-for (staffWithin tie routing broken)";
+
+    if (tieStart->tieFor()) {
+        Note* tieEnd = tieStart->tieFor()->endNote();
+        EXPECT_NE(tieEnd, nullptr) << "Tie must resolve to second E3 on staff 2";
+        if (tieEnd) {
+            EXPECT_EQ(tieEnd->pitch(), 52) << "Tie end note must also be E3 (pitch=52)";
+        }
+    }
+
+    delete score;
+}
+
+// ===========================================================================
+// grandstaff_staffwithin_four_voices
+//
+// All four Encore voices (0,1 on treble; 2,3 on bass) correctly distributed:
+// voice 0 → staff 1 MS-voice 0, voice 1 → staff 1 MS-voice 1,
+// voice 2 → staff 2 MS-voice 0, voice 3 → staff 2 MS-voice 1.
+// Fixture: C5/E5 on treble, G3/B3 on bass, all at tick=0.
+// ===========================================================================
+TEST_F(Tst_Notes, grandstaff_staffwithin_four_voices)
+{
+    MasterScore* score = readEncoreScore("notes_grandstaff_staffwithin_four_voices.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+    ASSERT_EQ(score->nstaves(), 2);
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    auto pitchesOnStaff = [&](int staffIdx) {
+        std::vector<int> pitches;
+        for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+            for (int v = 0; v < static_cast<int>(VOICES); ++v) {
+                EngravingItem* e = seg->element(static_cast<track_idx_t>(staffIdx * VOICES + v));
+                if (e && e->isChord()) {
+                    for (Note* n : toChord(e)->notes()) {
+                        pitches.push_back(n->pitch());
+                    }
+                }
+            }
+        }
+        return pitches;
+    };
+
+    auto s1 = pitchesOnStaff(0);
+    auto s2 = pitchesOnStaff(1);
+
+    EXPECT_EQ(s1.size(), 2u) << "Treble must have 2 notes (C5, E5)";
+    EXPECT_EQ(s2.size(), 2u) << "Bass must have 2 notes (G3, B3)";
+
+    for (int p : s1) {
+        EXPECT_GE(p, 72) << "Treble note must be >= 72 (C5)";
+    }
+    for (int p : s2) {
+        EXPECT_LT(p, 60) << "Bass note must be < 60 (middle C)";
+    }
+
+    delete score;
+}
+
+// ===========================================================================
+// grandstaff_staffwithin_sequential
+//
+// Sequential notes on both staves use independent cumTick accumulators.
+// Each staff advances its own position; notes must not bleed across staves.
+// Fixture: treble C5 at tick=0, E5 at tick=240; bass C3 at tick=0, E3 at 240.
+// Each staff must have exactly 2 notes placed at the correct ticks.
+// ===========================================================================
+TEST_F(Tst_Notes, grandstaff_staffwithin_sequential)
+{
+    MasterScore* score = readEncoreScore("notes_grandstaff_staffwithin_sequential.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+    ASSERT_EQ(score->nstaves(), 2);
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    auto countNotesOnStaff = [&](int staffIdx) {
+        int count = 0;
+        for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+            for (int v = 0; v < static_cast<int>(VOICES); ++v) {
+                EngravingItem* e = seg->element(static_cast<track_idx_t>(staffIdx * VOICES + v));
+                if (e && e->isChord()) {
+                    count += static_cast<int>(toChord(e)->notes().size());
+                }
+            }
+        }
+        return count;
+    };
+
+    EXPECT_EQ(countNotesOnStaff(0), 2) << "Treble must have 2 notes";
+    EXPECT_EQ(countNotesOnStaff(1), 2) << "Bass must have 2 notes";
+
+    delete score;
+}
+
+// ===========================================================================
+// transposing_instrument_written_tpc_not_double_flat
+//
 // Then tpc2 = transposeTpc(Cb=7, -6) = Gbb=1 (displayed as Gbb instead of F).
 // Fix: computeWindow uses the CONCERT key for transposing instrument staves.
 // Fixture: MIDI=69 (oboe), Key=+6. Written F4 (semiTonePitch=65) → concert B4

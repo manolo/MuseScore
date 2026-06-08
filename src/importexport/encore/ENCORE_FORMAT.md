@@ -202,7 +202,21 @@ An unrelated layout field at +0x18 always holds 200 in v0xC4 files — do not co
 ### Element body
 
 Each element: 2-byte tick + 1 type/voice byte (high nibble = type, low nibble = voice). `0xFFFF` tick terminates.
-After the 3-byte header every element starts with: 1-byte size + 1-byte staffIdx (mask `0x3F`).
+After the 3-byte header every element starts with: 1-byte size + 1-byte **staff byte**.
+
+**Staff byte encoding** (same format as `instrStaffIdx` in the LINE block):
+
+| Bits  | Mask   | Meaning                                                                 |
+|-------|--------|-------------------------------------------------------------------------|
+| 0-5   | `0x3F` | System staff index: which row in the current LINE staffData array.      |
+| 6-7   | `0xC0` | Staff-within-instrument (`staffWithin`): which staff of the instrument. |
+
+`staffWithin = staffByte >> 6`. Values: 0 = first staff, 1 = second (bass), 2 or 3 = further staves.
+
+For a piano grand staff, notes on the treble staff use `staffWithin = 0`; notes on the bass staff use
+`staffWithin = 1`. All notes in the MEAS stream share `systemStaffIdx = 0` and the `staffWithin` field
+distinguishes the destination. The voice field (low nibble of the type/voice byte) is distributed across
+staves: voices 0-1 belong to `staffWithin=0`, voices 2-3 to `staffWithin=1`.
 
 | Type   | Name        |
 |--------|-------------|
@@ -481,10 +495,30 @@ Only applies when `fv > maxFvInQueue`.
 (prevents spurious rests before the grace group) and also for subsequent notes whose apparent gap equals
 the stolen grace ticks (`stolenTicks` accumulated per trackKey).
 
+### Multi-staff instruments: staffWithin field
+
+For instruments with more than one staff (piano, harp, organ), all notes from all staves share
+the same MEAS element stream with `systemStaffIdx = 0`. The destination staff is encoded in bits
+6-7 of the staff byte (`staffWithin = staffByte >> 6`):
+
+- `staffWithin = 0`: note belongs to the first (treble) staff.
+- `staffWithin = 1`: note belongs to the second (bass) staff.
+- `staffWithin = 2` or `3`: third or fourth staff (uncommon).
+
+Within each destination staff, voices are re-indexed from 0. For a 2-staff instrument, Encore
+stores voices 0-1 for the first staff and voices 2-3 for the second staff in the stream; the
+importer remaps voice by subtracting `staffWithin * 2` after routing.
+
 ### System-level ornaments (voice = 4)
 
 System-wide ornaments use `voice = 4` AND set the high bit of the staff byte (`0x40`).
-Mask `& 0x3F` to get the real staff index.
+This sets `staffWithin = 1` (second staff) on the raw byte. Readers that support `staffWithin`
+routing must check `voice >= 4` first to distinguish system ornaments from regular second-staff
+notes; do not route voice-4 ornaments to the second instrument staff.
+
+Some files store NOTE/REST/BEAM with `voice = 4` WITHOUT a valid staffWithin relationship
+(seen in v0xC4 SATB scores where voice 4 is an out-of-band grand-staff slot).
+The correct interpretation depends on the LINE block's multi-staff configuration.
 
 ### Out-of-range voice on regular elements
 
