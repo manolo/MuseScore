@@ -1266,6 +1266,60 @@ TEST_F(Tst_Notes, capped_tuplet_note_removed_from_tuplet)
 }
 
 // ===========================================================================
+// BUG FIX: Mixed-duration tuplet with boundary-omitted note gets fill rest
+// ===========================================================================
+
+TEST_F(Tst_Notes, mixed_duration_tuplet_boundary_fill)
+{
+    // notes_mixed_duration_tuplet_boundary_fill.enc: 4/4 measure.
+    // {half} + {qtr/3:2, qtr/3:2, 8th/3:2, [8th/3:2 omitted at tick=960]}.
+    //
+    // Encore omits the final note of a tuplet group when it falls at durTicks
+    // (measure boundary). The group needs face sum=3Q=3/4 but only 3 notes are
+    // present (face sum=5/8). closeTupletWithFill must detect faceTicks < fullFaceSum
+    // and add an invisible 8th fill rest so the measure sums to 4/4.
+    //
+    // Without fix: elements.size()(3) < actualN(3) is false; no fill rest added;
+    //   cumTick stays at 11/12; sanityCheck fails.
+    // With fix: faceShort path adds invisible 8th rest; cumTick reaches 12/12=1.
+    MasterScore* score = readEncoreScore("notes_mixed_duration_tuplet_boundary_fill.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Mixed-duration tuplet with boundary-omitted note should pass sanityCheck: "
+                     << ret.text();
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->timesig(), Fraction(4, 4));
+
+    std::vector<ChordRest*> crs;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChordRest()) {
+            crs.push_back(toChordRest(e));
+        }
+    }
+    // half + 3 tuplet notes + 1 invisible fill rest = 5 elements
+    ASSERT_GE(crs.size(), 5u) << "Expected half + 3 tuplet notes + fill rest";
+
+    EXPECT_EQ(crs[0]->tuplet(), nullptr)          << "Half not in tuplet";
+    EXPECT_EQ(crs[0]->durationType().type(), DurationType::V_HALF);
+
+    ASSERT_NE(crs[1]->tuplet(), nullptr)           << "qtr 1 in tuplet";
+    ASSERT_NE(crs[2]->tuplet(), nullptr)           << "qtr 2 in tuplet";
+    ASSERT_NE(crs[3]->tuplet(), nullptr)           << "8th note in tuplet";
+    EXPECT_EQ(crs[1]->tuplet(), crs[2]->tuplet())  << "qtrs share bracket";
+    EXPECT_EQ(crs[2]->tuplet(), crs[3]->tuplet())  << "8th shares bracket with qtrs";
+
+    ASSERT_NE(crs[4]->tuplet(), nullptr)           << "Fill rest in tuplet";
+    EXPECT_EQ(crs[3]->tuplet(), crs[4]->tuplet())  << "Fill rest shares bracket";
+    EXPECT_TRUE(crs[4]->isRest())                  << "Fill is a rest";
+    EXPECT_FALSE(crs[4]->visible())                << "Fill rest is invisible";
+    EXPECT_EQ(crs[4]->durationType().type(), DurationType::V_EIGHTH) << "Fill rest is 8th";
+
+    delete score;
+}
+
+// ===========================================================================
 // BUG FIX: Partial measure-end triplet placed in tuplet, not overflowed
 // ===========================================================================
 

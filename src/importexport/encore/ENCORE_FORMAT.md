@@ -1024,6 +1024,18 @@ Encore truncates playback durations at the barline. The importer's MIDI-artifact
 **Fix:** notes in `validTupletGroupMember` bypass the rdur-based artifact filter. Their
 group membership already guarantees they are legitimate notation notes.
 
+### Mixed-duration tuplet group truncated at measure boundary
+
+When a tuplet group contains mixed note values (e.g. `{Q, Q, 8th, 8th}` in a 3:2 bracket
+summing to face value 3Q = `fullFaceSum`), Encore omits the final note(s) when their MIDI
+start tick equals `durTicks` (measure boundary). The written file therefore has an incomplete
+group: face-value sum < `fullFaceSum`, even though element count may already equal `actualN`.
+
+The importer detects this via `faceTicks < fullFaceSum` in `closeTupletWithFill` and adds an
+invisible fill rest with the remaining face value, completing the group so `checkMeasure` sees
+a full measure. The fill rest's duration is derived from `fullFaceSum − faceTicks` (e.g. 1/8
+for the case above), and its advance = `remainingFace × normalN/actualN` (e.g. 1/12).
+
 ### Tuplet advances inside active groups
 
 Gap-snap (advancing cumTick to the note's face-value grid position when a gap is detected)
