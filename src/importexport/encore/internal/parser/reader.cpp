@@ -26,8 +26,7 @@
 
 namespace mu::iex::encore {
 
-// Factory — maps magic byte (chuMagio from EncHeader) to the right reader.
-// To add a new format: create encoreformat-vXXXX.cpp/h and add a case here.
+// Maps magic byte to format reader; add new format cases here.
 std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 magic)
 {
     switch (magic) {

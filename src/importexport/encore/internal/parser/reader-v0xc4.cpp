@@ -28,7 +28,6 @@
 #include "encoding.h"
 
 namespace mu::iex::encore {
-// Full class definition lives here, not in the header.
 struct EncFormatReader_V0xC4 final : EncFormatReader
 {
     explicit EncFormatReader_V0xC4(bool hasMetaTables)
@@ -37,9 +36,10 @@ struct EncFormatReader_V0xC4 final : EncFormatReader
     quint32 elemBlockOffset() const override { return 0x36; }
     bool probeInstrumentEncoding() const override { return true; }
 
-    // v0xC2 (m_hasMetaTables=false) uses implied tuplets and G1 low tie sender.
     bool supportsImpliedTuplets() const override { return !m_hasMetaTables; }
     bool usesG1LowTieSender() const override { return !m_hasMetaTables; }
+    const char* formatName() const override { return m_hasMetaTables ? "v0xC4" : "v0xC2"; }
+    bool alMezuroIsReliable() const override { return m_hasMetaTables; }
 
     bool postProcessElement(EncMeasureElem* elem, QDataStream& ds, qint64 rawElemStart) const override
     {
@@ -49,14 +49,12 @@ struct EncFormatReader_V0xC4 final : EncFormatReader
         if (!en) {
             return false;
         }
-        // v0xC2 files (size=22) store MIDI pitch in the tuplet slot (byte +13),
-        // not in semiTonePitch (byte +15). Same swap as EncFormatReader_V0xA6.
+        // Size=22: pitch in tuplet slot (v0xC2 layout). See ENCORE_FORMAT.md §Note element.
         if (en->size == 22) {
             en->semiTonePitch = en->tuplet;
             en->tuplet = 0;
         }
-        // articulationUp/Down lie beyond the element boundary for size<27;
-        // they were read from adjacent-element bytes and must be cleared.
+        // Clear artic bytes read beyond boundary for size<27.
         if (en->size < 27) {
             en->articulationUp   = 0;
             en->articulationDown = 0;
@@ -104,13 +102,7 @@ void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& d
 
 void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds)
 {
-    // MIDI offsets: compact (offset=0): base=390 step=276; small TK (1-250): content+60; TK: base=2278 step=2158.
-    // Guard: compact files with a short header may have a LINE block before offset 390; skip MIDI in that case.
-    //
-    // Some v0xC4 files have no TK blocks at all (instruments populated by fallback, contentFilePos=-1).
-    // These files come in two layouts distinguished by where their first block (PAGE/LINE/MEAS) sits:
-    //   - firstBlock <= 2278: compact layout → MIDI table at base=390
-    //   - firstBlock >  2278: large-TK layout → MIDI table at base=2278
+    // MIDI table offsets vary by layout. See ENCORE_FORMAT.md §Instrument block.
     if (instruments.empty()) {
         return;
     }
@@ -219,7 +211,6 @@ void readKeyTranspositions(std::vector<EncInstrument>& instruments, QDataStream&
     }
     const bool noTkBlocks = (instruments[0].contentFilePos < 0);
     if (noTkBlocks) {
-        // Same layout detection as readMidiPrograms: scan for first block.
         qint64 firstBlockOff = ds.device()->size();
         if (ds.device()->seek(0)) {
             static constexpr int PROBE = 4096;
@@ -254,7 +245,6 @@ void readKeyTranspositions(std::vector<EncInstrument>& instruments, QDataStream&
                 }
             }
         } else {
-            // Compact layout: Key at CMP_BASE - 23 = 367.
             if (instruments.size() != 1) {
                 return;
             }
@@ -278,7 +268,6 @@ void readKeyTranspositions(std::vector<EncInstrument>& instruments, QDataStream&
     const bool tkBased = (instruments[0].offset > 250);
 
     if (compact) {
-        // Compact single-instrument only; Key at MIDI_BASE - 23. See ENCORE_FORMAT.md §Instrument block.
         if (instruments.size() != 1) {
             return;
         }

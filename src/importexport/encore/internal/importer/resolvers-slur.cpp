@@ -59,24 +59,25 @@ void resolveSlurs(BuildCtx& ctx)
     // Resolve slur intents: .enc has no SLURSTOP; endpoint from alMezuro.
     // Anchor on last ChordRest in the target measure on this track.
     for (const PendingSlur& ps : ctx.pendingSlurs) {
-        // v0xC4: alMezuro is a reliable measure-forward count. v0xC2: legacy byte with no valid measure semantics; clamp to start measure.
+        // When alMezuro is not a reliable measure count (e.g. v0xC2), clamp to
+        // the start measure so the same-measure xoffset heuristic handles it.
         int clampedEndMeasIdx = ps.endMeasIdx;
+        if (!ctx.alMezuroIsReliable && ps.startMeasIdx >= 0
+            && ps.startMeasIdx < static_cast<int>(ctx.measuresByIdx.size())) {
+            clampedEndMeasIdx = ps.startMeasIdx;
+        }
         if (clampedEndMeasIdx < 0
             || clampedEndMeasIdx >= static_cast<int>(ctx.measuresByIdx.size())) {
-            if (ctx.impliedTuplets && ps.startMeasIdx >= 0
-                && ps.startMeasIdx < static_cast<int>(ctx.measuresByIdx.size())) {
-                clampedEndMeasIdx = ps.startMeasIdx;
-            } else {
-                continue;
-            }
+            continue;
         }
         Measure* endMeas = ctx.measuresByIdx[clampedEndMeasIdx];
         Fraction endTick;
         bool resolved = false;
 
-        // Same-measure heuristic: find the note closest to first_note_xoff + pixelSpan. Applied when alMezuro==0 or v0xC2 file.
-        // Cross-measure slurs in v0xC4 (alMezuro > 0) skip this since xoffsets reset at barlines.
-        const bool tryHeuristic = (ctx.impliedTuplets || ps.alMezuro == 0)
+        // Same-measure heuristic: find the note closest to first_note_xoff + pixelSpan.
+        // Applied when alMezuro is unreliable or zero; skipped for cross-measure v0xC4
+        // slurs (alMezuro > 0) because xoffsets reset at barlines.
+        const bool tryHeuristic = (!ctx.alMezuroIsReliable || ps.alMezuro == 0)
                                   && ps.startMeasIdx >= 0
                                   && ps.startMeasIdx < static_cast<int>(enc.measures.size());
         if (tryHeuristic) {

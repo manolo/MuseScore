@@ -45,21 +45,12 @@ void resolveOrnaments(BuildCtx& ctx)
 
     // Resolve arpeggio intents: ORN written before chord in MEAS, so attach now.
     for (const PendingArpeggio& pa : ctx.pendingArpeggios) {
-        Measure* m = score->tick2measure(pa.tick);
-        if (!m) {
+        Chord* c = findChordAt(score, pa.tick, pa.track);
+        if (!c) {
             continue;
         }
-        Segment* seg = m->findSegment(SegmentType::ChordRest, pa.tick);
-        if (!seg) {
-            continue;
-        }
-        EngravingItem* el = seg->element(pa.track);
-        if (!el || !el->isChord()) {
-            continue;
-        }
-        Chord* c = toChord(el);
         if (c->arpeggio()) {
-            continue;   // chord already carries an arpeggio
+            continue;
         }
         Arpeggio* arp = Factory::createArpeggio(c);
         arp->setTrack(pa.track);
@@ -67,8 +58,8 @@ void resolveOrnaments(BuildCtx& ctx)
         c->add(arp);
     }
 
-    // Resolve ORN-based single-chord tremolos (0xAF / 0xEF). Encore may place the ORN at durTicks; fall back to backwards search if no chord at the exact tick.
-    // Tremolo ORNs are in voice 0 regardless of the actual note voice; widen to all voices when needed.
+    // Single-chord tremolos (0xAF/0xEF). See ENCORE_FORMAT.md §Ornament element.
+    // Encore may place ORN at durTicks or in voice 0 even when the note is in another voice.
     for (const PendingOrnTremolo& pt : ctx.pendingOrnTremolos) {
         const track_idx_t trTrack = static_cast<track_idx_t>(pt.staffIdx * VOICES + pt.msVoice);
         // Try exact tick match first.
@@ -81,7 +72,6 @@ void resolveOrnaments(BuildCtx& ctx)
         }
         Segment* seg = m->findSegment(SegmentType::ChordRest, pt.tick);
         if (!seg || !seg->element(trTrack) || !seg->element(trTrack)->isChord()) {
-            // Encore may place tremolo ORN at durTicks; tick2measure lands in the next measure. Re-anchor to the source measure.
             Measure* srcMeas = score->tick2measure(pt.measTick);
             if (!srcMeas) {
                 srcMeas = m;
@@ -90,11 +80,10 @@ void resolveOrnaments(BuildCtx& ctx)
             for (Segment* s = srcMeas->first(SegmentType::ChordRest); s;
                  s = s->next(SegmentType::ChordRest)) {
                 if (s->element(trTrack) && s->element(trTrack)->isChord()) {
-                    seg = s;   // keep updating: we want the LAST chord
+                    seg = s;
                 }
             }
         }
-        // ORN voice 0 is the norm even when notes live in a different voice; widen to all staff voices if no match.
         track_idx_t resolvedTrack = trTrack;
         if (!seg || !seg->element(resolvedTrack) || !seg->element(resolvedTrack)->isChord()) {
             Measure* srcMeas = score->tick2measure(pt.measTick);
@@ -132,7 +121,7 @@ void resolveOrnaments(BuildCtx& ctx)
             }
         }
         if (c->tremoloSingleChord()) {
-            continue;   // already has a tremolo from the articulation byte
+            continue;
         }
         TremoloSingleChord* trem = Factory::createTremoloSingleChord(c);
         trem->setTremoloType(pt.tremType);
@@ -153,19 +142,10 @@ void resolveOrnaments(BuildCtx& ctx)
 
     // Add staccato unless already present (artic byte 0x1D produces the same glyph).
     for (const PendingStaccato& ps : ctx.pendingStaccatos) {
-        Measure* m = score->tick2measure(ps.tick);
-        if (!m) {
+        Chord* c = findChordAt(score, ps.tick, ps.track);
+        if (!c) {
             continue;
         }
-        Segment* seg = m->findSegment(SegmentType::ChordRest, ps.tick);
-        if (!seg) {
-            continue;
-        }
-        EngravingItem* el = seg->element(ps.track);
-        if (!el || !el->isChord()) {
-            continue;
-        }
-        Chord* c = toChord(el);
         bool alreadyHas = false;
         for (Articulation* a : c->articulations()) {
             if (a->symId() == SymId::articStaccatoAbove
@@ -187,24 +167,13 @@ void resolveOrnaments(BuildCtx& ctx)
     // When Encore marks a trill span (TRILL_END in the same measure, or alMezuro>0),
     // create a Trill spanner (tr + wavy line). Otherwise create only the Ornament glyph.
     for (const PendingTrill& pt : ctx.pendingTrills) {
-        Measure* m = score->tick2measure(pt.tick);
-        if (!m) {
-            continue;
-        }
-        Segment* seg = m->findSegment(SegmentType::ChordRest, pt.tick);
-        if (!seg) {
-            continue;
-        }
-        EngravingItem* el = seg->element(pt.track);
-        if (!el || !el->isChord()) {
+        Chord* trillChord = findChordAt(score, pt.tick, pt.track);
+        if (!trillChord) {
             continue;
         }
 
-        // TRILL_ALT (0x37): secondary trill mark within a span → always Ornament glyph.
-        // TRILL_START (0x36): create Trill spanner when the span endpoint is known:
-        //   1. TRILL_END in the same measure (first end tick > pt.tick on this track).
-        //   2. alMezuro > 0: span to the end of the target measure.
-        //   3. Neither: fall back to Ornament glyph.
+        // TRILL_ALT → Ornament glyph; TRILL_START → Trill spanner when endpoint known, else Ornament.
+        // Endpoints: TRILL_END on same track, or alMezuro target measure. See ENCORE_FORMAT.md §Ornament element.
         Fraction endTick;
         bool hasSpan = !pt.isAlt;
 
@@ -245,12 +214,10 @@ void resolveOrnaments(BuildCtx& ctx)
             trill->setTrillType(TrillType::TRILL_LINE);
             score->addElement(trill);
         } else {
-            // No span info — keep the original Ornament glyph behaviour.
-            Chord* c = toChord(el);
-            Ornament* orn = Factory::createOrnament(c);
+            Ornament* orn = Factory::createOrnament(trillChord);
             orn->setTrack(pt.track);
             orn->setSymId(SymId::ornamentTrill);
-            c->add(orn);
+            trillChord->add(orn);
         }
     }
     ctx.pendingTrillEnds.clear();

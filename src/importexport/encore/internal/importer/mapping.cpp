@@ -72,10 +72,6 @@ int encKeyToFifths(quint8 key)
     return 0;
 }
 
-// ---------------------------------------------------------------------------
-// MuseScore DOM construction
-// ---------------------------------------------------------------------------
-
 // Translate Encore page tokens (#P, #D, #T) to MuseScore macros ($P, $D, $m).
 static String translateHeaderFooterTokens(const String& s)
 {
@@ -122,8 +118,6 @@ void addTitleFrame(MasterScore* score, const EncTitle& titleBlock)
     const bool hasAuthor      = !joinedAuthor.isEmpty();
     const bool hasCopyright   = !joinedCopyright.isEmpty();
 
-    // Populate Score Properties metadata (File > Score Properties dialog).
-    // These are independent of the VBox visual frame.
     if (!effectiveTitle.isEmpty()) {
         score->setMetaTag(u"workTitle", String(effectiveTitle));
     }
@@ -144,7 +138,6 @@ void addTitleFrame(MasterScore* score, const EncTitle& titleBlock)
         return;
     }
 
-    // Build the VBox title frame for visual display on the first page.
     VBox* vbox = Factory::createTitleVBox(score->dummy()->system());
     vbox->setNext(score->first());
     score->measures()->add(vbox);
