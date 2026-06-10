@@ -156,8 +156,10 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         ps.startMeasIdx = measIdx;
         ps.endMeasIdx = endIdx;
         ps.alMezuro = static_cast<int>(eo->alMezuro);
-        ps.slurXoffset = static_cast<int>(eo->xoffset);
-        ps.slurXoffset2 = static_cast<int>(eo->xoffset2);
+        // Treat xoffset as unsigned: Encore stores pixel positions that wrap at 256.
+        // Values above 127 are stored as negative qint8 but represent large positive pixel offsets.
+        ps.slurXoffset  = static_cast<int>(static_cast<quint8>(eo->xoffset));
+        ps.slurXoffset2 = static_cast<int>(eo->xoffset2);  // already quint8
         ps.staffIdx = staffIdx;
         ps.encVoice = voice;
         ctx.pendingSlurs.push_back(ps);

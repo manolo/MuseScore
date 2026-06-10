@@ -465,6 +465,16 @@ target measure, Encore drew the hairpin ending at the bar line; clamp to targetM
 Recover end tick via `target = firstNote.xoffset + (slurXoffset2 - slurXoffset)` and snap to the nearest note.
 Only applies when alMezuro == 0; cross-measure slurs fall back to the last ChordRest in the target measure.
 
+`xoffset` is stored as `qint8` but must be treated as `quint8` (unsigned) for the pixel-span computation:
+values > 127 are stored negative (e.g. 0x8A = -118 signed = 138 unsigned). Using signed arithmetic
+gives a huge spurious pixel span; unsigned gives the correct 1-2 note span.
+
+**startEncTick formula.** To reverse-map the slur's MuseScore start tick to an Encore tick (for finding
+`firstNoteXoff`): use `wt = durTicks × timeSigDen / timeSigNum` (whole-note ticks), NOT
+`beatTicks × timeSigDen`. In compound meters (e.g. 6/8 with beatTicks=240, durTicks=720):
+`beatTicks × timeSigDen = 240 × 8 = 1920 ≠ wt = 720 × 8/6 = 960`. Using the wrong formula shifts
+`firstNoteXoff` to the wrong note and causes slurs to end too late.
+
 ### Dynamic staff displacement (yoffset > 0)
 
 Normally `yoffset < 0` (below the staff).
