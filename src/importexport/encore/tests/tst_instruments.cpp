@@ -388,7 +388,7 @@ TEST_F(Tst_Instruments, no_tk_blocks_name_recovered_from_fixed_offset)
     const QString longName = part->longName().toQString();
     EXPECT_EQ(longName, QString("Dulzaina"))
         << "Instrument name 'Dulzaina' stored at NAME_BASE=202 (UTF-16) must be "
-           "recovered when TK blocks are absent; without fix it stays 'Part 1'";
+        "recovered when TK blocks are absent; without fix it stays 'Part 1'";
     delete score;
 }
 
@@ -420,6 +420,44 @@ TEST_F(Tst_Instruments, no_tk_blocks_name_falls_back_to_part_n_when_not_recovera
     // When recovery finds nothing, the part must have a non-empty fallback name.
     EXPECT_FALSE(longName.isEmpty())
         << "Part must have a non-empty name even when name recovery fails";
+    delete score;
+}
+
+TEST_F(Tst_Instruments, small_tk_midi_read_from_correct_offset)
+{
+    // instruments_small_tk_midi49.enc: TK00 varsize=112 (smallTK layout), MIDI 49
+    // stored at contentFilePos + offset + 76 = 202 + 112 + 76 = 390.
+    //
+    // Without fix: readMidiPrograms uses MIDI_IN_CONTENT=60, reads at 202+60=262
+    //   (within the zero-padded name area) → midiProgram=0 → Grand Piano fallback.
+    // With fix: reads at 202+112+76=390 → midiProgram=49 → step 5 selects a
+    //   non-Piano template (String Ensemble 1 for MIDI 49).
+    MasterScore* score = readEncoreScore("instruments_small_tk_midi49.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_NE(inst->id(), String(u"grand-piano"))
+        << "MIDI 49 must be read from smallTK offset (contentFilePos+offset+76=390), "
+        "not zero-padded name area; result must not be Grand Piano fallback";
+    delete score;
+}
+
+TEST_F(Tst_Instruments, small_tk_key_read_from_correct_offset)
+{
+    // instruments_small_tk_key6.enc: TK00 varsize=112, key=+6 semitones at
+    // contentFilePos + varSize + 53 = 202 + 112 + 53 = 367.
+    //
+    // Without fix: readKeyTranspositions returned early for smallTK (offset 1..250),
+    //   key stayed 0, no transposition applied.
+    // With fix: key=6 read from offset 367, instrument transposed +6 semitones.
+    MasterScore* score = readEncoreScore("instruments_small_tk_key6.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->transpose().chromatic, 6)
+        << "Key=6 must be read from smallTK offset (contentFilePos+varSize+53=367)";
     delete score;
 }
 
