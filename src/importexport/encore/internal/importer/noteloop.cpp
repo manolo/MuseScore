@@ -76,13 +76,23 @@
 #include "log.h"
 
 namespace mu::iex::encore {
-bool NoteLoopMeasCtx::isTieStartAt(int si, int v, int tick) const
+bool NoteLoopMeasCtx::isTieStartAt(int si, int v, int tick, int notePosition) const
 {
+    auto checkAt = [&](int t) {
+        auto range = tieStartSet.equal_range({ si, v, t });
+        for (auto it = range.first; it != range.second; ++it) {
+            // notePosition<0 = match any; sourcePosition<0 = any note in chord
+            if (notePosition < 0 || it->second < 0 || it->second == static_cast<int8_t>(notePosition)) {
+                return true;
+            }
+        }
+        return false;
+    };
     for (int dt = 0; dt < CHORD_CLUSTER_THRESHOLD; ++dt) {
-        if (tieStartSet.count({ si, v, tick - dt })) {
+        if (checkAt(tick - dt)) {
             return true;
         }
-        if (dt > 0 && tieStartSet.count({ si, v, tick + dt })) {
+        if (dt > 0 && checkAt(tick + dt)) {
             return true;
         }
     }
@@ -335,7 +345,7 @@ void buildNoteLoop(BuildCtx& ctx)
                             v  -= vBase;
                         }
                     }
-                    mc.tieStartSet.insert({ si, v, (int)e->tick });
+                    mc.tieStartSet.insert({ { si, v, (int)e->tick }, et->sourcePosition });
                 }
             }
         }
