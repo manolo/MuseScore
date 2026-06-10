@@ -468,7 +468,8 @@ TEST_F(Tst_Structure, intermediate_time_sig_7_8)
 }
 
 // ===========================================================================
-// FEATURE: LINE block system breaks: break after last measure of each non-final system.
+// FEATURE: LINE block data becomes SystemLocks — each Encore system is locked so the
+// layout engine keeps its measures together regardless of spatium.
 // ===========================================================================
 TEST_F(Tst_Structure, system_breaks_from_line_data)
 {
@@ -477,29 +478,23 @@ TEST_F(Tst_Structure, system_breaks_from_line_data)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    auto hasLineBreak = [](Measure* m) {
-        for (EngravingItem* e : m->el()) {
-            if (e->isLayoutBreak()
-                && toLayoutBreak(e)->layoutBreakType() == LayoutBreakType::LINE) {
-                return true;
-            }
-        }
-        return false;
-    };
-
+    // Measure 2 is the last measure of the first Encore system → end of a SystemLock.
     Measure* m2 = measureAt(score, 2);
     ASSERT_NE(m2, nullptr);
-    EXPECT_TRUE(hasLineBreak(m2)) << "LINE break expected after measure 2 (end of system 0)";
+    EXPECT_TRUE(m2->isEndOfSystemLock())
+        << "measure 2 (end of system 0) must be the end of a SystemLock";
 
-    Measure* m5 = measureAt(score, 5);
-    ASSERT_NE(m5, nullptr);
-    EXPECT_FALSE(hasLineBreak(m5)) << "last system must not get a break";
+    // Measure 0 is the start of the first system → start of a SystemLock.
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+    EXPECT_TRUE(m0->isStartOfSystemLock())
+        << "measure 0 (start of system 0) must be the start of a SystemLock";
 
     delete score;
 }
 
 // ===========================================================================
-// FEATURE: fitSpatiumToLineBreaks reduces spatium so each music system holds at least enc.lines[i].measureCount measures.
+// FEATURE: SystemLocks lock each Encore system to exactly enc.lines[i].measureCount measures.
 // ===========================================================================
 TEST_F(Tst_Structure, fit_spatium_first_system_measure_count)
 {
@@ -527,7 +522,7 @@ TEST_F(Tst_Structure, fit_spatium_first_system_measure_count)
 
 TEST_F(Tst_Structure, fit_spatium_multiple_systems_measure_count)
 {
-    // All 8 lines have measureCount=3; verify the first 4 systems each have >= 3 measures.
+    // All 8 lines have measureCount=3; verify the first 4 systems each have exactly 3 measures.
     MasterScore* score = readEncoreScore("text_tempo_orn_compound_68.enc");
     ASSERT_NE(score, nullptr);
 
