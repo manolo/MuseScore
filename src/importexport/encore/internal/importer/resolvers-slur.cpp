@@ -134,7 +134,29 @@ void resolveSlurs(BuildCtx& ctx)
                 }
                 if (bestEncTick > startEncTick) {
                     const Fraction endRel(bestEncTick, wt);
-                    endTick = ctx.measuresByIdx[ps.startMeasIdx]->tick() + endRel;
+                    const Fraction candidate = ctx.measuresByIdx[ps.startMeasIdx]->tick()
+                                               + endRel;
+                    // Snap to the actual MuseScore chord segment at or before the
+                    // candidate tick. Grace notes steal time and shift the parent
+                    // note's cumTick earlier than the proportional tick suggests.
+                    Measure* sMeas = ctx.measuresByIdx[ps.startMeasIdx];
+                    Segment* snappedSeg = score->tick2leftSegment(
+                        candidate, false, SegmentType::ChordRest);
+                    if (snappedSeg && snappedSeg->measure() == sMeas
+                        && snappedSeg->tick() >= ps.startTick) {
+                        bool hasChord = false;
+                        for (int v = 0; v < static_cast<int>(VOICES) && !hasChord; ++v) {
+                            track_idx_t t = static_cast<track_idx_t>(
+                                ps.staffIdx * VOICES + v);
+                            if (snappedSeg->element(t)
+                                && snappedSeg->element(t)->isChord()) {
+                                hasChord = true;
+                            }
+                        }
+                        endTick = hasChord ? snappedSeg->tick() : candidate;
+                    } else {
+                        endTick = candidate;
+                    }
                     resolved = true;
                 }
             }
@@ -200,8 +222,34 @@ void resolveSlurs(BuildCtx& ctx)
             endTick = lastSeg->tick();
         }
 
-        if (endTick <= ps.startTick) {
-            continue;   // zero or negative span: drop
+        if (endTick < ps.startTick) {
+            continue;   // negative span: always drop
+        }
+        if (endTick == ps.startTick) {
+            // Zero span after snapping: SLURSTART at a grace note's Encore tick,
+            // with the parent note also at the same MuseScore cumTick. Create a
+            // grace-to-main slur with explicit start/end elements.
+            Segment* gSeg = score->tick2segment(ps.startTick, true,
+                                                SegmentType::ChordRest);
+            if (gSeg) {
+                const track_idx_t graceTrack = resolveChordTrack(
+                    score, ps.startTick, ps.staffIdx, ps.track);
+                EngravingItem* el = gSeg->element(graceTrack);
+                if (el && el->isChord()) {
+                    const std::vector<Chord*> graces = toChord(el)->graceNotesBefore();
+                    if (!graces.empty()) {
+                        Slur* gSlur = Factory::createSlur(score->dummy());
+                        gSlur->setTrack(graceTrack);
+                        gSlur->setTrack2(graceTrack);
+                        gSlur->setTick(ps.startTick);
+                        gSlur->setTick2(endMeas->tick() + endMeas->ticks());
+                        gSlur->setStartElement(graces.front());
+                        gSlur->setEndElement(el);
+                        score->addElement(gSlur);
+                    }
+                }
+            }
+            continue;   // handled as grace-to-main or dropped (no grace notes)
         }
         const track_idx_t endTrack = resolveChordTrack(score, endTick, ps.staffIdx, startTrack);
 
@@ -210,6 +258,24 @@ void resolveSlurs(BuildCtx& ctx)
         slur->setTrack2(endTrack);
         slur->setTick(ps.startTick);
         slur->setTick2(endTick);
+        // If the chord at or after ps.startTick has grace notes before it, the
+        // SLURSTART was co-located with the grace in Encore; anchor to the grace.
+        // tick2rightSegment finds the segment AT or AFTER startTick, which is the
+        // chord whose grace notes precede the slur (even when startTick is slightly
+        // before that chord's cumTick due to grace-note tick stealing).
+        {
+            Segment* rSeg = score->tick2rightSegment(ps.startTick, false,
+                                                     SegmentType::ChordRest);
+            if (rSeg) {
+                EngravingItem* rEl = rSeg->element(startTrack);
+                if (rEl && rEl->isChord()) {
+                    const std::vector<Chord*> graces = toChord(rEl)->graceNotesBefore();
+                    if (!graces.empty()) {
+                        slur->setStartElement(graces.front());
+                    }
+                }
+            }
+        }
         score->addElement(slur);
     }
 
@@ -219,8 +285,29 @@ void resolveSlurs(BuildCtx& ctx)
         std::vector<Spanner*> toRemove;
         for (auto& [tick, spanner] : score->spannerMap().map()) {
             if (spanner->isSlur()) {
-                spanner->computeStartElement();
-                spanner->computeEndElement();
+                // Preserve explicitly-set grace note start elements.
+                // computeStartElement() uses tick2segment() which finds the regular
+                // chord in the segment, not the grace sub-chord inside it.
+                // For grace-to-main slurs, both start and end elements were set
+                // explicitly during import. computeStartElement() would override the
+                // grace chord with the main chord (which is in the segment); and
+                // computeEndElement() may fail to find the main chord at tick2 when
+                // the slur has an epsilon or out-of-measure tick2.
+                const bool graceStart = spanner->startElement()
+                                        && spanner->startElement()->isChord()
+                                        && toChord(spanner->startElement())->isGrace();
+                if (!graceStart) {
+                    spanner->computeStartElement();
+                }
+                // For grace-to-main slurs (tick == tick2) computeEndElement() would
+                // fail because no segment exists at the same tick through the spanner
+                // tick lookup. For grace-to-later slurs (tick < tick2) it works
+                // normally — the end chord has its own segment.
+                const bool graceToMain = graceStart
+                                         && (spanner->tick() == spanner->tick2());
+                if (!graceToMain) {
+                    spanner->computeEndElement();
+                }
                 if (!spanner->startElement() || !spanner->endElement()) {
                     toRemove.push_back(spanner);
                 }
