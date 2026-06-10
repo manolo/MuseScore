@@ -1356,3 +1356,42 @@ TEST_F(Tst_Ornaments, standalone_trill_alt_creates_trill_spanner)
 
     delete score;
 }
+
+// ===========================================================================
+// DEDUP: artic bytes on multi-note chords must not produce duplicate ornaments
+// Two notes at tick=0 both carry au=0x04 (→ ornamentTrill). Without dedup,
+// the chord would end up with two identical Ornament(ornamentTrill) elements.
+// Fix: skip adding if the chord already has the same SymId.
+// ===========================================================================
+TEST_F(Tst_Ornaments, artic_byte_dedup_no_duplicate_ornament_on_chord)
+{
+    // Both notes in the chord have au=0x04 → ornamentTrill.
+    // Only one trill must be added.
+    MasterScore* score = readEncoreScore("notes_artic_dedup_trill_on_chord.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "Artic dedup must not corrupt";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    Segment* seg = m->first(SegmentType::ChordRest);
+    ASSERT_NE(seg, nullptr);
+    EngravingItem* el = seg->element(0);
+    ASSERT_NE(el, nullptr);
+    ASSERT_TRUE(el->isChord());
+    Chord* chord = toChord(el);
+    ASSERT_EQ(chord->notes().size(), 2u) << "Chord must have both notes";
+
+    // Count ornamentTrill instances on the chord
+    int trillCount = 0;
+    for (Articulation* e : chord->articulations()) {
+        if (e && e->isOrnament() && toOrnament(e)->symId() == SymId::ornamentTrill) {
+            ++trillCount;
+        }
+    }
+    EXPECT_EQ(trillCount, 1)
+        << "Both notes carry au=0x04 (trill) but the chord must have exactly ONE "
+           "ornamentTrill; duplicate artic bytes on multi-note chords must be deduped";
+
+    delete score;
+}

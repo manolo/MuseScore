@@ -562,7 +562,52 @@ void buildNoteLoop(BuildCtx& ctx)
                 const EncChordSym* ecs = static_cast<const EncChordSym*>(e);
                 const QString raw = ecs->chordName();
                 if (!raw.isEmpty()) {
-                    Segment* seg = measure->getSegment(SegmentType::ChordRest, elemTick);
+                    // CHD elements in live-recorded Encore files often carry a MIDI timing
+                    // offset from the note they annotate.  The key insight is that Encore
+                    // renders chord symbols at BEAT positions, not at individual note ticks.
+                    // Algorithm: floor the CHD tick to the start of the beat that contains it,
+                    // then attach the harmony to the FIRST ChordRest segment within that beat
+                    // that precedes the CHD.  This handles:
+                    //   - Small drift (e.g. tick=6 for a beat-1 chord, distance 6t from note=0)
+                    //   - Large drift (e.g. tick=87 for a beat-1 chord, distance 87t from note=0)
+                    //   - Near-miss to a subdivison note (e.g. tick=62 in a measure with notes
+                    //     at tick=0 AND tick=60; without the beat-floor the chord would snap to
+                    //     the second 16th note instead of beat 1).
+                    const int wt = (encMeas.beatTicks && encMeas.timeSigDen)
+                                   ? encMeas.beatTicks * encMeas.timeSigDen : 960;
+                    const int bt = static_cast<int>(encMeas.beatTicks ? encMeas.beatTicks : 240);
+                    const int chdEncTick = static_cast<int>(e->tick);
+                    const int beatStart  = (chdEncTick / bt) * bt;  // floor to beat boundary
+                    const Fraction beatStartFrac(beatStart, wt);
+                    const Fraction chdFrac(chdEncTick, wt);
+                    Segment* seg = nullptr;
+                    for (Segment* s = measure->first(SegmentType::ChordRest); s;
+                         s = s->next(SegmentType::ChordRest)) {
+                        const Fraction sRel = s->tick() - measTick;
+                        if (sRel < beatStartFrac) {
+                            continue;   // before the beat that contains this CHD
+                        }
+                        if (sRel > chdFrac) {
+                            break;      // past the CHD tick
+                        }
+                        if (!seg) {
+                            seg = s;    // take the FIRST segment in [beatStart, chdTick]
+                        }
+                    }
+                    if (!seg) {
+                        // Fallback: any segment at or before the CHD tick
+                        for (Segment* s = measure->first(SegmentType::ChordRest); s;
+                             s = s->next(SegmentType::ChordRest)) {
+                            if (s->tick() - measTick <= chdFrac) {
+                                seg = s;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    if (!seg) {
+                        seg = measure->getSegment(SegmentType::ChordRest, elemTick);
+                    }
                     Harmony* h = Factory::createHarmony(score->dummy()->segment());
                     h->setTrack(track);
                     h->setHarmony(String(raw));
