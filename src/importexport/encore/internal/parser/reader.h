@@ -39,8 +39,7 @@ struct EncFile;
 // EncFormatReader: per-format binary parsing strategy. Register a new version in EncFormatReader::create().
 struct EncFormatReader
 {
-    // Byte offset from measure start where the element block begins.
-    // v0xA6: 0x1A   |   v0xC2/v0xC4: 0x36
+    // Byte offset where element block begins in a MEAS block. See ENCORE_FORMAT.md §Known quirks.
     virtual quint32 elemBlockOffset() const = 0;
 
     // Apply format-specific fixups; return true to drop the element (duplicate suppression).
@@ -54,7 +53,7 @@ struct EncFormatReader
         return false;
     }
 
-    // Return true if the candidate REST was a duplicate and should be dropped.
+    // True if the candidate REST is a duplicate and should be dropped.
     virtual bool deduplicateRest(std::vector<std::unique_ptr<EncMeasureElem> >& elements,
                                  EncMeasureElem* candidate) const
     {
@@ -63,8 +62,7 @@ struct EncFormatReader
         return false;
     }
 
-    // Byte stride to advance past one element block.
-    // v0xA6: rawSize * 2   |   v0xC2/v0xC4: rawSize
+    // Byte stride past one element block.
     virtual qint64 elemSpacing(qint64 rawSize) const { return rawSize; }
 
     // True when the stream is too close to measEnd for another element.
@@ -75,12 +73,8 @@ struct EncFormatReader
         return false;
     }
 
-    // -----------------------------------------------------------------------
-    // Called from EncHeader::read()
-    // -----------------------------------------------------------------------
-
-    // Byte offset where the file header ends (first block starts here).
-    // v0xA6: 0xA6   |   v0xC2/v0xC4: 0xC2
+    // Byte offset where the file header ends; first block starts here.
+    // See ENCORE_FORMAT.md §Known quirks for per-version values.
     virtual qint64 headerEnd() const { return 0xC2; }
 
     // Read MIDI program, Key, and name metadata stored outside TK blocks.
@@ -94,26 +88,20 @@ struct EncFormatReader
         return true;
     }
 
-    // True when TK names need UTF-16 probe (v0xC4 only; v0xA6/v0xC2 use Latin-1).
+    // True when TK instrument names need UTF-16 probe.
     virtual bool probeInstrumentEncoding() const { return false; }
 
-    // v0xA6: reads Key transposition from TK content offset +42. See ENCORE_FORMAT.md §Instrument block.
+    // Reads Key transposition from TK content (v0xA6). See ENCORE_FORMAT.md §Instrument block.
     virtual void readKeyFromTKBlock(EncInstrument& /*instr*/,
                                     QDataStream& /*ds*/,
                                     qint64 /*contentStart*/) const {}
 
-    // -----------------------------------------------------------------------
-    // Format capability queries (used by importer, not parser)
-    // -----------------------------------------------------------------------
-
-    // v0xA6 only: grace notes borrow real duration from the next note.
-    virtual bool hasGraceTimeBorrowing() const { return false; }
-
-    // v0xC2 only: tuplet membership implied by rdur/faceValue mismatch (no explicit tup byte).
-    virtual bool supportsImpliedTuplets() const { return false; }
-
-    // v0xC2 only: grace1 low nibble encodes tie-sender for live-recording scores.
-    virtual bool usesG1LowTieSender() const { return false; }
+    // Format capability queries — see ENCORE_FORMAT.md §Known quirks for per-version details.
+    virtual bool hasGraceTimeBorrowing() const { return false; }  // v0xA6: grace borrows rdur from next note
+    virtual bool supportsImpliedTuplets() const { return false; }  // v0xC2: tuplet by rdur/fv mismatch
+    virtual bool usesG1LowTieSender() const { return false; }      // v0xC2: grace1 low nibble = tie-sender
+    virtual bool alMezuroIsReliable() const { return true; }       // v0xC2=false: alMezuro has no valid measure-count semantics
+    virtual const char* formatName() const { return "v0xC4"; }    // for logging
 
     virtual ~EncFormatReader() = default;
 

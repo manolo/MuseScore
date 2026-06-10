@@ -101,12 +101,10 @@ void applyConcertPitch(Note* n, int semitone)
     n->setTpcFromPitch();
 }
 
-// ---------------------------------------------------------------------------
-
 static void logEncFileInfo(const EncFile& enc)
 {
     const EncHeader& h = enc.header;
-    const char* fmtName = (h.chuMagio == 0xA6) ? "v0xA6" : (h.chuMagio == 0xC2) ? "v0xC2" : "v0xC4";
+    const char* fmtName = enc.fmt ? enc.fmt->formatName() : "unknown";
 
     LOGD() << "---- Encore file info ----";
     LOGD() << "  Magic:          " << h.magic.toStdString();
@@ -305,8 +303,9 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     score->style().set(Sid::tupletVStemDistance,   0.0);
 
     BuildCtx ctx{ score, enc, enc.fmt.get() };
-    ctx.impliedTuplets = ctx.fmt->supportsImpliedTuplets();
-    ctx.g1LowTieSender = ctx.fmt->usesG1LowTieSender();
+    ctx.impliedTuplets     = ctx.fmt->supportsImpliedTuplets();
+    ctx.g1LowTieSender     = ctx.fmt->usesG1LowTieSender();
+    ctx.alMezuroIsReliable = ctx.fmt->alMezuroIsReliable();
     buildParts(ctx);
     buildMeasures(ctx);
     buildInitialSignatures(ctx);
@@ -322,10 +321,6 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     addTitleFrame(score, enc.titleBlock);
     score->setUpTempoMap();
 }
-
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
 
 Err importEncore(MasterScore* score, const QString& path)
 {

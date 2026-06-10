@@ -71,14 +71,10 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
 
     // Grace chords must be parented under a Chord (not a Segment) or pagePos crashes. Build detached, queue, attach to the next non-grace chord.
     {
-        // v0xA6 inner-grace (g1=0x10): must have higher fv than the leading grace; regular notes after the group have lower fv and must not be re-classified.
-        const bool isV0xA6InnerGrace
-            = (en->size == 10)
-              && ((en->grace1 & 0x30) == 0x10)
-              && ctx.v0xA6LeadingGraceFv.count(trackKey)
-              && ((en->faceValue & 0x0F) > ctx.v0xA6LeadingGraceFv.at(trackKey));
+        // en->isInnerGrace is set by calculateRealDurations() for v0xA6:
+        // a note with grace1 high nibble=0x10 that is shorter than the leading grace.
         if (isValidFaceValue(en->faceValue) && (en->faceValue & 0x0F) >= 4
-            && (en->graceType() != EncGraceType::NORMAL || isV0xA6InnerGrace)) {
+            && (en->graceType() != EncGraceType::NORMAL || en->isInnerGrace)) {
             // Roll back per-track tick state so the next note is not
             // detected as a chord extension of this grace.
             if (savedPrevMidiTick >= 0) {
@@ -119,16 +115,8 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
             }
 
             ctx.pendingGraces[trackKey].push_back(gc);
-            // Track the leading grace fv for inner-grace detection.
-            const quint8 curFv = en->faceValue & 0x0F;
-            auto it = ctx.v0xA6LeadingGraceFv.find(trackKey);
-            if (it == ctx.v0xA6LeadingGraceFv.end()) {
-                ctx.v0xA6LeadingGraceFv[trackKey] = curFv;
-            } else {
-                it->second = std::max(it->second, curFv);
-            }
-            // Accumulate stolen ticks for the post-flush snap guard.
-            ctx.v0xA6GraceStolenTicks[trackKey] += faceValue2ticks(curFv);
+            // Accumulate stolen ticks for the post-grace snap guard (noteloop.cpp).
+            ctx.graceStolenTicks[trackKey] += faceValue2ticks(en->faceValue & 0x0F);
             return;
         }
     }
@@ -172,9 +160,7 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     // Explicit tuplet notes use faceValue for dt (rdur may be truncated by the next MIDI event and give wrong duration).
     {
         int preA = en->actualNotes(), preN = en->normalNotes();
-        bool stdE = (preA == 3 && preN == 2) || (preA == 4 && preN == 3)
-                    || (preA == 5 && preN == 4) || (preA == 6 && preN == 4);
-        if (!stdE) {
+        if (!isStandardExplicitTuplet(preA, preN)) {
             preA = 0;
             preN = 0;
         }
@@ -187,10 +173,7 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         (void)preN;
     }
     int preACheck = en->actualNotes(), preNCheck = en->normalNotes();
-    bool isStandardExplicit = (preACheck == 3 && preNCheck == 2)
-                              || (preACheck == 4 && preNCheck == 3)
-                              || (preACheck == 5 && preNCheck == 4)
-                              || (preACheck == 6 && preNCheck == 4);
+    bool isStandardExplicit = isStandardExplicitTuplet(preACheck, preNCheck);
 
     // Explicit tuplet: written note value from rdur × (actualN/normalN).
     // In files where fv encodes "beats" rather than absolute note values (e.g. 8/8 where
@@ -254,18 +237,8 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         // Fallback 1: calcDotsSnap(realDuration) handles exact or near-exact rdur.
         // Fallback 2: when rdur has MIDI timing drift (>±1 tick), trust bit 0 of dotControl.
         if (en->dotControl > 0) {
-            int dByCtrl = calcDots(static_cast<qint16>(en->dotControl),
-                                   en->faceValue);
-            if (dByCtrl > 0) {
-                dots = dByCtrl;
-            } else {
-                dots = calcDotsSnap(en->realDuration, en->faceValue);
-                if (dots == 0 && (en->dotControl & 1)) {
-                    // Bit 0 set = Encore's dotted flag; force single dot when
-                    // rdur drift is too large for calcDotsSnap to detect it.
-                    dots = 1;
-                }
-            }
+            dots = computeDotCount(en->dotControl, en->realDuration, en->faceValue,
+                                   true /*useBit0Fallback*/);
         } else {
             dots = calcDotsSnap(en->realDuration, en->faceValue);
         }
@@ -345,7 +318,6 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         chord->setDots(dots);
         seg->add(chord);
 
-        // Tuplet handling.
         auto& tt = ctx.tuplets[trackKey];
         int actualN = isStandardExplicit ? preACheck : 0;
         int normalN = isStandardExplicit ? preNCheck : 0;
@@ -367,9 +339,8 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
                                       * Fraction(normalN, actualN);
                     Fraction remaining = measure->ticks() - ctx.cumTick[trackKey];
                     if (tupAdv == remaining) {
-                        dt   = dtFace;// restore face value (undo capping)
+                        dt   = dtFace;
                         dots = 0;
-                        // Update the chord's duration to face value
                         TDuration faceD(dtFace);
                         chord->setDurationType(faceD);
                         chord->setTicks(faceD.fraction());
@@ -451,13 +422,13 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
                     } else {
                         ctx.prevMidiTick.erase(trackKey);
                     }
-                    return; // skip note add, ties, articulations
+                    return;
                 }
                 if (chord) {
                     if (tt.inTuplet()) {
                         chord->setTuplet(nullptr);
                         tt.currentTuplet->remove(chord);
-                        tt.faceTicks -= TDuration(dtFace).fraction(); // undo face contribution
+                        tt.faceTicks -= TDuration(dtFace).fraction();
                     }
                     // Update chord duration to match capped advance; otherwise actualTicks() exceeds ctx.cumTick advance and causes sanityCheck overshoot.
                     TDuration cappedDur(advance);
@@ -473,7 +444,6 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         }
     }
 
-    // Drain pending graces onto this chord. Done for both new and reused chord paths.
     {
         auto& pg = ctx.pendingGraces[trackKey];
         for (Chord* gc : pg) {
@@ -482,8 +452,7 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
             chord->add(gc);
         }
         pg.clear();
-        ctx.v0xA6LeadingGraceFv.erase(trackKey);
-        // DO NOT erase ctx.v0xA6GraceStolenTicks yet: the snap guard
+        // DO NOT erase ctx.graceStolenTicks yet: the snap guard
         // for the NEXT regular note needs to read it.
     }
 

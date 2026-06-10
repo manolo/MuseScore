@@ -191,6 +191,9 @@ struct EncNote : EncMeasureElem {
     quint8 alterationGlyph { 0 };
     quint8 articulationUp  { 0 };
     quint8 articulationDown{ 0 };
+    // Set by calculateRealDurations() for v0xA6: note is a non-leading grace
+    // within a grace group (shorter duration than the leading grace).
+    bool isInnerGrace      { false };
 
     using EncMeasureElem::EncMeasureElem;
 
