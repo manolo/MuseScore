@@ -25,9 +25,10 @@
 #include "engraving/dom/chord.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/fingering.h"
-#include "engraving/dom/layoutbreak.h"
 #include "engraving/dom/note.h"
 #include "engraving/dom/masterscore.h"
+#include "engraving/dom/systemlock.h"
+#include "engraving/editing/editsystemlocks.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/segment.h"
 #include "engraving/dom/articulation.h"
@@ -190,24 +191,31 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
         n->add(f);
     }
 
-    // Add LINE breaks from the Encore LINE block; one EncLine = one system.
+    // Lock each Encore system so it always contains exactly the measures specified in
+    // the LINE block, regardless of spatium. SystemLocks replace LayoutBreak::LINE because
+    // they are hard constraints — the layout engine compresses note spacing within the
+    // locked system rather than redistributing measures. This preserves Encore's line
+    // layout without needing to reduce the staff space to unreadable sizes.
     {
         const auto& lines = ctx.enc.lines;
+        const int totalMeas = static_cast<int>(ctx.measuresByIdx.size());
         int cumMeas = 0;
-        for (int li = 0; li + 1 < static_cast<int>(lines.size()); ++li) {
+        for (int li = 0; li < static_cast<int>(lines.size()); ++li) {
+            const int firstIdx = cumMeas;
             cumMeas += lines[li].measureCount;
             const int lastIdx = cumMeas - 1;
-            if (lastIdx < 0 || lastIdx >= static_cast<int>(ctx.measuresByIdx.size())) {
+
+            if (firstIdx < 0 || lastIdx < firstIdx
+                || firstIdx >= totalMeas || lastIdx >= totalMeas) {
                 continue;
             }
-            Measure* m = ctx.measuresByIdx[lastIdx];
-            if (!m) {
+            Measure* firstM = ctx.measuresByIdx[firstIdx];
+            Measure* lastM  = ctx.measuresByIdx[lastIdx];
+            if (!firstM || !lastM) {
                 continue;
             }
-            LayoutBreak* lb = Factory::createLayoutBreak(m);
-            lb->setLayoutBreakType(LayoutBreakType::LINE);
-            lb->setTrack(0);
-            m->add(lb);
+            EditSystemLocks::undoAddSystemLock(ctx.score,
+                new SystemLock(firstM, lastM));
         }
     }
 }
