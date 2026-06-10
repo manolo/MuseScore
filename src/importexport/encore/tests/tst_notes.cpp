@@ -862,6 +862,97 @@ TEST_F(Tst_Notes, tie_start_flag_on_byte6_creates_tie)
 }
 
 // ===========================================================================
+// BUG FIX: 18-byte TIE with sourcePosition (byte +14) ties only the matching
+// note in a multi-note chord; other notes in the chord must NOT get a tie.
+// ===========================================================================
+TEST_F(Tst_Notes, tie_source_position_partial_chord)
+{
+    // notes_tie_partial_chord_source_position.enc: one measure.
+    // At tick=0: TIE(18-byte, dir=0x04, flag=0x80, sourcePosition=5) + C#4(pos=0) + A4(pos=5).
+    // Later in the same measure: C#4(pos=0) and A4(pos=5) as potential tie receivers.
+    //
+    // Bug (before fix): isTieStartAt returns true for the entire chord tick, so BOTH
+    //   C#4 and A4 register tie-starts. C#4 gets a spurious tie to its later occurrence.
+    // Fix: sourcePosition=5 at TIE byte +14 matches only A4 (pos=5). C#4 (pos=0) gets
+    //   no tie; A4 gets exactly one tie.
+    MasterScore* score = readEncoreScore("notes_tie_partial_chord_source_position.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "partial-chord source-position tie must produce clean score: " << ret.text();
+
+    // Collect all notes with tieFor, keyed by pitch
+    std::map<int, int> tiesByPitch;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Note* n : toChord(el)->notes()) {
+                if (n->tieFor()) {
+                    tiesByPitch[n->pitch()]++;
+                }
+            }
+        }
+    }
+
+    EXPECT_EQ(tiesByPitch.count(61), 0)
+        << "C#4 (pitch=61, pos=0) must NOT get a tie: sourcePosition=5 does not match pos=0";
+    EXPECT_EQ(tiesByPitch.count(69), 1)
+        << "A4 (pitch=69, pos=5) must get exactly one tie: sourcePosition=5 matches pos=5";
+
+    delete score;
+}
+
+// ===========================================================================
+// BUG FIX: Cross-measure tie with arcX1==arcX2 and startFlag=0x80
+// ===========================================================================
+
+TEST_F(Tst_Notes, tie_crossmeasure_arcxx_equal_with_startflag)
+{
+    // notes_tie_crossmeasure_arcxx_equal.enc: two 4/4 measures. Measure 1
+    // has a whole note C4 with an 18-byte TIE element where arcX1==arcX2==12
+    // (zero horizontal extent) but startFlag=0x80 (explicit tie-start bit).
+    // Measure 2 has a whole note C4.
+    //
+    // Without fix: arcX1==arcX2 override sets isTieStart=false → no tie.
+    // With fix: startFlag=0x80 prevents the override → tie created.
+    MasterScore* score = readEncoreScore("notes_tie_crossmeasure_arcxx_equal.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<Note*> notes;
+    for (MeasureBase* mb = score->first(); mb && notes.size() < 2; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (el && el->isChord()) {
+                Chord* c = toChord(el);
+                if (!c->notes().empty()) {
+                    notes.push_back(c->notes().front());
+                }
+            }
+        }
+    }
+    ASSERT_GE(notes.size(), 2u);
+    ASSERT_EQ(notes[0]->pitch(), 60);
+    ASSERT_EQ(notes[1]->pitch(), 60);
+
+    ASSERT_NE(notes[0]->tieFor(), nullptr)
+        << "cross-measure tie (arcX1==arcX2, startFlag=0x80) must not be suppressed";
+    EXPECT_EQ(notes[0]->tieFor()->endNote(), notes[1])
+        << "tie must connect the whole note in measure 1 to the whole note in measure 2";
+
+    delete score;
+}
+
+// ===========================================================================
 // BUG FIX: Grace note detection only for valid faceValues
 // ===========================================================================
 

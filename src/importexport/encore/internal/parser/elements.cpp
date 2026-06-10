@@ -327,17 +327,25 @@ bool EncTie::read(QDataStream& ds)
 
     if (static_cast<int>(size) >= 18) {
         // Read arc x-positions at offsets +10 and +12. When arcX1 == arcX2 the arc has
-        // zero horizontal extent: both endpoints are at the same visual column, meaning
-        // this is an intra-chord decorative arc (Encore connects two chord notes vertically)
-        // rather than a real forward tie. Override isTieStart so no MuseScore Tie is created.
+        // zero horizontal extent. Two cases share this pattern:
+        //   (a) intra-chord decorative arc (Encore connects two chord notes vertically,
+        //       startFlag = 0x00) — must NOT become a forward tie.
+        //   (b) cross-measure tie where the destination is in the next measure and Encore
+        //       stores arcX2 = arcX1 as a placeholder (startFlag = 0x80) — IS a real tie.
+        // Override isTieStart only when startFlag bit 7 is NOT set (case a).
         ds.skipRawData(3);          // skip offsets +7,+8,+9
         ds >> arcX1;                // offset +10
         ds.skipRawData(1);          // skip offset +11
         ds >> arcX2;                // offset +12
-        if (arcX1 == arcX2) {
+        if (arcX1 == arcX2 && (startFlag & 0x80) == 0) {
             isTieStart = false;
         }
-        const int toSkip = static_cast<int>(size) - 13;  // skip offsets +13..end
+        // Byte +13 unused; byte +14 = staff position of source note (see ENCORE_FORMAT.md §TIE element).
+        ds.skipRawData(1);          // skip offset +13
+        quint8 sp = 0;
+        ds >> sp;                   // offset +14
+        sourcePosition = static_cast<qint8>(sp);
+        const int toSkip = static_cast<int>(size) - 15;  // skip offsets +15..end
         if (toSkip > 0) {
             ds.skipRawData(toSkip);
         }
