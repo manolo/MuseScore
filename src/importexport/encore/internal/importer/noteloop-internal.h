@@ -63,7 +63,8 @@ struct NoteLoopMeasCtx {
     std::map<const EncMeasureElem*, const NestedTupletInfo*> nestedByInnerFirst;
     // Lookup: last elem of inner group → NestedTupletInfo*
     std::map<const EncMeasureElem*, const NestedTupletInfo*> nestedByInnerLast;
-    std::set<std::tuple<int, int, int> > tieStartSet;
+    // key={si,v,tick}, value=sourcePosition from EncTie (+14); -1 means all notes at that tick
+    std::multimap<std::tuple<int, int, int>, int8_t> tieStartSet;
     std::set<int> noteTicks;
     std::set<int> voice4NoteTicks;
     std::map<int, int> v0NoteCountAtTick;
@@ -74,7 +75,8 @@ struct NoteLoopMeasCtx {
     // When set, notes with options bit 0 and no other artic byte also show string numbers.
     bool hasScaleStringAnchors { false };
 
-    bool isTieStartAt(int si, int v, int tick) const;
+    // notePosition=-1 matches any note (used for bypass checks); otherwise only matches the given position.
+    bool isTieStartAt(int si, int v, int tick, int notePosition = -1) const;
     void closeTupletWithFill(BuildCtx& ctx, TupletTracker& tt, std::pair<int, int> trackKey);
 };
 

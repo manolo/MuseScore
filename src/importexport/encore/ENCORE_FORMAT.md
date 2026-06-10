@@ -389,6 +389,7 @@ visual x-positions of the arc endpoints:
 |----------|--------|---------------------------------------------------------------------|
 | +10      | 1      | `arcX1` — x-position of arc start (measure-relative pixel units)   |
 | +12      | 1      | `arcX2` — x-position of arc end                                    |
+| +14      | 1      | `sourcePosition` — staff position of the source note (matches `EncNote::position`); disambiguates which note in a multi-note chord carries the tie |
 
 **Intra-chord arc detection.** When `arcX1 == arcX2`, both endpoints are at the same visual
 column — the arc connects two notes of the same chord vertically with zero horizontal extent.
