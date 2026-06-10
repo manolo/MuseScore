@@ -391,6 +391,16 @@ Type 5. Variable size. Offsets from element start:
 | 0x36    | TRILL_START   | trill span start → MuseScore `Trill` spanner (tr + wavy line) when 0x35 or      |
 |         |               | `alMezuro>0` is present; otherwise falls back to Ornament glyph.                |
 | 0x37    | TRILL_ALT     | secondary trill mark within a span → always Ornament glyph (not a spanner).     |
+| 0xB0    | TRILL_TR      | standalone 16-byte "tr" mark → ornamentTrill glyph; never a spanner.            |
+|         |               | Placement: same rules as TRILL_SHORT (REST-forward-snap + dedup).                |
+| 0xB6    | TRILL_SHORT   | standalone 16-byte short-trill mark → ornamentShortTrill glyph; never a spanner. |
+|         |               | Placed at the note's tick. If tick falls on a REST, snaps forward to the next   |
+|         |               | chord in the same measure.                                                       |
+|         |               | Encore also stores a secondary "wavy-line extent" element with the same tipo:    |
+|         |               | the element's `xoffset` is well to the left (> 20px) of the note at its encoded |
+|         |               | tick. Rule: if `ornXoff < noteXoff - 20`, snap backward via xoffset heuristic.  |
+|         |               | Dedup prevents a duplicate glyph when primary and secondary resolve to the same  |
+|         |               | chord.                                                                           |
 | 0x41    | SLURSTOP      | reserved, not emitted in practice                                                |
 | 0x4D    | WEDGESTOP     | reserved, not emitted in practice                                                |
 | 0x80    | DYN_PPP       | dynamic `ppp` (size-16)                                                          |
@@ -431,7 +441,7 @@ Type 5. Variable size. Offsets from element start:
 |-------|------:|-------|------------|
 | 0xBE  |  12+  | TieYellow | unknown; appears at tick=0, possibly a mark/flag |
 | 0xC0  |   3   | Boda-LA, Beethoven | unknown |
-| 0xB0  |  11   | TieYellow | unknown; possibly hairpin sub-type |
+| 0xB0  |  11   | TieYellow | decoded as TRILL_TR (standalone ornamentTrill glyph) |
 | 0xC6, 0xC8, 0xEE | rare | various | unknown |
 
 ### Hairpin direction (speguleco bit 0)

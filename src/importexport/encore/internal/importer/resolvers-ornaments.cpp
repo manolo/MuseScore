@@ -198,9 +198,31 @@ void resolveOrnaments(BuildCtx& ctx)
     // When Encore marks a trill span (TRILL_END in the same measure, or alMezuro>0),
     // create a Trill spanner (tr + wavy line). Otherwise create only the Ornament glyph.
     for (const PendingTrill& pt : ctx.pendingTrills) {
-        Chord* trillChord = findChordAt(score, pt.tick, pt.track);
+        Fraction trillTick = pt.tick;
+        Chord* trillChord = findChordAt(score, trillTick, pt.track);
         if (!trillChord) {
-            continue;
+            // Fallback for ornaments placed on rest ticks (e.g. TRILL_SIMPLE at a rest position):
+            // snap forward to the next chord in the same measure and update the tick.
+            if (pt.isAlt) {
+                Measure* m = score->tick2measure(pt.tick);
+                if (m) {
+                    for (Segment* s = m->first(SegmentType::ChordRest); s;
+                         s = s->next(SegmentType::ChordRest)) {
+                        if (s->tick() < pt.tick) {
+                            continue;
+                        }
+                        EngravingItem* el = s->element(pt.track);
+                        if (el && el->isChord()) {
+                            trillChord = toChord(el);
+                            trillTick = s->tick();
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!trillChord) {
+                continue;
+            }
         }
 
         // Three cases:
@@ -227,7 +249,7 @@ void resolveOrnaments(BuildCtx& ctx)
             if (it != ctx.pendingTrillEnds.end()) {
                 auto& endVec = it->second;
                 for (auto eit = endVec.begin(); eit != endVec.end(); ++eit) {
-                    if (*eit > pt.tick) {
+                    if (*eit > trillTick) {
                         endTick = *eit;
                         hasSpan = true;
                         endVec.erase(eit);
@@ -250,7 +272,10 @@ void resolveOrnaments(BuildCtx& ctx)
         }
 
         // Case B: standalone TRILL_ALT with no explicit endpoint → span the note's duration.
-        if (standaloneAlt && (!hasSpan || endTick <= pt.tick)) {
+        // TRILL_SIMPLE always places a glyph only (never a spanner).
+        if (pt.isSimple) {
+            hasSpan = false;
+        } else if (standaloneAlt && (!hasSpan || endTick <= trillTick)) {
             const Fraction noteDuration = trillChord->actualTicks();
             if (!noteDuration.isZero()) {
                 endTick = trillChord->tick() + noteDuration;
@@ -258,19 +283,31 @@ void resolveOrnaments(BuildCtx& ctx)
             }
         }
 
-        if (hasSpan && endTick > pt.tick) {
+        if (hasSpan && endTick > trillTick) {
             Trill* trill = Factory::createTrill(score->dummy());
             trill->setTrack(pt.track);
             trill->setTrack2(pt.track);
-            trill->setTick(pt.tick);
+            trill->setTick(trillTick);
             trill->setTick2(endTick);
             trill->setTrillType(TrillType::TRILL_LINE);
             score->addElement(trill);
         } else {
-            Ornament* orn = Factory::createOrnament(trillChord);
-            orn->setTrack(pt.track);
-            orn->setSymId(SymId::ornamentTrill);
-            trillChord->add(orn);
+            const SymId sid = pt.isSimple ? pt.simpleSymId : SymId::ornamentTrill;
+            // Dedup: secondary 16-byte markers (e.g. trill wavy-line extent) can snap to
+            // the same chord as the primary glyph — only add if not already present.
+            bool alreadyHas = false;
+            for (Articulation* a : trillChord->articulations()) {
+                if (a && a->isOrnament() && toOrnament(a)->symId() == sid) {
+                    alreadyHas = true;
+                    break;
+                }
+            }
+            if (!alreadyHas) {
+                Ornament* orn = Factory::createOrnament(trillChord);
+                orn->setTrack(pt.track);
+                orn->setSymId(sid);
+                trillChord->add(orn);
+            }
         }
     }
 

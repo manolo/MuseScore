@@ -103,9 +103,13 @@ enum class EncOrnamentType : quint8 {
     SLURSTART  = 0x21,
     ARPEGGIO   = 0x22,
     // See ENCORE_FORMAT.md §Ornament subtypes for tipo values, sizes, and quirks.
-    TRILL_END   = 0x35,
-    TRILL_START = 0x36,
-    TRILL_ALT   = 0x37,
+    TRILL_END    = 0x35,
+    TRILL_START  = 0x36,
+    TRILL_ALT    = 0x37,
+    // 0xB0: standalone 16-byte "tr" ornament; places ornamentTrill glyph.
+    TRILL_TR     = 0xB0,
+    // 0xB6: standalone 16-byte short-trill ornament; places ornamentShortTrill glyph.
+    TRILL_SHORT  = 0xB6,
     SEGNO       = 0xA2,
     TO_CODA     = 0xA5,
     CODA        = 0xA6,
