@@ -136,8 +136,13 @@ enum class EncOrnamentType : quint8 {
     FINGER_3   = 0xBB,
     FINGER_4   = 0xBC,
     FINGER_5   = 0xBD,
-    UPBOW      = 0xC4,
-    DOWNBOW    = 0xC5
+    UPBOW         = 0xC4,
+    DOWNBOW       = 0xC5,
+    FERMATA_ABOVE = 0xCC,  // standalone fermata above (size-16 ORN; yoffset > 0)
+    FERMATA_BELOW = 0xCD,  // standalone fermata below (size-16 ORN; yoffset < 0)
+    REPEAT_MEASURE = 0xA3, // "%" repeat-last-bar glyph (size-16 ORN)
+    CAESURA       = 0xA7,  // caesura // (size-16 ORN, placed before note at tick)
+    BREATH_COMMA  = 0xA8   // breath mark comma (size-16 ORN, placed before note at tick)
 };
 
 enum class EncAccidentalType : quint8 {

@@ -2248,3 +2248,43 @@ TEST_F(Tst_Notes, transposing_instrument_written_tpc_not_double_flat)
 
     delete score;
 }
+// grandstaff_staffwithin_fermata
+TEST_F(Tst_Notes, grandstaff_staffwithin_fermata)
+{
+    MasterScore* score = readEncoreScore("notes_grandstaff_staffwithin_fermata.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+    ASSERT_EQ(score->nstaves(), 2);
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    auto fermatasOnStaff = [&](int staffIdx) {
+        std::vector<SymId> symIds;
+        for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : seg->annotations()) {
+                if (e->isFermata() && e->staffIdx() == static_cast<staff_idx_t>(staffIdx)) {
+                    symIds.push_back(toFermata(e)->symId());
+                }
+            }
+        }
+        return symIds;
+    };
+
+    auto s1 = fermatasOnStaff(0);
+    auto s2 = fermatasOnStaff(1);
+
+    EXPECT_EQ(s1.size(), 1u) << "Treble staff must have 1 fermata (tipo 0xCC)";
+    EXPECT_EQ(s2.size(), 1u) << "Bass staff must have 1 fermata (tipo 0xCD, staffWithin=1)";
+
+    if (!s1.empty()) {
+        EXPECT_EQ(s1[0], SymId::fermataAbove)
+            << "Treble fermata must be above (tipo 0xCC)";
+    }
+    if (!s2.empty()) {
+        EXPECT_EQ(s2[0], SymId::fermataBelow)
+            << "Bass fermata must be below (tipo 0xCD); staffWithin routing broken for ORNs";
+    }
+
+    delete score;
+}

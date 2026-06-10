@@ -745,6 +745,7 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x0C: return { SymId::ornamentTremblement };   // <inverted-mordent long="yes">
     case 0x0B:
     case 0x2F: return { SymId::ornamentMordent };
+    case 0x2E: return { SymId::ornamentTurnInverted };  // inverted turn
     case 0x12: return { SymId::articAccentAbove };
     case 0x13: return { SymId::articMarcatoAbove };
     case 0x14: return { SymId::articMarcatoAbove, SymId::articStaccatoAbove };
@@ -770,8 +771,11 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x2B: return { SymId::articAccentAbove, SymId::articStaccatissimoAbove };
     case 0x2C: return { SymId::articStaccatissimoAbove };
     case 0x2D: return { SymId::articTenutoAbove, SymId::articStaccatissimoAbove };
+    case 0x1B: return { SymId::brassMuteClosed };        // technical/stopped (+)
+    case 0x30: return { SymId::brassMuteHalfClosed };   // technical/stopped (tick/half stopped)
     // String markings (m3, m4, m18): 0x1E/0x1F=harmonic, 0x44/0x45=thumb-position.
     // 0x46=open-string: handled in encArticByteIsOpenString() (no SymId; uses Fingering "0").
+    // 0x47=string-1: handled in encArticByteToStringNumber().
     case 0x1E:
     case 0x1F: return { SymId::stringsHarmonic };
     case 0x44:
@@ -798,5 +802,41 @@ bool encArticByteIsOpenString(quint8 articByte)
 {
     // 0x46=open-string; emitted as Fingering "0" (STRING_NUMBER style).
     return articByte == 0x46;
+}
+
+int encArticByteToStringNumber(quint8 articByte)
+{
+    // Open string (0x46) is handled separately as plain Fingering "0".
+    // 0x47 is "stick" (drumstick technique), not a string number; left unmapped.
+    (void)articByte;
+    return 0;
+}
+
+int encArticByteToScaleStringNumber(quint8 articByte)
+{
+    // Bytes 0x39..0x40 encode string numbers 1..8 as (byte - 0x38).
+    // These appear as explicit anchors in scale exercises; their presence in a
+    // measure enables options-bit-0 string number display on all other notes.
+    if (articByte >= 0x39 && articByte <= 0x40) {
+        return static_cast<int>(articByte) - 0x38;
+    }
+    return 0;
+}
+
+mu::engraving::OrnamentInterval encArticByteToTrillInterval(quint8 articByte)
+{
+    using mu::engraving::IntervalStep;
+    using mu::engraving::IntervalType;
+    // Trill artic bytes 0x04..0x07 share the trill glyph but carry an accidental:
+    //   0x04: no accidental (AUTO = use key context)
+    //   0x05: flat  → minor second above (MINOR)
+    //   0x06: sharp → augmented second above (AUGMENTED)
+    //   0x07: natural → major second above (MAJOR)
+    switch (articByte) {
+    case 0x05: return { IntervalStep::SECOND, IntervalType::MINOR };
+    case 0x06: return { IntervalStep::SECOND, IntervalType::AUGMENTED };
+    case 0x07: return { IntervalStep::SECOND, IntervalType::MAJOR };
+    default:   return {};   // AUTO (default)
+    }
 }
 } // namespace mu::iex::encore
