@@ -90,15 +90,25 @@ instrument n → file offset  base + n * step
 "Key" dropdown (`0` = sounds as written, `-12` = octave lower, range ±33 semitones).
 Encore shifts every note pitch by this value.
 
-**No-TK-block files.** Some v0xC4 files have no TK blocks at all; the parser creates fallback
-instruments (name="Part N"). These files come in two sub-layouts determined by where the first
-PAGE/LINE/MEAS block starts:
+**No-TK-block files.** Some v0xC4 files have no TK blocks at all. These files come in two
+sub-layouts determined by where the first PAGE/LINE/MEAS block starts:
 
 - **Compact layout** (first block ≤ offset 2278): MIDI at offset 390, Key at 367.
   Single-instrument only for Key; multi-instrument Key is not read.
 - **Large-TK layout** (first block > offset 2278): MIDI at base 2278, Key at 2255,
   using the same offsets as TK-based files. This handles Encore 5 files exported
   without TK blocks but with the standard instrument metadata tables.
+
+**Name recovery for no-TK files.** Instrument names are stored at fixed offsets regardless of
+whether TK blocks are present:
+```
+NAME_BASE = 202     (offset of first instrument name in the file)
+NAME_STEP = 2158    (stride between instruments)
+instrument n → file offset  NAME_BASE + n * NAME_STEP
+```
+The name is encoded as UTF-16 LE or Latin-1 (same probe as TK blocks). When no TK blocks are
+found, the parser creates instruments with empty names so `recoverMissingNames()` can fill them
+from these offsets. "Part N" fallback is applied only after recovery, for names still empty.
 
 **Percussion quirk.** Percussion tracks always report MIDI program 1 (GM Grand Piano);
 infer the actual kit from the track name.

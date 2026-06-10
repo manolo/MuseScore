@@ -370,6 +370,59 @@ TEST_F(Tst_Instruments, transposition_filter_prefers_compatible_key)
 // large-TK offsets (2278/2255) have the real values. The importer must probe
 // the large-TK positions when contentFilePos<0 (no TK blocks found).
 // ===========================================================================
+// ===========================================================================
+// BUG FIX: instrument names from no-TK-block files recovered from fixed offsets
+// ===========================================================================
+TEST_F(Tst_Instruments, no_tk_blocks_name_recovered_from_fixed_offset)
+{
+    // instruments_no_tk_name_recovered.enc: TK00 magic zeroed, "Dulzaina" written
+    // as UTF-16 LE at NAME_BASE=202. Fix: fallback "Part N" names are applied AFTER
+    // readInstrumentMeta() so recoverMissingNames() can read names from the file.
+    // Without the fix: name was set to "Part 1" before recovery → guard !isEmpty()
+    // skipped the read → part remained "Part 1".
+    MasterScore* score = readEncoreScore("instruments_no_tk_name_recovered.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Part* part = score->parts().front();
+    ASSERT_NE(part, nullptr);
+    const QString longName = part->longName().toQString();
+    EXPECT_EQ(longName, QString("Dulzaina"))
+        << "Instrument name 'Dulzaina' stored at NAME_BASE=202 (UTF-16) must be "
+           "recovered when TK blocks are absent; without fix it stays 'Part 1'";
+    delete score;
+}
+
+TEST_F(Tst_Instruments, no_tk_blocks_name_recovered_latin1_encoding)
+{
+    // instruments_no_tk_name_latin1.enc: TK00 magic zeroed, "Tamboril" written
+    // as Latin-1 (b0='T', b1='a' → not UTF-16, is Latin-1) at NAME_BASE=202.
+    MasterScore* score = readEncoreScore("instruments_no_tk_name_latin1.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Part* part = score->parts().front();
+    ASSERT_NE(part, nullptr);
+    const QString longName = part->longName().toQString();
+    EXPECT_EQ(longName, QString("Tamboril"))
+        << "Latin-1 instrument name at NAME_BASE=202 must be recovered when TK blocks absent";
+    delete score;
+}
+
+TEST_F(Tst_Instruments, no_tk_blocks_name_falls_back_to_part_n_when_not_recoverable)
+{
+    // instruments_no_tk_name_fallback.enc: TK00 magic zeroed, offset 202 is 0x00
+    // (b0 < 0x20 → recoverMissingNames skips it). "Part 1" fallback must fire.
+    MasterScore* score = readEncoreScore("instruments_no_tk_name_fallback.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Part* part = score->parts().front();
+    ASSERT_NE(part, nullptr);
+    const QString longName = part->longName().toQString();
+    // When recovery finds nothing, the part must have a non-empty fallback name.
+    EXPECT_FALSE(longName.isEmpty())
+        << "Part must have a non-empty name even when name recovery fails";
+    delete score;
+}
+
 TEST_F(Tst_Instruments, no_tk_blocks_reads_midi_and_key_from_large_tk_offsets)
 {
     // instruments_no_tk_blocks_midi_key.enc: TK00 magic zeroed, MIDI=69 at 2278, Key=6 at 2255.
