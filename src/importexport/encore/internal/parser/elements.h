@@ -264,7 +264,8 @@ struct EncOrnament : EncMeasureElem {
 
 struct EncLyric : EncMeasureElem {
     QString text;
-    quint8 kie { 0 };   // location/anchor byte (similar to xoffset)
+    quint8 kie { 0 };                // location/anchor byte (similar to xoffset)
+    quint8 textGapAfterKie { 9 };   // bytes to skip after kie before text; set from EncFormatReader
 
     using EncMeasureElem::EncMeasureElem;
 

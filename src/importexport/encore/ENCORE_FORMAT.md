@@ -621,6 +621,8 @@ These are real content; the importer maps them to voice 0 of that staff so LYRIC
 
 Type 6. Variable size. Null-terminated text, NOT fixed-width.
 
+**v0xC4 layout (text at +20):**
+
 | Offset    | Size   | Description                                            |
 |-----------|--------|--------------------------------------------------------|
 | +0        | 2      | within-measure tick                                    |
@@ -630,7 +632,21 @@ Type 6. Variable size. Null-terminated text, NOT fixed-width.
 | +0x0A     | 1      | text anchor (x-offset equivalent)                      |
 | +0x14..   | var    | text payload (UTF-16 LE or Latin-1, null-terminated)   |
 
-Observed sizes: 24 (`-` dash), 26 (empty word-break), 30 (2 chars), 32 (3 chars), 34 (4 chars).
+**v0xC2 layout (text at +18, 2 bytes earlier):**
+
+| Offset    | Size   | Description                                            |
+|-----------|--------|--------------------------------------------------------|
+| +0        | 2      | within-measure tick                                    |
+| +2        | 1      | type/voice byte (high nibble = 6, low = voice)         |
+| +3        | 1      | element size (20..26+)                                 |
+| +4        | 1      | staffIdx & 0x3F                                        |
+| +0x0A     | 1      | text anchor (x-offset equivalent)                      |
+| +0x12..   | var    | text payload (UTF-16 LE or Latin-1, null-terminated)   |
+
+The 2-byte difference is handled via `EncFormatReader::lyricTextGapAfterKie()` (returns 9 for v0xC4, 7 for v0xC2).
+
+Observed sizes in v0xC4: 24 (`-` dash), 26 (empty word-break), 30 (2 chars), 32 (3 chars), 34 (4 chars).
+Observed sizes in v0xC2: 20 (`-` dash), 22 (1-2 chars), 24 (3 chars), 26 (4-5 chars).
 
 **Encoding.** Detected per element via byte 0/1 probe (same as instrument names).
 Portuguese/Spanish scores from older Encore builds use Latin-1.
@@ -646,6 +662,8 @@ Portuguese/Spanish scores from older Encore builds use Latin-1.
 Syllabic role (begin/middle/end/single) derived from hyphen-before / hyphen-after flags.
 
 **Multi-verse.** Verse N uses voice (N−1) on the same staff. All verses anchor on the voice-0 chord.
+
+**Lyric-to-note matching.** The importer matches each lyric to the nearest chord segment within a half-beat window (`matchThreshold = beatTicks / 2`). For compound meters (6/8, 9/8, 12/8) the segEncTick formula uses `encTicksPerQuarter = beatTicks * 2/3` (since `beatTicks` represents a dotted-quarter beat in those meters, not a plain quarter). The match window uses the wider value `beatTicks * 2/3` to accommodate Encore's visual pre-positioning of lyrics. Assignment is lyrics-first: each lyric (in tick order) claims the nearest unclaimed note, avoiding the note-first greedy issue where a later syllable can steal the note from an earlier one.
 
 ---
 

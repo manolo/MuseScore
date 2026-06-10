@@ -689,3 +689,100 @@ TEST_F(Tst_Text, meas_bpm_suppressed_when_orn_tempo_at_later_tick)
 
     delete score;
 }
+
+// ===========================================================================
+// FIX: v0xC2 lyric text was read at element offset +20 instead of +18, dropping
+// the first two bytes of every syllable (e.g. "ver"→"r", "dad"→"d", "Es"→"").
+// Root cause: the 9-byte skip after the kie field should be 7 bytes for v0xC2.
+// Fix: EncFormatReader_V0xC4::lyricTextGapAfterKie() returns 7 when !m_hasMetaTables.
+//
+// FIX: lyric matching used a note-first greedy algorithm that let later syllables
+// steal the nearest note before earlier ones could claim it. Switched to lyrics-first.
+//
+// FIX: segEncTick formula used encTicksPerQuarter = beatTicks regardless of meter.
+// For compound meters (6/8, 9/8) beatTicks represents a dotted-quarter beat (= 1.5
+// quarter notes), so encTicksPerQuarter must be beatTicks * 2/3.
+// Test file: J-RONDA.ENC (v0xC2, 6/8, "Jota de ronda" - Spanish folk tune).
+// Before fixes: 24 garbled single-char fragments. After: 56 complete syllables.
+// ===========================================================================
+
+static std::vector<String> collectAllLyrics(MasterScore* score)
+{
+    std::vector<String> lyrics;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (track_idx_t t = 0; t < score->ntracks(); ++t) {
+                EngravingItem* el = s->element(t);
+                if (!el || !el->isChord()) {
+                    continue;
+                }
+                for (Lyrics* ly : toChord(el)->lyrics()) {
+                    lyrics.push_back(ly->plainText());
+                }
+            }
+        }
+    }
+    return lyrics;
+}
+
+TEST_F(Tst_Text, lyrics_v0xc2_text_offset_full_words)
+{
+    // lyrics_v0c2_compound_meter.enc: v0xC2 6/8, 3 measures × 6 eighth notes = 18 notes,
+    // each with a lyric. Syllables: "La","ro","sol","es","mi","do" (each >=2 chars).
+    // Wrong +20 offset would decode each as a single char ("L","r","s","e","m","d").
+    MasterScore* score = readEncoreScore("lyrics_v0c2_compound_meter.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> all = collectAllLyrics(score);
+    // 3 measures × 6 syllables = 18 lyrics after v0xC2 +18 offset fix.
+    EXPECT_GE(all.size(), 18u)
+        << "expected 18 lyrics after v0xC2 offset fix";
+
+    auto contains = [&](const String& s) {
+        return std::find(all.begin(), all.end(), s) != all.end();
+    };
+    EXPECT_TRUE(contains(u"La"))  << "'La' must be present (wrong offset gives 'L')";
+    EXPECT_TRUE(contains(u"ro"))  << "'ro' must be present (wrong offset gives 'r')";
+    EXPECT_TRUE(contains(u"sol")) << "'sol' must be present (wrong offset gives 's')";
+    EXPECT_TRUE(contains(u"es"))  << "'es' must be present (wrong offset gives 'e')";
+    EXPECT_TRUE(contains(u"mi"))  << "'mi' must be present (wrong offset gives 'm')";
+    EXPECT_TRUE(contains(u"do"))  << "'do' must be present (wrong offset gives 'd')";
+
+    // Single-char garbled fragments must not appear after the fix.
+    EXPECT_FALSE(contains(u"L")) << "garbled fragment 'L' must not appear after offset fix";
+    EXPECT_FALSE(contains(u"s")) << "garbled fragment 's' must not appear after offset fix";
+
+    delete score;
+}
+
+TEST_F(Tst_Text, lyrics_compound_meter_all_syllables_matched)
+{
+    // lyrics_v0c2_compound_meter.enc: v0xC2 6/8 (beatTicks=360), 3 measures.
+    // In 6/8 the segEncTick formula must use encTicksPerQuarter = beatTicks*2/3 = 240.
+    // Using 360 inflates note positions, placing beat-2 syllables out of range.
+    // Each of the 6 syllables appears 3 times (once per measure).
+    MasterScore* score = readEncoreScore("lyrics_v0c2_compound_meter.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<String> all = collectAllLyrics(score);
+    int countLa = 0, countSol = 0, countEs = 0;
+    for (const String& s : all) {
+        if (s == u"La")  { ++countLa; }
+        if (s == u"sol") { ++countSol; }
+        if (s == u"es")  { ++countEs; }
+    }
+    EXPECT_GE(countLa, 2)
+        << "'La' must appear at least twice; before compound-meter fix: 0 or 1 occurrences.";
+    EXPECT_GE(countSol, 3)
+        << "'sol' must appear at least three times; before compound-meter fix: 0 occurrences.";
+    EXPECT_GE(countEs, 3)
+        << "'es' must appear at least three times; before compound-meter fix: 0 occurrences.";
+
+    delete score;
+}
