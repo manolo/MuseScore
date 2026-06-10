@@ -263,14 +263,14 @@ void Beam::calcBeamBreaks(const ChordRest* cr, const ChordRest* prevCr, int leve
     if (level > 0 && prevCr && cr->beamMode() == BeamMode::AUTO) {
         if (cr->tuplet() && cr->tuplet() != prevCr->tuplet()) {
             // this cr starts a tuplet
-            int beams = std::max(TDuration(cr->tuplet()->ticks()).hooks(), 1);
+            int beams = std::max(TDuration(cr->tuplet()->ticks(), true).hooks(), 1);
             if (beams <= level) {
                 isBroken16 = level == 1;
                 isBroken32 = level >= 2;
             }
         } else if (prevCr->tuplet() && prevCr->tuplet() != cr->tuplet()) {
             // this is a non-tuplet cr that is first after a tuplet
-            int beams = std::max(TDuration(prevCr->tuplet()->ticks()).hooks(), 1);
+            int beams = std::max(TDuration(prevCr->tuplet()->ticks(), true).hooks(), 1);
             if (beams <= level) {
                 isBroken16 = level == 1;
                 isBroken32 = level >= 2;

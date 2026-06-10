@@ -52,6 +52,10 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     const std::set<const EncMeasureElem*>& impliedGroupMember = mc.validTupletGroupMember;
     std::set<std::tuple<int, int, int> >& filteredTieSenderPitches = mc.filteredTieSenderPitches;
     const EncMeasureElem* e = ec.e;
+    // Nested-tuplet membership for this note (requires e).
+    const bool isInnerFirst  = mc.nestedByInnerFirst.count(e) > 0;
+    const bool isInnerLast   = mc.nestedByInnerLast.count(e)  > 0;
+    const bool isInnerMember = mc.innerGroupMembers.count(e)   > 0;
     int staffIdx = ec.staffIdx;
     int voice = ec.voice;
     int msVoice = ec.msVoice;
@@ -142,7 +146,10 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
             }
         } else {
             // For 8th+ notes: filter only when realDuration > CHORD_CLUSTER_THRESHOLD; at exactly the threshold the note is a live-recorded chord root.
-            if (en->realDuration > CHORD_CLUSTER_THRESHOLD) {
+            // Bypass for notes in a validated tuplet group: the last note of a measure-spanning
+            // tuplet legitimately has a short rdur because it's cut off at the measure boundary.
+            if (en->realDuration > CHORD_CLUSTER_THRESHOLD
+                && !validTupletGroupMember.count(e)) {
                 return;
             }
         }
@@ -173,6 +180,14 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         (void)preN;
     }
     int preACheck = en->actualNotes(), preNCheck = en->normalNotes();
+    // If a uniform-fill override was detected, use it instead of the tup byte.
+    {
+        auto orit = mc.overrideGroupRatios.find(e);
+        if (orit != mc.overrideGroupRatios.end()) {
+            preACheck = orit->second.first;
+            preNCheck = orit->second.second;
+        }
+    }
     bool isStandardExplicit = isStandardExplicitTuplet(preACheck, preNCheck);
 
     // Explicit tuplet: written note value from rdur × (actualN/normalN).
@@ -304,6 +319,7 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         }
     }
 
+
     Segment* seg = measure->getSegment(SegmentType::ChordRest, elemTick);
     Chord* chord = nullptr;
     if (seg->element(track) && seg->element(track)->isChord()) {
@@ -370,26 +386,65 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
             }
         }
         if (actualN > 0 && normalN > 0) {
-            chord->setTuplet(tt.currentTuplet);
-            tt.currentTuplet->add(chord);
-
-            // No-downdate: update fullFaceSum only when a smaller face value arrives AND
-            // the current (pre-add) tally still fits in the new lower threshold.
-            // {Q,E}/3:2: before E, faceTicks=Q=1/4, new threshold=3E=3/8: 1/4≤3/8 → update. ✓
-            // {Q,Q,8,8}/3:2: before 8th, faceTicks=2Q=1/2 > 3/8 → no update (stays 3Q). ✓
-            // {Q,Q,Q,Q}/4:3: Q is not < currentBaseLen(Q) → no update; fullFaceSum stays 4Q. ✓
-            if (tt.actualN > 0 && tt.fullFaceSum > Fraction(0, 1)) {
-                const Fraction thisFace = TDuration(dt).fraction();
-                const Fraction currentBaseLen = tt.fullFaceSum / tt.actualN;
-                if (thisFace > Fraction(0, 1) && thisFace < currentBaseLen) {
-                    const Fraction newThreshold = thisFace * tt.actualN;
-                    if (tt.faceTicks <= newThreshold) {
-                        tt.fullFaceSum = newThreshold;
+            // ---------------------------------------------------------------------------
+            // Nested-tuplet handling: inner group notes go into the inner TupletTracker.
+            // Outer TupletTracker advances via cumTick (doubly-nested advance in advance
+            // block below), not via direct faceTicks here.
+            // ---------------------------------------------------------------------------
+            auto& innerTt = ctx.innerTuplets[trackKey];
+            if (isInnerMember) {
+                // Start inner TupletTracker on the first note of the inner group.
+                if (isInnerFirst) {
+                    const NestedTupletInfo& ni = *mc.nestedByInnerFirst.at(e);
+                    innerTt.closeTuplet();
+                    innerTt.startTuplet(measure, elemTick, ni.innerActualN, ni.innerNormalN, dt, track);
+                    // Add inner Tuplet as element of outer Tuplet so MuseScore sees nesting.
+                    if (tt.inTuplet() && tt.currentTuplet && innerTt.currentTuplet) {
+                        innerTt.currentTuplet->setTuplet(tt.currentTuplet);
+                        tt.currentTuplet->add(innerTt.currentTuplet);
                     }
                 }
+                // Add this chord to the inner TupletTracker.
+                if (innerTt.inTuplet()) {
+                    chord->setTuplet(innerTt.currentTuplet);
+                    innerTt.currentTuplet->add(chord);
+                    innerTt.faceTicks += TDuration(dt).fraction();
+                }
+                // On the last inner note: close inner group and credit one outer slot.
+                if (isInnerLast && innerTt.inTuplet()) {
+                    innerTt.closeTuplet();
+                    // Credit outer TupletTracker with one outer-slot face value.
+                    if (tt.inTuplet() && tt.currentTuplet) {
+                        tt.faceTicks += TDuration(tt.currentTuplet->baseLen()).fraction();
+                    }
+                }
+            } else {
+                // Normal outer-group note: add to outer TupletTracker.
+                chord->setTuplet(tt.currentTuplet);
+                tt.currentTuplet->add(chord);
+
+                // No-downdate: update fullFaceSum only when a smaller face value arrives AND
+                // the current (pre-add) tally still fits in the new lower threshold.
+                // {Q,E}/3:2: before E, faceTicks=Q=1/4, new threshold=3E=3/8: 1/4≤3/8 → update. ✓
+                // {Q,Q,8,8}/3:2: before 8th, faceTicks=2Q=1/2 > 3/8 → no update (stays 3Q). ✓
+                // {Q,Q,Q,Q}/4:3: Q is not < currentBaseLen(Q) → no update; fullFaceSum stays 4Q. ✓
+                if (tt.actualN > 0 && tt.fullFaceSum > Fraction(0, 1)) {
+                    const Fraction thisFace = TDuration(dt).fraction();
+                    const Fraction currentBaseLen = tt.fullFaceSum / tt.actualN;
+                    if (thisFace > Fraction(0, 1) && thisFace < currentBaseLen) {
+                        const Fraction newThreshold = thisFace * tt.actualN;
+                        if (tt.faceTicks <= newThreshold) {
+                            tt.fullFaceSum = newThreshold;
+                        }
+                    }
+                }
+                tt.faceTicks += TDuration(dt).fraction();
             }
-            tt.faceTicks += TDuration(dt).fraction();
         } else {
+            auto& innerTt2 = ctx.innerTuplets[trackKey];
+            if (innerTt2.inTuplet()) {
+                innerTt2.closeTuplet();
+            }
             if (tt.groupFull()) {
                 closeTupletWithFill(tt, trackKey);
             }
@@ -400,9 +455,67 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
 
         // Advance cumulative position (graces are short-circuited above and never reach here).
         {
-            Fraction advance = tt.inTuplet()
-                               ? TDuration(dt).fraction() * Fraction(tt.normalN, tt.actualN)
-                               : dottedAdvance(dt, dots);
+            // Doubly-nested advance: when an inner Tuplet is active inside an outer Tuplet,
+            // apply both ratios so the total cumTick advance over the inner group equals one
+            // outer slot. Without this, 3 inner 16ths at 1/24 each = 1/8 > 1/12 (one 3:2
+            // outer slot), causing a 1/24 overshoot and spurious gap rests.
+            auto& innerTtAdv = ctx.innerTuplets[trackKey];
+            // Use doubly-nested advance for ALL inner group notes (including innerLast,
+            // which closes the inner Tuplet before the advance block runs).
+            Fraction advance;
+            if (isInnerMember) {
+                // Inner note: apply inner ratio AND outer ratio.
+                // If inner was already closed (isInnerLast), use saved ratios from NI.
+                const NestedTupletInfo* niAdv = nullptr;
+                if (mc.nestedByInnerFirst.count(e)) {
+                    niAdv = mc.nestedByInnerFirst.at(e);
+                } else if (mc.nestedByInnerLast.count(e)) {
+                    niAdv = mc.nestedByInnerLast.at(e);
+                } else if (!mc.nestedInfos.empty()) {
+                    // Middle inner note: use the first available NestedTupletInfo (only
+                    // one nested group per measure in all known Encore files).
+                    niAdv = &mc.nestedInfos.front();
+                }
+                const int innerAN = niAdv ? niAdv->innerActualN : (innerTtAdv.inTuplet() ? innerTtAdv.actualN : preACheck);
+                const int innerNN = niAdv ? niAdv->innerNormalN : (innerTtAdv.inTuplet() ? innerTtAdv.normalN : preNCheck);
+                Fraction innerAdv = TDuration(dt).fraction()
+                                    * Fraction(innerNN, innerAN);
+                if (tt.inTuplet()) {
+                    advance = innerAdv * Fraction(tt.normalN, tt.actualN);
+                } else {
+                    advance = innerAdv;
+                }
+            } else if (tt.inTuplet()) {
+                advance = TDuration(dt).fraction() * Fraction(tt.normalN, tt.actualN);
+            } else {
+                advance = dottedAdvance(dt, dots);
+            }
+
+            // Tuplet-remaining cap: when a note's face value is LARGER than the tuplet's
+            // baseLen (e.g. an 8th inside a 3:2 group with baseLen=16th), the advance can
+            // exceed the remaining tuplet span, producing a non-TDuration-aligned Tuplet.ticks
+            // that crashes MuseScore's layout. Cap both the advance and the chord duration to
+            // fit within the remaining expected tuplet span.
+            if (tt.inTuplet() && chord) {
+                const Fraction tupExpected = TDuration(tt.currentTuplet->baseLen()).fraction()
+                                             * tt.normalN;
+                const Fraction tupRemaining = tupExpected - tt.placedTicks;
+                if (tupRemaining > Fraction(0, 1) && advance > tupRemaining) {
+                    // Compute what face value the chord needs so that face*ratio = tupRemaining.
+                    const Fraction neededFace = tupRemaining * Fraction(tt.actualN, tt.normalN);
+                    TDuration cappedFace(neededFace, true /*truncate*/);
+                    if (cappedFace.isValid() && cappedFace.fraction().numerator() > 0) {
+                        advance = cappedFace.fraction() * Fraction(tt.normalN, tt.actualN);
+                        chord->setDurationType(cappedFace);
+                        chord->setTicks(cappedFace.fraction());
+                        chord->setDots(0);
+                        // Re-sync faceTicks: the original dt may have been larger.
+                        tt.faceTicks -= TDuration(dt).fraction();
+                        tt.faceTicks += cappedFace.fraction();
+                    }
+                }
+            }
+
             // Cap advance to remaining space. For tuplet notes: remove from tuplet and assign capped duration to avoid sanityCheck overshoot.
             Fraction remaining = measure->ticks() - ctx.cumTick[trackKey];
             if (advance > remaining && remaining > Fraction(0, 1)) {
@@ -441,6 +554,15 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
             if (tt.inTuplet()) {
                 tt.placedTicks += advance;
             }
+            // For inner-group notes: also advance the inner TupletTracker's placedTicks
+            // by the SINGLY-nested inner advance (not the doubly-nested cumTick advance)
+            // so closeTuplet() sees the correct inner span.
+            auto& innerTtFin = ctx.innerTuplets[trackKey];
+            if (isInnerMember && innerTtFin.inTuplet()) {
+                const Fraction innerOnlyAdv = TDuration(dt).fraction()
+                                              * Fraction(innerTtFin.normalN, innerTtFin.actualN);
+                innerTtFin.placedTicks += innerOnlyAdv;
+            }
         }
     }
 
@@ -470,9 +592,6 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     Note* note = Factory::createNote(chord);
     applyConcertPitch(note, concertPitch);
     chord->add(note);
-    if (msVoice == 0) {
-        ctx.v0PitchesInMeasure[staffIdx].insert(note->pitch());
-    }
 
     // faceValue high nibble=3: square notehead (Encore's notation for bass drum). Register pitch in drumset as HEAD_CUSTOM.
     if ((en->faceValue >> 4) == 3) {
@@ -519,10 +638,19 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
             break;
         }
         if (encArticByteIsOpenString(ab)) {
+            // Open string shown as plain fingering "0" (not circled STRING_NUMBER).
+            Fingering* fg = Factory::createFingering(note);
+            fg->setTrack(track);
+            fg->setXmlText(u"0");
+            note->add(fg);
+            break;
+        }
+        const int sn = encArticByteToStringNumber(ab);
+        if (sn > 0) {
             Fingering* fg = Factory::createFingering(
                 note, mu::engraving::TextStyleType::STRING_NUMBER);
             fg->setTrack(track);
-            fg->setXmlText(u"0");
+            fg->setXmlText(String::number(sn));
             note->add(fg);
             break;
         }
@@ -596,11 +724,21 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
                 continue;
             }
             // Ornaments need Ornament wrapper for MusicXML <ornaments>; plain articulations use Articulation.
-            Articulation* art = isOrnamentSymId(sid)
-                                ? static_cast<Articulation*>(Factory::createOrnament(chord))
-                                : Factory::createArticulation(chord);
-            art->setSymId(sid);
-            chord->add(art);
+            if (isOrnamentSymId(sid)) {
+                Ornament* orn = Factory::createOrnament(chord);
+                orn->setSymId(sid);
+                if (sid == SymId::ornamentTrill) {
+                    const auto interval = encArticByteToTrillInterval(ab);
+                    if (interval.type != mu::engraving::IntervalType::AUTO) {
+                        orn->setIntervalAbove(interval);
+                    }
+                }
+                chord->add(orn);
+            } else {
+                Articulation* art = Factory::createArticulation(chord);
+                art->setSymId(sid);
+                chord->add(art);
+            }
         }
     }
     // Single-note tremolos: stroke count in artic byte low nibble. 0x41/0x42/0x43 = 1/2/3 strokes; 0x03 also = 3 strokes.
@@ -632,6 +770,37 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         }
         trem->setTremoloType(type);
         chord->add(trem);
+    }
+
+    // Circled string number from note options bit 0.
+    // When bit 0 of the options byte is set, the position field encodes the
+    // string number - 1 (0=①..7=⑧). Only applied when:
+    //  - no artic byte already provides a number (prevents doubling)
+    //  - the staff has standard G clef (EncClefType::G = 0) — excludes piano/keyboard
+    //    staves that use clef 0x09 and do not represent string exercises
+    //  - v0xA6 excluded (its options byte has different semantics)
+    // Scale string numbers (0x39..0x40 = string 1..8).
+    // Two cases handled together:
+    //  (A) Explicit: au in 0x39..0x40 → string number = au - 0x38
+    //  (B) Fallback: au == 0, opt bit 0 set, pos in 0-7, and the measure contains
+    //      at least one explicit anchor (mc.hasScaleStringAnchors) → string number = pos + 1
+    {
+        const int scaleSn = encArticByteToScaleStringNumber(en->articulationUp);
+        if (scaleSn > 0) {
+            Fingering* fg = Factory::createFingering(note, mu::engraving::TextStyleType::STRING_NUMBER);
+            fg->setTrack(track);
+            fg->setXmlText(String::number(scaleSn));
+            note->add(fg);
+        } else if (mc.hasScaleStringAnchors
+                   && (en->options & 0x01)
+                   && en->position >= 0 && en->position <= 7
+                   && en->articulationUp == 0
+                   && en->articulationDown == 0) {
+            Fingering* fg = Factory::createFingering(note, mu::engraving::TextStyleType::STRING_NUMBER);
+            fg->setTrack(track);
+            fg->setXmlText(String::number(static_cast<int>(en->position) + 1));
+            note->add(fg);
+        }
     }
 
     // Register tie-start if TIE element exists at this tick, or (v0xC2) if grace1 low==1. The g1low indicator covers chord members just outside the ±3-tick window.
