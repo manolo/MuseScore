@@ -1788,6 +1788,49 @@ TEST_F(Tst_Notes, sf_tiestart_not_filtered_by_rdur)
 }
 
 // ===========================================================================
+// BUG FIX: 32nd rest with rdur shortened by next note's MIDI start kept
+// ===========================================================================
+
+TEST_F(Tst_Notes, rest_before_note_midi_slop_keeps_rest)
+{
+    // 5/8 measure: E8 | R32 | N16. | E8 | E8 | E8.
+    // The 32nd rest has rdur=5 (<15) because the next note starts 5 ticks after
+    // the rest's MIDI tick (MIDI timing slop). Fix: when face value >= 32nd
+    // (faceTicks >= 30), trust the face value and keep the rest in order.
+    MasterScore* score = readEncoreScore("notes_rest_before_note_midi_slop.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "score must be clean: " << ret.text();
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    // Collect ChordRest elements in order
+    std::vector<ChordRest*> crs;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChordRest()) {
+            crs.push_back(toChordRest(e));
+        }
+    }
+    ASSERT_GE(crs.size(), 6u) << "Must have 6 ChordRest elements in M1";
+    // [0] eighth note
+    EXPECT_TRUE(crs[0]->isChord())
+        << "First element must be a chord (eighth note)";
+    EXPECT_EQ(crs[0]->durationType().type(), DurationType::V_EIGHTH);
+    // [1] 32nd REST must be second (before the dotted-16th)
+    EXPECT_TRUE(crs[1]->isRest())
+        << "Second element must be a rest (32nd); without fix it appears last";
+    EXPECT_EQ(crs[1]->durationType().type(), DurationType::V_32ND)
+        << "Rest must be a 32nd (face value preserved despite rdur=5)";
+    // [2] dotted 16th note
+    EXPECT_TRUE(crs[2]->isChord())
+        << "Third element must be a chord (dotted 16th)";
+    EXPECT_EQ(crs[2]->durationType().type(), DurationType::V_16TH);
+    delete score;
+}
+
+// ===========================================================================
 // BUG FIX: prevMidiTick self-reference bypassed rdur<15 filter for non-chord-ext notes
 // ===========================================================================
 

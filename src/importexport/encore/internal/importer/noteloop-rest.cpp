@@ -50,7 +50,14 @@ void handleRest(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         return;
     }
     if (er->realDuration > 0 && er->realDuration < 15) {
-        return;
+        // Drop ghost rests (MIDI recording artifacts), but trust face value when it
+        // indicates a real duration. When rdur was shortened by the next note's MIDI
+        // start (rdur < faceTicks), the face value is authoritative.
+        const int faceTicks = faceValue2ticks(er->faceValue);
+        if (faceTicks <= 0 || faceTicks < 30) {
+            return;  // Face value is 64th or smaller: drop ghost rest.
+        }
+        // Face value is 32nd or longer: MIDI timing slop shortened rdur. Keep the rest.
     }
     DurationType dt = realDuration2DurationType(er->realDuration, er->faceValue);
     int dots = computeDotCount(er->dotControl, er->realDuration, er->faceValue);
