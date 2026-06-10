@@ -99,8 +99,12 @@ bool EncMeasure::read(QDataStream& ds, const quint32 vs, const EncFormatReader& 
             elem = std::make_unique<EncOrnament>(tick, tp, vo);
             break;
         case EncElemType::LYRIC:
-            elem = std::make_unique<EncLyric>(tick, tp, vo);
-            break;
+        {
+            auto lyr = std::make_unique<EncLyric>(tick, tp, vo);
+            lyr->textGapAfterKie = fmt.lyricTextGapAfterKie();
+            elem = std::move(lyr);
+        }
+        break;
         case EncElemType::KEYCHANGE:
             elem = std::make_unique<EncKeyChange>(tick, tp, vo);
             break;
