@@ -2596,4 +2596,96 @@ TEST_F(Tst_Notes, no_spurious_rests_inside_active_tuplet_gapsnap_suppressed)
         << "No visible rests must appear inside the tuplet bracket (gap-snap suppressed)";
 
     delete score;
+}TEST_F(Tst_Notes, chord_symbol_snaps_to_beat1_despite_midi_offset)
+{
+    // Fixture: quarter note at tick=0, chord symbol CHD at tick=6 (6/960 offset),
+    // quarter note at tick=240. CHD must attach to the beat-1 segment.
+    MasterScore* score = readEncoreScore("notes_chord_symbol_snap_to_beat1.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "CHD snap must not corrupt";
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    // The first ChordRest segment must have the Harmony attached.
+    Segment* firstSeg = m->first(SegmentType::ChordRest);
+    ASSERT_NE(firstSeg, nullptr);
+
+    bool harmonyOnBeat1 = false;
+    for (EngravingItem* ann : firstSeg->annotations()) {
+        if (ann && ann->isHarmony()) {
+            harmonyOnBeat1 = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(harmonyOnBeat1)
+        << "Chord symbol with tick=6 (MIDI offset from note at tick=0) must snap to beat-1 segment";
+
+    // The second segment must NOT have the Harmony.
+    Segment* secondSeg = firstSeg->next(SegmentType::ChordRest);
+    if (secondSeg) {
+        for (EngravingItem* ann : secondSeg->annotations()) {
+            EXPECT_FALSE(ann && ann->isHarmony())
+                << "Chord symbol must NOT land on beat-2 segment due to MIDI drift";
+        }
+    }
+
+    delete score;
+}
+
+TEST_F(Tst_Notes, chord_symbol_large_midi_drift_still_on_beat1)
+{
+    MasterScore* score = readEncoreScore("notes_chord_symbol_large_drift.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+    Segment* first = m->first(SegmentType::ChordRest);
+    ASSERT_NE(first, nullptr);
+
+    bool harmonyOnBeat1 = false;
+    for (EngravingItem* ann : first->annotations()) {
+        if (ann && ann->isHarmony()) { harmonyOnBeat1 = true; break; }
+    }
+    EXPECT_TRUE(harmonyOnBeat1)
+        << "CHD@87 (large drift from note@0) must still snap to beat-1 segment";
+
+    delete score;
+}
+
+TEST_F(Tst_Notes, chord_symbol_snaps_to_beat_not_nearby_subdivision)
+{
+    // tick=62, beat=240 → beatStart=0 → first note in [0..62] is at tick=0, not tick=60
+    MasterScore* score = readEncoreScore("notes_chord_symbol_nearbeat_subdivision.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    // Beat-1 segment (tick offset = 0)
+    Segment* beat1seg = m->first(SegmentType::ChordRest);
+    ASSERT_NE(beat1seg, nullptr);
+    EXPECT_EQ(beat1seg->tick() - m->tick(), Fraction(0, 1))
+        << "First segment must be at tick=0 (beat 1)";
+
+    bool harmonyOnBeat1 = false;
+    for (EngravingItem* ann : beat1seg->annotations()) {
+        if (ann && ann->isHarmony()) { harmonyOnBeat1 = true; break; }
+    }
+    EXPECT_TRUE(harmonyOnBeat1)
+        << "CHD@62 with note at tick=60 only 2t away must NOT snap to tick=60; "
+           "beat-floor forces it to tick=0 (beat 1)";
+
+    // Second segment (tick=60) must NOT have a harmony
+    Segment* seg60 = beat1seg->next(SegmentType::ChordRest);
+    if (seg60) {
+        for (EngravingItem* ann : seg60->annotations()) {
+            EXPECT_FALSE(ann && ann->isHarmony())
+                << "CHD must not land on the tick=60 subdivision segment";
+        }
+    }
+
+    delete score;
 }
