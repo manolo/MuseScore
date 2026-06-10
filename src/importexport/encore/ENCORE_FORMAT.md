@@ -361,6 +361,23 @@ Byte +5 encodes arc direction and outgoing status; byte +6 is an additional tie-
 Values `0x02` and `0x03` encode the arc-below outgoing direction; they do NOT set bit 7
 but bit 1 carries the same "outgoing" semantic.
 
+**Arc x-positions (18-byte elements only).** For size ≥ 18, two additional bytes encode the
+visual x-positions of the arc endpoints:
+
+| Offset   | Size   | Description                                                         |
+|----------|--------|---------------------------------------------------------------------|
+| +10      | 1      | `arcX1` — x-position of arc start (measure-relative pixel units)   |
+| +12      | 1      | `arcX2` — x-position of arc end                                    |
+
+**Intra-chord arc detection.** When `arcX1 == arcX2`, both endpoints are at the same visual
+column — the arc connects two notes of the same chord vertically with zero horizontal extent.
+This is a decorative mark in Encore (not a forward tie). The tie-start flag is overridden to
+`false` so no MuseScore Tie is created. Such elements often appear in groups of 2–4 identical
+copies at the same tick (one per chord note) and always carry `dirByte = 0x02`.
+
+When `arcX1 != arcX2`, the arc spans notes at genuinely different time positions: the
+tie-start flag stands, and a normal forward tie is created.
+
 ---
 
 ## Ornament element

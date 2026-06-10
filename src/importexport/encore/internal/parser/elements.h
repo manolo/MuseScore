@@ -287,7 +287,9 @@ struct EncGenericElem : EncMeasureElem {
 
 // TIE element: dir byte (+5) and startFlag (+6) encode arc direction. See ENCORE_FORMAT.md §TIE element.
 struct EncTie : EncMeasureElem {
-    bool isTieStart { false };   // true when dir byte has bit 7 or bit 1 set, or startFlag has bit 7 set
+    bool    isTieStart { false };   // true when dir byte has bit 7 or bit 1 set, or startFlag has bit 7 set
+    quint8  arcX1      { 0 };       // arc start x (element offset +10); only valid for size >= 18
+    quint8  arcX2      { 0 };       // arc end   x (element offset +12); only valid for size >= 18
 
     using EncMeasureElem::EncMeasureElem;
 

@@ -716,6 +716,72 @@ TEST_F(Tst_Notes, tie_direction_02_creates_tie)
 }
 
 // ===========================================================================
+// BUG FIX: 18-byte TIE with arcX1==arcX2 is an intra-chord decorative arc
+// (Encore connects two chord notes at the same visual column). Must NOT create
+// a forward tie in MuseScore.
+//
+// Pattern from POPURRI JOTAS5.enc M99/M103: 4 identical 18-byte TIE@0 with
+// dirByte=0x02 and arcX1=arcX2=12. Without the fix, both chord notes p60 and
+// p62 had spurious ties reaching their next occurrence.
+// ===========================================================================
+TEST_F(Tst_Notes, tie_18byte_intra_chord_arc_no_spurious_tie)
+{
+    // 4 duplicate 18-byte TIE@0 with arcX1==arcX2==12 (same as POPURRI).
+    // Two chord notes p60+p62 at tick=0. Same pitches again at tick=480.
+    // Fix: arcX1==arcX2 → isTieStart=false → no ties created.
+    MasterScore* score = readEncoreScore("notes_tie_intra_chord_arc_no_spurious.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "intra-chord arc test must produce clean score: " << ret.text();
+
+    int tieCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) { continue; }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) { continue; }
+            for (Note* n : toChord(el)->notes()) {
+                if (n->tieFor()) { ++tieCount; }
+            }
+        }
+    }
+    EXPECT_EQ(tieCount, 0)
+        << "18-byte TIE with arcX1==arcX2 is an intra-chord arc; must produce NO forward ties";
+    delete score;
+}
+
+// ===========================================================================
+// BUG FIX (complement): 18-byte TIE with arcX1 != arcX2 is a real forward tie
+// and must still create a MuseScore Tie, even with dirByte=0x02.
+// ===========================================================================
+TEST_F(Tst_Notes, tie_18byte_real_forward_still_creates_tie)
+{
+    // 18-byte TIE@0 with arcX1=12, arcX2=50 (different x positions → real forward tie).
+    // dirByte=0x02 → isTieStart=true. C4@tick=0 must be tied to C4@tick=480.
+    MasterScore* score = readEncoreScore("notes_tie_18byte_real_forward.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "18-byte real forward tie must produce clean score: " << ret.text();
+
+    int tieCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) { continue; }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) { continue; }
+            for (Note* n : toChord(el)->notes()) {
+                if (n->tieFor()) { ++tieCount; }
+            }
+        }
+    }
+    EXPECT_EQ(tieCount, 1)
+        << "18-byte TIE with arcX1!=arcX2 is a real forward tie; must still create one Tie";
+    delete score;
+}
+
+// ===========================================================================
 // FIX: dir byte 0x03 (bits 0+1: incoming arc + outgoing tie) must produce a tie;
 // appears without sflag=0x80 in some files.
 // ===========================================================================
