@@ -756,6 +756,13 @@ Can be inferred from `playbackTicks == faceTicks × 3/2` (one dot), `7/4` (two d
 tolerance. For rests, dotControl (+10) is a bitmask flag, NOT a tick count; use
 `calcDotsSnap(realDuration, fv)` as the authoritative dot source.
 
+**Ghost rest filter.** `calculateRealDurations` sets a REST's rdur to `nextTick - tick` (the
+MIDI gap to the next event). When a note starts only a few ticks after the rest's MIDI start
+(MIDI timing slop), rdur ends up far shorter than the face value (e.g. rdur=5 for a 32nd rest
+with faceTicks=30). The ghost-rest filter (`rdur > 0 && rdur < 15`) must not drop these real
+rests. Rule: if `faceTicks >= 30` (32nd or longer), trust the face value regardless of rdur. Only
+drop rests whose face value is also very short (64th or smaller, faceTicks < 30).
+
 ---
 
 ## BEAM element
