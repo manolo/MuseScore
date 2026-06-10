@@ -34,6 +34,9 @@
 #include "engraving/dom/segment.h"
 #include "engraving/dom/marker.h"
 #include "engraving/dom/articulation.h"
+#include "engraving/dom/fermata.h"
+#include "engraving/dom/breath.h"
+#include "engraving/dom/measurerepeat.h"
 #include "engraving/dom/trill.h"
 
 using namespace mu::engraving;
@@ -140,6 +143,34 @@ void resolveOrnaments(BuildCtx& ctx)
         m->add(mk);
     }
 
+    // Standalone fermata ORNs (tipo 0xCC/0xCD); attach to segment, not chord.
+    for (const PendingFermata& pf : ctx.pendingFermatas) {
+        Chord* c = findChordAt(score, pf.tick, pf.track);
+        if (!c) {
+            continue;
+        }
+        Segment* seg = c->segment();
+        bool alreadyHas = false;
+        for (EngravingItem* e : seg->annotations()) {
+            if (e->isFermata() && toFermata(e)->symId() == pf.symId) {
+                alreadyHas = true;
+                break;
+            }
+        }
+        if (alreadyHas) {
+            continue;
+        }
+        const bool isBelow = (pf.symId == SymId::fermataBelow
+                              || pf.symId == SymId::fermataShortBelow
+                              || pf.symId == SymId::fermataLongBelow);
+        Fermata* fermata = Factory::createFermata(seg);
+        fermata->setTrack(pf.track);
+        fermata->setSymId(pf.symId);
+        fermata->setPlacement(isBelow ? PlacementV::BELOW : PlacementV::ABOVE);
+        fermata->setPropertyFlags(Pid::PLACEMENT, PropertyFlags::UNSTYLED);
+        seg->add(fermata);
+    }
+
     // Add staccato unless already present (artic byte 0x1D produces the same glyph).
     for (const PendingStaccato& ps : ctx.pendingStaccatos) {
         Chord* c = findChordAt(score, ps.tick, ps.track);
@@ -172,20 +203,34 @@ void resolveOrnaments(BuildCtx& ctx)
             continue;
         }
 
-        // TRILL_ALT → Ornament glyph; TRILL_START → Trill spanner when endpoint known, else Ornament.
-        // Endpoints: TRILL_END on same track, or alMezuro target measure. See ENCORE_FORMAT.md §Ornament element.
+        // Three cases:
+        //  (A) TRILL_ALT within a TRILL_START span: secondary marker → Ornament glyph always.
+        //  (B) TRILL_ALT standalone (no prior START on same track): spanner on note duration.
+        //  (C) TRILL_START: spanner when explicit endpoint found; glyph if no endpoint.
+        const bool altWithinSpan = pt.isAlt && [&]() {
+            for (const PendingTrill& other : ctx.pendingTrills) {
+                if (!other.isAlt && other.track == pt.track && other.tick < pt.tick) {
+                    return true;
+                }
+            }
+            return false;
+        }();
+        const bool standaloneAlt = pt.isAlt && !altWithinSpan;
+
         Fraction endTick;
-        bool hasSpan = !pt.isAlt;
+        bool hasSpan = !altWithinSpan;  // case A: never try to build a span
 
         if (hasSpan) {
             hasSpan = false;
-            // Check for a TRILL_END marker on this track
+            // Check for a TRILL_END marker on this track; erase consumed entry.
             auto it = ctx.pendingTrillEnds.find(pt.track);
             if (it != ctx.pendingTrillEnds.end()) {
-                for (const Fraction& endT : it->second) {
-                    if (endT > pt.tick) {
-                        endTick = endT;
+                auto& endVec = it->second;
+                for (auto eit = endVec.begin(); eit != endVec.end(); ++eit) {
+                    if (*eit > pt.tick) {
+                        endTick = *eit;
                         hasSpan = true;
+                        endVec.erase(eit);
                         break;
                     }
                 }
@@ -204,8 +249,16 @@ void resolveOrnaments(BuildCtx& ctx)
             }
         }
 
+        // Case B: standalone TRILL_ALT with no explicit endpoint → span the note's duration.
+        if (standaloneAlt && (!hasSpan || endTick <= pt.tick)) {
+            const Fraction noteDuration = trillChord->actualTicks();
+            if (!noteDuration.isZero()) {
+                endTick = trillChord->tick() + noteDuration;
+                hasSpan = true;
+            }
+        }
+
         if (hasSpan && endTick > pt.tick) {
-            // Create Trill spanner (renders tr + wavy line from startTick to endTick).
             Trill* trill = Factory::createTrill(score->dummy());
             trill->setTrack(pt.track);
             trill->setTrack2(pt.track);
@@ -220,6 +273,71 @@ void resolveOrnaments(BuildCtx& ctx)
             trillChord->add(orn);
         }
     }
+
+    // Standalone TRILL_END entries (not consumed by any TRILL_START):
+    // Create a Trill spanner covering the note's duration.
+    for (auto& [trTrack, endTicks] : ctx.pendingTrillEnds) {
+        for (const Fraction& eTick : endTicks) {
+            Chord* c = findChordAt(score, eTick, trTrack);
+            if (!c) {
+                continue;
+            }
+            const Fraction noteDuration = c->actualTicks();
+            if (noteDuration.isZero()) {
+                continue;
+            }
+            Trill* trill = Factory::createTrill(score->dummy());
+            trill->setTrack(trTrack);
+            trill->setTrack2(trTrack);
+            trill->setTick(c->tick());
+            trill->setTick2(c->tick() + noteDuration);
+            trill->setTrillType(TrillType::TRILL_LINE);
+            score->addElement(trill);
+        }
+    }
     ctx.pendingTrillEnds.clear();
+
+    // Breath marks and caesuras (tipo 0xA7/0xA8).
+    // In standard notation, breath/caesura is placed AFTER the preceding note.
+    // The Encore ORN is at the tick of the note it precedes; we attach to the Breath
+    // segment at (prev_note_tick + prev_note_ticks), i.e., after the note at that tick.
+    for (const PendingBreath& pb : ctx.pendingBreaths) {
+        Chord* c = findChordAt(score, pb.tick, pb.track);
+        if (!c) {
+            continue;
+        }
+        Measure* m = c->measure();
+        if (!m) {
+            continue;
+        }
+        const Fraction breathTick = c->tick() + c->ticks();
+        Segment* seg = m->getSegment(SegmentType::Breath, breathTick);
+        Breath* breath = Factory::createBreath(seg);
+        breath->setTrack(pb.track);
+        breath->setSymId(pb.symId);
+        breath->setPlacement(PlacementV::ABOVE);
+        breath->setPropertyFlags(Pid::PLACEMENT, PropertyFlags::UNSTYLED);
+        seg->add(breath);
+    }
+
+    // Measure repeats (tipo 0xA3): replace measure content with "%" symbol.
+    for (const PendingMeasureRepeat& pmr : ctx.pendingMeasureRepeats) {
+        Measure* m = score->tick2measure(pmr.measTick);
+        if (!m) {
+            continue;
+        }
+        const track_idx_t track = static_cast<track_idx_t>(pmr.staffIdx) * VOICES;
+        Segment* firstSeg = m->first(SegmentType::ChordRest);
+        if (!firstSeg) {
+            continue;
+        }
+        Staff* st = score->staff(static_cast<staff_idx_t>(pmr.staffIdx));
+        if (!st) {
+            continue;
+        }
+        score->makeGap(firstSeg, track, m->stretchedLen(st), nullptr);
+        score->addMeasureRepeat(m->tick(), track, 1);
+        m->setMeasureRepeatCount(1, static_cast<staff_idx_t>(pmr.staffIdx));
+    }
 }
 } // namespace mu::iex::encore
