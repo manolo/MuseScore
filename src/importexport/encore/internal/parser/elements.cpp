@@ -269,8 +269,10 @@ bool EncLyric::read(QDataStream& ds)
     EncMeasureElem::read(ds);   // consumed: size + staffIdx (5 bytes from elemStart)
 
     // See ENCORE_FORMAT.md §Lyric element for field offsets and encoding detection.
+    // textGapAfterKie is 9 for v0xC4 (text at +20) and 7 for v0xC2 (text at +18).
+    const int fixedReads = 5 + 1 + static_cast<int>(textGapAfterKie);
     int remaining = static_cast<int>(size) - 5;
-    if (remaining < 15) {
+    if (remaining < fixedReads) {
         if (remaining > 0) {
             ds.skipRawData(remaining);
         }
@@ -279,8 +281,8 @@ bool EncLyric::read(QDataStream& ds)
 
     ds.skipRawData(5);
     ds >> kie;
-    ds.skipRawData(9);
-    remaining -= 15;
+    ds.skipRawData(textGapAfterKie);
+    remaining -= fixedReads;
 
     text = readEncodedStringRemaining(ds, remaining);
 

@@ -708,9 +708,16 @@ void buildNoteLoop(BuildCtx& ctx)
         }
 
         // Attach queued lyrics to the nearest chord segment (within half a beat). Encore PPQ from beatTicks; unmatched end-of-measure syllables are discarded.
-        const int encTicksPerQuarter = encMeas.beatTicks
-                                       ? static_cast<int>(encMeas.beatTicks) : 240;
-        const int matchThreshold = encTicksPerQuarter / 2;   // half-beat window
+        // In compound meters (6/8, 9/8, 12/8) beatTicks = ticks per dotted-quarter beat = 1.5 quarter notes.
+        // The segEncTick formula uses ticks-per-quarter, so scale down by 2/3 for compound time.
+        // matchThreshold stays at beatTicks/2 (half a beat in ENC ticks) regardless of meter.
+        const bool isCompoundMeter = (encMeas.timeSigDen == 8 || encMeas.timeSigDen == 16)
+                                     && encMeas.timeSigNum >= 6
+                                     && (encMeas.timeSigNum % 3) == 0;
+        const int beatTicksVal = encMeas.beatTicks ? static_cast<int>(encMeas.beatTicks) : 240;
+        const int encTicksPerQuarter = isCompoundMeter ? beatTicksVal * 2 / 3 : beatTicksVal;
+        // Compound meters need a wider window: Encore places lyrics slightly before their note.
+        const int matchThreshold = isCompoundMeter ? beatTicksVal * 2 / 3 : beatTicksVal / 2;
         for (auto& [lyTrack, entries] : ctx.pendingLyrics) {
             if (entries.empty()) {
                 continue;
@@ -719,49 +726,58 @@ void buildNoteLoop(BuildCtx& ctx)
             const int lyStaffIdx = static_cast<int>(lyTrack) / VOICES;
             const int lyVerseNo = static_cast<int>(lyTrack) % VOICES;
             const track_idx_t chordTrack = static_cast<track_idx_t>(lyStaffIdx) * VOICES;
-            std::vector<bool> consumed(entries.size(), false);
+
+            // Build (segEncTick, Chord*) table for this measure and verse track.
+            std::vector<std::pair<int, Chord*> > noteTickPairs;
             for (Segment* s = measure->first(SegmentType::ChordRest);
                  s; s = s->next(SegmentType::ChordRest)) {
                 EngravingItem* el = s->element(chordTrack);
                 if (!el || !el->isChord()) {
                     continue;
                 }
-                // Convert segment tick (relative to measure start) to raw
-                // Encore PPQ for comparison with the queued lyric ticks.
                 const Fraction relTick = s->tick() - measure->tick();
                 const int segEncTick = (relTick.numerator() * encTicksPerQuarter * 4)
                                        / std::max(1, relTick.denominator());
-                int bestIdx = -1;
+                noteTickPairs.emplace_back(segEncTick, toChord(el));
+            }
+
+            // Lyrics-first assignment: for each lyric in tick order, claim the nearest
+            // available note within the threshold. This correctly handles cases where
+            // syllables are unevenly spaced relative to note positions — a note-first
+            // greedy pass would let a later syllable steal the note from an earlier one.
+            std::vector<bool> noteConsumed(noteTickPairs.size(), false);
+            for (const auto& pl : entries) {
+                int bestNoteIdx = -1;
                 int bestDelta = matchThreshold + 1;
-                for (size_t i = 0; i < entries.size(); ++i) {
-                    if (consumed[i]) {
+                for (size_t ni = 0; ni < noteTickPairs.size(); ++ni) {
+                    if (noteConsumed[ni]) {
                         continue;
                     }
-                    const int delta = std::abs(entries[i].encTick - segEncTick);
+                    const int delta = std::abs(noteTickPairs[ni].first - pl.encTick);
                     if (delta < bestDelta) {
                         bestDelta = delta;
-                        bestIdx = static_cast<int>(i);
+                        bestNoteIdx = static_cast<int>(ni);
                     }
                 }
-                if (bestIdx < 0) {
+                if (bestNoteIdx < 0) {
                     continue;
                 }
-                Chord* c = toChord(el);
+                noteConsumed[bestNoteIdx] = true;
+                Chord* c = noteTickPairs[bestNoteIdx].second;
                 Lyrics* ly = Factory::createLyrics(c);
                 ly->setTrack(chordTrack);
                 ly->setVerse(lyVerseNo);
-                ly->setXmlText(entries[bestIdx].text);
+                ly->setXmlText(pl.text);
                 LyricsSyllabic syll = LyricsSyllabic::SINGLE;
-                if (entries[bestIdx].hyphenBefore && entries[bestIdx].hyphenAfter) {
+                if (pl.hyphenBefore && pl.hyphenAfter) {
                     syll = LyricsSyllabic::MIDDLE;
-                } else if (entries[bestIdx].hyphenBefore) {
+                } else if (pl.hyphenBefore) {
                     syll = LyricsSyllabic::END;
-                } else if (entries[bestIdx].hyphenAfter) {
+                } else if (pl.hyphenAfter) {
                     syll = LyricsSyllabic::BEGIN;
                 }
                 ly->setSyllabic(syll);
                 c->add(ly);
-                consumed[bestIdx] = true;
             }
             // Lyric ticks are measure-relative; unmatched leftovers cannot anchor in a later measure, so discard them.
             entries.clear();
