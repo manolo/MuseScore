@@ -296,10 +296,8 @@ void buildMeasures(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
     const EncFile& enc = ctx.enc;
-    // --------------- Measures ---------------
 
-    // Pickup measure detection: Encore stores the actual short duration as measure 0's time sig;
-    // the real displayed sig is in measure 1.
+    // Pickup measure detection: measure 0 holds the short duration, measure 1 the real sig.
     {
         int n0 = !enc.measures.empty() && enc.measures[0].timeSigNum > 0
                  ? enc.measures[0].timeSigNum : 4;
@@ -311,7 +309,7 @@ void buildMeasures(BuildCtx& ctx)
             int d1 = enc.measures[1].timeSigDen > 0 ? enc.measures[1].timeSigDen : 4;
             Fraction ts1(n1, d1);
             if (ts1 != ctx.nominalTimeSig) {
-                ctx.nominalTimeSig = ts1;   // m0 is a pickup; m1 carries the real sig
+                ctx.nominalTimeSig = ts1;
             }
         }
     }
@@ -367,7 +365,6 @@ void buildInitialSignatures(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
     const EncFile& enc = ctx.enc;
-    // --------------- Initial key/time/clef signatures ---------------
     if (!enc.measures.empty()) {
         addInitialTimeSig(score, ctx.totalStaves, ctx.nominalTimeSig);
     }
@@ -386,8 +383,7 @@ void buildInitialSignatures(BuildCtx& ctx)
         }
     }
 
-    // --------------- Intermediate time signature changes ---------------
-    // buildMeasures() sets timesig() per measure but not TimeSig elements; emit them here at each change point.
+    // Emit TimeSig elements at change points (buildMeasures sets per-measure properties only).
     Fraction prevTs = ctx.nominalTimeSig;
     for (const Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
         Fraction mTs = m->timesig();
