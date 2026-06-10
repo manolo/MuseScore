@@ -85,8 +85,12 @@ void resolveSlurs(BuildCtx& ctx)
             int firstNoteXoff = -1;
             // Find the first note on this track whose Encore tick matches the slur's start tick.
             const Fraction relStartTick = ps.startTick - ctx.measuresByIdx[ps.startMeasIdx]->tick();
-            const int startEncTick = (relStartTick.numerator() * startEncMeas.beatTicks
-                                      * startEncMeas.timeSigDen)
+            // Whole-note ticks: durTicks × timeSigDen / timeSigNum (e.g. 6/8: 720×8/6=960).
+            // beatTicks × timeSigDen is WRONG for compound meters (e.g. 6/8 gives 360×8=2880≠960).
+            const int wt = (startEncMeas.durTicks && startEncMeas.timeSigNum && startEncMeas.timeSigDen)
+                           ? (static_cast<int>(startEncMeas.durTicks) * startEncMeas.timeSigDen)
+                           / startEncMeas.timeSigNum : 960;
+            const int startEncTick = (relStartTick.numerator() * wt)
                                      / std::max(1, relStartTick.denominator());
             for (const auto& elem : startEncMeas.elements) {
                 const EncMeasureElem* em = elem.get();
@@ -129,8 +133,7 @@ void resolveSlurs(BuildCtx& ctx)
                     }
                 }
                 if (bestEncTick > startEncTick) {
-                    const Fraction endRel(bestEncTick,
-                                          startEncMeas.beatTicks * startEncMeas.timeSigDen);
+                    const Fraction endRel(bestEncTick, wt);
                     endTick = ctx.measuresByIdx[ps.startMeasIdx]->tick() + endRel;
                     resolved = true;
                 }
