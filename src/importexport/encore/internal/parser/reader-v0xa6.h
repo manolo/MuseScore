@@ -26,9 +26,7 @@
 #include "reader.h"
 
 namespace mu::iex::encore {
-// v0xA6 (Encore 2.x) format reader.
-// Header ends at 0xA6, element blocks are 10 bytes (not 32 like v0xC4),
-// MIDI pitch and tuplet at different offsets, REST dedup required.
+// Encore 2.x (v0xA6) format reader. See ENCORE_FORMAT.md §Known quirks.
 struct EncFormatReader_V0xA6 final : EncFormatReader
 {
     qint64 headerEnd() const override { return 0xA6; }
@@ -48,6 +46,7 @@ struct EncFormatReader_V0xA6 final : EncFormatReader
     void readKeyFromTKBlock(EncInstrument& instr, QDataStream& ds, qint64 contentStart) const override;
 
     bool hasGraceTimeBorrowing() const override { return true; }
+    const char* formatName() const override { return "v0xA6"; }
 };
 } // namespace mu::iex::encore
 

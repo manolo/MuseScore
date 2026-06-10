@@ -159,8 +159,6 @@ void buildNoteLoop(BuildCtx& ctx)
         lineStaffWithin[s]   = static_cast<int>(enc.lines[0].staffData[s].staffIndex());
     }
 
-    // --------------- Notes, rests, ornaments, chord symbols ---------------
-    // measuresByIdx: resolves hairpin/slur end measure from alMezuro offset.
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
         if (mb->isMeasure()) {
             ctx.measuresByIdx.push_back(toMeasure(mb));
@@ -190,7 +188,6 @@ void buildNoteLoop(BuildCtx& ctx)
         mc.lineStaffInstrIdx = &lineStaffInstrIdx;
         mc.lineStaffWithin = &lineStaffWithin;
 
-        // Reset per-measure state.
         for (auto& [key, tt] : ctx.tuplets) {
             if (tt.inTuplet()) {
                 tt.closeTuplet();
@@ -201,7 +198,7 @@ void buildNoteLoop(BuildCtx& ctx)
         ctx.prevMidiTick.clear();
         ctx.prevEncVoice.clear();
         ctx.lastChordPos.clear();
-        ctx.v0xA6GraceStolenTicks.clear();
+        ctx.graceStolenTicks.clear();
         ctx.streamOffset.clear();
         ctx.v0PitchesInMeasure.clear();
 
@@ -299,8 +296,7 @@ void buildNoteLoop(BuildCtx& ctx)
             return false;         // stable for equal keys
         });
 
-        // Collect TIE-START positions (isTieStartAt==true). Arc-only markers (incoming
-        // endpoint) are excluded; including them would falsely mark notes as tie-senders.
+        // Collect TIE-START positions; exclude arc-only markers (would falsely mark notes as tie-senders).
         for (const EncMeasureElem* e : sortedElems) {
             if (static_cast<EncElemType>(e->type) == EncElemType::TIE) {
                 const EncTie* et = static_cast<const EncTie*>(e);
@@ -310,12 +306,9 @@ void buildNoteLoop(BuildCtx& ctx)
             }
         }
 
-        // Pre-compute validTupletGroupMember: complete tuplet groups (explicit or implied); partialEndGroup for measure-end partial groups only.
         mc.validTupletGroupMember
             = computeImpliedTupletMembers(sortedElems, encMeas, ctx.totalStaves, &mc.partialEndGroup);
 
-        // noteTicks/voice4NoteTicks: for BOWING ORN routing (ORN at absent tick goes to next measure).
-        // v0NoteCountAtTick/ornFingCountAtTick/maxVoice0Tick: grand-staff fingering routing.
         for (const EncMeasureElem* em : sortedElems) {
             const EncElemType et2 = static_cast<EncElemType>(em->type);
             if (et2 == EncElemType::NOTE) {
@@ -363,8 +356,8 @@ void buildNoteLoop(BuildCtx& ctx)
             if (staffIdx >= ctx.totalStaves) {
                 continue;
             }
-            // voice>=VOICES is Encore's out-of-band slot: grand-staff second staff uses voice=4/staffIdx=0.
-            // Route to staffIdx+1 if LINE confirms multi-staff; else clamp to voice 0 (choral/ornament case).
+            // voice>=VOICES: grand-staff second staff slot. Route to staffIdx+1 if LINE confirms multi-staff.
+            // See ENCORE_FORMAT.md §Known quirks (system-level ornaments / voice=4).
             if (voice >= static_cast<int>(VOICES)) {
                 if (staffIdx < nLineStaves) {
                     const int instrIdx = lineStaffInstrIdx[staffIdx];
@@ -379,20 +372,18 @@ void buildNoteLoop(BuildCtx& ctx)
                 voice = 0;
             }
 
-            // streamOffset increments when a recording stream overflows the current MuseScore voice (see multi-stream assignment below).
             auto encVoiceKey = std::make_pair(staffIdx, voice);
             int msVoice = voice + ctx.streamOffset[encVoiceKey];
             if (msVoice >= static_cast<int>(VOICES)) {
                 continue;  // all MuseScore voices used up
             }
             track_idx_t track = static_cast<track_idx_t>(staffIdx * VOICES + msVoice);
-            // trackKey keys all per-voice state (ctx.cumTick, ctx.prevMidiTick, ctx.lastChordPos, ctx.tuplets).
             auto trackKey = std::make_pair(staffIdx, msVoice);
 
-            // faceValue-cumulative placement: MuseScore position from written durations, not MIDI ticks. Near-simultaneous notes (< CHORD_MIDI_THRESHOLD) extend the chord.
+            // faceValue-cumulative placement; near-simultaneous notes (< CHORD_MIDI_THRESHOLD) extend the chord.
+            // Chord extension requires the same Encore voice; cross-voice spill must not extend.
             constexpr int CHORD_MIDI_THRESHOLD = 2 * CHORD_CLUSTER_THRESHOLD;  // = 8
             bool isNoteOrRest = (et == EncElemType::NOTE || et == EncElemType::REST);
-            // Chord extension only when previous note came from the SAME Encore voice; cross-voice spill must not extend the chord.
             bool isChordExt   = isNoteOrRest && ctx.prevMidiTick.count(trackKey)
                                 && ctx.prevEncVoice.count(trackKey)
                                 && ctx.prevEncVoice.at(trackKey) == voice
@@ -400,8 +391,7 @@ void buildNoteLoop(BuildCtx& ctx)
                                 && (int)e->tick - (int)ctx.prevMidiTick.at(trackKey)
                                 < CHORD_MIDI_THRESHOLD;
 
-            // Multi-stream voice assignment: when the current voice is full, advance to the next MuseScore voice.
-            // Loop until a voice with space is found or all VOICES exhausted.
+            // Advance to next MuseScore voice when current is full (multi-stream overflow).
             bool dropNote = false;
             while (isNoteOrRest && !isChordExt && ctx.cumTick[trackKey] >= measure->ticks()) {
                 int newOffset = ctx.streamOffset[encVoiceKey] + 1;
@@ -419,7 +409,7 @@ void buildNoteLoop(BuildCtx& ctx)
             if (dropNote) {
                 continue;
             }
-            // Suppress overflow notes whose pitch exists in voice 0: Encore's 3 MIDI streams can diverge and create duplicate overflow notes.
+            // Suppress overflow pitch if already in voice 0 (3-stream divergence dedup).
             if (msVoice > 0 && et == EncElemType::NOTE) {
                 const EncNote* enChk = static_cast<const EncNote*>(e);
                 const int pitchChk = static_cast<int>(enChk->semiTonePitch)
@@ -431,7 +421,6 @@ void buildNoteLoop(BuildCtx& ctx)
                 }
             }
 
-            // Save prevMidiTick/lastChordPos for restore when skipping (tuplet doesn't fit) or routing to grace queue (graces must not create chord-extension anchors).
             const int savedPrevMidiTick = ctx.prevMidiTick.count(trackKey)
                                           ? ctx.prevMidiTick.at(trackKey) : -1;
             const bool hadLastChordPos = ctx.lastChordPos.count(trackKey);
@@ -459,8 +448,8 @@ void buildNoteLoop(BuildCtx& ctx)
                         // Suppress gap-snap when a grace is pending (v0xA6 grace ticks land on the face grid but represent no real time).
                         const bool gracePending = !ctx.pendingGraces[trackKey].empty();
                         // Also suppress when gap equals stolen grace ticks: the note after a grace group lands on the face grid by the grace amount and must not trigger a spurious rest.
-                        const int stolenTicks = ctx.v0xA6GraceStolenTicks.count(trackKey)
-                                                ? ctx.v0xA6GraceStolenTicks.at(trackKey) : 0;
+                        const int stolenTicks = ctx.graceStolenTicks.count(trackKey)
+                                                ? ctx.graceStolenTicks.at(trackKey) : 0;
                         if (onFaceGrid && !gracePending) {
                             // wholeTicks = beatTicks * timeSigDen; using 4*beatTicks is wrong for x/8 meters. Fall back to 960 when the header has no time signature.
                             const int wholeTicks

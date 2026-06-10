@@ -41,10 +41,8 @@ class Note;
 namespace mu::iex::encore {
 // faceValue low nibble: 1=whole, 2=half ... 8=256th; 0 and 9..15 are invalid.
 bool isValidFaceValue(quint8 faceValue);
-// Apply concert pitch to a note: set pitch + recompute TPC.
 void applyConcertPitch(mu::engraving::Note* n, int semitone);
 
-// Per-measure context: populated once per measure iteration, shared by all handlers.
 struct NoteLoopMeasCtx {
     mu::engraving::Measure* measure = nullptr;
     const EncMeasure* encMeas = nullptr;
@@ -90,8 +88,7 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec);
 void handleRest(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec);
 void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec);
 
-// Render tempo text for displayBpm at the given beat unit (beatTicks: 360=dotted-quarter, 240=quarter).
-// Defined in noteloop.cpp (shared with noteloop-orn.cpp).
+// Render tempo text (beatTicks: 360=dotted-quarter, 240=quarter). Defined in noteloop.cpp.
 mu::engraving::String tempoXmlText(int displayBpm, int beatTicks);
 } // namespace mu::iex::encore
 

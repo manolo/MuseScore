@@ -83,7 +83,6 @@ DurationType realDuration2DurationType(qint16 realDur, quint8 fv)
     case  60: return DurationType::V_16TH;
     case  30: return DurationType::V_32ND;
     case  15: return DurationType::V_64TH;
-    // Dotted values
     case 720: return inflatedDottedPromotion(720, fv) ? faceValue2DurationType(fv) : DurationType::V_HALF;
     case 360: return inflatedDottedPromotion(360, fv) ? faceValue2DurationType(fv) : DurationType::V_QUARTER;
     case 180: return inflatedDottedPromotion(180, fv) ? faceValue2DurationType(fv) : DurationType::V_EIGHTH;
@@ -169,5 +168,32 @@ Fraction dottedAdvance(DurationType durationType, int dots)
         multiplier = Fraction(15, 8);
     }
     return TDuration(durationType).fraction() * multiplier;
+}
+
+int computeDotCount(quint8 dotControl, qint16 realDuration, quint8 faceValue, bool useBit0Fallback)
+{
+    if (dotControl > 0) {
+        const int dByCtrl = calcDots(static_cast<qint16>(dotControl), faceValue);
+        if (dByCtrl > 0) {
+            return dByCtrl;
+        }
+        const int dBySnap = calcDotsSnap(realDuration, faceValue);
+        if (dBySnap > 0) {
+            return dBySnap;
+        }
+        if (useBit0Fallback && (dotControl & 1)) {
+            return 1;   // bit 0 = Encore's dotted flag; force dot when rdur drift is too large
+        }
+        return 0;
+    }
+    return calcDotsSnap(realDuration, faceValue);
+}
+
+bool isStandardExplicitTuplet(int actualN, int normalN)
+{
+    return (actualN == 3 && normalN == 2)
+           || (actualN == 4 && normalN == 3)
+           || (actualN == 5 && normalN == 4)
+           || (actualN == 6 && normalN == 4);
 }
 } // namespace mu::iex::encore

@@ -61,7 +61,7 @@ bool EncFormatReader_V0xA6::postProcessElement(EncMeasureElem* elem,
         en->articulationDown = 0;
     }
 
-    return false;   // element is kept
+    return false;
 }
 
 // v0xA6 back-to-back identical RESTs: Encore shows only one; duplicates break voice routing.
@@ -86,7 +86,7 @@ bool EncFormatReader_V0xA6::deduplicateRest(
     return false;
 }
 
-// v0xA6: no 4-byte sentinel; stop the element loop when < 4 bytes remain before measEnd.
+// v0xA6 has no 4-byte sentinel; stop when < 4 bytes remain before measEnd.
 bool EncFormatReader_V0xA6::isMeasureNearEnd(QDataStream& ds, qint64 measEnd) const
 {
     return ds.device()->pos() >= measEnd - 4;

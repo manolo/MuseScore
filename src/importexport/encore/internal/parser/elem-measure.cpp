@@ -211,6 +211,40 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing)
                 elems[i]->realDuration = dur;
             }
         }
+
+        // v0xA6 inner-grace marking. Group structure in a typical pattern:
+        //   leading grace  — graceType != NORMAL (APPOGGIATURA, grace1&0x30 > 0x10)
+        //   inner grace(s) — graceType == NORMAL, grace1&0x30 == 0x10, fv > leading fv
+        //   main note      — graceType == NORMAL, fv <= leading fv (ends the group)
+        // isInnerGrace tells the noteloop to route the note through the grace path
+        // instead of producing a spurious regular chord before the leading grace.
+        if (hasGraceTimeBorrowing) {
+            quint8 leadingFv = 0;
+            for (EncMeasureElem* e : elems) {
+                EncNote* en = dynamic_cast<EncNote*>(e);
+                if (!en || en->size != 10) {
+                    leadingFv = 0;
+                    continue;
+                }
+                if (en->graceType() != EncGraceType::NORMAL) {
+                    // Leading grace (APPOGGIATURA/ACCIACCATURA): record its fv.
+                    if (leadingFv == 0) {
+                        leadingFv = en->faceValue & 0x0F;
+                    }
+                    continue;
+                }
+                // NORMAL-classified note: check for inner-grace indicator.
+                if ((en->grace1 & 0x30) == 0x10 && leadingFv != 0) {
+                    const quint8 fv = en->faceValue & 0x0F;
+                    if (fv > leadingFv) {
+                        en->isInnerGrace = true;
+                        leadingFv = std::max(leadingFv, fv);  // keep running max
+                        continue;
+                    }
+                }
+                leadingFv = 0;  // regular note ends the grace group
+            }
+        }
     }
 }
 } // namespace mu::iex::encore

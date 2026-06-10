@@ -140,7 +140,6 @@ struct PendingLyric {
     bool hyphenAfter;   // a "-" LYRIC element follows this syllable
 };
 
-// Shared state for all build phases: setup, measures, notes, resolvers.
 struct BuildCtx
 {
     mu::engraving::MasterScore* score;
@@ -149,8 +148,9 @@ struct BuildCtx
 
     // Format capability flags, set from fmt in buildScore() so that importer
     // phases do not need to query the reader directly.
-    bool impliedTuplets  { false };    // v0xC2: tuplet membership by rdur/faceValue mismatch
-    bool g1LowTieSender  { false };    // v0xC2: grace1 low nibble encodes tie-sender indicator
+    bool impliedTuplets      { false };  // v0xC2: tuplet membership by rdur/faceValue mismatch
+    bool g1LowTieSender      { false };  // v0xC2: grace1 low nibble encodes tie-sender indicator
+    bool alMezuroIsReliable  { true };   // v0xC2=false: alMezuro byte has no valid measure-count semantics
 
     // Populated by buildParts():
     int totalStaves = 0;
@@ -184,7 +184,6 @@ struct BuildCtx
     Volta* activeVolta { nullptr };
     quint8 activeVoltaBits { 0 };
 
-    // Tuplet state per (staffIdx, msVoice).
     std::map<std::pair<int, int>, TupletTracker> tuplets {};
 
     // Pending tie-start notes: key=(staffIdx, voice, pitch), value=Note* to tie FROM.
@@ -209,10 +208,9 @@ struct BuildCtx
     // Pitches placed in voice 0 for the current measure (per staffIdx); cleared each measure.
     std::map<int, std::set<int> > v0PitchesInMeasure {};
 
-    // v0xA6 inner-grace tracking; cleared on flush.
-    std::map<std::pair<int, int>, quint8> v0xA6LeadingGraceFv {};
-    // Face ticks of the last flushed grace group; used to suppress spurious gap rests.
-    std::map<std::pair<int, int>, int> v0xA6GraceStolenTicks {};
+    // Ticks borrowed by grace notes from the following note; used to suppress
+    // spurious gap-snap rests after a grace group. Cleared each measure.
+    std::map<std::pair<int, int>, int> graceStolenTicks {};
 
     // True when the next syllable follows a hyphen; reset at measure boundary.
     std::map<track_idx_t, bool> nextLyricHyphenBefore {};
