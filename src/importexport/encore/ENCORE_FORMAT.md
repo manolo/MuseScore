@@ -682,6 +682,22 @@ Each byte holds one or two glyphs:
 
 `0x44` and above are technical markings — NOT tremolos.
 
+### Deduplication of artic-byte markings on chords
+
+Each NOTE element carries its own `articulationUp` and `articulationDown` bytes.
+When multiple notes in the same chord (same tick, same voice) carry the same
+artic byte, each would independently produce the same ornament or articulation
+glyph on the chord — resulting in duplicate visual marks (e.g. two "tr" symbols).
+
+**Importer rule:** before adding an ornament or articulation to a chord, the
+importer checks `chord->articulations()` for an existing element with the same
+SymId and skips the new one if found. Since `Ornament` extends `Articulation`
+and is stored in the same list, this dedup covers both types.
+
+**Example:** two notes at tick=0 (forming a chord) both have `au=0x04` (trill).
+Without dedup, the chord would receive two `ornamentTrill` elements; the rule
+ensures exactly one is added.
+
 ---
 
 ## Rhythm encoding
@@ -1002,6 +1018,32 @@ would create spurious rests and misalign subsequent notes.
 **No multi-stream overflow.** If cumTick fills the measure for a given voice, any
 additional notes with the same Encore voice byte are dropped. They are never routed to
 the next MuseScore voice.
+
+### Chord symbol placement
+
+CHD elements (type 7) contain harmony markings. Their encoded tick often carries a
+small MIDI offset from the note they annotate — for example, a chord symbol that
+logically belongs to beat 1 may have tick=6 while the note is at tick=0.
+
+**Placement rule:** Encore renders chord symbols at BEAT positions, not at
+individual note ticks. The importer applies the same principle:
+
+1. Compute `beatStart = floor(chd_tick / beatTicks) * beatTicks` — the start of
+   the beat that contains the CHD.
+2. Find the **first** existing `ChordRest` segment in the measure whose relative
+   tick is in the range `[beatStart, chd_tick]`.
+3. Attach the harmony there as a segment annotation.
+4. Fallback (no segment in that range): scan backwards for any segment before
+   the CHD tick. If still none, use `elemTick` (cumTick-based).
+
+This handles both small drift (CHD@6 for a beat-1 chord, 6t from note=0) and
+the subtle near-miss case: a CHD@62 in a measure with notes at tick=0 **and**
+tick=60 must snap to tick=0 (beat start), not to tick=60 (which is only 2t
+away but is the SECOND 16th note of the beat).
+
+**Example:** M15 of a 2/4 piece. `beatTicks=240`. CHD@62. Notes at tick=0 and
+tick=60. `beatStart = floor(62/240)*240 = 0`. First segment in [0, 62] =
+tick=0 → harmony on beat 1, first 16th note. ✓
 
 ---
 
