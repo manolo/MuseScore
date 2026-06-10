@@ -220,6 +220,11 @@ struct EncRest : EncMeasureElem {
     quint8 faceValue  { 0 };
     quint8 tuplet     { 0 };
     quint8 dotControl { 0 };
+    // +15 (v0xC4 only): Encore multi-measure rest display count.
+    // When > 1 this single MEAS block represents that many consecutive empty display
+    // measures (Encore shows one rest symbol with this number above it).
+    // Only meaningful when the MEAS block contains exactly this one REST element.
+    quint8 mrestCount { 1 };
 
     using EncMeasureElem::EncMeasureElem;
 
@@ -291,7 +296,7 @@ struct EncTie : EncMeasureElem {
     bool isTieStart { false };      // true when dir byte has bit 7 or bit 1 set, or startFlag has bit 7 set
     quint8 arcX1         { 0 };     // arc start x (element offset +10); only valid for size >= 18
     quint8 arcX2         { 0 };     // arc end   x (element offset +12); only valid for size >= 18
-    qint8  sourcePosition { -1 };   // staff position of source note (+14); -1 = all notes in chord
+    qint8 sourcePosition { -1 };    // staff position of source note (+14); -1 = all notes in chord
 
     using EncMeasureElem::EncMeasureElem;
 
