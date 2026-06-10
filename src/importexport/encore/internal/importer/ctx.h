@@ -97,6 +97,8 @@ struct PendingTrill {
     size_t measIdx  { 0 };        // index into ctx.measuresByIdx for the start measure
     int xoffset2 { 0 };           // end x-position hint (for same-measure endpoint detection)
     bool isAlt    { false };        // TRILL_ALT (0x37): secondary mark, always Ornament glyph
+    bool isSimple { false };        // TRILL_SIMPLE/TRILL_TR: standalone glyph only, never a spanner
+    mu::engraving::SymId simpleSymId { mu::engraving::SymId::ornamentTrill }; // symId when isSimple=true
 };
 
 // Staccato intents (tipo 0xC9), deferred for the same reason as ARPEGGIO.
