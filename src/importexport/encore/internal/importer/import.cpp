@@ -196,63 +196,6 @@ static void logEncFileInfo(const EncFile& enc)
     LOGD() << "--------------------------";
 }
 
-// Shrink spatium until the first 4 music systems each hold at least as many measures as the Encore LINE block specifies.
-// Runs before resolveAll() so the reduced spatium is in effect when system breaks are placed.
-static void fitSpatiumToLineBreaks(MasterScore* score, const EncFile& enc)
-{
-    if (enc.lines.empty()) {
-        return;
-    }
-
-    const int kCheckLines = static_cast<int>(std::min<size_t>(enc.lines.size(), 4));
-    std::vector<int> targets;
-    for (int i = 0; i < kCheckLines; ++i) {
-        if (enc.lines[i].measureCount > 0) {
-            targets.push_back(static_cast<int>(enc.lines[i].measureCount));
-        }
-    }
-    if (targets.empty()) {
-        return;
-    }
-
-    double spatium = score->style().spatium();
-
-    for (int iter = 0; iter < 20; ++iter) {
-        score->style().setSpatium(spatium);
-        score->doLayout();
-
-        std::vector<int> sysCounts;
-        for (const System* sys : score->systems()) {
-            int mc = 0;
-            for (const MeasureBase* mb : sys->measures()) {
-                if (mb->isMeasure()) {
-                    ++mc;
-                }
-            }
-            if (mc > 0) {
-                sysCounts.push_back(mc);
-            }
-        }
-
-        bool allFit = true;
-        for (int j = 0; j < static_cast<int>(targets.size())
-             && j < static_cast<int>(sysCounts.size()); ++j) {
-            if (sysCounts[j] < targets[j]) {
-                allFit = false;
-                break;
-            }
-        }
-        if (allFit) {
-            break;
-        }
-
-        spatium *= 0.9;
-        if (spatium < 0.01) {
-            break;
-        }
-    }
-    score->style().setSpatium(spatium);
-}
 
 static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
 {
@@ -312,8 +255,6 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     buildNoteLoop(ctx);
 
     applyPageMargins(score, enc.pageSetup);
-
-    fitSpatiumToLineBreaks(score, enc);
 
     resolveAll(ctx);
 
