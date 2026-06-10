@@ -558,6 +558,32 @@ Only applies when `fv > maxFvInQueue`.
 (prevents spurious rests before the grace group) and also for subsequent notes whose apparent gap equals
 the stolen grace ticks (`stolenTicks` accumulated per trackKey).
 
+### Grace-note slurs (SLURSTART co-located with appoggiatura)
+
+When a SLURSTART ornament (tipo 0x21) is at the same Encore tick as an appoggiatura
+grace note, both elements reference the same beat in the measure (tick=0 of that beat
+in Encore). In MuseScore, the grace note and its parent chord both land at cumTick=0
+because grace notes steal ticks without advancing cumTick.
+
+**Problem**: the same-measure xoffset heuristic converts the end note's Encore tick
+(e.g. tick=15) to a proportional MuseScore tick (`Fraction(15, 960)`). No chord exists
+there — the parent chord is at cumTick=0. The slur's `computeEndElement()` call finds
+nothing and returns null → slur removed.
+
+**Fix**: two cases are handled:
+
+1. **Grace-to-main** (`ps.startTick == endTick` after snapping, e.g. grace and parent both at
+   measure beat 0): a slur is created with explicit `startElement = graceChord` and
+   `endElement = mainChord`. Both `computeStartElement()` and `computeEndElement()` are
+   skipped in the validation loop.
+
+2. **Grace-to-later** (`ps.startTick < endTick`, e.g. SLURSTART at Encore tick=450, grace at
+   450, regular note at 480, half note at 0): `tick2rightSegment(ps.startTick)` finds the
+   chord AT or AFTER startTick (the regular quarter note), reads its `graceNotesBefore()`,
+   and sets `slur->setStartElement(graceChord)`. Only `computeStartElement()` is skipped in
+   the validation loop; `computeEndElement()` runs normally and anchors the slur end to the
+   correct later chord.
+
 ### Multi-staff instruments: staffWithin field
 
 For instruments with more than one staff (piano, harp, organ), all notes from all staves share

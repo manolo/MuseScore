@@ -1137,15 +1137,21 @@ TEST_F(Tst_Ornaments, new_artic_bytes_stopped_inverted_turn_half_stopped)
         for (int i = 0; i < noteIdx && seg; ++i) {
             seg = seg->next(SegmentType::ChordRest);
         }
-        if (!seg) return std::vector<SymId>{};
+        if (!seg) {
+            return std::vector<SymId> {};
+        }
         EngravingItem* el = seg->element(0);
-        if (!el || !el->isChord()) return std::vector<SymId>{};
+        if (!el || !el->isChord()) {
+            return std::vector<SymId> {};
+        }
         std::vector<SymId> ids;
         for (Articulation* a : toChord(el)->articulations()) {
             ids.push_back(a->symId());
         }
         for (EngravingItem* e : toChord(el)->el()) {
-            if (e->isOrnament()) ids.push_back(toOrnament(e)->symId());
+            if (e->isOrnament()) {
+                ids.push_back(toOrnament(e)->symId());
+            }
         }
         return ids;
     };
@@ -1186,8 +1192,12 @@ TEST_F(Tst_Ornaments, breath_comma_and_caesura_from_orn_tipo)
             if (el && el->isBreath()) {
                 ++breathCount;
                 SymId sid = toBreath(el)->symId();
-                if (sid == SymId::breathMarkComma) hasComma = true;
-                if (sid == SymId::caesura) hasCaesura = true;
+                if (sid == SymId::breathMarkComma) {
+                    hasComma = true;
+                }
+                if (sid == SymId::caesura) {
+                    hasCaesura = true;
+                }
             }
         }
     }
@@ -1235,12 +1245,16 @@ TEST_F(Tst_Ornaments, measure_repeat_from_orn_tipo_0xA3)
 
     int mrCount = 0;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
-        if (!mb->isMeasure()) continue;
+        if (!mb->isMeasure()) {
+            continue;
+        }
         Measure* m = toMeasure(mb);
         for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
             for (size_t v = 0; v < VOICES; ++v) {
                 EngravingItem* el = seg->element(static_cast<track_idx_t>(v));
-                if (el && el->isMeasureRepeat()) ++mrCount;
+                if (el && el->isMeasureRepeat()) {
+                    ++mrCount;
+                }
             }
         }
     }
@@ -1261,7 +1275,11 @@ TEST_F(Tst_Ornaments, trill_accidentals_set_interval_above)
     Measure* m = score->firstMeasure();
     ASSERT_NE(m, nullptr);
 
-    struct NoteOrnInterval { int noteIdx; IntervalType expected; const char* desc; };
+    struct NoteOrnInterval {
+        int noteIdx;
+        IntervalType expected;
+        const char* desc;
+    };
     std::vector<NoteOrnInterval> checks = {
         { 0, IntervalType::AUTO,      "0x04 trill: no accidental → AUTO" },
         { 1, IntervalType::MINOR,     "0x05 trill+flat → MINOR (trill menor)" },
@@ -1275,10 +1293,16 @@ TEST_F(Tst_Ornaments, trill_accidentals_set_interval_above)
     int noteIdx = 0;
     for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
         EngravingItem* el = seg->element(0);
-        if (!el || !el->isChord()) continue;
-        if (noteIdx >= (int)checks.size()) break;
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        if (noteIdx >= (int)checks.size()) {
+            break;
+        }
         for (EngravingItem* sub : toChord(el)->el()) {
-            if (!sub->isOrnament()) continue;
+            if (!sub->isOrnament()) {
+                continue;
+            }
             Ornament* orn = toOrnament(sub);
             // Only check ornaments that were created for trills (have a trill-related interval or AUTO)
             if (orn->intervalAbove().type != IntervalType::AUTO
@@ -1308,10 +1332,12 @@ TEST_F(Tst_Ornaments, open_string_0x46_is_plain_fingering_not_string_number)
     Measure* m = score->firstMeasure();
     ASSERT_NE(m, nullptr);
 
-    std::vector<std::pair<String, TextStyleType>> fingeringsByNote;
+    std::vector<std::pair<String, TextStyleType> > fingeringsByNote;
     for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
         EngravingItem* el = seg->element(0);
-        if (!el || !el->isChord()) continue;
+        if (!el || !el->isChord()) {
+            continue;
+        }
         for (Note* n : toChord(el)->notes()) {
             for (EngravingItem* sub : n->el()) {
                 if (sub && sub->isFingering()) {
@@ -1391,7 +1417,7 @@ TEST_F(Tst_Ornaments, artic_byte_dedup_no_duplicate_ornament_on_chord)
     }
     EXPECT_EQ(trillCount, 1)
         << "Both notes carry au=0x04 (trill) but the chord must have exactly ONE "
-           "ornamentTrill; duplicate artic bytes on multi-note chords must be deduped";
+        "ornamentTrill; duplicate artic bytes on multi-note chords must be deduped";
 
     delete score;
 }
@@ -1436,7 +1462,10 @@ TEST_F(Tst_Ornaments, trill_simple_tipo_b6_places_ornament_trill)
     for (Segment* s = m2->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
         if (el && el->isChord()) {
-            if (++chordIdx == 2) { trillNote = toChord(el); break; }
+            if (++chordIdx == 2) {
+                trillNote = toChord(el);
+                break;
+            }
         }
     }
     ASSERT_NE(trillNote, nullptr) << "M2 must have a 2nd chord (target of the rest-tick snap)";
@@ -1457,7 +1486,10 @@ TEST_F(Tst_Ornaments, trill_simple_tipo_b6_places_ornament_trill)
     for (Segment* s = m3->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
         if (el && el->isChord()) {
-            if (++ci == 2) { trChord = toChord(el); break; }
+            if (++ci == 2) {
+                trChord = toChord(el);
+                break;
+            }
         }
     }
     ASSERT_NE(trChord, nullptr) << "M3 must have a 2nd chord";
@@ -1486,6 +1518,81 @@ TEST_F(Tst_Ornaments, trill_simple_tipo_b6_places_ornament_trill)
     }
     EXPECT_EQ(trCount4, 1)
         << "Two duplicate TRILL_SHORT ORNs at the same tick must be deduped to one glyph";
+
+    delete score;
+}
+
+// ===========================================================================
+// BUG FIX: Grace-to-main slur (SLURSTART at same Encore tick as appoggiatura)
+// ===========================================================================
+
+TEST_F(Tst_Ornaments, grace_slur_to_main_not_dropped)
+{
+    // ornaments_grace_slur_to_main.enc: 4/4 measure with appoggiatura grace at
+    // Encore tick=0, SLURSTART at tick=0 (alMezuro=0), and regular note at tick=15.
+    //
+    // Both grace and regular note map to MuseScore cumTick=0 (grace steals 15
+    // ticks; regular note starts at measure beat 0). The heuristic converted
+    // tick=15 to measTick+Fraction(15,960) where no chord exists → slur dropped.
+    //
+    // Fix: snap end tick to nearest real segment, detect zero-span as
+    // grace-to-main, and create slur with startElement = grace chord.
+    MasterScore* score = readEncoreScore("ornaments_grace_slur_to_main.enc");
+    ASSERT_NE(score, nullptr);
+
+    int slurCount = 0;
+    bool graceStart = false;
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (sp->isSlur()) {
+            ++slurCount;
+            if (sp->startElement() && sp->startElement()->isChord()) {
+                graceStart = toChord(sp->startElement())->isGrace();
+            }
+        }
+    }
+    EXPECT_GE(slurCount, 1) << "At least one slur must be imported";
+    EXPECT_TRUE(graceStart)
+        << "Slur from appoggiatura grace must have a grace chord as startElement";
+
+    delete score;
+}
+
+TEST_F(Tst_Ornaments, grace_slur_to_later_note_starts_from_grace)
+{
+    // ornaments_grace_slur_to_later.enc: 3/4 measure with half note at tick=0,
+    // then SLURSTART + appoggiatura graces at Encore tick=450, and quarter at tick=480.
+    //
+    // In MuseScore: half=cumTick=0, graces+quarter=cumTick=1/2.
+    // ps.startTick = measTick + Fraction(450,960) = measTick + 15/32.
+    // endTick snaps to measTick + 1/2 (the quarter) > ps.startTick → grace-to-LATER slur.
+    //
+    // Without fix: computeStartElement() creates a TimeTick anchor at 15/32 and
+    //   falls back to firstElement(staff) → half note → wrong start.
+    // With fix: tick2rightSegment(ps.startTick) finds the quarter note which has
+    //   graces → startElement set to first grace chord.
+    MasterScore* score = readEncoreScore("ornaments_grace_slur_to_later.enc");
+    ASSERT_NE(score, nullptr);
+
+    int slurCount = 0;
+    bool graceStart = false;
+    bool endIsQuarter = false;
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (sp->isSlur()) {
+            ++slurCount;
+            if (sp->startElement() && sp->startElement()->isChord()) {
+                graceStart = toChord(sp->startElement())->isGrace();
+            }
+            if (sp->endElement() && sp->endElement()->isChord()) {
+                endIsQuarter = (toChord(sp->endElement())->durationType().type()
+                                == DurationType::V_QUARTER);
+            }
+        }
+    }
+    EXPECT_GE(slurCount, 1) << "Slur from grace to later note must be imported";
+    EXPECT_TRUE(graceStart)
+        << "Slur startElement must be the grace chord, not the half note";
+    EXPECT_TRUE(endIsQuarter)
+        << "Slur endElement must be the quarter note that follows the graces";
 
     delete score;
 }
