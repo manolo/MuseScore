@@ -620,13 +620,16 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
                 DrumInstrument di;
                 di.name = String::number(note->pitch());
                 di.line = std::max(-4, 10 - static_cast<int>(en->position));
-                di.notehead = ((en->faceValue >> 4) == 5)
-                              ? NoteHeadGroup::HEAD_CROSS
-                              : NoteHeadGroup::HEAD_NORMAL;
                 di.stemDirection = DirectionV::UP;
                 ds->setDrum(note->pitch(), di);
             }
-            note->setHeadGroup(ds->noteHead(note->pitch()));
+            // faceValue is the source of truth for the visual notehead; override the
+            // drumset's default (e.g. standard MIDI has HEAD_SLASH for Electric Snare).
+            const NoteHeadGroup nhg = ((en->faceValue >> 4) == 5)
+                                      ? NoteHeadGroup::HEAD_CROSS
+                                      : NoteHeadGroup::HEAD_NORMAL;
+            ds->drum(note->pitch()).notehead = nhg;
+            note->setHeadGroup(nhg);
         }
     }
 
