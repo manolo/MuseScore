@@ -607,11 +607,11 @@ Syllabic role (begin/middle/end/single) derived from hyphen-before / hyphen-afte
 
 | Offset   | Size   | Description                                                                      |
 |----------|--------|----------------------------------------------------------------------------------|
-| +5       | 1      | face value — high nibble: 0=normal, 3=square notehead; low nibble: 1=whole, 2=half, 3=qtr, 4=8th, …, 8=128th |
+| +5       | 1      | face value — high nibble: 0=normal, 3=square notehead, 5=cross/X notehead (cymbal/triangle on PERC staves); low nibble: 1=whole, 2=half, 3=qtr, 4=8th, …, 8=128th |
 | +6       | 1      | grace1 (high-nibble flags, see grace section)                                    |
 | +7       | 1      | grace2                                                                           |
 | +10      | 2      | layout x-position                                                                |
-| +12      | 1      | staff-relative pitch (legacy; not used for playback)                             |
+| +12      | 1      | staff-relative pitch — diatonic steps from C4 (C4=0, D4=1, E4=2, F4=3, … A5=12). On PERC clef staves this byte encodes the visual staff line in Encore; the importer converts it to a MuseScore drumset line: `line = max(-4, 10 − position)`. MuseScore's PERC clef places A4 on the middle line (line=5), so D4→line=9, F4→line=7, A5→line=−2. On pitched staves: legacy display hint, not used for playback. |
 | +13      | 1      | tuplet byte — high nibble = actualN, low nibble = normalN                        |
 | +14      | 1      | dot count (0/1/2/3)                                                              |
 | +15      | 1      | MIDI pitch (0–127)                                                               |
