@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include "engraving/dom/arpeggio.h"
+#include "engraving/dom/drumset.h"
 #include "engraving/dom/articulation.h"
 #include "engraving/dom/barline.h"
 #include "engraving/dom/chord.h"
@@ -736,13 +737,19 @@ TEST_F(Tst_Notes, tie_18byte_intra_chord_arc_no_spurious_tie)
 
     int tieCount = 0;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
-        if (!mb->isMeasure()) { continue; }
+        if (!mb->isMeasure()) {
+            continue;
+        }
         for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
              s; s = s->next(SegmentType::ChordRest)) {
             EngravingItem* el = s->element(0);
-            if (!el || !el->isChord()) { continue; }
+            if (!el || !el->isChord()) {
+                continue;
+            }
             for (Note* n : toChord(el)->notes()) {
-                if (n->tieFor()) { ++tieCount; }
+                if (n->tieFor()) {
+                    ++tieCount;
+                }
             }
         }
     }
@@ -766,13 +773,19 @@ TEST_F(Tst_Notes, tie_18byte_real_forward_still_creates_tie)
 
     int tieCount = 0;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
-        if (!mb->isMeasure()) { continue; }
+        if (!mb->isMeasure()) {
+            continue;
+        }
         for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
              s; s = s->next(SegmentType::ChordRest)) {
             EngravingItem* el = s->element(0);
-            if (!el || !el->isChord()) { continue; }
+            if (!el || !el->isChord()) {
+                continue;
+            }
             for (Note* n : toChord(el)->notes()) {
-                if (n->tieFor()) { ++tieCount; }
+                if (n->tieFor()) {
+                    ++tieCount;
+                }
             }
         }
     }
@@ -1332,6 +1345,67 @@ TEST_F(Tst_Notes, capped_tuplet_note_removed_from_tuplet)
 }
 
 // ===========================================================================
+// BUG FIX: 5-line PERC staff: note positions derived from Encore position byte
+// ===========================================================================
+
+TEST_F(Tst_Notes, perc_clef_note_positions_from_encore_position_byte)
+{
+    // notes_perc_clef_positions.enc: 4/4 PERC clef staff with three pitches at
+    // Encore position bytes 1, 3, 12. faceValue high nibble: 0=normal, 5=cross.
+    //
+    // Without fix: all pitches registered at line=0 with HEAD_SLASH.
+    // With fix: each pitch at a distinct line derived from position_byte;
+    //   HEAD_CROSS for fv high nibble=5, HEAD_NORMAL for high nibble=0.
+    MasterScore* score = readEncoreScore("notes_perc_clef_positions.enc");
+    ASSERT_NE(score, nullptr);
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    std::vector<Note*> notes;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChord()) {
+            Chord* c = toChord(e);
+            if (!c->notes().empty()) {
+                notes.push_back(c->notes().front());
+            }
+        }
+    }
+    ASSERT_GE(notes.size(), 3u);
+
+    EXPECT_EQ(notes[0]->pitch(), 62);
+    EXPECT_EQ(notes[1]->pitch(), 65);
+    EXPECT_EQ(notes[2]->pitch(), 81);
+
+    // Lines derived from Encore position byte via: line = max(-4, 10 - position).
+    // MuseScore PERC clef has A4 at line=5 (middle), so:
+    //   pitch 62, position=1  → line=9  (bottom line, D in PERC clef)
+    //   pitch 65, position=3  → line=7  (2nd line, F in PERC clef)
+    //   pitch 81, position=12 → line=-2 (above staff, A5 in PERC clef)
+    EXPECT_EQ(notes[0]->line(),  9) << "pitch 62 position=1 must be at line 9";
+    EXPECT_EQ(notes[1]->line(),  7) << "pitch 65 position=3 must be at line 7";
+    EXPECT_EQ(notes[2]->line(), -2) << "pitch 81 position=12 must be at line -2";
+
+    // Verify drumset registration: the visual head is determined by the drumset entry.
+    // note->headGroup() is a user-override property (stays HEAD_NORMAL unless the user
+    // explicitly changes it); the rendering path uses drumset->noteHead(pitch) directly.
+    const Drumset* ds = notes[0]->part()->instrument()->drumset();
+    ASSERT_NE(ds, nullptr) << "Staff must have a drumset assigned (PERC clef)";
+
+    // faceValue high nibble=5 (pitch 81) → registered as HEAD_CROSS in drumset
+    EXPECT_EQ(ds->noteHead(81), NoteHeadGroup::HEAD_CROSS)
+        << "fv high nibble=5 must register HEAD_CROSS in drumset";
+
+    // faceValue high nibble=0 (pitch 62, 65) → registered as HEAD_NORMAL
+    EXPECT_EQ(ds->noteHead(62), NoteHeadGroup::HEAD_NORMAL)
+        << "fv high nibble=0 must register HEAD_NORMAL in drumset";
+    EXPECT_EQ(ds->noteHead(65), NoteHeadGroup::HEAD_NORMAL)
+        << "fv high nibble=0 must register HEAD_NORMAL in drumset";
+
+    delete score;
+}
+
+// ===========================================================================
 // BUG FIX: Mixed-duration tuplet with boundary-omitted note gets fill rest
 // ===========================================================================
 
@@ -1367,19 +1441,19 @@ TEST_F(Tst_Notes, mixed_duration_tuplet_boundary_fill)
     // half + 3 tuplet notes + 1 invisible fill rest = 5 elements
     ASSERT_GE(crs.size(), 5u) << "Expected half + 3 tuplet notes + fill rest";
 
-    EXPECT_EQ(crs[0]->tuplet(), nullptr)          << "Half not in tuplet";
+    EXPECT_EQ(crs[0]->tuplet(), nullptr) << "Half not in tuplet";
     EXPECT_EQ(crs[0]->durationType().type(), DurationType::V_HALF);
 
-    ASSERT_NE(crs[1]->tuplet(), nullptr)           << "qtr 1 in tuplet";
-    ASSERT_NE(crs[2]->tuplet(), nullptr)           << "qtr 2 in tuplet";
-    ASSERT_NE(crs[3]->tuplet(), nullptr)           << "8th note in tuplet";
-    EXPECT_EQ(crs[1]->tuplet(), crs[2]->tuplet())  << "qtrs share bracket";
-    EXPECT_EQ(crs[2]->tuplet(), crs[3]->tuplet())  << "8th shares bracket with qtrs";
+    ASSERT_NE(crs[1]->tuplet(), nullptr) << "qtr 1 in tuplet";
+    ASSERT_NE(crs[2]->tuplet(), nullptr) << "qtr 2 in tuplet";
+    ASSERT_NE(crs[3]->tuplet(), nullptr) << "8th note in tuplet";
+    EXPECT_EQ(crs[1]->tuplet(), crs[2]->tuplet()) << "qtrs share bracket";
+    EXPECT_EQ(crs[2]->tuplet(), crs[3]->tuplet()) << "8th shares bracket with qtrs";
 
-    ASSERT_NE(crs[4]->tuplet(), nullptr)           << "Fill rest in tuplet";
-    EXPECT_EQ(crs[3]->tuplet(), crs[4]->tuplet())  << "Fill rest shares bracket";
-    EXPECT_TRUE(crs[4]->isRest())                  << "Fill is a rest";
-    EXPECT_FALSE(crs[4]->visible())                << "Fill rest is invisible";
+    ASSERT_NE(crs[4]->tuplet(), nullptr) << "Fill rest in tuplet";
+    EXPECT_EQ(crs[3]->tuplet(), crs[4]->tuplet()) << "Fill rest shares bracket";
+    EXPECT_TRUE(crs[4]->isRest()) << "Fill is a rest";
+    EXPECT_FALSE(crs[4]->visible()) << "Fill rest is invisible";
     EXPECT_EQ(crs[4]->durationType().type(), DurationType::V_EIGHTH) << "Fill rest is 8th";
 
     delete score;
@@ -2466,14 +2540,19 @@ TEST_F(Tst_Notes, scale_string_numbers_from_anchor_bytes)
     std::vector<int> nums;
     for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
         EngravingItem* el = seg->element(0);
-        if (!el || !el->isChord()) continue;
+        if (!el || !el->isChord()) {
+            continue;
+        }
         for (Note* n : toChord(el)->notes()) {
             for (EngravingItem* sub : n->el()) {
                 if (sub && sub->isFingering()) {
                     Fingering* fg = toFingering(sub);
                     if (fg->textStyleType() == TextStyleType::STRING_NUMBER) {
-                        bool ok; int v = fg->plainText().toInt(&ok);
-                        if (ok) nums.push_back(v);
+                        bool ok;
+                        int v = fg->plainText().toInt(&ok);
+                        if (ok) {
+                            nums.push_back(v);
+                        }
                     }
                 }
             }
@@ -2481,8 +2560,9 @@ TEST_F(Tst_Notes, scale_string_numbers_from_anchor_bytes)
     }
 
     EXPECT_EQ(nums.size(), 4u) << "Anchor byte 0x39 must enable circles on all 4 notes";
-    for (int i = 0; i < (int)nums.size(); ++i)
-        EXPECT_EQ(nums[i], i + 1) << "Note " << i+1 << " must show string " << i+1;
+    for (int i = 0; i < (int)nums.size(); ++i) {
+        EXPECT_EQ(nums[i], i + 1) << "Note " << i + 1 << " must show string " << i + 1;
+    }
 
     delete score;
 }
@@ -2497,14 +2577,18 @@ TEST_F(Tst_Notes, scale_no_anchor_produces_no_circles)
 
     int fingerCount = 0;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
-        if (!mb->isMeasure()) continue;
+        if (!mb->isMeasure()) {
+            continue;
+        }
         for (Segment* seg = toMeasure(mb)->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
             for (size_t v = 0; v < VOICES; ++v) {
                 EngravingItem* el = seg->element(static_cast<track_idx_t>(v));
                 if (el && el->isChord()) {
                     for (Note* n : toChord(el)->notes()) {
                         for (EngravingItem* sub : n->el()) {
-                            if (sub && sub->isFingering()) ++fingerCount;
+                            if (sub && sub->isFingering()) {
+                                ++fingerCount;
+                            }
                         }
                     }
                 }
@@ -2529,7 +2613,9 @@ TEST_F(Tst_Notes, segment_override_15notes_becomes_15_8)
     std::vector<Chord*> chords;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
-        if (el && el->isChord()) chords.push_back(toChord(el));
+        if (el && el->isChord()) {
+            chords.push_back(toChord(el));
+        }
     }
     EXPECT_EQ(chords.size(), 15u) << "All 15 notes must be placed (none dropped)";
 
@@ -2546,7 +2632,9 @@ TEST_F(Tst_Notes, segment_override_15notes_becomes_15_8)
     // No second voice, no rests outside the bracket
     int voice1Chords = 0;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
-        if (s->element(1)) ++voice1Chords;
+        if (s->element(1)) {
+            ++voice1Chords;
+        }
     }
     EXPECT_EQ(voice1Chords, 0) << "Overflow notes must be dropped, not routed to voice 2";
 
@@ -2566,7 +2654,9 @@ TEST_F(Tst_Notes, segment_override_12notes_plus_2plain_becomes_12_6)
     std::vector<Chord*> allChords;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
-        if (el && el->isChord()) allChords.push_back(toChord(el));
+        if (el && el->isChord()) {
+            allChords.push_back(toChord(el));
+        }
     }
     EXPECT_EQ(allChords.size(), 14u) << "12 tuplet + 2 plain = 14 notes total";
 
@@ -2576,7 +2666,7 @@ TEST_F(Tst_Notes, segment_override_12notes_plus_2plain_becomes_12_6)
     EXPECT_EQ(tup->ratio().numerator(), 12);
     EXPECT_EQ(tup->ratio().denominator(), 6);
     for (int i = 0; i < 12; ++i) {
-        EXPECT_EQ(allChords[i]->tuplet(), tup) << "Note " << i+1 << " must be in the [12:6] bracket";
+        EXPECT_EQ(allChords[i]->tuplet(), tup) << "Note " << i + 1 << " must be in the [12:6] bracket";
     }
     // Last 2 are plain (not in any tuplet)
     EXPECT_EQ(allChords[12]->tuplet(), nullptr) << "Trailing note 13 must be plain";
@@ -2599,22 +2689,29 @@ TEST_F(Tst_Notes, segment_override_does_not_fire_for_clean_multiple)
     std::vector<Chord*> chords;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
-        if (el && el->isChord()) chords.push_back(toChord(el));
+        if (el && el->isChord()) {
+            chords.push_back(toChord(el));
+        }
     }
     ASSERT_EQ(chords.size(), 6u) << "All 6 notes must be placed";
 
     // Must form two separate Tuplets, each [3:2]
     Tuplet* t1 = chords[0]->tuplet();
     Tuplet* t2 = chords[3]->tuplet();
-    ASSERT_NE(t1, nullptr); ASSERT_NE(t2, nullptr);
+    ASSERT_NE(t1, nullptr);
+    ASSERT_NE(t2, nullptr);
     EXPECT_NE(t1, t2) << "6 notes with 3:2 must form TWO separate groups, not one [6:m]";
     EXPECT_EQ(t1->ratio().numerator(), 3);
     EXPECT_EQ(t1->ratio().denominator(), 2);
     EXPECT_EQ(t2->ratio().numerator(), 3);
     EXPECT_EQ(t2->ratio().denominator(), 2);
     // Notes 1-3 in group 1, notes 4-6 in group 2
-    for (int i = 0; i < 3; ++i) EXPECT_EQ(chords[i]->tuplet(), t1);
-    for (int i = 3; i < 6; ++i) EXPECT_EQ(chords[i]->tuplet(), t2);
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(chords[i]->tuplet(), t1);
+    }
+    for (int i = 3; i < 6; ++i) {
+        EXPECT_EQ(chords[i]->tuplet(), t2);
+    }
 
     delete score;
 }
@@ -2632,7 +2729,9 @@ TEST_F(Tst_Notes, non_standard_tuplet_dosillo_2_1)
     std::vector<Chord*> chords;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
-        if (el && el->isChord()) chords.push_back(toChord(el));
+        if (el && el->isChord()) {
+            chords.push_back(toChord(el));
+        }
     }
     ASSERT_EQ(chords.size(), 2u) << "Dosillo must produce exactly 2 notes";
 
@@ -2658,7 +2757,9 @@ TEST_F(Tst_Notes, non_standard_tuplet_9_4_nontuplet)
     std::vector<Chord*> chords;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
-        if (el && el->isChord()) chords.push_back(toChord(el));
+        if (el && el->isChord()) {
+            chords.push_back(toChord(el));
+        }
     }
     EXPECT_EQ(chords.size(), 9u) << "All 9 notes must be in the 9:4 bracket";
 
@@ -2666,7 +2767,9 @@ TEST_F(Tst_Notes, non_standard_tuplet_9_4_nontuplet)
     ASSERT_NE(tup, nullptr);
     EXPECT_EQ(tup->ratio().numerator(), 9);
     EXPECT_EQ(tup->ratio().denominator(), 4);
-    for (auto* c : chords) EXPECT_EQ(c->tuplet(), tup);
+    for (auto* c : chords) {
+        EXPECT_EQ(c->tuplet(), tup);
+    }
 
     delete score;
 }
@@ -2684,7 +2787,9 @@ TEST_F(Tst_Notes, last_tuplet_note_short_rdur_not_dropped)
     std::vector<Chord*> chords;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
-        if (el && el->isChord()) chords.push_back(toChord(el));
+        if (el && el->isChord()) {
+            chords.push_back(toChord(el));
+        }
     }
     EXPECT_EQ(chords.size(), 10u)
         << "Note 10 with rdur=6 (< 15) must NOT be dropped by the MIDI artifact filter";
@@ -2712,7 +2817,9 @@ TEST_F(Tst_Notes, voice_overflow_notes_dropped_not_routed_to_voice2)
     int v0Chords = 0;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
-        if (el && el->isChord()) ++v0Chords;
+        if (el && el->isChord()) {
+            ++v0Chords;
+        }
     }
     EXPECT_EQ(v0Chords, 2) << "Only notes 1-2 fit; notes 3-5 must be dropped";
 
@@ -2720,7 +2827,9 @@ TEST_F(Tst_Notes, voice_overflow_notes_dropped_not_routed_to_voice2)
     int v1Chords = 0;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(1);
-        if (el && el->isChord()) ++v1Chords;
+        if (el && el->isChord()) {
+            ++v1Chords;
+        }
     }
     EXPECT_EQ(v1Chords, 0) << "Overflow notes must be dropped, NOT routed to voice 2";
 
@@ -2743,7 +2852,9 @@ TEST_F(Tst_Notes, no_spurious_rests_inside_active_tuplet_gapsnap_suppressed)
     Tuplet* activeTup = nullptr;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
-        if (!el) continue;
+        if (!el) {
+            continue;
+        }
         if (el->isChord()) {
             ++chordCount;
             activeTup = toChord(el)->tuplet();
@@ -2759,7 +2870,7 @@ TEST_F(Tst_Notes, no_spurious_rests_inside_active_tuplet_gapsnap_suppressed)
         << "No visible rests must appear inside the tuplet bracket (gap-snap suppressed)";
 
     delete score;
-}TEST_F(Tst_Notes, chord_symbol_snaps_to_beat1_despite_midi_offset)
+} TEST_F(Tst_Notes, chord_symbol_snaps_to_beat1_despite_midi_offset)
 {
     // Fixture: quarter note at tick=0, chord symbol CHD at tick=6 (6/960 offset),
     // quarter note at tick=240. CHD must attach to the beat-1 segment.
@@ -2809,7 +2920,10 @@ TEST_F(Tst_Notes, chord_symbol_large_midi_drift_still_on_beat1)
 
     bool harmonyOnBeat1 = false;
     for (EngravingItem* ann : first->annotations()) {
-        if (ann && ann->isHarmony()) { harmonyOnBeat1 = true; break; }
+        if (ann && ann->isHarmony()) {
+            harmonyOnBeat1 = true;
+            break;
+        }
     }
     EXPECT_TRUE(harmonyOnBeat1)
         << "CHD@87 (large drift from note@0) must still snap to beat-1 segment";
@@ -2835,11 +2949,14 @@ TEST_F(Tst_Notes, chord_symbol_snaps_to_beat_not_nearby_subdivision)
 
     bool harmonyOnBeat1 = false;
     for (EngravingItem* ann : beat1seg->annotations()) {
-        if (ann && ann->isHarmony()) { harmonyOnBeat1 = true; break; }
+        if (ann && ann->isHarmony()) {
+            harmonyOnBeat1 = true;
+            break;
+        }
     }
     EXPECT_TRUE(harmonyOnBeat1)
         << "CHD@62 with note at tick=60 only 2t away must NOT snap to tick=60; "
-           "beat-floor forces it to tick=0 (beat 1)";
+        "beat-floor forces it to tick=0 (beat 1)";
 
     // Second segment (tick=60) must NOT have a harmony
     Segment* seg60 = beat1seg->next(SegmentType::ChordRest);
