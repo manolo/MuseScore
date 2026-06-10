@@ -197,6 +197,40 @@ static void logEncFileInfo(const EncFile& enc)
 }
 
 
+// Reduce spatium until the score fits within enc.header.pageCount pages.
+// Called after SystemLocks are in place (resolveAll) so the horizontal layout
+// (measures per system) is frozen; only the vertical system height changes.
+// The spatium floor is set to 0.4mm (~0.016in) to prevent unreadable output.
+static void fitSpatiumToPageCount(MasterScore* score, const EncFile& enc)
+{
+    const int targetPages = static_cast<int>(enc.header.pageCount);
+    if (targetPages <= 0 || enc.lines.empty()) {
+        return;
+    }
+
+    static constexpr double SPATIUM_FLOOR_MM = 0.40;   // ~0.016 in minimum
+    static constexpr double SPATIUM_FLOOR    = SPATIUM_FLOOR_MM / 25.4 * 1200.0;
+
+    double spatium = score->style().spatium();
+
+    for (int iter = 0; iter < 20; ++iter) {
+        score->style().setSpatium(spatium);
+        score->doLayout();
+
+        const int actualPages = static_cast<int>(score->pages().size());
+        if (actualPages <= targetPages) {
+            break;
+        }
+
+        spatium *= 0.9;
+        if (spatium <= SPATIUM_FLOOR) {
+            score->style().setSpatium(SPATIUM_FLOOR);
+            break;
+        }
+    }
+    score->style().setSpatium(spatium);
+}
+
 static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
 {
     if (!ps.hasData) {
@@ -261,6 +295,11 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     score->spell();
     addTitleFrame(score, enc.titleBlock);
     score->setUpTempoMap();
+
+    // SystemLocks (added by resolveAll) fix horizontal layout.
+    // Now reduce spatium vertically until the page count matches the original.
+    // Called after addTitleFrame so the VBox is included in the page count.
+    fitSpatiumToPageCount(score, enc);
 }
 
 Err importEncore(MasterScore* score, const QString& path)
