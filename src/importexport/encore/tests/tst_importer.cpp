@@ -920,6 +920,58 @@ TEST_F(Tst_Importer, v0c4_slur_pixel_span)
     delete score;
 }
 
+// Regression: pixel-span heuristic in 6/8 (compound meter) used beatTicks×timeSigDen as whole-note
+// ticks (giving 240×8=1920) instead of durTicks×timeSigDen/timeSigNum (=720×8/6=960).
+// This caused startEncTick to be wrong, so firstNoteXoff was read from the wrong note and
+// slurs ended too late.
+TEST_F(Tst_Importer, v0c4_slur_pixel_span_6_8)
+{
+    // 6/8 measure: SLURSTART at enc_tick=120 (note 2, xoff=30), xoffset2=50.
+    // pixelSpan=20. firstNoteXoff=30 (note 2). targetEndXoff=50 → note 3 at tick=240. ✓
+    MasterScore* score = readEncoreScore("importer_slur_pixel_span_6_8.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_slur_pixel_span_6_8.enc";
+
+    Slur* found = nullptr;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isSlur()) {
+            found = toSlur(sp);
+            break;
+        }
+    }
+    ASSERT_NE(found, nullptr) << "A slur must be created";
+    // Start: note 2 at enc_tick=120 → measTick + 120/960 = measTick + 1/8
+    EXPECT_EQ(found->tick(), Fraction(1, 8))
+        << "slur start must be at the 2nd note (enc_tick=120 = 1/8 from measure start)";
+    // End: note 3 at enc_tick=240 → measTick + 240/960 = measTick + 1/4
+    EXPECT_EQ(found->tick2(), Fraction(1, 4))
+        << "slur end must be at note 3 (enc_tick=240 = 1/4); "
+        "with wrong formula it lands at note 4 (enc_tick=360 = 3/8)";
+    delete score;
+}
+
+// Regression: SLURSTART xoffset > 127 must be treated as unsigned for pixel-span computation.
+// qint8 sign-extension gives a huge spurious span; quint8 cast gives the correct 1-2 note span.
+TEST_F(Tst_Importer, v0c4_slur_xoffset_unsigned)
+{
+    // xoffset=0x8A (138 unsigned, -118 signed). xoffset2=149. Note2 xoff=88.
+    // Unsigned: span=11. target=88+11=99 → note3. Signed: span=267. target=355 → no match.
+    MasterScore* score = readEncoreScore("importer_slur_xoffset_unsigned.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_slur_xoffset_unsigned.enc";
+
+    Slur* found = nullptr;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isSlur()) { found = toSlur(sp); break; }
+    }
+    ASSERT_NE(found, nullptr) << "A slur must be created";
+    EXPECT_EQ(found->tick(), Fraction(1, 4))
+        << "slur starts at note 2 (tick=240 = 1/4)";
+    EXPECT_EQ(found->tick2(), Fraction(1, 2))
+        << "slur ends at note 3 (tick=480 = 1/2); with signed xoffset it lands too late";
+    delete score;
+}
+
 // Regression: pixel-span heuristic skips cross-measure slurs (alMezuro >= 1) because xoffsets reset at barlines.
 // Pins the fallback: alMezuro=1 slur must anchor on the last ChordRest of the target measure.
 TEST_F(Tst_Importer, v0c4_slur_cross_measure_fallback)
