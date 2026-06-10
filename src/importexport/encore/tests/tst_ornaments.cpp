@@ -1395,3 +1395,97 @@ TEST_F(Tst_Ornaments, artic_byte_dedup_no_duplicate_ornament_on_chord)
 
     delete score;
 }
+
+// ===========================================================================
+// BUG FIX: TRILL_SIMPLE (0xB6) standalone ornament glyph
+// ===========================================================================
+
+TEST_F(Tst_Ornaments, trill_simple_tipo_b6_places_ornament_trill)
+{
+    // TRILL_SIMPLE (tipo=0xB6) is a 16-byte standalone trill mark.
+    // Case 1: ORN at same tick as a note places ornamentTrill on that note.
+    // Case 2: ORN at a REST tick snaps forward to the next note.
+    MasterScore* score = readEncoreScore("ornaments_trill_simple_on_note.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "TRILL_SIMPLE test must produce clean score: " << ret.text();
+
+    // M1: ORN@tick=0 co-located with first quarter note → trill on that note
+    Measure* m1 = score->firstMeasure();
+    ASSERT_NE(m1, nullptr);
+    Segment* seg1 = m1->first(SegmentType::ChordRest);
+    ASSERT_NE(seg1, nullptr);
+    EngravingItem* el1 = seg1->element(0);
+    ASSERT_NE(el1, nullptr);
+    ASSERT_TRUE(el1->isChord());
+    Chord* chord1 = toChord(el1);
+    int trillCount1 = 0;
+    for (Articulation* a : chord1->articulations()) {
+        if (a && a->isOrnament() && toOrnament(a)->symId() == SymId::ornamentShortTrill) {
+            ++trillCount1;
+        }
+    }
+    EXPECT_EQ(trillCount1, 1)
+        << "TRILL_SHORT (0xB6) at note tick must place ornamentShortTrill on that note";
+
+    // M2 (5/8): ORN at tick=1/8 (REST position) must snap to the 2nd chord (tick=1/4)
+    Measure* m2 = m1->nextMeasure();
+    ASSERT_NE(m2, nullptr);
+    Chord* trillNote = nullptr;
+    int chordIdx = 0;
+    for (Segment* s = m2->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) {
+            if (++chordIdx == 2) { trillNote = toChord(el); break; }
+        }
+    }
+    ASSERT_NE(trillNote, nullptr) << "M2 must have a 2nd chord (target of the rest-tick snap)";
+    int trillCount2 = 0;
+    for (Articulation* a : trillNote->articulations()) {
+        if (a && a->isOrnament() && toOrnament(a)->symId() == SymId::ornamentShortTrill) {
+            ++trillCount2;
+        }
+    }
+    EXPECT_EQ(trillCount2, 1)
+        << "TRILL_SHORT (0xB6) at REST tick must snap forward and place ornamentShortTrill on next note";
+
+    // M3 (4/4): TRILL_TR (0xB0) at tick=1/4 on second quarter note → ornamentTrill
+    Measure* m3 = m2->nextMeasure();
+    ASSERT_NE(m3, nullptr);
+    Chord* trChord = nullptr;
+    int ci = 0;
+    for (Segment* s = m3->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) {
+            if (++ci == 2) { trChord = toChord(el); break; }
+        }
+    }
+    ASSERT_NE(trChord, nullptr) << "M3 must have a 2nd chord";
+    int trCount3 = 0;
+    for (Articulation* a : trChord->articulations()) {
+        if (a && a->isOrnament() && toOrnament(a)->symId() == SymId::ornamentTrill) {
+            ++trCount3;
+        }
+    }
+    EXPECT_EQ(trCount3, 1) << "TRILL_TR (0xB0) must place ornamentTrill on its target note";
+
+    // M4 (4/4): two identical TRILL_SHORT ORNs at tick=0 → dedup places exactly one glyph
+    Measure* m4 = m3->nextMeasure();
+    ASSERT_NE(m4, nullptr);
+    Segment* seg4 = m4->first(SegmentType::ChordRest);
+    ASSERT_NE(seg4, nullptr);
+    EngravingItem* el4 = seg4->element(0);
+    ASSERT_NE(el4, nullptr);
+    ASSERT_TRUE(el4->isChord());
+    Chord* chord4 = toChord(el4);
+    int trCount4 = 0;
+    for (Articulation* a : chord4->articulations()) {
+        if (a && a->isOrnament() && toOrnament(a)->symId() == SymId::ornamentShortTrill) {
+            ++trCount4;
+        }
+    }
+    EXPECT_EQ(trCount4, 1)
+        << "Two duplicate TRILL_SHORT ORNs at the same tick must be deduped to one glyph";
+
+    delete score;
+}

@@ -246,14 +246,51 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         break;
     }
     case EncOrnamentType::TRILL_START:
-    case EncOrnamentType::TRILL_ALT: {
+    case EncOrnamentType::TRILL_ALT:
+    case EncOrnamentType::TRILL_TR:
+    case EncOrnamentType::TRILL_SHORT: {
         // Chord not built yet; defer to post-measure pass.
         // TRILL_START (0x36): can become a Trill spanner when a TRILL_END or alMezuro marks the end.
         // TRILL_ALT (0x37): secondary trill mark within a span; always creates an Ornament glyph.
+        // TRILL_TR (0xB0): standalone 16-byte "tr" glyph; always ornamentTrill, never a spanner.
+        // TRILL_SHORT (0xB6): standalone 16-byte short-trill glyph; ornamentShortTrill, never a spanner.
         PendingTrill pt;
-        pt.tick    = elemTick;
+        pt.isAlt    = (eo->ornType() != EncOrnamentType::TRILL_START);
+        pt.isSimple = (eo->ornType() == EncOrnamentType::TRILL_TR
+                       || eo->ornType() == EncOrnamentType::TRILL_SHORT);
+        if (pt.isSimple) {
+            // Snap to the visual position of the glyph. When Encore stores a secondary
+            // wavy-line marker at a distant tick with an xoffset well to the left of the
+            // registered note (e.g. trill wavy-line endpoint), the snap collapses it onto
+            // the primary glyph's note; dedup in the resolver then skips the duplicate.
+            // Use a 20-pixel threshold: small nudges (< 20px) are visual alignment only.
+            const int ornXoff = static_cast<int>(eo->xoffset);
+            int crXoffAtTick = -1;
+            for (const auto& elem : encMeas.elements) {
+                const EncMeasureElem* em = elem.get();
+                if (static_cast<int>(em->tick) != static_cast<int>(e->tick)) { continue; }
+                if (em->staffIdx != staffIdx || em->voice != voice) { continue; }
+                if (em->type == static_cast<quint8>(EncElemType::NOTE)) {
+                    crXoffAtTick = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
+                    break;
+                } else if (em->type == static_cast<quint8>(EncElemType::REST)) {
+                    crXoffAtTick = static_cast<int>(static_cast<const EncRest*>(em)->xoffset);
+                    break;
+                }
+            }
+            constexpr int TRILL_SNAP_THRESHOLD = 20;
+            if (crXoffAtTick >= 0 && ornXoff < crXoffAtTick - TRILL_SNAP_THRESHOLD) {
+                pt.tick = snapTickByXoffset(elemTick);
+            } else {
+                pt.tick = elemTick;
+            }
+            pt.simpleSymId = (eo->ornType() == EncOrnamentType::TRILL_SHORT)
+                             ? SymId::ornamentShortTrill
+                             : SymId::ornamentTrill;
+        } else {
+            pt.tick = elemTick;
+        }
         pt.track   = track;
-        pt.isAlt   = (eo->ornType() == EncOrnamentType::TRILL_ALT);
         if (!pt.isAlt) {
             pt.alMezuro = static_cast<int>(eo->alMezuro);
             pt.measIdx  = static_cast<size_t>(measIdx);
