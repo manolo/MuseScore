@@ -689,3 +689,108 @@ TEST_F(Tst_Text, meas_bpm_suppressed_when_orn_tempo_at_later_tick)
 
     delete score;
 }
+
+// ===========================================================================
+// FIX: v0xC2 lyric text was read at element offset +20 instead of +18, dropping
+// the first two bytes of every syllable (e.g. "ver"→"r", "dad"→"d", "Es"→"").
+// Root cause: the 9-byte skip after the kie field should be 7 bytes for v0xC2.
+// Fix: EncFormatReader_V0xC4::lyricTextGapAfterKie() returns 7 when !m_hasMetaTables.
+//
+// FIX: lyric matching used a note-first greedy algorithm that let later syllables
+// steal the nearest note before earlier ones could claim it. Switched to lyrics-first.
+//
+// FIX: segEncTick formula used encTicksPerQuarter = beatTicks regardless of meter.
+// For compound meters (6/8, 9/8) beatTicks represents a dotted-quarter beat (= 1.5
+// quarter notes), so encTicksPerQuarter must be beatTicks * 2/3.
+// Test file: J-RONDA.ENC (v0xC2, 6/8, "Jota de ronda" - Spanish folk tune).
+// Before fixes: 24 garbled single-char fragments. After: 56 complete syllables.
+// ===========================================================================
+
+static std::vector<String> collectAllLyrics(MasterScore* score)
+{
+    std::vector<String> lyrics;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (track_idx_t t = 0; t < score->ntracks(); ++t) {
+                EngravingItem* el = s->element(t);
+                if (!el || !el->isChord()) {
+                    continue;
+                }
+                for (Lyrics* ly : toChord(el)->lyrics()) {
+                    lyrics.push_back(ly->plainText());
+                }
+            }
+        }
+    }
+    return lyrics;
+}
+
+TEST_F(Tst_Text, lyrics_v0xc2_text_offset_full_words)
+{
+    MasterScore* score = readEncoreScore("jronda_68_lyrics.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> all = collectAllLyrics(score);
+    // Before the v0xC2 +18 fix, the importer returned only 24 garbled single-char
+    // fragments. After the fix, all ~56 syllables are imported.
+    EXPECT_GE(all.size(), 50u)
+        << "expected ~56 lyrics after v0xC2 offset fix";
+
+    auto contains = [&](const String& s) {
+        return std::find(all.begin(), all.end(), s) != all.end();
+    };
+    EXPECT_TRUE(contains(u"Es")) << "'Es' must be present (was '' before fix)";
+    EXPECT_TRUE(contains(u"ver")) << "'ver' must be present (was 'r' before fix)";
+    EXPECT_TRUE(contains(u"dad")) << "'dad' must be present (was 'd' before fix)";
+    EXPECT_TRUE(contains(u"que")) << "'que' must be present (was 'e' before fix)";
+    EXPECT_TRUE(contains(u"ri")) << "'ri' must be present";
+    EXPECT_TRUE(contains(u"lim")) << "'lim' must be present (was 'm' before fix)";
+    EXPECT_TRUE(contains(u"pia")) << "'pia' must be present (was 'a' before fix)";
+
+    // These single-char garbled fragments must not appear after the fix.
+    EXPECT_FALSE(contains(u"r")) << "garbled fragment 'r' must not appear after offset fix";
+    EXPECT_FALSE(contains(u"d")) << "garbled fragment 'd' must not appear after offset fix";
+
+    delete score;
+}
+
+TEST_F(Tst_Text, lyrics_compound_meter_all_syllables_matched)
+{
+    MasterScore* score = readEncoreScore("jronda_68_lyrics.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<String> all = collectAllLyrics(score);
+    // In 6/8 (compound meter, beatTicks=360), the segEncTick formula must use
+    // encTicksPerQuarter = beatTicks * 2/3 = 240 rather than beatTicks = 360.
+    // Using 360 inflates note positions (beat 2 appeared at segEncTick=540 instead of
+    // 360), placing them out of range of the lyrics. Before the compound-meter fix,
+    // several syllables in every 6/8 measure were dropped.
+    // Count occurrences of "Es", "ver", "dad" to verify all three refrain occurrences
+    // are imported (the refrain "Es ver-dad..." repeats three times in J-RONDA).
+    int countEs = 0, countVer = 0, countDad = 0;
+    for (const String& s : all) {
+        if (s == u"Es") {
+            ++countEs;
+        }
+        if (s == u"ver") {
+            ++countVer;
+        }
+        if (s == u"dad") {
+            ++countDad;
+        }
+    }
+    EXPECT_GE(countEs, 2)
+        << "'Es' must appear at least twice; before compound-meter fix: 0 or 1 occurrences.";
+    EXPECT_GE(countVer, 3)
+        << "'ver' must appear at least three times; before compound-meter fix: 0 occurrences.";
+    EXPECT_GE(countDad, 3)
+        << "'dad' must appear at least three times; before compound-meter fix: 0 occurrences.";
+
+    delete score;
+}
