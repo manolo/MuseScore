@@ -418,7 +418,12 @@ Type 5. Variable size. Offsets from element start:
 | 0xC4    | UPBOW         | up-bow stroke (V) as size-16 ORN; maps to Articulation stringsUpBow             |
 | 0xC5    | DOWNBOW       | down-bow stroke (П) as size-16 ORN; maps to Articulation stringsDownBow         |
 | 0xC9    | STACCATO      | per-chord staccato dot                                                           |
+| 0xCC    | FERMATA_ABOVE | standalone fermata above (size-16 ORN; yoffset > 0)                             |
+| 0xCD    | FERMATA_BELOW | standalone fermata below (size-16 ORN; yoffset < 0)                             |
 | 0xEF    | TREMOLO_32B   | alternate triple tremolo (ORN at tick == durTicks); also maps to R32             |
+| 0xA3    | REPEAT_MEAS   | "%" repeat-last-bar glyph (size-16 ORN); replaces measure content with MeasureRepeat |
+| 0xA7    | CAESURA       | caesura (//) breath element placed after preceding note (size-16 ORN)           |
+| 0xA8    | BREATH_COMMA  | comma breath mark placed after preceding note (size-16 ORN)                     |
 
 **Undecoded subtypes.** Silently ignored; observed in corpus:
 
@@ -628,32 +633,43 @@ Each byte holds one or two glyphs:
 
 | Value        | Glyphs                    |
 |--------------|---------------------------|
-| 0x04–0x07    | trill-mark                |
-| 0x0A, 0x0C   | inverted-mordent          |
-| 0x0B, 0x2F   | mordent                   |
-| 0x12         | accent (`->`)             |
-| 0x13         | marcato (`-^`)            |
-| 0x14         | accent + tenuto           |
-| 0x15         | marcato + staccato        |
-| 0x16         | accent + staccatissimo    |
-| 0x17         | accent + staccato         |
-| 0x18         | up bow                    |
-| 0x19         | down bow                  |
-| 0x1C         | tenuto (`--`)             |
-| 0x1D         | staccato (`-.`)           |
+| 0x04         | trill (plain; no accidental on upper neighbor)                     |
+| 0x05         | trill to minor second (flat upper neighbor; `intervalAbove=MINOR`) |
+| 0x06         | trill to augmented second (sharp; `intervalAbove=AUGMENTED`)       |
+| 0x07         | trill to major second (natural; `intervalAbove=MAJOR`)             |
+| 0x08         | turn                                                               |
+| 0x09         | inverted turn                                                      |
+| 0x0A, 0x0C   | inverted-mordent                                                   |
+| 0x0B, 0x2F   | mordent                                                            |
+| 0x12         | accent (`->`)                                                      |
+| 0x13         | marcato (`-^`)                                                     |
+| 0x14         | accent + tenuto                                                    |
+| 0x15         | marcato + staccato                                                 |
+| 0x16         | accent + staccatissimo                                             |
+| 0x17         | accent + staccato                                                  |
+| 0x18         | up bow                                                             |
+| 0x19         | down bow                                                           |
+| 0x1B         | stopped horn/brass (+)                                             |
+| 0x1C         | tenuto (`--`)                                                      |
+| 0x1D         | staccato (`-.`)                                                    |
+| 0x1E, 0x1F   | harmonic                                                           |
 | 0x20–0x22    | fermata variants; **but 0x20/0x21 on a note with tuplet != 0 means "tuplet bracket above/below" (not a fermata)** |
-| 0x24         | tenuto + staccato         |
-| 0x25         | marcato + tenuto          |
-| 0x28–0x2D    | staccatissimo combos      |
+| 0x24         | tenuto + staccato                                                  |
+| 0x25         | marcato + tenuto                                                   |
+| 0x28–0x2D    | staccatissimo combos                                               |
+| 0x2E         | inverted turn                                                      |
+| 0x30         | half-stopped horn (circle-plus)                                    |
 
 ### Technical markings (reuse articulation slots)
 
-| Byte         | Meaning          |
-|--------------|------------------|
-| 0x0D–0x11    | fingering 1–5    |
-| 0x1E, 0x1F   | harmonic         |
-| 0x44, 0x45   | thumb-position   |
-| 0x46         | open-string      |
+| Byte         | Meaning                                                        |
+|--------------|----------------------------------------------------------------|
+| 0x0D–0x11    | fingering 1–5                                                  |
+| 0x1E, 0x1F   | harmonic (see above)                                           |
+| 0x44, 0x45   | thumb-position                                                 |
+| 0x46         | open-string (plain Fingering "0", not circled)                |
+| 0x47         | "stick" technique; no standard SMuFL equivalent (not imported) |
+| 0x39–0x40    | scale string numbers 1–8 (byte `0x38 + N` = string N); when at least one such byte appears in a measure, all notes in that measure with options bit 0 set also display their scale-degree position as a circled string number |
 
 ### Single-note tremolos (articulation slots)
 
@@ -690,8 +706,27 @@ Notated duration = face value + dot count + tuplet byte.
 The playback duration at +16 diverges (live recording, ties, tuplets).
 
 **Tuplets.** Either explicit byte `(actualN << 4) | normalN` or implicit (playback duration
-≈ faceTicks × 2/3 or 4/5). Supported explicit ratios: 3:2 (`0x32`), 4:3 (`0x43`), 5:4 (`0x54`),
-6:4 (`0x64`). Implicit detection applies only to v0xC2 files.
+≈ faceTicks × 2/3 or 4/5). Implicit detection applies only to v0xC2 files.
+
+Supported explicit ratios (importer creates a Tuplet bracket):
+
+| Ratio  | Example               | Constraint |
+|--------|-----------------------|------------|
+| 2:1    | dosillo de redonda    | normalN × baseLen must be TDuration-aligned |
+| 2:3    | compound duplet       | |
+| 2:4    | 2 in 4 beats          | |
+| 3:2    | triplet               | |
+| 4:1, 4:2, 4:3 | quadruplet  | |
+| 5:2, 5:3, 5:4, 5:6, 5:8 | quintuplet | 5:4 is the standard; others need normalN × baseLen ∈ TDuration |
+| 6:4, 6:7, 6:8 | sextuplet | |
+| 7:4, 7:6, 7:8 | septuplet | |
+| 8:4, 8:6 | octuplet | |
+| 9:4, 9:6, 9:8 | nontuplet | 9:5 is NOT supported (5/8 is not a TDuration-aligned fraction) |
+| 10:6, 10:8 | decuplet | |
+
+Ratios with normalN ∈ {5, 9, 10, 15, ...} produce Tuplet.ticks = normalN × baseLen that
+cannot be represented as a standard TDuration (e.g. 9:5 with 8th gives ticks=5/8, which
+is not a valid note value). Such ratios are left as plain notes without a bracket.
 
 **Beat-relative face values.** In compound and simple meters where one beat equals an eighth
 (e.g. 6/8, 8/8, 12/8), Encore stores the face value as the number of "beats", not as an
@@ -826,6 +861,147 @@ displays back as 0.097".
 **Zero-margin files.** When all four margins are 0, `top = left = 0` and
 `bottomEdge = pageHeight_pts`, `rightEdge = pageWidth_pts`. The importer
 accepts this (guard requires `bottomEdge > 0 && rightEdge > 0`).
+
+---
+
+## Importer: measure and tuplet rules
+
+This section documents the decisions the importer makes when Encore content does not map
+cleanly to standard MuseScore notation.
+
+### Measure length: fill and discard rules
+
+Encore does not require measures to be completely filled with notes and rests. The importer
+enforces correct measure length using the following rules, applied in order:
+
+1. **Fill with rests.** After all notes are placed, MuseScore's `checkMeasure` fills any
+   gaps with invisible gap rests so that every voice sums to exactly the measure duration.
+
+2. **Overshoot removal (small).** If the voice total exceeds the measure length by ≤ 1/24
+   of a whole note after gap-fill, the importer removes the smallest trailing gap rests
+   until the sum is correct.
+
+3. **Undershoot fill (small).** If the voice total falls short by ≤ 1/24, a single
+   invisible V_MEASURE gap rest is added for the deficit.
+
+4. **Hard nuclear cap.** If the voice still overflows after steps 1–3 (by any amount),
+   trailing ChordRest elements are removed from the end of the voice, smallest-first, until
+   the sum is ≤ measure length. Any remaining deficit is filled with a gap rest.
+   This guarantees the importer never produces a corrupt measure (`sanityCheck` always passes).
+
+5. **Notes discarded, not moved.** Notes that arrive after the voice is already full
+   (`cumTick ≥ measure->ticks()`) are **silently dropped**. They are never routed to a
+   second MuseScore voice (voice 1). Encore sometimes stores multiple MIDI recording passes
+   in the same voice slot; the importer treats only the first fill as valid and discards the
+   rest.
+
+6. **Anacrusis / pickup measure.** When the first measure's time signature differs from the
+   score's nominal time signature, it is treated as a pickup measure (`isIrregular = true`).
+   No fill rests are added beyond the pickup duration.
+
+### Tuplets: compaction into available space
+
+Encore freely allows writing more tuplet notes than the nominal group size. For example,
+a phrase encoded as 12 notes all carrying `tup = 9:5` (nine-in-five), or 15 notes all
+carrying `tup = 9:5`, cannot be directly represented by standard groups without overflowing
+the measure.
+
+The importer detects this situation and **re-computes the tuplet ratio to fit exactly in
+the available space**. The algorithm, applied before the regular explicit-group logic:
+
+For each contiguous run of N notes in a voice, all sharing the same explicit tuplet byte
+`tup = an:nn` and the same face value `fv`:
+
+1. N must be > an (more notes than one stated group).
+2. N must **not** be an exact multiple of an (otherwise the regular logic creates the
+   correct number of standard groups: e.g. N=6, an=3 → two `[3:2]` groups, no override).
+3. The "non-override interpretation" must **overflow** the remaining measure space:
+   `floor(N/an) × fv × nn + (N%an) × fv + trailingDur > durTicks`.
+   If the standard interpretation already fits, no override is needed.
+4. Compute:
+   ```
+   available = durTicks − leadingDur − trailingDur
+   m = round(available / fv_ticks)
+   ```
+   where `leadingDur` = actual duration of notes before this run (accounting for their own
+   tuplet ratios), and `trailingDur` = actual duration of notes after this run.
+5. If `m > 0` and `m × fv` is a standard TDuration-aligned fraction (e.g. half, dotted
+   half, whole), create a single `[N:m/fv]` bracket for all N notes.
+
+**Examples:**
+
+| Encore input | Available space | Computed [N:m] | Result |
+|---|---|---|---|
+| 15 notes `tup=9:5`, fv=8th, 4/4 alone | 960t | m=960/120=8 | `[15:8/eighth]` fills 1 measure |
+| 12 notes `tup=9:5`, fv=8th + 2 plain 8ths at end | 720t | m=720/120=6 | `[12:6/eighth]` (3/4) + 2×(1/8) = 1 |
+| 10 notes `tup=9:4`, fv=quarter, 4/4 alone | 960t | m=960/240=4 | `[10:4/quarter]` fills 1 measure |
+
+The rule works at any position: leading notes before the run reduce `available`, trailing
+notes after the run also reduce it.
+
+**Accepted normalN values for Tuplet.ticks safety:**
+`normalN ∈ {1, 2, 3, 4, 6, 7, 8}` always produce a TDuration-aligned `normalN × baseLen`.
+normalN=5 and 10 give non-standard fractions (e.g. 5/8, 5/4) and cannot be stored in
+MuseScore's Tuplet.ticks without crashing beam layout. As a special case, ratios with
+normalN=5 that trigger the compaction rule are overridden to a safe normalN instead
+(e.g. 9:5 → 15:8, 12:9-5 → 12:6).
+
+### Tuplets: nested triplets
+
+When a measure contains a 3:2 triplet group that closes via the no-downdate rule (the
+second note has a smaller face value than the first, downdating the threshold) and the
+triggering note together with the next `actualN-1` notes of the same face value form a
+complete inner triplet, a **nested Tuplet** is created:
+
+- Outer 3:2/eighth: spans one beat. Elements = {note_a, inner-triplet, note_b}.
+- Inner 3:2/sixteenth: nested inside outer. Elements = 3 sixteenth notes.
+
+The inner Tuplet's `setTuplet(outerTuplet)` links them; MuseScore renders the standard
+nested bracket notation. Advances use the doubly-nested ratio (inner × outer) to keep
+cumTick exact so subsequent plain notes are placed correctly.
+
+### Tuplets: 9:5 nontuplet
+
+9:5 is supported when the compaction rule fires (see above). When 9:5 notes do NOT trigger
+the compaction rule (i.e. exactly 9 notes at the beginning of the measure), the group is
+created as a standard `[9:5/eighth]`:
+- `Tuplet.ticks = 5/8` is non-standard but is set AFTER all 9 notes are placed (mirroring
+  MuseScore's `sanitizeTuplet()` path, which avoids the debug-build assertion in
+  `TDuration(Fraction, truncate=false)`).
+- `beam.cpp` uses `TDuration(tuplet->ticks(), true/*truncate*/)` to avoid asserting on
+  non-standard spans during beam-break calculation.
+
+### Last note of a measure-spanning tuplet
+
+The last note of a tuplet that spans to the very end of a measure often has a very short
+`realDuration` (rdur) — e.g. a note at tick 954 in a 960t measure has rdur≈6 — because
+Encore truncates playback durations at the barline. The importer's MIDI-artifact filter
+(`rdur > CHORD_CLUSTER_THRESHOLD=4 && rdur < 15 → skip`) would otherwise drop this note.
+
+**Fix:** notes in `validTupletGroupMember` bypass the rdur-based artifact filter. Their
+group membership already guarantees they are legitimate notation notes.
+
+### Tuplet advances inside active groups
+
+Gap-snap (advancing cumTick to the note's face-value grid position when a gap is detected)
+is **suppressed** while a tuplet group is active (`inActiveTuplet = true`). Tuplet notes
+are placed by cumTick advance, not by their MIDI tick. Firing gap-snap inside a tuplet
+would create spurious rests and misalign subsequent notes.
+
+### Voice assignment rules
+
+| Encore voice byte | MuseScore voice |
+|---|---|
+| 0 | 0 |
+| 1 | 1 |
+| 2 | 2 (or staff 2 voice 0 for grand-staff instruments) |
+| 3 | 3 |
+| ≥ 4 (out-of-band) | 0 of the adjacent staff |
+| `staffWithin > 0` | staffIdx + staffWithin, voice remapped |
+
+**No multi-stream overflow.** If cumTick fills the measure for a given voice, any
+additional notes with the same Encore voice byte are dropped. They are never routed to
+the next MuseScore voice.
 
 ---
 
