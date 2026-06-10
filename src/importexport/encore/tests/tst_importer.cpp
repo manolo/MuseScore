@@ -25,6 +25,7 @@
 #include "engraving/dom/barline.h"
 #include "engraving/dom/chord.h"
 #include "engraving/dom/clef.h"
+#include "engraving/dom/keysig.h"
 #include "engraving/dom/dynamic.h"
 #include "engraving/dom/hairpin.h"
 #include "engraving/dom/rest.h"
@@ -962,7 +963,10 @@ TEST_F(Tst_Importer, v0c4_slur_xoffset_unsigned)
     Slur* found = nullptr;
     for (const auto& kv : score->spanner()) {
         Spanner* sp = kv.second;
-        if (sp && sp->isSlur()) { found = toSlur(sp); break; }
+        if (sp && sp->isSlur()) {
+            found = toSlur(sp);
+            break;
+        }
     }
     ASSERT_NE(found, nullptr) << "A slur must be created";
     EXPECT_EQ(found->tick(), Fraction(1, 4))
@@ -2505,6 +2509,56 @@ TEST_F(Tst_Importer, numeric_chord_with_bass_note)
         << "root should be Ab (radiko=0x25): " << name.toStdString();
     EXPECT_TRUE(name.contains(u"/F#"))
         << "bass should be F# (baso=0x13): " << name.toStdString();
+
+    delete score;
+}
+
+// Regression: key sig encoded at the start of a rest-only measure must be deferred
+// to the first subsequent measure with pitched notes, so MuseScore can condense all
+// consecutive empty measures into a single multi-measure rest.
+// NOHOFARE5.enc has a Bb->C key change at the start of 3 empty measures (54-56).
+// After the fix: no KeySig in measures 54-56; KeySig present at measure 57.
+TEST_F(Tst_Importer, keysig_in_empty_measure_deferred_to_preserve_mmrest)
+{
+    MasterScore* score = readEncoreScore("NOHOFARE5.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load NOHOFARE5.enc";
+    ASSERT_EQ(score->nmeasures(), 82);
+
+    // Navigate to measure 54 (0-indexed: 53).
+    auto measureAt = [](MasterScore* sc, int idx) -> Measure* {
+        Measure* m = sc->firstMeasure();
+        for (int i = 0; i < idx && m; ++i) {
+            m = m->nextMeasure();
+        }
+        return m;
+    };
+
+    auto hasKeySigAt = [](Measure* m) -> bool {
+        if (!m) {
+            return false;
+        }
+        for (Segment* s = m->first(SegmentType::KeySig); s; s = s->next(SegmentType::KeySig)) {
+            if (s->element(0)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    Measure* m54 = measureAt(score, 53);
+    Measure* m55 = measureAt(score, 54);
+    Measure* m56 = measureAt(score, 55);
+    Measure* m57 = measureAt(score, 56);
+
+    ASSERT_NE(m54, nullptr);
+    ASSERT_NE(m55, nullptr);
+    ASSERT_NE(m56, nullptr);
+    ASSERT_NE(m57, nullptr);
+
+    EXPECT_FALSE(hasKeySigAt(m54)) << "measure 54 must not carry the key sig (empty measure)";
+    EXPECT_FALSE(hasKeySigAt(m55)) << "measure 55 must not carry the key sig (empty measure)";
+    EXPECT_FALSE(hasKeySigAt(m56)) << "measure 56 must not carry the key sig (empty measure)";
+    EXPECT_TRUE(hasKeySigAt(m57)) << "measure 57 must carry the key sig (first note measure)";
 
     delete score;
 }

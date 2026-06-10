@@ -194,6 +194,27 @@ void buildNoteLoop(BuildCtx& ctx)
 
     // Slurs resolved after the pass: .enc has no SLURSTOP; end anchored at
     // last ChordRest in the alMezuro target measure (xoffset2 is layout, not tick).
+
+    // Key sig in an empty measure (rest-only, no NOTE elements) breaks MuseScore's
+    // multi-measure rest condensation.  Defer such key sigs to the first subsequent
+    // measure that contains pitched notes; standard engraving practice places the
+    // key change at the barline just before the notes resume.
+    auto hasPitchedNotes = [](const EncMeasure& m) {
+        for (const auto& elem : m.elements) {
+            if (static_cast<EncElemType>(elem->type) == EncElemType::NOTE) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    struct DeferredKeySig {
+        Key writtenKey;
+        Key concertKey;
+        int staffIdx { 0 };
+    };
+    std::vector<DeferredKeySig> pendingKeySigs;
+
     int measIdx = 0;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
         if (!mb->isMeasure()) {
@@ -284,6 +305,26 @@ void buildNoteLoop(BuildCtx& ctx)
         } else {
             ctx.activeVolta = nullptr;
             ctx.activeVoltaBits = 0;
+        }
+
+        // Apply any key sig that was deferred from a preceding rest-only measure.
+        if (!pendingKeySigs.empty() && hasPitchedNotes(encMeas)) {
+            for (const DeferredKeySig& dks : pendingKeySigs) {
+                Staff* dksStaff = score->staff(dks.staffIdx);
+                if (!dksStaff) {
+                    continue;
+                }
+                KeySigEvent ke;
+                ke.setConcertKey(dks.concertKey);
+                ke.setKey(dks.writtenKey);
+                dksStaff->setKey(measTick, ke);
+                Segment* seg = measure->getSegment(SegmentType::KeySig, measTick);
+                KeySig* ks = Factory::createKeySig(seg);
+                ks->setTrack(dks.staffIdx * VOICES);
+                ks->setKey(dks.concertKey, dks.writtenKey);
+                seg->add(ks);
+            }
+            pendingKeySigs.clear();
         }
 
         // Sort: tick asc, then ORNs before notes, then tuplet notes before non-tuplet.
@@ -674,6 +715,14 @@ void buildNoteLoop(BuildCtx& ctx)
                 Key writtenKey = Key(encKeyToFifths(ekc->tipo));
                 Interval v = Interval(ctx.staffPitchOffset[staffIdx]);
                 Key concertKey = v.isZero() ? writtenKey : Transpose::transposeKey(writtenKey, v);
+
+                if (!hasPitchedNotes(encMeas)) {
+                    // Placing a KeySig in a rest-only measure breaks MuseScore's MMRest
+                    // condensation.  Defer to the next measure that contains notes.
+                    pendingKeySigs.push_back({ writtenKey, concertKey, staffIdx });
+                    return;
+                }
+
                 KeySigEvent ke;
                 ke.setConcertKey(concertKey);
                 ke.setKey(writtenKey);
