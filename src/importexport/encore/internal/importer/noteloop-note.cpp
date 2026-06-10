@@ -611,18 +611,22 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
             ds->setDrum(note->pitch(), di);
         }
     } else {
-        // RHYTHM staff: register undefined pitches as slash noteheads on line 0 (Encore draws them as diagonal slashes on the single line).
+        // 5-line PERC staff: derive line from Encore position byte (diatonic steps
+        // from C4). Higher position = higher on staff = smaller MuseScore line number.
+        // faceValue high nibble: 0=normal filled, 5=cross (cymbal/triangle notation).
         Drumset* ds = note->part()->instrument()->drumset();
         if (ds) {
             if (!ds->isValid(note->pitch())) {
                 DrumInstrument di;
                 di.name = String::number(note->pitch());
-                di.notehead = NoteHeadGroup::HEAD_SLASH;
-                di.line = 0;
+                di.line = std::max(-4, 10 - static_cast<int>(en->position));
+                di.notehead = ((en->faceValue >> 4) == 5)
+                              ? NoteHeadGroup::HEAD_CROSS
+                              : NoteHeadGroup::HEAD_NORMAL;
                 di.stemDirection = DirectionV::UP;
                 ds->setDrum(note->pitch(), di);
             }
-            note->setHeadGroup(NoteHeadGroup::HEAD_SLASH);
+            note->setHeadGroup(ds->noteHead(note->pitch()));
         }
     }
 
