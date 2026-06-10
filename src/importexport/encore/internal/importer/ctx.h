@@ -105,6 +105,26 @@ struct PendingStaccato {
     track_idx_t track;
 };
 
+// Fermata intents (tipo 0xCC/0xCD), deferred for the same reason as ARPEGGIO.
+struct PendingFermata {
+    Fraction tick;
+    track_idx_t track;
+    mu::engraving::SymId symId;
+};
+
+// Breath / caesura intents (tipo 0xA7/0xA8), attached to the chord segment.
+struct PendingBreath {
+    Fraction tick;
+    track_idx_t track;
+    mu::engraving::SymId symId;
+};
+
+// Measure repeat intents (tipo 0xA3): replace measure content with a "%" symbol.
+struct PendingMeasureRepeat {
+    Fraction measTick;
+    int staffIdx;
+};
+
 // Bowing/stroke intents (tipo 0xC4=upbow, 0xC5=downbow), deferred like ARPEGGIO.
 struct PendingBowing {
     Fraction tick;
@@ -172,6 +192,9 @@ struct BuildCtx
     // TRILL_END (0x35) ticks by track; consumed by resolveOrnaments() to compute span endpoints.
     std::map<track_idx_t, std::vector<mu::engraving::Fraction> > pendingTrillEnds {};
     std::vector<PendingStaccato> pendingStaccatos {};
+    std::vector<PendingFermata> pendingFermatas {};
+    std::vector<PendingBreath> pendingBreaths {};
+    std::vector<PendingMeasureRepeat> pendingMeasureRepeats {};
     std::vector<PendingBowing> pendingBowings {};
     std::vector<PendingOrnFingering> pendingOrnFingerings {};
     std::vector<PendingMarker> pendingMarkers {};
@@ -202,15 +225,14 @@ struct BuildCtx
     // Grace chords held detached; attached to the next normal chord.
     std::map<std::pair<int, int>, std::vector<Chord*> > pendingGraces {};
 
-    // Stream-overflow voice assignment; reset each measure.
-    std::map<std::pair<int, int>, int> streamOffset {};
-
-    // Pitches placed in voice 0 for the current measure (per staffIdx); cleared each measure.
-    std::map<int, std::set<int> > v0PitchesInMeasure {};
 
     // Ticks borrowed by grace notes from the following note; used to suppress
     // spurious gap-snap rests after a grace group. Cleared each measure.
     std::map<std::pair<int, int>, int> graceStolenTicks {};
+
+    // Inner (nested) TupletTrackers: active only when a note is inside a nested group.
+    // Keyed by the same trackKey as ctx.tuplets.  Cleared each measure alongside tuplets.
+    std::map<std::pair<int, int>, TupletTracker> innerTuplets {};
 
     // True when the next syllable follows a hyphen; reset at measure boundary.
     std::map<track_idx_t, bool> nextLyricHyphenBefore {};

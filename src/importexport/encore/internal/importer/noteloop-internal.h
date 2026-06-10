@@ -54,6 +54,15 @@ struct NoteLoopMeasCtx {
 
     std::set<const EncMeasureElem*> validTupletGroupMember;
     std::set<const EncMeasureElem*> partialEndGroup;
+    std::vector<NestedTupletInfo>   nestedInfos;
+    // All notes that belong to an INNER group (the notes inside the nested sub-tuplet).
+    std::set<const EncMeasureElem*> innerGroupMembers;
+    // Override (actualN, normalN) for notes detected as uniform-fill groups (e.g. 15→[15:8]).
+    std::map<const EncMeasureElem*, std::pair<int,int>> overrideGroupRatios;
+    // Lookup: first elem of inner group → NestedTupletInfo*
+    std::map<const EncMeasureElem*, const NestedTupletInfo*> nestedByInnerFirst;
+    // Lookup: last elem of inner group → NestedTupletInfo*
+    std::map<const EncMeasureElem*, const NestedTupletInfo*> nestedByInnerLast;
     std::set<std::tuple<int, int, int> > tieStartSet;
     std::set<int> noteTicks;
     std::set<int> voice4NoteTicks;
@@ -61,6 +70,9 @@ struct NoteLoopMeasCtx {
     std::map<int, int> ornFingCountAtTick;
     int maxVoice0Tick = -1;
     std::set<std::tuple<int, int, int> > filteredTieSenderPitches;
+    // True when at least one note in the measure has au in 0x39..0x40 (scale string anchors).
+    // When set, notes with options bit 0 and no other artic byte also show string numbers.
+    bool hasScaleStringAnchors { false };
 
     bool isTieStartAt(int si, int v, int tick) const;
     void closeTupletWithFill(BuildCtx& ctx, TupletTracker& tt, std::pair<int, int> trackKey);

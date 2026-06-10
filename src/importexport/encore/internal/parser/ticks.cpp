@@ -191,9 +191,76 @@ int computeDotCount(quint8 dotControl, qint16 realDuration, quint8 faceValue, bo
 
 bool isStandardExplicitTuplet(int actualN, int normalN)
 {
-    return (actualN == 3 && normalN == 2)
-           || (actualN == 4 && normalN == 3)
-           || (actualN == 5 && normalN == 4)
-           || (actualN == 6 && normalN == 4);
+    if (actualN < 2 || normalN < 1) {
+        return false;
+    }
+    // Common tuplets (the "standard 4" always supported)
+    if ((actualN == 3 && normalN == 2)
+        || (actualN == 4 && normalN == 3)
+        || (actualN == 5 && normalN == 4)
+        || (actualN == 6 && normalN == 4)) {
+        return true;
+    }
+    // Safety constraint: Tuplet.ticks = normalN × baseLen must be a TDuration-aligned
+    // fraction to avoid MuseScore layout assertions.  For standard power-of-2 base notes,
+    // normalN × 1/(2^k) is TDuration-aligned only when normalN is in {1,2,3,4,6,7,8,...}.
+    // normalN=5 always gives 5/(2^k) which is not representable as a standard note value.
+    // Reject any normalN that is a multiple of 5 but not also a multiple of a power of 2
+    // sufficient to cancel the 5.  In practice: reject normalN == 5 or 10 (or 15, 20...).
+    // 7 is safe: 7/(2^k) = double-dotted note.
+    // normalN=10, 15, 20 have no practical musical use.
+    if (normalN == 10 || normalN == 15 || normalN == 20) {
+        return false;
+    }
+
+    // Duplets: 2 in the time of 1 (dosillo), or 2 in time of 3 (compound-meter duplet)
+    if (actualN == 2 && (normalN == 1 || normalN == 3)) {
+        return true;
+    }
+    // 2:4 (dosillo spanning a full measure's face value)
+    if (actualN == 2 && normalN == 4) {
+        return true;
+    }
+    // Quintuplets with safe normalN: 5:2, 5:3, 5:6, 5:8
+    if (actualN == 5 && (normalN == 2 || normalN == 3 || normalN == 6 || normalN == 8)) {
+        return true;
+    }
+    // Sextuplets: 6:5 excluded (normalN=5 unsafe); 6:7, 6:8 safe
+    if (actualN == 6 && (normalN == 7 || normalN == 8)) {
+        return true;
+    }
+    // Septuplets: 7:4, 7:6, 7:8
+    if (actualN == 7 && (normalN == 4 || normalN == 6 || normalN == 8)) {
+        return true;
+    }
+    // Octuplets: 8:4, 8:6
+    if (actualN == 8 && (normalN == 4 || normalN == 6)) {
+        return true;
+    }
+    // Segment-override groups: produced by the segment-override detector.
+    // normalN must yield a standard TDuration when multiplied by a common baseLen:
+    //   normalN=4: 4×1/8=1/2 (half) ✓, 4×1/16=1/4 (quarter) ✓
+    //   normalN=6: 6×1/8=3/4 (dotted half) ✓, 6×1/16=3/8 (dotted quarter) ✓
+    //   normalN=8: 8×1/8=1 (whole) ✓
+    // Allow any actualN in a reasonable range for these safe denominators.
+    if ((normalN == 4 || normalN == 6 || normalN == 8)
+        && actualN >= 2 && actualN <= 64) {
+        return true;
+    }
+    // Nontuplets: 9:4, 9:5, 9:6, 9:8
+    // 9:5 produces Tuplet.ticks=5/8 (non-TDuration-aligned), but startTuplet skips setTicks
+    // for it and closeTuplet sets it after notes are placed -- same path as sanitizeTuplet().
+    if (actualN == 9 && (normalN == 4 || normalN == 5 || normalN == 6 || normalN == 8)) {
+        return true;
+    }
+    // Decuplets with safe normalN: 10:6, 10:8
+    if (actualN == 10 && (normalN == 6 || normalN == 8)) {
+        return true;
+    }
+    // Unusual observed: 4:1, 4:2
+    if (actualN == 4 && (normalN == 1 || normalN == 2)) {
+        return true;
+    }
+    return false;
 }
 } // namespace mu::iex::encore
