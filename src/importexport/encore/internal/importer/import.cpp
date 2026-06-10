@@ -273,6 +273,8 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     score->style().set(Sid::chordsXmlFile, true);
     score->chordList()->read(u"chords.xml");
 
+    score->style().set(Sid::createMultiMeasureRests, true);
+
     // Encore positions tuplet brackets/numbers flush against note heads and stems
     // with no extra vertical gap, and never pushes them outside the staff.
     score->style().set(Sid::tupletOutOfStaff,      false);

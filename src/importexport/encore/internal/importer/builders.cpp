@@ -292,6 +292,51 @@ void buildParts(BuildCtx& ctx)
     }
 }
 
+static bool encMeasHasPitchedNotes(const EncMeasure& m)
+{
+    for (const auto& elem : m.elements) {
+        if (static_cast<EncElemType>(elem->type) == EncElemType::NOTE) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool encMeasHasSingleRest(const EncMeasure& m)
+{
+    return m.elements.size() == 1
+           && static_cast<EncElemType>(m.elements[0]->type) == EncElemType::REST;
+}
+
+// Returns the number of MuseScore measures to create for a single EncMeasure.
+// Normally 1:1, but Encore stores "N consecutive empty display measures" as a single MEAS
+// block whose lone REST element has mrestCount == N (byte +15 of the REST element data).
+// Expansion only applies to an ISOLATED single-block rest:
+//   - exactly one REST element with mrestCount > 1
+//   - predecessor is NOT also a single-REST block (otherwise we are in a consecutive run)
+//   - successor HAS pitched notes (ensures the next block is the real content)
+static int encMeasDisplayCount(const EncMeasure& m, const EncMeasure* prev, const EncMeasure* next)
+{
+    if (m.elements.size() != 1) {
+        return 1;
+    }
+    const EncMeasureElem* e = m.elements[0].get();
+    if (static_cast<EncElemType>(e->type) != EncElemType::REST) {
+        return 1;
+    }
+    const int cnt = static_cast<int>(static_cast<const EncRest*>(e)->mrestCount);
+    if (cnt <= 1) {
+        return 1;
+    }
+    if (prev && encMeasHasSingleRest(*prev)) {
+        return 1;
+    }
+    if (!next || !encMeasHasPitchedNotes(*next)) {
+        return 1;
+    }
+    return cnt;
+}
+
 void buildMeasures(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
@@ -316,48 +361,54 @@ void buildMeasures(BuildCtx& ctx)
 
     int currentTick = 0;
     bool firstMeasure = true;
-    for (const auto& encMeas : enc.measures) {
+    for (size_t mi = 0; mi < enc.measures.size(); ++mi) {
+        const EncMeasure& encMeas = enc.measures[mi];
         int num = encMeas.timeSigNum > 0 ? encMeas.timeSigNum : 4;
         int den = encMeas.timeSigDen > 0 ? encMeas.timeSigDen : 4;
         Fraction ts(num, den);
 
-        Measure* measure = Factory::createMeasure(score->dummy()->system());
-        measure->setTick(Fraction::fromTicks(currentTick));
+        const EncMeasure* prev = (mi > 0) ? &enc.measures[mi - 1] : nullptr;
+        const EncMeasure* next = (mi + 1 < enc.measures.size()) ? &enc.measures[mi + 1] : nullptr;
+        const int displayCount = encMeasDisplayCount(encMeas, prev, next);
 
-        if (firstMeasure && ts != ctx.nominalTimeSig) {
-            // Pickup measure: display nominal sig, use actual (shorter) duration.
-            // isIrregular() returns true automatically when timesig != ticks.
-            measure->setTimesig(ctx.nominalTimeSig);
-            measure->setTicks(ts);
-        } else {
-            measure->setTimesig(ts);
-            measure->setTicks(ts);
+        for (int di = 0; di < displayCount; ++di) {
+            Measure* measure = Factory::createMeasure(score->dummy()->system());
+            measure->setTick(Fraction::fromTicks(currentTick));
+
+            if (firstMeasure && ts != ctx.nominalTimeSig && di == 0) {
+                measure->setTimesig(ctx.nominalTimeSig);
+                measure->setTicks(ts);
+            } else {
+                measure->setTimesig(ts);
+                measure->setTicks(ts);
+            }
+
+            if (di == 0) {
+                if (encMeas.startBarline() == EncBarlineType::REPEATSTART) {
+                    measure->setRepeatStart(true);
+                }
+                if (encMeas.endBarline() == EncBarlineType::REPEATEND) {
+                    measure->setRepeatEnd(true);
+                } else if (encMeas.endBarline() == EncBarlineType::FINAL
+                           || encMeas.endBarline() == EncBarlineType::DOUBLEL
+                           || encMeas.endBarline() == EncBarlineType::DOUBLER
+                           || encMeas.endBarline() == EncBarlineType::DOTTED) {
+                    BarLineType type = BarLineType::DOUBLE;
+                    if (encMeas.endBarline() == EncBarlineType::FINAL) {
+                        type = BarLineType::END;
+                    } else if (encMeas.endBarline() == EncBarlineType::DOTTED) {
+                        type = BarLineType::DOTTED;
+                    }
+                    for (int s = 0; s < ctx.totalStaves; ++s) {
+                        measure->setEndBarLineType(type, static_cast<track_idx_t>(s) * VOICES);
+                    }
+                }
+            }
+
+            score->measures()->append(measure);
+            currentTick += ts.ticks();
         }
         firstMeasure = false;
-
-        if (encMeas.startBarline() == EncBarlineType::REPEATSTART) {
-            measure->setRepeatStart(true);
-        }
-        if (encMeas.endBarline() == EncBarlineType::REPEATEND) {
-            measure->setRepeatEnd(true);
-        } else if (encMeas.endBarline() == EncBarlineType::FINAL
-                   || encMeas.endBarline() == EncBarlineType::DOUBLEL
-                   || encMeas.endBarline() == EncBarlineType::DOUBLER
-                   || encMeas.endBarline() == EncBarlineType::DOTTED) {
-            // Encore barlines span all staves; MuseScore stores per-staff, so set on every track.
-            BarLineType type = BarLineType::DOUBLE;
-            if (encMeas.endBarline() == EncBarlineType::FINAL) {
-                type = BarLineType::END;
-            } else if (encMeas.endBarline() == EncBarlineType::DOTTED) {
-                type = BarLineType::DOTTED;
-            }
-            for (int s = 0; s < ctx.totalStaves; ++s) {
-                measure->setEndBarLineType(type, static_cast<track_idx_t>(s) * VOICES);
-            }
-        }
-
-        score->measures()->append(measure);
-        currentTick += ts.ticks();
     }
 }
 

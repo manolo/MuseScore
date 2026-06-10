@@ -713,6 +713,7 @@ Byte +11 is the playable MIDI value.
 | +10      | 1      | layout x-position                                                                |
 | +13      | 1      | tuplet byte — high nibble = actualN, low nibble = normalN (same as note)         |
 | +14      | 1      | dotControl — **bitmask flag, NOT a tick count**. Bit 0 = dotted display hint.   |
+| +15      | 1      | **mrestCount** — Encore multi-measure rest display count. When > 1, this single MEAS block represents that many consecutive empty display measures (Encore draws one rest symbol with this count above it). Only meaningful when this is the sole element in the MEAS block **and** the next MEAS block contains pitched notes; otherwise treat as 1. |
 
 **dotControl semantics.** dotControl is a **bitmask**, not a sounding tick value:
 
