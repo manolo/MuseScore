@@ -324,10 +324,29 @@ bool EncTie::read(QDataStream& ds)
     }
     // Dir/startFlag bit layout: see ENCORE_FORMAT.md §TIE element.
     isTieStart = ((dirByte & 0x80) != 0) || ((startFlag & 0x80) != 0) || ((dirByte & 0x02) != 0);
-    int consumed = (size > 5 ? 1 : 0) + (size > 6 ? 1 : 0);
-    int toSkip = static_cast<int>(size) - 5 - consumed;
-    if (toSkip > 0) {
-        ds.skipRawData(toSkip);
+
+    if (static_cast<int>(size) >= 18) {
+        // Read arc x-positions at offsets +10 and +12. When arcX1 == arcX2 the arc has
+        // zero horizontal extent: both endpoints are at the same visual column, meaning
+        // this is an intra-chord decorative arc (Encore connects two chord notes vertically)
+        // rather than a real forward tie. Override isTieStart so no MuseScore Tie is created.
+        ds.skipRawData(3);          // skip offsets +7,+8,+9
+        ds >> arcX1;                // offset +10
+        ds.skipRawData(1);          // skip offset +11
+        ds >> arcX2;                // offset +12
+        if (arcX1 == arcX2) {
+            isTieStart = false;
+        }
+        const int toSkip = static_cast<int>(size) - 13;  // skip offsets +13..end
+        if (toSkip > 0) {
+            ds.skipRawData(toSkip);
+        }
+    } else {
+        const int consumed = (size > 5 ? 1 : 0) + (size > 6 ? 1 : 0);
+        const int toSkip = static_cast<int>(size) - 5 - consumed;
+        if (toSkip > 0) {
+            ds.skipRawData(toSkip);
+        }
     }
     return true;
 }
