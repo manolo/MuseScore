@@ -101,22 +101,39 @@ void NoteLoopMeasCtx::closeTupletWithFill(BuildCtx& ctx, TupletTracker& tt,
     TDuration snap(tt.placedTicks, true /*truncate*/);
     const bool fitsTD = snap.isValid() && snap.fraction() == tt.placedTicks;
     if (tt.placedTicks < expectedTup && !fitsTD) {
-        if (static_cast<int>(tt.currentTuplet->elements().size()) < tt.actualN) {
+        const bool countShort = (static_cast<int>(tt.currentTuplet->elements().size()) < tt.actualN);
+        // Mixed-duration group: element count matches actualN but face-value sum is still short
+        // (e.g. {Q,Q,8th}/3:2 needs a 4th 8th to reach fullFaceSum=3Q, but the note falls exactly
+        // at the measure boundary and Encore omits it from the element stream).
+        const bool faceShort = (tt.fullFaceSum > Fraction(0, 1) && tt.faceTicks < tt.fullFaceSum);
+        if (countShort || faceShort) {
             track_idx_t trk = static_cast<track_idx_t>(trackKey.first) * VOICES
                               + trackKey.second;
             DurationType baseLen = tt.currentTuplet->baseLen().type();
             Fraction perNote = TDuration(baseLen).fraction()
                                * Fraction(tt.normalN, tt.actualN);
+            DurationType fillDurType = baseLen;
+            // For the mixed-duration case compute fill from remaining face value, which is
+            // smaller than baseLen and produces an advance that fits the remaining measure space.
+            if (faceShort && !countShort) {
+                const Fraction remFace = tt.fullFaceSum - tt.faceTicks;
+                TDuration remDur(remFace, true /*truncate*/);
+                if (remDur.isValid() && remDur.fraction() == remFace) {
+                    fillDurType = remDur.type();
+                    perNote = remFace * Fraction(tt.normalN, tt.actualN);
+                }
+            }
             int safety = tt.actualN + 1;
             while (tt.placedTicks < expectedTup && safety-- > 0
-                   && static_cast<int>(tt.currentTuplet->elements().size()) < tt.actualN
+                   && (static_cast<int>(tt.currentTuplet->elements().size()) < tt.actualN
+                       || (faceShort && tt.faceTicks < tt.fullFaceSum))
                    && ctx.cumTick[trackKey] + perNote <= measure->ticks()) {
                 Fraction restTick = measure->tick() + ctx.cumTick[trackKey];
                 Segment* seg = measure->getSegment(SegmentType::ChordRest, restTick);
                 if (seg->element(trk)) {
                     break;
                 }
-                TDuration dur(baseLen);
+                TDuration dur(fillDurType);
                 Rest* rest = Factory::createRest(seg, dur);
                 rest->setTrack(trk);
                 rest->setTicks(dur.fraction());

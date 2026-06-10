@@ -54,8 +54,8 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     const EncMeasureElem* e = ec.e;
     // Nested-tuplet membership for this note (requires e).
     const bool isInnerFirst  = mc.nestedByInnerFirst.count(e) > 0;
-    const bool isInnerLast   = mc.nestedByInnerLast.count(e)  > 0;
-    const bool isInnerMember = mc.innerGroupMembers.count(e)   > 0;
+    const bool isInnerLast   = mc.nestedByInnerLast.count(e) > 0;
+    const bool isInnerMember = mc.innerGroupMembers.count(e) > 0;
     int staffIdx = ec.staffIdx;
     int voice = ec.voice;
     int msVoice = ec.msVoice;
@@ -319,7 +319,6 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         }
     }
 
-
     Segment* seg = measure->getSegment(SegmentType::ChordRest, elemTick);
     Chord* chord = nullptr;
     if (seg->element(track) && seg->element(track)->isChord()) {
@@ -525,7 +524,7 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
                     if (tt.inTuplet()) {
                         chord->setTuplet(nullptr);
                         tt.currentTuplet->remove(chord);
-                        tt.faceTicks -= TDuration(dtFace).fraction();
+                        tt.faceTicks -= chord->ticks();
                     }
                     seg->remove(chord);
                     delete chord;
@@ -541,7 +540,7 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
                     if (tt.inTuplet()) {
                         chord->setTuplet(nullptr);
                         tt.currentTuplet->remove(chord);
-                        tt.faceTicks -= TDuration(dtFace).fraction();
+                        tt.faceTicks -= chord->ticks();
                     }
                     // Update chord duration to match capped advance; otherwise actualTicks() exceeds ctx.cumTick advance and causes sanityCheck overshoot.
                     TDuration cappedDur(advance);
@@ -750,7 +749,10 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
             } else {
                 bool alreadyHas = false;
                 for (Articulation* a : chord->articulations()) {
-                    if (a->symId() == sid) { alreadyHas = true; break; }
+                    if (a->symId() == sid) {
+                        alreadyHas = true;
+                        break;
+                    }
                 }
                 if (!alreadyHas) {
                     Articulation* art = Factory::createArticulation(chord);
