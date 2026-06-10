@@ -203,6 +203,15 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         break;
     case EncOrnamentType::TEMPO: {
         if (eo->tempo > 0) {
+            // Suppress ORN TEMPO when its BPM conflicts with the measure's header BPM.
+            // Encore stores tempo annotations in the wrong measure when a mark is placed
+            // visually at the start of a new system (stored in the last measure of the
+            // previous system, same x-column). The MEAS header BPM is authoritative;
+            // ORN TEMPO is a visual annotation only. Only trust it when the two agree, or
+            // when the header BPM is 0 (not explicitly set, so ornament is the sole source).
+            if (encMeas.bpm != 0 && static_cast<quint16>(eo->tempo) != encMeas.bpm) {
+                break;
+            }
             Segment* seg = measure->getSegment(SegmentType::ChordRest, elemTick);
             if (!seg) {
                 seg = measure->getSegment(SegmentType::ChordRest, measTick);
@@ -270,8 +279,12 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
             int crXoffAtTick = -1;
             for (const auto& elem : encMeas.elements) {
                 const EncMeasureElem* em = elem.get();
-                if (static_cast<int>(em->tick) != static_cast<int>(e->tick)) { continue; }
-                if (em->staffIdx != staffIdx || em->voice != voice) { continue; }
+                if (static_cast<int>(em->tick) != static_cast<int>(e->tick)) {
+                    continue;
+                }
+                if (em->staffIdx != staffIdx || em->voice != voice) {
+                    continue;
+                }
                 if (em->type == static_cast<quint8>(EncElemType::NOTE)) {
                     crXoffAtTick = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
                     break;

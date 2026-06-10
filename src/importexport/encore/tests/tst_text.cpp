@@ -656,8 +656,14 @@ TEST_F(Tst_Text, orn_tempo_3_8_dotted_quarter_bps_correct)
 // Fix: widen guard to scan all segments in the measure.
 // Expected: only ONE TempoText, from ORN TEMPO=63 (not the MEAS BPM=160).
 // ===========================================================================
-TEST_F(Tst_Text, meas_bpm_suppressed_when_orn_tempo_at_later_tick)
+TEST_F(Tst_Text, meas_bpm_wins_over_conflicting_orn_tempo_at_later_tick)
 {
+    // text_meas_bpm_suppressed_by_orn_tempo_later_tick.enc: 4/4, MEAS bpm=160,
+    // quarter REST at tick=0, ORN TEMPO=63 at tick=240 (after the rest).
+    // The ORN TEMPO BPM (63) conflicts with the MEAS header BPM (160).
+    // MEAS header BPM is authoritative; ORN TEMPO is a visual annotation and is
+    // suppressed when it disagrees with the header.
+    // Expected: exactly ONE TempoText with BPS=160/60 (from MEAS header).
     MasterScore* score = readEncoreScore("text_meas_bpm_suppressed_by_orn_tempo_later_tick.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -679,13 +685,72 @@ TEST_F(Tst_Text, meas_bpm_suppressed_when_orn_tempo_at_later_tick)
     }
 
     EXPECT_EQ(bpsValues.size(), 1u)
-        << "Only ONE TempoText must exist (ORN TEMPO=63); MEAS BPM=160 must be "
-        "suppressed because ORN TEMPO already exists in the same measure";
+        << "Only ONE TempoText must exist; conflicting ORN TEMPO=63 is suppressed "
+        "when MEAS header BPM=160 disagrees";
 
     if (!bpsValues.empty()) {
-        EXPECT_NEAR(bpsValues[0], 63.0 / 60.0, 1e-5)
-            << "The surviving TempoText must be the ORN TEMPO (BPS=63/60), not the MEAS BPM (160/60)";
+        EXPECT_NEAR(bpsValues[0], 160.0 / 60.0, 1e-5)
+            << "The surviving TempoText must be the MEAS header BPM (160/60), not the ORN TEMPO (63/60)";
     }
+
+    delete score;
+}
+
+// ===========================================================================
+// BUG FIX: ORN TEMPO misplaced one system before its intended measure
+// ===========================================================================
+
+TEST_F(Tst_Text, orn_tempo_mismatch_with_header_bpm_suppressed)
+{
+    // text_orn_tempo_mismatch_suppressed.enc: 2 content measures.
+    // M1: header BPM=249, ORN TEMPO=80 (BPM conflicts with header → misplaced ornament).
+    // M2: header BPM=80, no ORN TEMPO.
+    //
+    // Without fix: ORN TEMPO at M1 creates TempoText BPM=80 at M1 (wrong position),
+    //   and the !hasExisting guard in the header-BPM loop blocks M2's correct TempoText.
+    // With fix: ORN TEMPO suppressed because 80 != encMeas.bpm=249; header-BPM loop
+    //   creates TempoText BPM=80 at M2.
+    MasterScore* score = readEncoreScore("text_orn_tempo_mismatch_suppressed.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    struct TempoAtTick {
+        Fraction tick;
+        double bps;
+    };
+    std::vector<TempoAtTick> found;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isTempoText()) {
+                    found.push_back({ s->tick(), toTempoText(e)->tempo().val });
+                }
+            }
+        }
+    }
+
+    // No TempoText at measure 1 (tick=0) with BPM=80 — the misplaced ornament must be suppressed
+    for (const auto& t : found) {
+        if (t.tick == Fraction(0, 1)) {
+            EXPECT_FALSE(std::abs(t.bps - 80.0 / 60.0) < 1e-4)
+                << "ORN TEMPO=80 at M1 (header BPM=249) must be suppressed (misplaced ornament)";
+        }
+    }
+
+    // TempoText BPM=80 must appear somewhere after tick=0 (at measure 2)
+    bool foundM2 = false;
+    for (const auto& t : found) {
+        if (t.tick > Fraction(0, 1) && std::abs(t.bps - 80.0 / 60.0) < 1e-4) {
+            foundM2 = true;
+        }
+    }
+    EXPECT_TRUE(foundM2)
+        << "Header BPM=80 must create TempoText at M2 when misplaced ORN TEMPO at M1 is suppressed";
 
     delete score;
 }
