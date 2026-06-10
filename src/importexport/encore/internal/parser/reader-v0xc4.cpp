@@ -148,12 +148,15 @@ void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds)
     const bool smallTK = (!compact && instruments[0].offset <= 250);
 
     if (smallTK) {
-        static constexpr qint64 MIDI_IN_CONTENT = 60;
+        // MIDI programs are stored 76 bytes into the extra-data region that follows
+        // the TK block content. The content is `instr.offset` bytes long, so the
+        // absolute position is contentFilePos + offset + 76.
+        static constexpr qint64 MIDI_AFTER_CONTENT = 76;
         for (auto& instr : instruments) {
             if (instr.contentFilePos < 0) {
                 continue;
             }
-            const qint64 off = instr.contentFilePos + MIDI_IN_CONTENT;
+            const qint64 off = instr.contentFilePos + static_cast<qint64>(instr.offset) + MIDI_AFTER_CONTENT;
             if (off >= static_cast<qint64>(ds.device()->size())) {
                 continue;
             }
@@ -289,8 +292,29 @@ void readKeyTranspositions(std::vector<EncInstrument>& instruments, QDataStream&
     }
 
     if (!tkBased) {
+        // smallTK layout: key is 23 bytes before the MIDI position (same relative
+        // offset as in the large-TK table: KEY_OFF = -23 from MIDI base).
+        static constexpr qint64 KEY_AFTER_CONTENT = 76 - 23;   // = 53
+        for (auto& instr : instruments) {
+            if (instr.contentFilePos < 0) {
+                continue;
+            }
+            const qint64 off = instr.contentFilePos + static_cast<qint64>(instr.offset) + KEY_AFTER_CONTENT;
+            if (off < 0 || off >= static_cast<qint64>(ds.device()->size())) {
+                continue;
+            }
+            if (!ds.device()->seek(off)) {
+                continue;
+            }
+            quint8 raw;
+            ds >> raw;
+            const qint8 sv = static_cast<qint8>(raw);
+            if (sv >= -33 && sv <= 24) {
+                instr.keyTransposeSemitones = sv;
+            }
+        }
         return;
-    }                           // offset 1..250: unusual, skip
+    }
 
     static constexpr qint64 PRG_BASE = 2278, PRG_STEP = 2158, KEY_OFF = -23;
     for (size_t n = 0; n < instruments.size(); ++n) {

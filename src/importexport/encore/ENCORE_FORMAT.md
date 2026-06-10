@@ -79,15 +79,26 @@ The importer stops after `header.measureCount` blocks (observed: 36 rendered / 5
 Carries the instrument name as Latin-1 or UTF-16 LE.
 Probe: byte 0 printable ASCII + byte 1 == `0x00` → UTF-16 LE; else Latin-1.
 
-**MIDI program.** Fixed-offset table after the TK blocks:
-```
-base = 2278    (header 194 + first block 120 + intra-data 1964)
-step = 2158    (block 120 + data block 2038)
-instrument n → file offset  base + n * step
-```
+**MIDI program.** Layout depends on the TK block size (`varSize`, stored in the 4-byte size
+field of each TK block):
 
-**Key transposition.** At `base - 23 + n * step`: signed `int8` semitones matching the Encore Staff Sheet
-"Key" dropdown (`0` = sounds as written, `-12` = octave lower, range ±33 semitones).
+- **Large-TK** (`varSize > 250`): fixed-offset table after TK blocks:
+  ```
+  base = 2278    (header 194 + first block 120 + intra-data 1964)
+  step = 2158    (block 120 + data block 2038)
+  instrument n → file offset  base + n * step
+  ```
+- **Small-TK** (`0 < varSize ≤ 250`, e.g. 112): MIDI is in the extra-data region that
+  follows each TK block's named content, at a fixed offset of 76 bytes into that region:
+  ```
+  contentFilePos = TK_block_start + 8        (after 4-byte magic + 4-byte size)
+  instrument n MIDI offset = contentFilePos[n] + varSize + 76
+  ```
+  Key transposition is at the same location minus 23 bytes (`varSize + 53`).
+
+**Key transposition.** At `base - 23 + n * step` (large-TK/no-TK), or `contentFilePos + varSize + 53`
+(small-TK): signed `int8` semitones matching the Encore Staff Sheet "Key" dropdown
+(`0` = sounds as written, `-12` = octave lower, range ±33 semitones).
 Encore shifts every note pitch by this value.
 
 **No-TK-block files.** Some v0xC4 files have no TK blocks at all. These files come in two
