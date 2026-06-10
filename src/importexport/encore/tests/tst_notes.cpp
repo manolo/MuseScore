@@ -1406,6 +1406,42 @@ TEST_F(Tst_Notes, perc_clef_note_positions_from_encore_position_byte)
 }
 
 // ===========================================================================
+// BUG FIX: faceValue overrides standard drumset notehead for pre-populated pitches
+// ===========================================================================
+
+TEST_F(Tst_Notes, perc_clef_facevalue_overrides_standard_drumset_notehead)
+{
+    // notes_perc_clef_standard_drumset_notehead.enc: PERC-clef staff with one note
+    // at pitch 40 (Electric Snare), faceValue high nibble=0 (normal head in Encore).
+    // Standard MIDI drumset pre-registers pitch 40 as HEAD_SLASH; the importer must
+    // override that with HEAD_NORMAL based on faceValue.
+    MasterScore* score = readEncoreScore("notes_perc_clef_standard_drumset_notehead.enc");
+    ASSERT_NE(score, nullptr);
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    Note* note = nullptr;
+    for (Segment* s = m->first(SegmentType::ChordRest); s && !note; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChord()) {
+            Chord* c = toChord(e);
+            if (!c->notes().empty()) {
+                note = c->notes().front();
+            }
+        }
+    }
+    ASSERT_NE(note, nullptr);
+    ASSERT_EQ(note->pitch(), 40);
+
+    const Drumset* ds = note->part()->instrument()->drumset();
+    ASSERT_NE(ds, nullptr) << "Staff must have a drumset assigned (PERC clef)";
+    EXPECT_EQ(ds->noteHead(40), NoteHeadGroup::HEAD_NORMAL)
+        << "faceValue normal must override HEAD_SLASH from standard drumset (pitch 40)";
+
+    delete score;
+}
+
+// ===========================================================================
 // BUG FIX: Mixed-duration tuplet with boundary-omitted note gets fill rest
 // ===========================================================================
 
