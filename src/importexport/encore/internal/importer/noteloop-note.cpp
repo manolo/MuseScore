@@ -66,7 +66,7 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     int savedPrevMidiTick = ec.savedPrevMidiTick;
     bool hadLastChordPos = ec.hadLastChordPos;
     Fraction savedLastChordPos = ec.savedLastChordPos;
-    auto isTieStart = [&](int si, int v, int t) { return mc.isTieStartAt(si, v, t); };
+    auto isTieStart = [&](int si, int v, int t, int pos = -1) { return mc.isTieStartAt(si, v, t, pos); };
     auto closeTupletWithFill = [&](TupletTracker& tt, std::pair<int, int> key) {
         mc.closeTupletWithFill(ctx, tt, key);
     };
@@ -833,7 +833,7 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
 
     // Register tie-start if TIE element exists at this tick, or (v0xC2) if grace1 low==1. The g1low indicator covers chord members just outside the ±3-tick window.
     {
-        bool hasTieStart = isTieStart(staffIdx, voice, (int)e->tick)
+        bool hasTieStart = isTieStart(staffIdx, voice, (int)e->tick, (int)en->position)
                            || (ctx.g1LowTieSender
                                && (en->grace1 & 0x0F) == 1);
         if (hasTieStart) {
