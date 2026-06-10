@@ -194,14 +194,91 @@ void buildNoteLoop(BuildCtx& ctx)
 
     // Slurs resolved after the pass: .enc has no SLURSTOP; end anchored at
     // last ChordRest in the alMezuro target measure (xoffset2 is layout, not tick).
+
+    // Key sig in an empty measure (rest-only, no NOTE elements) breaks MuseScore's
+    // multi-measure rest condensation.  Defer such key sigs to the first subsequent
+    // measure that contains pitched notes; standard engraving practice places the
+    // key change at the barline just before the notes resume.
+    auto hasPitchedNotes = [](const EncMeasure& m) {
+        for (const auto& elem : m.elements) {
+            if (static_cast<EncElemType>(elem->type) == EncElemType::NOTE) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    struct DeferredKeySig {
+        Key writtenKey;
+        Key concertKey;
+        int staffIdx { 0 };
+    };
+    std::vector<DeferredKeySig> pendingKeySigs;
+
+    auto hasSingleRest = [](const EncMeasure& m) -> bool {
+        return m.elements.size() == 1
+               && static_cast<EncElemType>(m.elements[0]->type) == EncElemType::REST;
+    };
+
+    auto measDisplayCount = [&hasPitchedNotes, &hasSingleRest](
+        const EncMeasure& m, const EncMeasure* prev, const EncMeasure* next) -> int {
+        if (m.elements.size() != 1) {
+            return 1;
+        }
+        const EncMeasureElem* e = m.elements[0].get();
+        if (static_cast<EncElemType>(e->type) != EncElemType::REST) {
+            return 1;
+        }
+        const int cnt = static_cast<int>(static_cast<const EncRest*>(e)->mrestCount);
+        if (cnt <= 1) {
+            return 1;
+        }
+        if (prev && hasSingleRest(*prev)) {
+            return 1;
+        }
+        if (!next || !hasPitchedNotes(*next)) {
+            return 1;
+        }
+        return cnt;
+    };
+
+    // Map enc.measures[i] → index into ctx.measuresByIdx (MuseScore measure index).
+    // Required because single-block multi-measure rests expand 1 MEAS to N MuseScore measures,
+    // so the indices diverge after the first such block.
+    std::vector<size_t> encToMsIdx(enc.measures.size(), 0);
+    int measSkip = 0;
+    size_t msIdxCounter = 0;
+
     int measIdx = 0;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
         if (!mb->isMeasure()) {
             continue;
         }
+
+        if (measSkip > 0) {
+            --measSkip;
+            ++msIdxCounter;
+            // Fill the virtual empty measure that was created by a single-block
+            // multi-measure rest expansion so the sanity check passes.
+            Measure* vm = toMeasure(mb);
+            const Fraction vmTick = vm->tick();
+            const Fraction vmLen  = vm->ticks();
+            for (int si = 0; si < ctx.totalStaves; ++si) {
+                const track_idx_t tr = static_cast<track_idx_t>(si) * VOICES;
+                Segment* seg = vm->getSegment(SegmentType::ChordRest, vmTick);
+                Rest* r = Factory::createRest(seg, TDuration(DurationType::V_MEASURE));
+                r->setTicks(vmLen);
+                r->setTrack(tr);
+                seg->add(r);
+            }
+            continue;
+        }
+
         if (measIdx >= static_cast<int>(enc.measures.size())) {
             break;
         }
+        encToMsIdx[static_cast<size_t>(measIdx)] = msIdxCounter;
+
         Measure* measure = toMeasure(mb);
         const EncMeasure& encMeas = enc.measures[measIdx];
         const Fraction measTick = measure->tick();
@@ -284,6 +361,26 @@ void buildNoteLoop(BuildCtx& ctx)
         } else {
             ctx.activeVolta = nullptr;
             ctx.activeVoltaBits = 0;
+        }
+
+        // Apply any key sig that was deferred from a preceding rest-only measure.
+        if (!pendingKeySigs.empty() && hasPitchedNotes(encMeas)) {
+            for (const DeferredKeySig& dks : pendingKeySigs) {
+                Staff* dksStaff = score->staff(dks.staffIdx);
+                if (!dksStaff) {
+                    continue;
+                }
+                KeySigEvent ke;
+                ke.setConcertKey(dks.concertKey);
+                ke.setKey(dks.writtenKey);
+                dksStaff->setKey(measTick, ke);
+                Segment* seg = measure->getSegment(SegmentType::KeySig, measTick);
+                KeySig* ks = Factory::createKeySig(seg);
+                ks->setTrack(dks.staffIdx * VOICES);
+                ks->setKey(dks.concertKey, dks.writtenKey);
+                seg->add(ks);
+            }
+            pendingKeySigs.clear();
         }
 
         // Sort: tick asc, then ORNs before notes, then tuplet notes before non-tuplet.
@@ -674,6 +771,14 @@ void buildNoteLoop(BuildCtx& ctx)
                 Key writtenKey = Key(encKeyToFifths(ekc->tipo));
                 Interval v = Interval(ctx.staffPitchOffset[staffIdx]);
                 Key concertKey = v.isZero() ? writtenKey : Transpose::transposeKey(writtenKey, v);
+
+                if (!hasPitchedNotes(encMeas)) {
+                    // Placing a KeySig in a rest-only measure breaks MuseScore's MMRest
+                    // condensation.  Defer to the next measure that contains notes.
+                    pendingKeySigs.push_back({ writtenKey, concertKey, staffIdx });
+                    return;
+                }
+
                 KeySigEvent ke;
                 ke.setConcertKey(concertKey);
                 ke.setKey(writtenKey);
@@ -912,6 +1017,11 @@ void buildNoteLoop(BuildCtx& ctx)
             }
         }
 
+        const EncMeasure* prevMeas = (measIdx > 0) ? &enc.measures[measIdx - 1] : nullptr;
+        const EncMeasure* nextMeas = (measIdx + 1 < static_cast<int>(enc.measures.size()))
+                                     ? &enc.measures[measIdx + 1] : nullptr;
+        measSkip = measDisplayCount(encMeas, prevMeas, nextMeas) - 1;
+        ++msIdxCounter;
         ++measIdx;
     }
 
@@ -922,7 +1032,7 @@ void buildNoteLoop(BuildCtx& ctx)
     // guard missed them and created a duplicate tempo mark.
     {
         quint16 lastBpm = 0;
-        for (size_t mi = 0; mi < enc.measures.size() && mi < ctx.measuresByIdx.size(); ++mi) {
+        for (size_t mi = 0; mi < enc.measures.size(); ++mi) {
             const quint16 bpm = enc.measures[mi].bpm;
             if (bpm == 0) {
                 continue;
@@ -930,7 +1040,11 @@ void buildNoteLoop(BuildCtx& ctx)
             if (mi > 0 && bpm == lastBpm) {
                 continue;
             }
-            Measure* m = ctx.measuresByIdx[mi];
+            const size_t msI = (mi < encToMsIdx.size()) ? encToMsIdx[mi] : mi;
+            if (msI >= ctx.measuresByIdx.size()) {
+                continue;
+            }
+            Measure* m = ctx.measuresByIdx[msI];
             const Fraction measTick = m->tick();
             Segment* seg = m->getSegment(SegmentType::ChordRest, measTick);
             if (!seg) {

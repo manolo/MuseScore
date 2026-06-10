@@ -84,7 +84,14 @@ bool EncRest::read(QDataStream& ds)
     ds >> tuplet >> dotControl;
     int toSkip = static_cast<int>(size) - 10 - 5;
     if (toSkip > 0) {
-        ds.skipRawData(toSkip);
+        ds >> mrestCount;
+        --toSkip;
+        if (mrestCount < 1) {
+            mrestCount = 1;
+        }
+        if (toSkip > 0) {
+            ds.skipRawData(toSkip);
+        }
     }
     return true;
 }
