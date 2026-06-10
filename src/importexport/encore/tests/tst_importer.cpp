@@ -559,6 +559,44 @@ TEST_F(Tst_Importer, v0xa6_no_spurious_articulation_glyphs)
     delete score;
 }
 
+// Regression: options byte bit 0 and position field must NOT produce string numbers on plain
+// piano/vocal notes. As muitas aguas is a grand-staff piece with opt=0x87/0x07 on all notes
+// and au=ad=0x00; it must import with zero fingerings.
+TEST_F(Tst_Importer, v0c4_no_spurious_string_numbers_from_options_byte)
+{
+    // Fixture: 4 notes with opt=0x87 or 0x07, au=ad=0x00, pos=3/6/13/5 — matches the
+    // "As muitas aguas" piano piece pattern that was incorrectly getting circles.
+    MasterScore* score = readEncoreScore("notes_no_spurious_string_numbers.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+
+    int fingerCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (size_t v = 0; v < score->nstaves() * VOICES; ++v) {
+                EngravingItem* el = s->element(static_cast<track_idx_t>(v));
+                if (el && el->isChord()) {
+                    for (Note* n : toChord(el)->notes()) {
+                        for (EngravingItem* sub : n->el()) {
+                            if (sub && sub->isFingering()) {
+                                ++fingerCount;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_EQ(fingerCount, 0)
+        << "Piano/grand-staff notes (instrCount=1, staffPerSystem=2) must not get circled string numbers. "
+        "String numbers are only shown when instrCount == staffPerSystem (each instrument has one staff).";
+
+    delete score;
+}
+
 // Regression: gap snap used denominator 4*beatTicks (correct only for x/4). x/8 beatTicks=120 gave
 // half the correct whole-note value, overflowing by one beat. Fix: wholeTicks = beatTicks * timeSigDen.
 TEST_F(Tst_Importer, v0c4_gap_snap_eighth_meter)

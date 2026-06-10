@@ -2287,4 +2287,69 @@ TEST_F(Tst_Notes, grandstaff_staffwithin_fermata)
     }
 
     delete score;
+}// scale_string_numbers_from_anchor_bytes
+TEST_F(Tst_Notes, scale_string_numbers_from_anchor_bytes)
+{
+    // Fixture: M1 has 4 notes with au=0x39 on note 1 (explicit string 1) and au=0x00
+    // on notes 2-4. The anchor unlocks opt-based circles for the whole measure:
+    // all 4 notes show strings 1-4 via pos+1.
+    MasterScore* score = readEncoreScore("notes_scale_string_numbers_anchor.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    std::vector<int> nums;
+    for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        EngravingItem* el = seg->element(0);
+        if (!el || !el->isChord()) continue;
+        for (Note* n : toChord(el)->notes()) {
+            for (EngravingItem* sub : n->el()) {
+                if (sub && sub->isFingering()) {
+                    Fingering* fg = toFingering(sub);
+                    if (fg->textStyleType() == TextStyleType::STRING_NUMBER) {
+                        bool ok; int v = fg->plainText().toInt(&ok);
+                        if (ok) nums.push_back(v);
+                    }
+                }
+            }
+        }
+    }
+
+    EXPECT_EQ(nums.size(), 4u) << "Anchor byte 0x39 must enable circles on all 4 notes";
+    for (int i = 0; i < (int)nums.size(); ++i)
+        EXPECT_EQ(nums[i], i + 1) << "Note " << i+1 << " must show string " << i+1;
+
+    delete score;
+}
+
+// scale_no_anchor_produces_no_circles
+TEST_F(Tst_Notes, scale_no_anchor_produces_no_circles)
+{
+    // Notes with opt bit 0 and pos in 0-7 but NO au=0x39..0x40 anchor → no circles.
+    MasterScore* score = readEncoreScore("notes_scale_no_anchor_no_circles.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+
+    int fingerCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) continue;
+        for (Segment* seg = toMeasure(mb)->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+            for (size_t v = 0; v < VOICES; ++v) {
+                EngravingItem* el = seg->element(static_cast<track_idx_t>(v));
+                if (el && el->isChord()) {
+                    for (Note* n : toChord(el)->notes()) {
+                        for (EngravingItem* sub : n->el()) {
+                            if (sub && sub->isFingering()) ++fingerCount;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_EQ(fingerCount, 0)
+        << "Without 0x39..0x40 anchor bytes, options-bit-0 notes must not show circles";
+
+    delete score;
 }
