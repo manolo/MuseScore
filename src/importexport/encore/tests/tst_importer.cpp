@@ -25,6 +25,7 @@
 #include "engraving/dom/barline.h"
 #include "engraving/dom/chord.h"
 #include "engraving/dom/clef.h"
+#include "engraving/dom/keysig.h"
 #include "engraving/dom/dynamic.h"
 #include "engraving/dom/hairpin.h"
 #include "engraving/dom/rest.h"
@@ -962,7 +963,10 @@ TEST_F(Tst_Importer, v0c4_slur_xoffset_unsigned)
     Slur* found = nullptr;
     for (const auto& kv : score->spanner()) {
         Spanner* sp = kv.second;
-        if (sp && sp->isSlur()) { found = toSlur(sp); break; }
+        if (sp && sp->isSlur()) {
+            found = toSlur(sp);
+            break;
+        }
     }
     ASSERT_NE(found, nullptr) << "A slur must be created";
     EXPECT_EQ(found->tick(), Fraction(1, 4))
@@ -2505,6 +2509,115 @@ TEST_F(Tst_Importer, numeric_chord_with_bass_note)
         << "root should be Ab (radiko=0x25): " << name.toStdString();
     EXPECT_TRUE(name.contains(u"/F#"))
         << "bass should be F# (baso=0x13): " << name.toStdString();
+
+    delete score;
+}
+
+// Regression: key sig encoded at the start of a rest-only measure must be deferred
+// to the first subsequent measure with pitched notes, so MuseScore can condense all
+// consecutive empty measures into a single multi-measure rest.
+// NOHOFARE5.enc has a Bb->C key change at binary MEAS[53] (the start of 3 empty
+// consecutive measures).  Binary MEAS[4], [9], [27] are single-block multi-measure
+// rests that expand to 3, 6, 6 MuseScore measures respectively (+12 total), so
+// MEAS[53] lands at MuseScore measure 66 instead of the pre-fix 54.
+// After both fixes: no KeySig in MuseScore measures 66-68; KeySig present at measure 69.
+// Also verifies the total measure count (82 binary + 2+5+5 = 94 MuseScore measures).
+TEST_F(Tst_Importer, keysig_in_empty_measure_deferred_to_preserve_mmrest)
+{
+    MasterScore* score = readEncoreScore("NOHOFARE5.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load NOHOFARE5.enc";
+    ASSERT_EQ(score->nmeasures(), 94)
+        << "82 binary MEAS blocks + 2+5+5 from 3 single-block multi-measure rests";
+
+    // Navigate to measure at 0-based index idx.
+    auto measureAt = [](MasterScore* sc, int idx) -> Measure* {
+        Measure* m = sc->firstMeasure();
+        for (int i = 0; i < idx && m; ++i) {
+            m = m->nextMeasure();
+        }
+        return m;
+    };
+
+    auto hasKeySigAt = [](Measure* m) -> bool {
+        if (!m) {
+            return false;
+        }
+        for (Segment* s = m->first(SegmentType::KeySig); s; s = s->next(SegmentType::KeySig)) {
+            if (s->element(0)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // MEAS[53] (binary measure 54) is the first of 3 consecutive empty blocks.
+    // With the multi-measure rest expansion (+12 offset), it lands at MuseScore index 65.
+    Measure* m66 = measureAt(score, 65);   // binary MEAS[53] -- empty, no KeySig
+    Measure* m67 = measureAt(score, 66);   // binary MEAS[54] -- empty
+    Measure* m68 = measureAt(score, 67);   // binary MEAS[55] -- empty
+    Measure* m69 = measureAt(score, 68);   // binary MEAS[56] -- first note measure, KeySig here
+
+    ASSERT_NE(m66, nullptr);
+    ASSERT_NE(m67, nullptr);
+    ASSERT_NE(m68, nullptr);
+    ASSERT_NE(m69, nullptr);
+
+    EXPECT_FALSE(hasKeySigAt(m66)) << "MuseScore measure 66 must not carry the key sig";
+    EXPECT_FALSE(hasKeySigAt(m67)) << "MuseScore measure 67 must not carry the key sig";
+    EXPECT_FALSE(hasKeySigAt(m68)) << "MuseScore measure 68 must not carry the key sig";
+    EXPECT_TRUE(hasKeySigAt(m69)) << "MuseScore measure 69 must carry the key sig (first note measure)";
+
+    delete score;
+}
+
+// Regression: NOHOFARE5.enc has 3 single-block multi-measure rest blocks (at binary
+// MEAS[4]=3 measures, MEAS[9]=6 measures, MEAS[27]=6 measures).  The importer must
+// create the correct number of empty measures so that content appears at the right
+// position after each rest.
+// Specifically: binary MEAS[5] (content measure after the 3-measure rest at measure 5)
+// must appear at MuseScore measure 8, not measure 6.
+TEST_F(Tst_Importer, single_block_mmrest_expands_to_correct_measure_count)
+{
+    MasterScore* score = readEncoreScore("NOHOFARE5.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load NOHOFARE5.enc";
+    ASSERT_EQ(score->nmeasures(), 94);
+
+    auto measureAt = [](MasterScore* sc, int idx) -> Measure* {
+        Measure* m = sc->firstMeasure();
+        for (int i = 0; i < idx && m; ++i) {
+            m = m->nextMeasure();
+        }
+        return m;
+    };
+
+    auto hasPitchedNotes = [](Measure* m) -> bool {
+        if (!m) {
+            return false;
+        }
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (size_t v = 0; v < VOICES; ++v) {
+                EngravingItem* el = s->element(v);
+                if (el && el->isChord()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    // 3-measure rest at binary MEAS[4] (MuseScore measures 5-7).
+    Measure* m5 = measureAt(score, 4);
+    Measure* m6 = measureAt(score, 5);
+    Measure* m7 = measureAt(score, 6);
+    Measure* m8 = measureAt(score, 7);
+    ASSERT_NE(m5, nullptr);
+    ASSERT_NE(m6, nullptr);
+    ASSERT_NE(m7, nullptr);
+    ASSERT_NE(m8, nullptr);
+    EXPECT_FALSE(hasPitchedNotes(m5)) << "measure 5 must be empty (part of 3-measure rest)";
+    EXPECT_FALSE(hasPitchedNotes(m6)) << "measure 6 must be empty (part of 3-measure rest)";
+    EXPECT_FALSE(hasPitchedNotes(m7)) << "measure 7 must be empty (part of 3-measure rest)";
+    EXPECT_TRUE(hasPitchedNotes(m8)) << "measure 8 must have notes (content after 3-measure rest)";
 
     delete score;
 }
