@@ -2352,4 +2352,248 @@ TEST_F(Tst_Notes, scale_no_anchor_produces_no_circles)
         << "Without 0x39..0x40 anchor bytes, options-bit-0 notes must not show circles";
 
     delete score;
+}// segment_override_15notes_becomes_15_8
+TEST_F(Tst_Notes, segment_override_15notes_becomes_15_8)
+{
+    MasterScore* score = readEncoreScore("notes_segment_override_15notes.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "15-note segment override must not corrupt";
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    // Collect chords in voice 0
+    std::vector<Chord*> chords;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) chords.push_back(toChord(el));
+    }
+    EXPECT_EQ(chords.size(), 15u) << "All 15 notes must be placed (none dropped)";
+
+    // All must be in the same Tuplet with ratio 15:8
+    Tuplet* tup = chords.empty() ? nullptr : chords[0]->tuplet();
+    ASSERT_NE(tup, nullptr) << "Notes must be in a Tuplet bracket";
+    EXPECT_EQ(tup->ratio().numerator(), 15) << "Override actualN must be 15";
+    EXPECT_EQ(tup->ratio().denominator(), 8) << "Override normalN must be 8";
+    EXPECT_EQ(tup->baseLen().type(), DurationType::V_EIGHTH);
+    for (size_t i = 1; i < chords.size(); ++i) {
+        EXPECT_EQ(chords[i]->tuplet(), tup) << "All 15 notes must be in the same Tuplet";
+    }
+
+    // No second voice, no rests outside the bracket
+    int voice1Chords = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        if (s->element(1)) ++voice1Chords;
+    }
+    EXPECT_EQ(voice1Chords, 0) << "Overflow notes must be dropped, not routed to voice 2";
+
+    delete score;
+}
+
+// segment_override_12notes_plus_2plain_becomes_12_6
+TEST_F(Tst_Notes, segment_override_12notes_plus_2plain_becomes_12_6)
+{
+    MasterScore* score = readEncoreScore("notes_segment_override_12plus2.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "12+2 segment override must not corrupt";
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    std::vector<Chord*> allChords;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) allChords.push_back(toChord(el));
+    }
+    EXPECT_EQ(allChords.size(), 14u) << "12 tuplet + 2 plain = 14 notes total";
+
+    // First 12 in [12:6]
+    Tuplet* tup = allChords.empty() ? nullptr : allChords[0]->tuplet();
+    ASSERT_NE(tup, nullptr);
+    EXPECT_EQ(tup->ratio().numerator(), 12);
+    EXPECT_EQ(tup->ratio().denominator(), 6);
+    for (int i = 0; i < 12; ++i) {
+        EXPECT_EQ(allChords[i]->tuplet(), tup) << "Note " << i+1 << " must be in the [12:6] bracket";
+    }
+    // Last 2 are plain (not in any tuplet)
+    EXPECT_EQ(allChords[12]->tuplet(), nullptr) << "Trailing note 13 must be plain";
+    EXPECT_EQ(allChords[13]->tuplet(), nullptr) << "Trailing note 14 must be plain";
+
+    delete score;
+}
+
+// segment_override_does_not_fire_for_clean_multiple
+TEST_F(Tst_Notes, segment_override_does_not_fire_for_clean_multiple)
+{
+    MasterScore* score = readEncoreScore("notes_segment_no_override_clean_multiple.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "Two standard 3:2 groups must not corrupt";
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    // Collect all chords and their Tuplets
+    std::vector<Chord*> chords;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) chords.push_back(toChord(el));
+    }
+    ASSERT_EQ(chords.size(), 6u) << "All 6 notes must be placed";
+
+    // Must form two separate Tuplets, each [3:2]
+    Tuplet* t1 = chords[0]->tuplet();
+    Tuplet* t2 = chords[3]->tuplet();
+    ASSERT_NE(t1, nullptr); ASSERT_NE(t2, nullptr);
+    EXPECT_NE(t1, t2) << "6 notes with 3:2 must form TWO separate groups, not one [6:m]";
+    EXPECT_EQ(t1->ratio().numerator(), 3);
+    EXPECT_EQ(t1->ratio().denominator(), 2);
+    EXPECT_EQ(t2->ratio().numerator(), 3);
+    EXPECT_EQ(t2->ratio().denominator(), 2);
+    // Notes 1-3 in group 1, notes 4-6 in group 2
+    for (int i = 0; i < 3; ++i) EXPECT_EQ(chords[i]->tuplet(), t1);
+    for (int i = 3; i < 6; ++i) EXPECT_EQ(chords[i]->tuplet(), t2);
+
+    delete score;
+}
+
+// non_standard_tuplet_dosillo_2_1
+TEST_F(Tst_Notes, non_standard_tuplet_dosillo_2_1)
+{
+    MasterScore* score = readEncoreScore("notes_tuplet_dosillo_2_1.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "Dosillo 2:1 must not corrupt";
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    std::vector<Chord*> chords;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) chords.push_back(toChord(el));
+    }
+    ASSERT_EQ(chords.size(), 2u) << "Dosillo must produce exactly 2 notes";
+
+    Tuplet* tup = chords[0]->tuplet();
+    ASSERT_NE(tup, nullptr) << "Both notes must be inside a 2:1 bracket";
+    EXPECT_EQ(tup->ratio().numerator(), 2);
+    EXPECT_EQ(tup->ratio().denominator(), 1);
+    EXPECT_EQ(chords[0]->tuplet(), chords[1]->tuplet());
+
+    delete score;
+}
+
+// non_standard_tuplet_9_4_nontuplet
+TEST_F(Tst_Notes, non_standard_tuplet_9_4_nontuplet)
+{
+    MasterScore* score = readEncoreScore("notes_tuplet_9_4_nontuplet.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "9:4 nontuplet must not corrupt";
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    std::vector<Chord*> chords;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) chords.push_back(toChord(el));
+    }
+    EXPECT_EQ(chords.size(), 9u) << "All 9 notes must be in the 9:4 bracket";
+
+    Tuplet* tup = chords.empty() ? nullptr : chords[0]->tuplet();
+    ASSERT_NE(tup, nullptr);
+    EXPECT_EQ(tup->ratio().numerator(), 9);
+    EXPECT_EQ(tup->ratio().denominator(), 4);
+    for (auto* c : chords) EXPECT_EQ(c->tuplet(), tup);
+
+    delete score;
+}
+
+// last_tuplet_note_short_rdur_not_dropped
+TEST_F(Tst_Notes, last_tuplet_note_short_rdur_not_dropped)
+{
+    MasterScore* score = readEncoreScore("notes_tuplet_last_note_short_rdur.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "Last note with tiny rdur must not corrupt";
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    std::vector<Chord*> chords;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) chords.push_back(toChord(el));
+    }
+    EXPECT_EQ(chords.size(), 10u)
+        << "Note 10 with rdur=6 (< 15) must NOT be dropped by the MIDI artifact filter";
+
+    Tuplet* tup = chords.empty() ? nullptr : chords[0]->tuplet();
+    ASSERT_NE(tup, nullptr);
+    EXPECT_EQ(tup->ratio().numerator(), 10);
+    EXPECT_EQ(tup->ratio().denominator(), 4);
+    EXPECT_EQ(chords[9]->tuplet(), tup) << "Note 10 must be inside the tuplet bracket";
+
+    delete score;
+}
+
+// voice_overflow_notes_dropped_not_routed_to_voice2
+TEST_F(Tst_Notes, voice_overflow_notes_dropped_not_routed_to_voice2)
+{
+    MasterScore* score = readEncoreScore("notes_voice_overflow_dropped.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "Overflow must not corrupt";
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    // Voice 0 should have exactly 2 half notes
+    int v0Chords = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) ++v0Chords;
+    }
+    EXPECT_EQ(v0Chords, 2) << "Only notes 1-2 fit; notes 3-5 must be dropped";
+
+    // Voice 1 must be empty (overflow notes are not routed to voice 2)
+    int v1Chords = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(1);
+        if (el && el->isChord()) ++v1Chords;
+    }
+    EXPECT_EQ(v1Chords, 0) << "Overflow notes must be dropped, NOT routed to voice 2";
+
+    delete score;
+}
+
+// no_spurious_rests_inside_active_tuplet_gapsnap_suppressed
+TEST_F(Tst_Notes, no_spurious_rests_inside_active_tuplet_gapsnap_suppressed)
+{
+    MasterScore* score = readEncoreScore("notes_tuplet_no_gapsnap_spurious_rest.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "Triplet + half must not corrupt";
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    // Collect all chords and rests in voice 0
+    int chordCount = 0;
+    bool anyVisibleRestInsideTriplet = false;
+    Tuplet* activeTup = nullptr;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el) continue;
+        if (el->isChord()) {
+            ++chordCount;
+            activeTup = toChord(el)->tuplet();
+        } else if (el->isRest()) {
+            Rest* r = toRest(el);
+            if (!r->isGap() && activeTup != nullptr) {
+                anyVisibleRestInsideTriplet = true;
+            }
+        }
+    }
+    EXPECT_EQ(chordCount, 4) << "3 triplet quarters + 1 half = 4 chords";
+    EXPECT_FALSE(anyVisibleRestInsideTriplet)
+        << "No visible rests must appear inside the tuplet bracket (gap-snap suppressed)";
+
+    delete score;
 }

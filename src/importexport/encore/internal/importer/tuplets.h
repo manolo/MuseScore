@@ -59,11 +59,30 @@ struct TupletTracker {
     mu::engraving::Fraction noteAdvance(mu::engraving::DurationType baseType) const;
 };
 
+// Nested-tuplet annotation: an inner group of actualN same-ratio notes whose combined
+// face-value equals one outer-group slot. Created when a flat group closes via the
+// no-downdate rule and the ending smaller-fv notes form a valid inner group.
+struct NestedTupletInfo {
+    const EncMeasureElem* innerFirst { nullptr };   // first note of the inner group
+    const EncMeasureElem* innerLast  { nullptr };   // last note of the inner group
+    int innerActualN { 0 };
+    int innerNormalN { 0 };
+    // The outer group spans: [outerGroupStart … innerLast, then one or more outer
+    // continuation notes]. outerActualN/NormalN = same as the flat group's ratio.
+    int outerActualN { 0 };
+    int outerNormalN { 0 };
+};
+
 // Find all elements belonging to complete tuplet groups (implied v0xC2 or explicit). Isolated notes with matching rdur are MIDI swing drift.
 // partialEndGroup: if non-null, receives measure-end partial groups (rdur fills measure AND face-value would overflow without scaling).
+// nestedInfos: if non-null, receives nested-tuplet annotations for detected inner groups.
+// overrideRatios: if non-null, receives {actualN, normalN} overrides for notes that triggered
+//   uniform-fill detection (e.g. 15 equal notes → [15:8] instead of the tup-byte ratio [9:5]).
 std::set<const EncMeasureElem*> computeImpliedTupletMembers(
     const MeasureElemRefVec& sortedElems, const EncMeasure& encMeas, int totalStaves,
-    std::set<const EncMeasureElem*>* partialEndGroup = nullptr);
+    std::set<const EncMeasureElem*>* partialEndGroup = nullptr,
+    std::vector<NestedTupletInfo>* nestedInfos = nullptr,
+    std::map<const EncMeasureElem*, std::pair<int,int>>* overrideRatios = nullptr);
 } // namespace mu::iex::encore
 
 #endif // MU_IMPORTEXPORT_ENC_IMPORT_TUPLETS_H
