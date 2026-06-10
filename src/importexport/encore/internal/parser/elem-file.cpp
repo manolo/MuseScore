@@ -175,10 +175,10 @@ bool EncFile::read(QDataStream& ds)
     }
 
     if (instruments.empty()) {
+        // Leave names empty so readInstrumentMeta can recover them from fixed-offset tables.
+        // "Part N" fallback is applied below only for instruments that are still nameless.
         for (int i = 0; i < header.instrumentCount; ++i) {
-            EncInstrument instr;
-            instr.name = QString("Part %1").arg(i + 1);
-            instruments.push_back(std::move(instr));
+            instruments.emplace_back();
         }
     }
 
@@ -190,6 +190,13 @@ bool EncFile::read(QDataStream& ds)
 
     // Format-specific instrument metadata (name recovery, MIDI programs, Key transposition).
     fmt->readInstrumentMeta(instruments, ds, *this);
+
+    // Apply "Part N" fallback for any instrument whose name is still empty after recovery.
+    for (int i = 0; i < static_cast<int>(instruments.size()); ++i) {
+        if (instruments[i].name.isEmpty()) {
+            instruments[i].name = QString("Part %1").arg(i + 1);
+        }
+    }
 
     // Derive per-instrument staff count from LINE block; grand-staff instruments
     // have two entries with the same instrumentIndex() but staffIndex() 0 and 1.
