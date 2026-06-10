@@ -29,6 +29,7 @@
 #include "engraving/dom/clef.h"
 
 #include "engraving/types/symid.h"
+#include "engraving/types/types.h"
 #include "../parser/elements.h"
 
 namespace mu::engraving {
@@ -84,6 +85,19 @@ int encArticByteToFingerNumber(quint8 articByte);
 
 // True when the articulation byte is an open-string marker (importer emits Fingering "0").
 bool encArticByteIsOpenString(quint8 articByte);
+
+// Returns the string number (1..N) for a string-number articulation byte, or 0 if not one.
+int encArticByteToStringNumber(quint8 articByte);
+
+// Returns the string number (1..8) for bytes in the 0x39..0x40 range (= byte - 0x38),
+// or 0 if the byte is not in that range.  These bytes are written by Encore as explicit
+// string-number anchors; when at least one is present in a measure, all notes in that
+// measure with options bit 0 set and no other artic byte also show string numbers.
+int encArticByteToScaleStringNumber(quint8 articByte);
+
+// Returns the trill upper-neighbor interval for artic bytes 0x05/0x06/0x07 (flat/sharp/natural).
+// Returns {SECOND, AUTO} for bytes with no accidental modifier.
+mu::engraving::OrnamentInterval encArticByteToTrillInterval(quint8 articByte);
 } // namespace mu::iex::encore
 
 #endif // MU_IMPORTEXPORT_ENC_IMPORT_MAPPING_H

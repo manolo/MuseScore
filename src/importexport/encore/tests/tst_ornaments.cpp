@@ -49,6 +49,10 @@
 #include "engraving/dom/tremolosinglechord.h"
 #include "engraving/dom/timesig.h"
 #include "engraving/dom/tuplet.h"
+#include "engraving/dom/breath.h"
+#include "engraving/dom/measurerepeat.h"
+#include "engraving/dom/ornament.h"
+#include "engraving/dom/trill.h"
 
 #include "testbase.h"
 
@@ -292,9 +296,8 @@ TEST_F(Tst_Ornaments, staccato_from_orn_c9)
 
 // ===========================================================================
 // FIX: Size-28 ORN 0x36 (TRILL_START) + 0x35 (TRILL_END) now create a Trill spanner
-// (tr + wavy line) instead of a glyph-only Ornament. ORN 0x37 (TRILL_ALT) remains
-// an Ornament glyph (secondary marker within the span). 0x35 is consumed as the span
-// endpoint and produces no visible element of its own.
+// (tr + wavy line) instead of a glyph-only Ornament. ORN 0x37 (TRILL_ALT) that appears
+// WITHIN a 0x36..0x35 span remains an Ornament glyph (secondary tr marker).
 // Fixture: 0x36 at tick=0, 0x37 at tick=240, 0x35 at tick=480 in a 4/4 measure.
 // Expected: one Trill spanner (from 0x36 to 0x35) + one Ornament glyph (from 0x37).
 // ===========================================================================
@@ -1112,5 +1115,244 @@ TEST_F(Tst_Ornaments, tremolo_orn_stays_on_untied_chord)
         << "tremolo must land on the quarter (tick=0); no spurious tie-back walk";
     EXPECT_EQ(tremoloChord->notes().front()->tieBack(), nullptr)
         << "the chord carrying the tremolo must have no incoming tie";
+    delete score;
+}
+
+// ===========================================================================
+// NEW ARTIC BYTES: brassMuteClosed (0x1B), ornamentTurnInverted (0x2E),
+//                 brassMuteHalfClosed (0x30)
+// ===========================================================================
+TEST_F(Tst_Ornaments, new_artic_bytes_stopped_inverted_turn_half_stopped)
+{
+    MasterScore* score = readEncoreScore("ornaments_new_artic_bytes.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    auto articsOnNote = [&](int noteIdx) {
+        int count = 0;
+        Segment* seg = m->first(SegmentType::ChordRest);
+        for (int i = 0; i < noteIdx && seg; ++i) {
+            seg = seg->next(SegmentType::ChordRest);
+        }
+        if (!seg) return std::vector<SymId>{};
+        EngravingItem* el = seg->element(0);
+        if (!el || !el->isChord()) return std::vector<SymId>{};
+        std::vector<SymId> ids;
+        for (Articulation* a : toChord(el)->articulations()) {
+            ids.push_back(a->symId());
+        }
+        for (EngravingItem* e : toChord(el)->el()) {
+            if (e->isOrnament()) ids.push_back(toOrnament(e)->symId());
+        }
+        return ids;
+    };
+
+    auto s0 = articsOnNote(0);
+    auto s1 = articsOnNote(1);
+    auto s2 = articsOnNote(2);
+
+    EXPECT_TRUE(std::find(s0.begin(), s0.end(), SymId::brassMuteClosed) != s0.end())
+        << "0x1B must produce brassMuteClosed (+)";
+    EXPECT_TRUE(std::find(s1.begin(), s1.end(), SymId::ornamentTurnInverted) != s1.end())
+        << "0x2E must produce ornamentTurnInverted (inverted turn)";
+    EXPECT_TRUE(std::find(s2.begin(), s2.end(), SymId::brassMuteHalfClosed) != s2.end())
+        << "0x30 must produce brassMuteHalfClosed (half-stopped)";
+
+    delete score;
+}
+
+// ===========================================================================
+// BREATH MARKS AND CAESURA (ORN tipo 0xA8=breathMarkComma, 0xA7=caesura)
+// ===========================================================================
+TEST_F(Tst_Ornaments, breath_comma_and_caesura_from_orn_tipo)
+{
+    MasterScore* score = readEncoreScore("ornaments_breath_and_caesura.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    int breathCount = 0;
+    bool hasComma = false, hasCaesura = false;
+    // Breath elements live on SegmentType::Breath segments as segment elements,
+    // not as annotations; iterate all segments and check element slots.
+    for (Segment* seg = m->first(); seg; seg = seg->next()) {
+        for (track_idx_t v = 0; v < score->ntracks(); ++v) {
+            EngravingItem* el = seg->element(v);
+            if (el && el->isBreath()) {
+                ++breathCount;
+                SymId sid = toBreath(el)->symId();
+                if (sid == SymId::breathMarkComma) hasComma = true;
+                if (sid == SymId::caesura) hasCaesura = true;
+            }
+        }
+    }
+
+    EXPECT_EQ(breathCount, 2) << "Must have 2 Breath elements (comma + caesura)";
+    EXPECT_TRUE(hasComma) << "ORN tipo 0xA8 must produce breathMarkComma";
+    EXPECT_TRUE(hasCaesura) << "ORN tipo 0xA7 must produce caesura";
+
+    delete score;
+}
+
+// ===========================================================================
+// STANDALONE TRILL_END (tipo 0x35 without prior TRILL_START)
+// Creates a Trill spanner spanning the note's duration.
+// ===========================================================================
+TEST_F(Tst_Ornaments, standalone_trill_end_creates_trill_spanner_on_note)
+{
+    MasterScore* score = readEncoreScore("ornaments_standalone_trill_end.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+
+    int trillCount = 0;
+    for (auto it = score->spanner().cbegin(); it != score->spanner().cend(); ++it) {
+        if (it->second->isTrill()) {
+            ++trillCount;
+            Trill* tr = toTrill(it->second);
+            EXPECT_GE(tr->ticks().ticks(), 240)
+                << "Trill spanner must cover at least a quarter note";
+        }
+    }
+    EXPECT_EQ(trillCount, 1)
+        << "TRILL_END without prior TRILL_START must create one Trill spanner";
+
+    delete score;
+}
+
+// ===========================================================================
+// MEASURE REPEAT (ORN tipo 0xA3)
+// ===========================================================================
+TEST_F(Tst_Ornaments, measure_repeat_from_orn_tipo_0xA3)
+{
+    MasterScore* score = readEncoreScore("ornaments_measure_repeat.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+
+    int mrCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) continue;
+        Measure* m = toMeasure(mb);
+        for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+            for (size_t v = 0; v < VOICES; ++v) {
+                EngravingItem* el = seg->element(static_cast<track_idx_t>(v));
+                if (el && el->isMeasureRepeat()) ++mrCount;
+            }
+        }
+    }
+    EXPECT_EQ(mrCount, 1) << "ORN tipo 0xA3 must produce one MeasureRepeat element";
+
+    delete score;
+}
+
+// ===========================================================================
+// TRILL WITH ACCIDENTALS: intervalAbove set from artic bytes 0x05/0x06/0x07
+// ===========================================================================
+TEST_F(Tst_Ornaments, trill_accidentals_set_interval_above)
+{
+    MasterScore* score = readEncoreScore("ornaments_trill_with_accidentals.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    struct NoteOrnInterval { int noteIdx; IntervalType expected; const char* desc; };
+    std::vector<NoteOrnInterval> checks = {
+        { 0, IntervalType::AUTO,      "0x04 trill: no accidental → AUTO" },
+        { 1, IntervalType::MINOR,     "0x05 trill+flat → MINOR (trill menor)" },
+        { 2, IntervalType::AUGMENTED, "0x06 trill+sharp → AUGMENTED (trill augmented)" },
+        { 3, IntervalType::MAJOR,     "0x07 trill+natural → MAJOR" },
+    };
+
+    // Collect intervalAbove values from all trill ornaments (any symId, since
+    // MuseScore may store the cue-note accidental as the primary glyph for some intervals).
+    std::vector<IntervalType> intervals;
+    int noteIdx = 0;
+    for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        EngravingItem* el = seg->element(0);
+        if (!el || !el->isChord()) continue;
+        if (noteIdx >= (int)checks.size()) break;
+        for (EngravingItem* sub : toChord(el)->el()) {
+            if (!sub->isOrnament()) continue;
+            Ornament* orn = toOrnament(sub);
+            // Only check ornaments that were created for trills (have a trill-related interval or AUTO)
+            if (orn->intervalAbove().type != IntervalType::AUTO
+                || checks[noteIdx].expected == IntervalType::AUTO) {
+                EXPECT_EQ(orn->intervalAbove().type, checks[noteIdx].expected)
+                    << checks[noteIdx].desc;
+            }
+        }
+        ++noteIdx;
+    }
+
+    delete score;
+}
+
+// ===========================================================================
+// OPEN-STRING (0x46): plain Fingering "0", NOT circled STRING_NUMBER.
+// STICK (0x47): unmapped — no fingering added.
+// ===========================================================================
+TEST_F(Tst_Ornaments, open_string_0x46_is_plain_fingering_not_string_number)
+{
+    // Note 1: au=0x46 (open string) → Fingering "0", plain FINGERING style (no circle).
+    // Note 2: au=0x47 (stick) → no fingering added.
+    MasterScore* score = readEncoreScore("ornaments_open_string_and_stick.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    std::vector<std::pair<String, TextStyleType>> fingeringsByNote;
+    for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        EngravingItem* el = seg->element(0);
+        if (!el || !el->isChord()) continue;
+        for (Note* n : toChord(el)->notes()) {
+            for (EngravingItem* sub : n->el()) {
+                if (sub && sub->isFingering()) {
+                    Fingering* fg = toFingering(sub);
+                    fingeringsByNote.emplace_back(fg->plainText(), fg->textStyleType());
+                }
+            }
+        }
+    }
+
+    ASSERT_EQ(fingeringsByNote.size(), 1u)
+        << "Only note 1 (0x46) must have a fingering; note 2 (0x47=stick) is unmapped";
+    EXPECT_EQ(fingeringsByNote[0].first, String(u"0"))
+        << "Open-string (0x46) must produce Fingering '0'";
+    EXPECT_EQ(fingeringsByNote[0].second, TextStyleType::FINGERING)
+        << "Open-string (0x46) must use plain FINGERING style, not STRING_NUMBER (circled)";
+
+    delete score;
+}
+
+// ===========================================================================
+// STANDALONE TRILL_ALT (0x37) with no prior TRILL_START on same track:
+// creates a Trill spanner covering the note's duration.
+// ===========================================================================
+TEST_F(Tst_Ornaments, standalone_trill_alt_creates_trill_spanner)
+{
+    MasterScore* score = readEncoreScore("ornaments_trill_alt_standalone.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+
+    int trillCount = 0;
+    for (auto it = score->spanner().cbegin(); it != score->spanner().cend(); ++it) {
+        if (it->second->isTrill()) {
+            ++trillCount;
+            Trill* tr = toTrill(it->second);
+            EXPECT_GE(tr->ticks().ticks(), 240)
+                << "Standalone TRILL_ALT spanner must cover at least a quarter note";
+        }
+    }
+    EXPECT_EQ(trillCount, 1)
+        << "TRILL_ALT (0x37) without prior TRILL_START must create exactly one Trill spanner";
+
     delete score;
 }

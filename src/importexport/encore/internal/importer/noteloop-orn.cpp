@@ -284,6 +284,36 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         ctx.pendingStaccatos.push_back({ elemTick, track });
         break;
     }
+    case EncOrnamentType::FERMATA_ABOVE: {
+        ctx.pendingFermatas.push_back({ elemTick, track, SymId::fermataAbove });
+        break;
+    }
+    case EncOrnamentType::FERMATA_BELOW: {
+        ctx.pendingFermatas.push_back({ elemTick, track, SymId::fermataBelow });
+        break;
+    }
+    case EncOrnamentType::REPEAT_MEASURE: {
+        // Deduplicate: one MeasureRepeat per (staffIdx, measure) is enough.
+        bool already = false;
+        for (const auto& pmr : ctx.pendingMeasureRepeats) {
+            if (pmr.staffIdx == ec.staffIdx && pmr.measTick == measTick) {
+                already = true;
+                break;
+            }
+        }
+        if (!already) {
+            ctx.pendingMeasureRepeats.push_back({ measTick, ec.staffIdx });
+        }
+        break;
+    }
+    case EncOrnamentType::CAESURA: {
+        ctx.pendingBreaths.push_back({ elemTick, track, SymId::caesura });
+        break;
+    }
+    case EncOrnamentType::BREATH_COMMA: {
+        ctx.pendingBreaths.push_back({ elemTick, track, SymId::breathMarkComma });
+        break;
+    }
     case EncOrnamentType::DOWNBOW: {
         const bool cm = !noteTicks.count(static_cast<int>(e->tick));
         ctx.pendingBowings.push_back({ elemTick, track, SymId::stringsDownBow, measIdx, cm });
