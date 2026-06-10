@@ -724,20 +724,39 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
                 continue;
             }
             // Ornaments need Ornament wrapper for MusicXML <ornaments>; plain articulations use Articulation.
+            // Dedup: when multiple notes in the same chord carry the same artic byte (common for
+            // trills, mordents, etc. that apply to the whole chord), each note would independently
+            // add the same SymId to the chord. Skip if the chord already has this symbol.
             if (isOrnamentSymId(sid)) {
-                Ornament* orn = Factory::createOrnament(chord);
-                orn->setSymId(sid);
-                if (sid == SymId::ornamentTrill) {
-                    const auto interval = encArticByteToTrillInterval(ab);
-                    if (interval.type != mu::engraving::IntervalType::AUTO) {
-                        orn->setIntervalAbove(interval);
+                // Ornament extends Articulation and is stored in chord->articulations().
+                bool alreadyHas = false;
+                for (Articulation* a : chord->articulations()) {
+                    if (a->isOrnament() && toOrnament(a)->symId() == sid) {
+                        alreadyHas = true;
+                        break;
                     }
                 }
-                chord->add(orn);
+                if (!alreadyHas) {
+                    Ornament* orn = Factory::createOrnament(chord);
+                    orn->setSymId(sid);
+                    if (sid == SymId::ornamentTrill) {
+                        const auto interval = encArticByteToTrillInterval(ab);
+                        if (interval.type != mu::engraving::IntervalType::AUTO) {
+                            orn->setIntervalAbove(interval);
+                        }
+                    }
+                    chord->add(orn);
+                }
             } else {
-                Articulation* art = Factory::createArticulation(chord);
-                art->setSymId(sid);
-                chord->add(art);
+                bool alreadyHas = false;
+                for (Articulation* a : chord->articulations()) {
+                    if (a->symId() == sid) { alreadyHas = true; break; }
+                }
+                if (!alreadyHas) {
+                    Articulation* art = Factory::createArticulation(chord);
+                    art->setSymId(sid);
+                    chord->add(art);
+                }
             }
         }
     }
