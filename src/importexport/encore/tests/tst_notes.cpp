@@ -1306,6 +1306,71 @@ TEST_F(Tst_Notes, dotted_note_dotctrl_bit0_with_rdur_drift)
 }
 
 // ===========================================================================
+// BUG FIX: v0xC2 dotted-eighth: tick-pattern detection via E@tick→S@tick+120
+// ===========================================================================
+
+TEST_F(Tst_Notes, v0c2_dotted_eighth_detected_from_tick_pattern)
+{
+    // notes_v0c2_dotted_eighth.enc: v0xC2 3/4 measure.
+    // E@0 (dotControl=0x60, bit 0 = 0), S@120, H@180.
+    //
+    // In Encore v0xC2 the sixteenth in a dotted-eighth+sixteenth group is
+    // stored at tick+faceValue(eighth)=tick+120, NOT tick+dotted(eighth)=
+    // tick+180.  realDuration of the eighth = 120 = plain eighth gap.
+    // dotControl=0x60 has bit 0 = 0 (unlike v0xC4 which uses 0x1D).
+    //
+    // Without fix: plain-E(120) + S(60) + H(480) = 660 ≠ 720 → trailing
+    //   16th rest generated; sanityCheck fails or measure is wrong.
+    // With fix (E@tick → S@tick+120 pattern): dotControl|=1 set on the
+    //   eighth → bit-0 fallback gives 1 dot → dotted-E(180)+S(60)+H(480)
+    //   = 720 → clean measure, 3 chords, no phantom rest.
+    MasterScore* score = readEncoreScore("notes_v0c2_dotted_eighth.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load notes_v0c2_dotted_eighth.enc";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "v0xC2 dotted-eighth measure must pass sanityCheck: " << ret.text();
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->timesig(), Fraction(3, 4));
+
+    std::vector<Chord*> chords;
+    std::vector<Rest*> rests;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (!e) {
+            continue;
+        }
+        if (e->isChord()) {
+            chords.push_back(toChord(e));
+        } else if (e->isRest()) {
+            Rest* r = toRest(e);
+            if (!r->isGap()) {
+                rests.push_back(r);
+            }
+        }
+    }
+
+    ASSERT_EQ(chords.size(), 3u) << "Must have exactly 3 chords (dotted-E, S, H); phantom rest signals unfixed bug";
+    EXPECT_EQ(rests.size(), 0u) << "No phantom rests: measure must fill 3/4 exactly";
+
+    // First chord: dotted eighth (bit-0 fallback applied by tick-pattern fix)
+    EXPECT_EQ(chords[0]->durationType().type(), DurationType::V_EIGHTH)
+        << "Note 0 base type must be eighth";
+    EXPECT_EQ(chords[0]->dots(), 1)
+        << "Note 0 must have 1 dot (v0xC2 tick-pattern fix sets dotControl bit 0)";
+
+    // Second chord: plain sixteenth
+    EXPECT_EQ(chords[1]->durationType().type(), DurationType::V_16TH);
+    EXPECT_EQ(chords[1]->dots(), 0);
+
+    // Third chord: plain half
+    EXPECT_EQ(chords[2]->durationType().type(), DurationType::V_HALF);
+    EXPECT_EQ(chords[2]->dots(), 0);
+
+    delete score;
+}
+
+// ===========================================================================
 // BUG FIX: Mixed-face-value tuplet group gets exact ticks; isolated note
 //          that exactly fills remaining space becomes a partial tuplet
 // ===========================================================================

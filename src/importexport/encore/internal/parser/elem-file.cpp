@@ -124,7 +124,8 @@ bool EncFile::read(QDataStream& ds)
         } else if (nextId == "MEAS") {
             EncMeasure meas;
             meas.read(ds, varSize, *fmt);
-            meas.calculateRealDurations(fmt->hasGraceTimeBorrowing());
+            meas.calculateRealDurations(fmt->hasGraceTimeBorrowing(),
+                                    fmt->supportsImpliedTuplets());
             // header.measureCount says how many MEAS blocks Encore shows.
             // Extra "ghost" measures from old edits; skip them.
             if (header.measureCount > 0
