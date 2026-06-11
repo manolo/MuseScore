@@ -320,6 +320,15 @@ void buildNoteLoop(BuildCtx& ctx)
         ctx.lastChordPos.clear();
         ctx.graceStolenTicks.clear();
 
+        // Pickup (Case A): pre-offset all tracks so notes land at the end of m0.
+        if (measIdx == 0 && ctx.measure0PickupOffset > Fraction(0, 1)) {
+            for (int s = 0; s < ctx.totalStaves; ++s) {
+                for (int v = 0; v < VOICES; ++v) {
+                    ctx.cumTick[{ s, v }] = ctx.measure0PickupOffset;
+                }
+            }
+        }
+
         // Delete unattached grace chords explicitly: not in score tree, so no auto-cleanup.
         for (auto& [key, vec] : ctx.pendingGraces) {
             for (Chord* gc : vec) {
@@ -940,6 +949,24 @@ void buildNoteLoop(BuildCtx& ctx)
             entries.clear();
         }
         // ctx.nextLyricHyphenBefore survives bar lines so a trailing hyphen (e.g. "RO -") carries into the next measure's first syllable.
+
+        // Pickup (Case A): insert leading invisible gap rests so checkMeasure does not
+        // fill the leading space with visible rests.
+        if (measIdx == 0 && ctx.measure0PickupOffset > Fraction(0, 1)) {
+            for (int si = 0; si < ctx.totalStaves; ++si) {
+                for (voice_idx_t v = 0; v < VOICES; ++v) {
+                    const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
+                    Segment* leadSeg = measure->getSegment(SegmentType::ChordRest, measTick);
+                    if (!leadSeg->element(tr)) {
+                        Rest* r = Factory::createRest(leadSeg, TDuration(DurationType::V_MEASURE));
+                        r->setTicks(ctx.measure0PickupOffset);
+                        r->setTrack(tr);
+                        r->setGap(true);
+                        leadSeg->add(r);
+                    }
+                }
+            }
+        }
 
         // Fill remaining gaps; faceValue-cumulative placement ensures they represent genuinely missing rests, not drift.
         for (int si = 0; si < ctx.totalStaves; ++si) {
