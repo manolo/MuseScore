@@ -28,7 +28,6 @@
 #include "engraving/dom/note.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/systemlock.h"
-#include "engraving/editing/editsystemlocks.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/segment.h"
 #include "engraving/dom/articulation.h"
@@ -197,25 +196,43 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
     // locked system rather than redistributing measures. This preserves Encore's line
     // layout without needing to reduce the staff space to unreadable sizes.
     {
-        const auto& lines = ctx.enc.lines;
+        const auto& lines  = ctx.enc.lines;
+        const auto& enc2ms = ctx.encToMsIdx;   // MEAS-block index → first MuseScore measure index
         const int totalMeas = static_cast<int>(ctx.measuresByIdx.size());
-        int cumMeas = 0;
-        for (int li = 0; li < static_cast<int>(lines.size()); ++li) {
-            const int firstIdx = cumMeas;
-            cumMeas += lines[li].measureCount;
-            const int lastIdx = cumMeas - 1;
 
-            if (firstIdx < 0 || lastIdx < firstIdx
-                || firstIdx >= totalMeas || lastIdx >= totalMeas) {
+        for (const auto& line : lines) {
+            if (line.measureCount <= 0) {
                 continue;
             }
-            Measure* firstM = ctx.measuresByIdx[firstIdx];
-            Measure* lastM  = ctx.measuresByIdx[lastIdx];
+            const int firstBlock = static_cast<int>(line.start);
+            const int lastBlock  = firstBlock + static_cast<int>(line.measureCount) - 1;
+
+            if (firstBlock < 0 || lastBlock < firstBlock
+                || firstBlock >= static_cast<int>(enc2ms.size())
+                || lastBlock >= static_cast<int>(enc2ms.size())) {
+                continue;
+            }
+
+            const int firstMsIdx = static_cast<int>(enc2ms[static_cast<size_t>(firstBlock)]);
+            // Last MuseScore measure = first of the last MEAS block's range, plus however
+            // many MuseScore measures that block produces (gap to next block, or to end).
+            const int lastBlockMs = static_cast<int>(enc2ms[static_cast<size_t>(lastBlock)]);
+            const int nextBlockMs = (lastBlock + 1 < static_cast<int>(enc2ms.size()))
+                                    ? static_cast<int>(enc2ms[static_cast<size_t>(lastBlock + 1)])
+                                    : totalMeas;
+            const int lastMsIdx = nextBlockMs - 1;
+
+            if (firstMsIdx < 0 || lastMsIdx < firstMsIdx
+                || firstMsIdx >= totalMeas || lastMsIdx >= totalMeas) {
+                continue;
+            }
+
+            Measure* firstM = ctx.measuresByIdx[static_cast<size_t>(firstMsIdx)];
+            Measure* lastM  = ctx.measuresByIdx[static_cast<size_t>(lastMsIdx)];
             if (!firstM || !lastM) {
                 continue;
             }
-            EditSystemLocks::undoAddSystemLock(ctx.score,
-                new SystemLock(firstM, lastM));
+            ctx.score->addSystemLock(new SystemLock(firstM, lastM));
         }
     }
 }
