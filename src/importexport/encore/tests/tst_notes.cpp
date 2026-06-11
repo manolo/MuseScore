@@ -3161,3 +3161,49 @@ TEST_F(Tst_Notes, chord_symbol_snaps_to_beat_not_nearby_subdivision)
 
     delete score;
 }
+
+// ===========================================================================
+// FEATURE: Multi-instrument compact rawStaff routing
+// ===========================================================================
+
+TEST_F(Tst_Notes, notes_multiinstr_compact_routing)
+{
+    // notes_multiinstr_compact_routing.enc has 2 instruments x 2 staves each.
+    // Notes use compact rawStaff encoding: rawStaff = (staffWithin<<6)|instrIdx
+    // (same byte format as LINE block instrStaffIdx).
+    //
+    // Expected layout:
+    //   staff 0 (instr 0 treble): C4 = pitch 60
+    //   staff 1 (instr 0 bass):   C3 = pitch 48
+    //   staff 2 (instr 1 treble): E4 = pitch 64
+    //   staff 3 (instr 1 bass):   E3 = pitch 52
+    //
+    // Bug (before fix): importer treated rawStaff low-6-bits as LINE slot index,
+    // so organ notes (instrIdx=1) were placed on piano-bass staff (LINE slot 1).
+    // All four notes ended up on staffs 0 and 1 only; staves 2 and 3 were empty.
+    MasterScore* score = readEncoreScore("notes_multiinstr_compact_routing.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_EQ(score->nstaves(), 4) << "score must have 4 staves (2 instruments x 2 each)";
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+    Segment* seg = m->first(SegmentType::ChordRest);
+    ASSERT_NE(seg, nullptr);
+
+    auto pitchOnStaff = [&](int staffIdx) -> int {
+        for (int v = 0; v < static_cast<int>(VOICES); ++v) {
+            EngravingItem* e = seg->element(static_cast<track_idx_t>(staffIdx * VOICES + v));
+            if (e && e->isChord()) {
+                return toChord(e)->notes().front()->pitch();
+            }
+        }
+        return -1;
+    };
+
+    EXPECT_EQ(pitchOnStaff(0), 60) << "staff 0 (instr 0 treble) must have C4";
+    EXPECT_EQ(pitchOnStaff(1), 48) << "staff 1 (instr 0 bass) must have C3";
+    EXPECT_EQ(pitchOnStaff(2), 64) << "staff 2 (instr 1 treble) must have E4";
+    EXPECT_EQ(pitchOnStaff(3), 52) << "staff 3 (instr 1 bass) must have E3";
+
+    delete score;
+}
