@@ -959,24 +959,23 @@ the backwards scan also fires when no chord-rest is found at the
 default tick, finding the latest note/rest in the source measure with
 `xoffset <= ornament.xoffset` and anchoring the start there.
 
-**Endpoint priority.** Two possible endpoint signals exist:
+**Endpoint priority.** Three-tier resolution:
 
-1. **Next-dynamic**: first Dynamic annotation on the same track after
-   the start tick and within the `alMezuro` upper bound. This is the
-   primary resolver and handles `mf<f>mf` chains where each hairpin
-   terminates at the next visible glyph.
+1. **Next-dynamic** (primary): first Dynamic annotation on the same track
+   after start tick and within the `alMezuro` upper bound. Handles `mf<f>mf`
+   chains where each hairpin terminates at the next visible dynamic glyph.
 
-2. **`xoffset2` bar-line clamp** (fallback only). When `xoffset2`
-   is smaller than the first NOTE's `xoffset` in the target measure
-   and NO Dynamic was found via step 1, Encore drew the hairpin tip
-   right before any note content (= at the bar line). The importer
-   clamps the endpoint to the target measure's start tick in that
-   case.
+2. **`xoffset2` note snap** (fallback when no Dynamic): scan the target
+   measure for the last NOTE/REST with `xoffset <= xoffset2`. End the
+   hairpin at that note's tick. Mirrors the `snapTickByXoffset` start-snap
+   logic in `noteloop-orn.cpp`.
 
-The clamp fires only when no Dynamic is found so a cross-measure dim
-that ends at a `mf` dynamic is not incorrectly pinned to the bar line.
-The clamp is also guarded against synthetic fixtures where notes have
-`xoffset == 0` (generator default), which would always trigger it.
+3. **Bar-line clamp** (when no note found in step 2): if `xoffset2`
+   precedes all notes with positive xoffsets in the target measure, clamp
+   to `targetMeasure.tick`.
+
+Steps 2-3 are skipped for notes with `xoffset == 0` (synthetic fixture
+guard) and when `xoffset2 == 0` (no endpoint hint).
 
 ## Slur endpoint resolution (pixel-span heuristic)
 
