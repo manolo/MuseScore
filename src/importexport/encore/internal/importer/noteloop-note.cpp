@@ -521,9 +521,10 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
                 advance = TDuration(remaining, true).fraction();
                 if (advance.numerator() == 0) {
                     // Remaining smaller than any standard duration; chord would become zero-tick. Remove it.
-                    if (tt.inTuplet()) {
+                    if (chord->tuplet()) {
+                        Tuplet* t = chord->tuplet();
                         chord->setTuplet(nullptr);
-                        tt.currentTuplet->remove(chord);
+                        t->remove(chord);
                         tt.faceTicks -= chord->ticks();
                     }
                     seg->remove(chord);
@@ -537,9 +538,10 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
                     return;
                 }
                 if (chord) {
-                    if (tt.inTuplet()) {
+                    if (chord->tuplet()) {
+                        Tuplet* t = chord->tuplet();
                         chord->setTuplet(nullptr);
-                        tt.currentTuplet->remove(chord);
+                        t->remove(chord);
                         tt.faceTicks -= chord->ticks();
                     }
                     // Update chord duration to match capped advance; otherwise actualTicks() exceeds ctx.cumTick advance and causes sanityCheck overshoot.
