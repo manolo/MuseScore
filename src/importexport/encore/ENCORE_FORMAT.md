@@ -592,10 +592,20 @@ pixel-span heuristic would otherwise ignore the co-located regular note (it only
 notes strictly after startEncTick) and land on the NEXT note as the endpoint. Similarly, the
 fallback path can produce a zero-span that resolves to the end of the measure. In both cases:
 
-- **Heuristic shortcut** (Fix A, `resolvers-slur.cpp`): before the endpoint search loop, if a
-  grace and a regular note share `startEncTick` AND `targetEndXoff ≤ maxXoffInMeas`, the slur
-  is immediately resolved as grace-to-main (endTick = startTick). This prevents the heuristic
-  from wandering to the wrong note and applies for both v0xC2 and v0xC4 formats.
+- **firstNoteXoff uses grace xoffset** (`resolvers-slur.cpp`): the `firstNoteXoff` reference
+  for `targetEndXoff = firstNoteXoff + pixelSpan` must be the GRACE note's xoffset, not the
+  regular's. The slur arc starts at the grace position (`slurXoffset ≈ graceXoff`), so using
+  the regular's larger xoffset inflates `targetEndXoff` and causes the heuristic to select a
+  later note as the endpoint instead of the co-located main chord. Fix: when iterating notes at
+  `startEncTick`, break immediately if a grace note is found; otherwise continue to search past
+  any regular notes (v0xC4 has regular-first binary order).
+
+- **Integrated heuristic shortcut** (`resolvers-slur.cpp`): the endpoint search loop also tracks
+  whether there's a grace+regular pair at `startEncTick`. After the loop, if the regular note at
+  `startEncTick` is a BETTER match for `targetEndXoff` than any later note (`regularDist <
+  bestDist`), the slur is resolved as grace-to-main. If a later note is a better match, the
+  heuristic endpoint wins (grace-to-later). This correctly handles v0xC2 co-located grace+main
+  AND v0xC4 grace+main+later cases, preventing over-eager zero-span forcing.
 
 - **tick2 = startTick invariant** (Fix B, `resolvers-slur.cpp`): the zero-span path sets
   `gSlur->setTick2(ps.startTick)` (same as tick) so that the post-pass detects
@@ -607,6 +617,26 @@ fallback path can produce a zero-span that resolves to the end of the measure. I
   instead of `addElement` so MuseScore's default `computeStartElement()` (called by
   `addElement` → `addSpanner(true)`) does not replace the explicitly-set grace startElement
   with the main chord.
+
+**v0xC4 binary ordering** (`noteloop-note.cpp`): Encore 5 serializes the MAIN note BEFORE its
+ACCIACCATURA grace note at the same beat. This is the opposite of v0xC2 where the grace comes
+first. In the noteloop, when the main note is placed first it sets `prevMidiTick`, and the
+immediately-following grace (same tick, `tick − prevTick < CHORD_MIDI_THRESHOLD`) has
+`isChordExt=TRUE`. The grace handler detects this and attaches the grace directly to the
+already-placed main chord (retroactive attachment) instead of queuing it for the next note.
+Without this, the grace would be attached to the NEXT note and appear in the wrong visual
+position.
+
+**Regression tests** (`tests/data/` + `tst_ornaments.cpp`):
+
+| Fixture | Format | Pattern | What fails without fix |
+|---------|--------|---------|------------------------|
+| `ornaments_v0c2_grace_slur_to_main_coloc.enc` | v0xC2 | Grace before main; note@600 "bait" | Old shortcut picks note@600; refined shortcut catches regularDist=0 |
+| `ornaments_v0c4_grace_slur_to_main_coloc.enc` | v0xC4 | Grace before main (coloc) | Zero-span endElement = next-measure note |
+| `ornaments_v0c4_grace_after_main_in_binary.enc` | v0xC4 | Regular FIRST, grace SECOND at tick=0 | Without Fix 1: grace on chord@1/4, mainChord@0 empty → no slur |
+| `ornaments_v0c4_grace_after_main_grace_to_later.enc` | v0xC4 | Regular FIRST, grace SECOND at tick=240; Note@480 | Without Fix 1: graceStart=FALSE. Without refined shortcut: endAtLaterTick=FALSE |
+| `ornaments_v0c4_grace_after_main_preceding_notes.enc` | v0xC4 | Preceding Quarter@0 + Regular@240 FIRST + ACCIACCATURA@240 SECOND | Reproduces BN-COLET5 preceding-note pattern |
+| `ornaments_v0c4_grace_after_main_slur_to_main.enc` | v0xC4 | Regular FIRST (xoff=20), grace SECOND (xoff=10); slurXoffset=10 near grace | Without firstNoteXoff fix: Regular's xoff used → targetEnd=32 → later note wins (grace-to-later). With fix: grace xoff used → targetEnd=22 → main wins (grace-to-main, endAtSameTick) |
 
 ### Multi-staff instruments: staffWithin field
 
