@@ -3207,3 +3207,34 @@ TEST_F(Tst_Notes, notes_multiinstr_compact_routing)
 
     delete score;
 }
+
+TEST_F(Tst_Notes, notes_v0c2_multiinstr_compact_routing)
+{
+    // v0xC2 counterpart: same compact rawStaff encoding in an older file format.
+    // Verifies the lineSlotByRawByte lookup in noteloop.cpp works for v0xC2 (size=22 notes).
+    MasterScore* score = readEncoreScore("notes_v0c2_multiinstr_compact_routing.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_EQ(score->nstaves(), 4);
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+    Segment* seg = m->first(SegmentType::ChordRest);
+    ASSERT_NE(seg, nullptr);
+
+    auto pitchOnStaff = [&](int staffIdx) -> int {
+        for (int v = 0; v < static_cast<int>(VOICES); ++v) {
+            EngravingItem* e = seg->element(static_cast<track_idx_t>(staffIdx * VOICES + v));
+            if (e && e->isChord()) {
+                return toChord(e)->notes().front()->pitch();
+            }
+        }
+        return -1;
+    };
+
+    EXPECT_EQ(pitchOnStaff(0), 60) << "staff 0 (instr 0 treble) must have C4";
+    EXPECT_EQ(pitchOnStaff(1), 48) << "staff 1 (instr 0 bass) must have C3";
+    EXPECT_EQ(pitchOnStaff(2), 64) << "staff 2 (instr 1 treble) must have E4";
+    EXPECT_EQ(pitchOnStaff(3), 52) << "staff 3 (instr 1 bass) must have E3";
+
+    delete score;
+}
