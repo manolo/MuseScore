@@ -729,6 +729,14 @@ cases. Instead:
 3. If both return 0 AND `dotControl & 1`, force 1 dot. This handles MIDI timing drift
    where rdur is 10–20 ticks off from the theoretical dotted value.
 
+**v0xC2 dotted-eighth anomaly.** In v0xC2 files, the MIDI note-on for the sixteenth in a
+`dotted-eighth + sixteenth` group is stored at `tick + faceValue(eighth) = tick + 120`,
+NOT at `tick + dotted(eighth) = tick + 180`. This makes `realDuration = 120` for the dotted
+eighth, identical to a plain eighth, so `calcDotsSnap` returns 0. The `dotControl` byte
+(typically `0x60`) also lacks bit 0 (unlike v0xC4 which uses `0x1D`). The importer detects
+this via the `E@tick → S@tick+120` pattern in `calculateRealDurations` and sets
+`dotControl |= 1` so the bit-0 fallback fires correctly.
+
 ---
 
 ### Articulation bytes

@@ -161,7 +161,7 @@ bool EncMeasure::read(QDataStream& ds, const quint32 vs, const EncFormatReader& 
     return true;
 }
 
-void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing)
+void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, bool fixDottedEighth)
 {
     std::map<std::pair<int, int>, std::vector<EncMeasureElem*> > groups;
     for (auto& elem : elements) {
@@ -247,6 +247,40 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing)
                     }
                 }
                 leadingFv = 0;  // regular note ends the grace group
+            }
+        }
+    }
+
+    // v0xC2: Encore stores the sixteenth in a dotted-eighth+sixteenth group at
+    // tick + faceValue_ticks(eighth) = tick + 120, NOT at tick + 180 (the true
+    // dotted duration). This makes realDuration=120 for the dotted eighth,
+    // indistinguishable from a plain eighth by calcDotsSnap. The dotControl byte
+    // (typically 0x60) has bit 0 = 0, so the existing bit-0 fallback in
+    // computeDotCount does not fire. Detect the pattern by looking for an eighth
+    // (fv=4, rdur=120) followed by a sixteenth (fv=5, rdur=60) exactly 120 ticks
+    // later in the same voice, then signal the dot by setting dotControl bit 0.
+    if (fixDottedEighth) {
+        for (auto& [key, elems] : groups) {
+            for (size_t i = 0; i < elems.size(); ++i) {
+                EncNote* en = dynamic_cast<EncNote*>(elems[i]);
+                if (!en || (en->faceValue & 0x0F) != 4 || en->realDuration != 120) {
+                    continue;
+                }
+                const qint16 targetTick = static_cast<qint16>(elems[i]->tick + 120);
+                for (size_t j = i + 1; j < elems.size(); ++j) {
+                    if (elems[j]->tick > targetTick) {
+                        break;
+                    }
+                    if (elems[j]->tick == targetTick) {
+                        const EncNote* enNext = dynamic_cast<const EncNote*>(elems[j]);
+                        if (enNext
+                            && (enNext->faceValue & 0x0F) == 5
+                            && enNext->realDuration == 60) {
+                            en->dotControl |= 1;
+                            break;
+                        }
+                    }
+                }
             }
         }
     }
