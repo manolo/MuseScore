@@ -342,7 +342,8 @@ struct EncMeasure {
     EncRepeatType repeatMark() const { return static_cast<EncRepeatType>(coda & 0xFF); }
 
     bool read(QDataStream& ds, const quint32 vs, const struct EncFormatReader& fmt);
-    void calculateRealDurations(bool hasGraceTimeBorrowing = false);
+    void calculateRealDurations(bool hasGraceTimeBorrowing = false,
+                                bool fixDottedEighth = false);
 };
 
 // ---------------------------------------------------------------------------
