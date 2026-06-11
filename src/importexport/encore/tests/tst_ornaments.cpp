@@ -969,6 +969,56 @@ TEST_F(Tst_Ornaments, v0xc2_same_measure_slur_not_extended_to_next_measure)
 }
 
 // ===========================================================================
+// REGRESSION: v0xC2 multi-instrument slur routing — combined emLineSlot +
+// targetEndXoff fix. Reproduces the SALVEDOL organ-bass pattern on all 4 staves.
+// ===========================================================================
+
+TEST_F(Tst_Ornaments, v0xc2_multiinstr_slur_endpoint_on_note2_not_decoy)
+{
+    // ornaments_v0c2_multiinstr_slur_routing.enc: v0xC2, 2 instruments × 2 staves,
+    // 3 quarter notes per staff with a SLURSTART at note1.
+    // SALVEDOL organ-bass pattern: note1(xoff=2), SLUR(xoff=10,xoff2=11),
+    // note2(xoff=9, correct endpoint), note3(xoff=3, decoy — close to OLD target=3).
+    //
+    // Without emLineSlot fix: staves 1-3 find no notes, strategy-3 picks note3.
+    // Without targetEndXoff fix: target=3, note3(dist=0) beats note2(dist=6).
+    // Both fixes: note2 wins on every staff.
+    //
+    // Expected note2 pitches: staff0=60, staff1=52, staff2=71, staff3=59.
+    MasterScore* score = readEncoreScore("ornaments_v0c2_multiinstr_slur_routing.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_EQ(score->nstaves(), 4);
+
+    const std::map<int, int> expectedPitch = { {0, 60}, {1, 52}, {2, 71}, {3, 59} };
+    std::map<int, bool> staffSeen;
+
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (!sp->isSlur()) {
+            continue;
+        }
+        EXPECT_NE(sp->startElement(), nullptr) << "slur missing start";
+        EXPECT_NE(sp->endElement(),   nullptr) << "slur missing end";
+        if (!sp->startElement() || !sp->endElement()) {
+            continue;
+        }
+        const int si = static_cast<int>(sp->staffIdx());
+        staffSeen[si] = true;
+        ASSERT_TRUE(sp->endElement()->isChord()) << "slur end not a chord, staff " << si;
+        const int endPitch = toChord(sp->endElement())->notes().back()->pitch();
+        auto it = expectedPitch.find(si);
+        if (it != expectedPitch.end()) {
+            EXPECT_EQ(endPitch, it->second)
+                << "staff " << si << ": slur must end at note2 (pitch " << it->second
+                << "), not note3 (decoy)";
+        }
+    }
+    for (const auto& [si, _] : expectedPitch) {
+        EXPECT_TRUE(staffSeen.count(si) > 0) << "missing slur on staff " << si;
+    }
+    delete score;
+}
+
+// ===========================================================================
 // FIX: Multi-measure hairpin end tick resolved from WEDGESTART's alMezuro (cresc alMezuro=2, dim alMezuro=1).
 // ===========================================================================
 
