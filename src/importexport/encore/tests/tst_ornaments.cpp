@@ -838,7 +838,7 @@ TEST_F(Tst_Ornaments, v0xc2_cross_measure_slur_ends_in_next_measure)
     }
     // All slurs in this file should be cross-measure (not same-measure).
     EXPECT_GT(crossMeasureCount, 0) << "expected at least one cross-measure slur";
-    EXPECT_EQ(sameMeasureCount, 0)  << "no same-measure slurs expected in this file";
+    EXPECT_EQ(sameMeasureCount, 0) << "no same-measure slurs expected in this file";
     delete score;
 }
 
@@ -1666,9 +1666,22 @@ TEST_F(Tst_Ornaments, grace_slur_to_main_not_dropped)
             }
         }
     }
+    bool endInSameMeasure = false;
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (sp->isSlur() && sp->startElement() && sp->endElement()
+            && sp->startElement()->isChord() && sp->endElement()->isChord()) {
+            const Chord* startCh = toChord(sp->startElement());
+            const Chord* endCh   = toChord(sp->endElement());
+            if (startCh->isGrace() && !endCh->isGrace()) {
+                endInSameMeasure = (startCh->measure() == endCh->measure());
+            }
+        }
+    }
     EXPECT_GE(slurCount, 1) << "At least one slur must be imported";
     EXPECT_TRUE(graceStart)
         << "Slur from appoggiatura grace must have a grace chord as startElement";
+    EXPECT_TRUE(endInSameMeasure)
+        << "Slur endElement must be the main chord in the same measure, not a note in the next measure";
 
     delete score;
 }
@@ -1709,6 +1722,113 @@ TEST_F(Tst_Ornaments, grace_slur_to_later_note_starts_from_grace)
         << "Slur startElement must be the grace chord, not the half note";
     EXPECT_TRUE(endIsQuarter)
         << "Slur endElement must be the quarter note that follows the graces";
+
+    delete score;
+}
+
+// ===========================================================================
+// BUG FIX: Grace-to-main slur with co-located grace+regular (same Encore tick)
+//
+// When an ACCIACCATURA grace and its main note share the same Encore tick, two
+// bugs conspire to produce the wrong slur endpoint:
+//
+// Bug A (v0xC2): the pixel-span heuristic searches only notes AFTER startEncTick,
+// so the co-located main note is excluded and the NEXT note (one beat later) is
+// chosen → slur misses the main note.
+//
+// Bug B (both formats): the zero-span path sets tick2 = end-of-measure instead of
+// startTick, making graceToMain=false → computeEndElement() runs and overwrites
+// the explicit endElement with whatever is at end-of-measure (often a note in the
+// next measure, or a rest).
+//
+// Fix A: detect grace+regular co-location in the heuristic and force zero-span.
+// Fix B: set tick2 = startTick so graceToMain=true → computeEndElement skipped.
+// ===========================================================================
+
+TEST_F(Tst_Ornaments, v0c4_grace_slur_to_main_coloc_correct_endpoint)
+{
+    // ornaments_v0c4_grace_slur_to_main_coloc.enc: 3/4 measure with
+    // ACCIACCATURA at Encore tick=480 followed by a regular note ALSO at
+    // tick=480, and SLURSTART at tick=480 (alMezuro=0, arc pointing within
+    // the same beat).
+    //
+    // Without Fix B: zero-span path sets tick2=end-of-measure → computeEndElement
+    // finds a rest or note in measure 2 → endElement is in the wrong measure.
+    // With Fix B: tick2=startTick → graceToMain=true → endElement preserved as
+    // the co-located main chord in measure 1.
+    MasterScore* score = readEncoreScore("ornaments_v0c4_grace_slur_to_main_coloc.enc");
+    ASSERT_NE(score, nullptr);
+
+    int slurCount = 0;
+    bool graceStart = false;
+    bool endIsNonGrace = false;
+    bool endInSameMeasure = false;
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (!sp->isSlur()) {
+            continue;
+        }
+        ++slurCount;
+        if (sp->startElement() && sp->startElement()->isChord()) {
+            graceStart = toChord(sp->startElement())->isGrace();
+        }
+        if (sp->endElement() && sp->endElement()->isChord()) {
+            const Chord* endCh = toChord(sp->endElement());
+            endIsNonGrace = !endCh->isGrace();
+            if (sp->startElement() && sp->startElement()->isChord()) {
+                const Chord* startCh = toChord(sp->startElement());
+                endInSameMeasure = (startCh->measure() == endCh->measure());
+            }
+        }
+    }
+    EXPECT_GE(slurCount, 1) << "Grace-to-main slur must be imported";
+    EXPECT_TRUE(graceStart) << "startElement must be the grace chord";
+    EXPECT_TRUE(endIsNonGrace) << "endElement must be the non-grace main chord";
+    EXPECT_TRUE(endInSameMeasure)
+        << "endElement must be in the same measure as the grace, not in a later measure";
+
+    delete score;
+}
+
+TEST_F(Tst_Ornaments, v0c2_grace_slur_to_main_coloc_correct_endpoint)
+{
+    // ornaments_v0c2_grace_slur_to_main_coloc.enc: 3/4 measure (v0xC2 format)
+    // with ACCIACCATURA at tick=480 (xoff=6), regular note at tick=480 (xoff=5,
+    // main note), regular note at tick=600 (xoff=4, the "bait" for the heuristic),
+    // and SLURSTART at tick=480 (xoffset=4, xoffset2=3).
+    //
+    // Without Fix A: heuristic finds note@600 (dist=1 from targetEnd=5) as best
+    // endpoint → endTick=measTick+5/8 ≠ startTick → slur ends at the WRONG note.
+    // With Fix A: grace+regular co-location detected → force zero-span → grace-
+    // to-main path creates slur with endElement = main chord at tick=480.
+    MasterScore* score = readEncoreScore("ornaments_v0c2_grace_slur_to_main_coloc.enc");
+    ASSERT_NE(score, nullptr);
+
+    int slurCount = 0;
+    bool graceStart = false;
+    bool endIsNonGrace = false;
+    bool endAtSameTick = false;
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (!sp->isSlur()) {
+            continue;
+        }
+        ++slurCount;
+        if (sp->startElement() && sp->startElement()->isChord()) {
+            graceStart = toChord(sp->startElement())->isGrace();
+        }
+        if (sp->endElement() && sp->endElement()->isChord()) {
+            const Chord* endCh = toChord(sp->endElement());
+            endIsNonGrace = !endCh->isGrace();
+            // The main note and grace are co-located: the slur's tick and the
+            // endElement's segment tick must match (grace-to-main = zero span).
+            endAtSameTick = (endCh->tick() == sp->tick());
+        }
+    }
+    EXPECT_GE(slurCount, 1) << "Grace-to-main slur must be imported";
+    EXPECT_TRUE(graceStart) << "startElement must be the grace chord";
+    EXPECT_TRUE(endIsNonGrace) << "endElement must be the non-grace main chord";
+    EXPECT_TRUE(endAtSameTick)
+        << "endElement must be the co-located main chord (same beat as grace), "
+        "not the note at the following beat";
 
     delete score;
 }
