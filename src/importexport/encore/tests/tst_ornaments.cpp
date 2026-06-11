@@ -798,6 +798,51 @@ TEST_F(Tst_Ornaments, multi_measure_slur_resolved_from_almezuro)
 }
 
 // ===========================================================================
+// FIX: v0xC2 cross-measure slurs resolved via xoffset span heuristic extended
+// to the next measure when targetEndXoff exceeds the start measure's range.
+// ===========================================================================
+
+TEST_F(Tst_Ornaments, v0xc2_cross_measure_slur_ends_in_next_measure)
+{
+    // XEQUEABU.ENC is a v0xC2 file with slurs on staff 2 that span from the first
+    // note of a measure to the first note of the NEXT measure. Before the fix the
+    // same-measure xoffset heuristic picked the last note of the start measure
+    // because targetEndXoff exceeded all xoffsets in that measure; the correct
+    // endpoint is in the following measure.
+    MasterScore* score = readEncoreScore("XEQUEABU.ENC");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int crossMeasureCount = 0;
+    int sameMeasureCount = 0;
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (!sp->isSlur()) {
+            continue;
+        }
+        EXPECT_LT(sp->tick(), sp->tick2()) << "slur span must be positive";
+        EXPECT_NE(sp->startElement(), nullptr) << "slur missing start element";
+        EXPECT_NE(sp->endElement(), nullptr) << "slur missing end element";
+        // Determine whether the slur crosses a barline.
+        if (sp->startElement() && sp->endElement()) {
+            const EngravingItem* startEl = sp->startElement();
+            const EngravingItem* endEl   = sp->endElement();
+            const Measure* startMeas = startEl->findMeasure();
+            const Measure* endMeas   = endEl->findMeasure();
+            if (startMeas && endMeas && startMeas != endMeas) {
+                ++crossMeasureCount;
+            } else {
+                ++sameMeasureCount;
+            }
+        }
+    }
+    // All slurs in this file should be cross-measure (not same-measure).
+    EXPECT_GT(crossMeasureCount, 0) << "expected at least one cross-measure slur";
+    EXPECT_EQ(sameMeasureCount, 0)  << "no same-measure slurs expected in this file";
+    delete score;
+}
+
+// ===========================================================================
 // FIX: Multi-measure hairpin end tick resolved from WEDGESTART's alMezuro (cresc alMezuro=2, dim alMezuro=1).
 // ===========================================================================
 
@@ -908,6 +953,41 @@ TEST_F(Tst_Ornaments, v0xc2_orn_c4_is_accent_not_upbow)
         }
     }
     EXPECT_GE(accentCount, 5) << "Expected several accent marks in this v0xC2 score";
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: In v0xC4, ORN tipo 0xBE = accent above (standalone accent glyph).
+// ===========================================================================
+TEST_F(Tst_Ornaments, v0xc4_orn_be_is_accent)
+{
+    MasterScore* score = readEncoreScore("ornaments_v0c4_orn_be_accent.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int accentCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Articulation* a : toChord(el)->articulations()) {
+                EXPECT_NE(a->symId(), SymId::stringsUpBow)
+                    << "ORN 0xBE in v0xC4 must not produce stringsUpBow";
+                if (a->symId() == SymId::articAccentAbove
+                    || a->symId() == SymId::articAccentBelow) {
+                    ++accentCount;
+                }
+            }
+        }
+    }
+    EXPECT_GE(accentCount, 5) << "Expected several accent marks in this v0xC4 score";
     delete score;
 }
 

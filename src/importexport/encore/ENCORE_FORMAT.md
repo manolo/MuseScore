@@ -473,12 +473,12 @@ Type 5. Variable size. Offsets from element start:
 | 0xA3    | REPEAT_MEAS   | "%" repeat-last-bar glyph (size-16 ORN); replaces measure content with MeasureRepeat |
 | 0xA7    | CAESURA       | caesura (//) breath element placed after preceding note (size-16 ORN)           |
 | 0xA8    | BREATH_COMMA  | comma breath mark placed after preceding note (size-16 ORN)                     |
+| 0xBE    | ACCENT        | standalone accent above (>) in v0xC4 as size-16 ORN; maps to articAccentAbove. In v0xC2, accent is instead ORN tipo=0xC4. |
 
 **Undecoded subtypes.** Silently ignored; observed in corpus:
 
 | Tipo  | Count | Files | Hypothesis |
 |-------|------:|-------|------------|
-| 0xBE  |  12+  | TieYellow | unknown; appears at tick=0, possibly a mark/flag |
 | 0xC0  |   3   | Boda-LA, Beethoven | unknown |
 | 0xB0  |  11   | TieYellow | decoded as TRILL_TR (standalone ornamentTrill glyph) |
 | 0xC6, 0xC8, 0xEE | rare | various | unknown |

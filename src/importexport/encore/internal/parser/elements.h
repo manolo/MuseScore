@@ -140,6 +140,7 @@ enum class EncOrnamentType : quint8 {
     FINGER_3   = 0xBB,
     FINGER_4   = 0xBC,
     FINGER_5   = 0xBD,
+    ACCENT        = 0xBE,  // standalone accent (>) in v0xC4; maps to articAccentAbove
     UPBOW         = 0xC4,
     DOWNBOW       = 0xC5,
     FERMATA_ABOVE = 0xCC,  // standalone fermata above (size-16 ORN; yoffset > 0)
