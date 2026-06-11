@@ -201,10 +201,14 @@ void resolveSlurs(BuildCtx& ctx)
                         resolved = true;
                     }
                     // Cross-measure extension for v0xC2 (unreliable alMezuro): when
-                    // targetEndXoff exceeds all xoffsets in the start measure the slur
-                    // endpoint is in the next measure. Search up to 2 measures forward.
+                    // targetEndXoff exceeds all xoffsets in the start measure AND no note
+                    // was found after the slur start in the same measure, the endpoint is
+                    // in the next measure. Search up to 2 measures forward.
+                    // Guard: if a same-measure note exists (bestEncTick >= 0), the slur
+                    // ends there; do not extend cross-measure on a tiny overshoot.
                     if (!ctx.alMezuroIsReliable && bestDist > 0
-                        && targetEndXoff > maxXoffInMeas) {
+                        && targetEndXoff > maxXoffInMeas
+                        && bestEncTick < 0) {
                         for (int nextMIdx = ps.startMeasIdx + 1;
                              nextMIdx <= ps.startMeasIdx + 2
                              && nextMIdx < static_cast<int>(enc.measures.size())

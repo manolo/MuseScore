@@ -843,6 +843,45 @@ TEST_F(Tst_Ornaments, v0xc2_cross_measure_slur_ends_in_next_measure)
 }
 
 // ===========================================================================
+// FIX: v0xC2 same-measure slur must not extend cross-measure when a note
+// exists after the slur start in the current measure.
+// ===========================================================================
+
+TEST_F(Tst_Ornaments, v0xc2_same_measure_slur_not_extended_to_next_measure)
+{
+    // ornaments_v0c2_same_measure_slur_no_cross.enc reproduces the pattern from
+    // SALVEDOL.ENC measure 3: a slur from note 5 to note 6 within the same measure.
+    // firstNoteXoff=9, slurXoffset=11, slurXoffset2=12: pixelSpan=1,
+    // targetEndXoff=10 > maxXoffInMeas=9 -- tiny overshoot triggers the cross-measure
+    // extension without the fix. Measure 1 has a decoy G4 (xoff=9, dist=1) that the
+    // extension would incorrectly prefer over the correct same-measure E4 (xoff=5, dist=5).
+    MasterScore* score = readEncoreScore("ornaments_v0c2_same_measure_slur_no_cross.enc");
+    ASSERT_NE(score, nullptr);
+
+    const Measure* m0 = score->firstMeasure();
+    ASSERT_NE(m0, nullptr);
+
+    bool foundSlur = false;
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (!sp->isSlur()) {
+            continue;
+        }
+        foundSlur = true;
+        EXPECT_NE(sp->startElement(), nullptr) << "slur must have start element";
+        EXPECT_NE(sp->endElement(),   nullptr) << "slur must have end element";
+        if (!sp->startElement() || !sp->endElement()) {
+            continue;
+        }
+        const Measure* startMeas = sp->startElement()->findMeasure();
+        const Measure* endMeas   = sp->endElement()->findMeasure();
+        EXPECT_EQ(startMeas, m0) << "slur must start in measure 0";
+        EXPECT_EQ(endMeas, m0)   << "slur must end in measure 0, not in the decoy measure 1";
+    }
+    EXPECT_TRUE(foundSlur) << "score must contain a slur";
+    delete score;
+}
+
+// ===========================================================================
 // FIX: Multi-measure hairpin end tick resolved from WEDGESTART's alMezuro (cresc alMezuro=2, dim alMezuro=1).
 // ===========================================================================
 
