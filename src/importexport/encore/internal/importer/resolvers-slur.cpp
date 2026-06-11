@@ -56,6 +56,25 @@ void resolveSlurs(BuildCtx& ctx)
     MasterScore* score = ctx.score;
     const EncFile& enc = ctx.enc;
 
+    // Build compact-rawStaff → LINE-slot lookup (same logic as noteloop.cpp).
+    // Note elements use (staffWithin<<6)|instrIdx as the raw staff byte; ps.staffIdx
+    // is the routed LINE slot. Without this lookup the comparisons below would
+    // mismatch for any staff beyond the first of the first instrument.
+    std::array<int, 256> lineSlotByRawByte;
+    lineSlotByRawByte.fill(-1);
+    if (!enc.lines.empty()) {
+        const auto& sd = enc.lines[0].staffData;
+        for (int s = 0; s < static_cast<int>(sd.size()); ++s) {
+            lineSlotByRawByte[static_cast<unsigned char>(sd[s].instrStaffIdx)] = s;
+        }
+    }
+    auto emLineSlot = [&](const EncMeasureElem* em) -> int {
+        const quint8 raw = (static_cast<quint8>(em->staffWithin) << 6)
+                           | static_cast<quint8>(em->staffIdx);
+        const int slot = lineSlotByRawByte[static_cast<unsigned char>(raw)];
+        return (slot >= 0) ? slot : static_cast<int>(em->staffIdx);
+    };
+
     // Resolve slur intents: .enc has no SLURSTOP; endpoint from alMezuro.
     // Anchor on last ChordRest in the target measure on this track.
     for (const PendingSlur& ps : ctx.pendingSlurs) {
@@ -98,69 +117,76 @@ void resolveSlurs(BuildCtx& ctx)
                     continue;
                 }
                 // Search all voices: the slur ORN's encVoice is where the arc is drawn, not necessarily where the notes are.
-                if (em->staffIdx != ps.staffIdx) {
+                if (emLineSlot(em) != ps.staffIdx) {
                     continue;
                 }
                 if (static_cast<int>(em->tick) != startEncTick) {
                     continue;
                 }
-                firstNoteXoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
-                break;
+                const EncNote* en = static_cast<const EncNote*>(em);
+                const int xoff = static_cast<int>(en->xoffset);
+                if (en->graceType() != EncGraceType::NORMAL) {
+                    // The slur arc starts at the grace note. Prefer the grace
+                    // xoffset as the arc-start reference so targetEndXoff
+                    // correctly reflects the slur's visual endpoint.
+                    // In v0xC4 files the regular note appears before the grace
+                    // in the binary; without this preference, firstNoteXoff
+                    // would use the regular's larger xoffset and inflate
+                    // targetEndXoff past the intended endpoint.
+                    firstNoteXoff = xoff;
+                    break;
+                }
+                if (firstNoteXoff < 0) {
+                    firstNoteXoff = xoff;   // regular: tentative, keep searching
+                }
             }
             if (firstNoteXoff >= 0) {
                 const int pixelSpan = ps.slurXoffset2 - ps.slurXoffset;
-                const int targetEndXoff = firstNoteXoff + pixelSpan;
-                // Grace-to-main shortcut: when a grace note and a regular note share
-                // startEncTick (both at the same Encore beat), and targetEndXoff is
-                // within the measure (not a cross-measure arc), this SLURSTART is a
-                // grace-to-main slur. Force zero-span so the path below creates the
-                // correct grace→main element pair without guessing the endpoint.
+                // When pixelSpan is tiny (0-2) AND the first note's xoffset is less
+                // than slurXoffset (note position << arc start), the formula
+                // firstNoteXoff + pixelSpan produces a near-zero target that matches
+                // a later "decoy" note instead of the chronologically next note.
+                // In that case use slurXoffset2 directly as the absolute arc-end target.
+                const int targetEndXoff
+                    =(pixelSpan >= 0 && pixelSpan <= 2 && firstNoteXoff < ps.slurXoffset)
+                      ? ps.slurXoffset2
+                      : firstNoteXoff + pixelSpan;
+                // Integrated loop: find best later-note endpoint AND track
+                // grace/regular co-location at startEncTick for the grace-to-main
+                // shortcut. Merging the two passes avoids iterating elements twice.
                 {
-                    bool hasGrace = false, hasRegular = false;
-                    int maxXoffAtStart = -1;
-                    for (const auto& gElem : startEncMeas.elements) {
-                        const EncMeasureElem* gm = gElem.get();
-                        if (gm->type != static_cast<quint8>(EncElemType::NOTE)) {
-                            continue;
-                        }
-                        if (gm->staffIdx != ps.staffIdx) {
-                            continue;
-                        }
-                        const int gxoff = static_cast<int>(
-                            static_cast<const EncNote*>(gm)->xoffset);
-                        if (gxoff > maxXoffAtStart) {
-                            maxXoffAtStart = gxoff;
-                        }
-                        if (static_cast<int>(gm->tick) != startEncTick) {
-                            continue;
-                        }
-                        if (static_cast<const EncNote*>(gm)->graceType()
-                            != EncGraceType::NORMAL) {
-                            hasGrace = true;
-                        } else {
-                            hasRegular = true;
-                        }
-                    }
-                    if (hasGrace && hasRegular && targetEndXoff <= maxXoffAtStart) {
-                        endTick  = ps.startTick;
-                        resolved = true;
-                    }
-                }
-                if (!resolved) {
                     int bestDist = std::numeric_limits<int>::max();
                     int bestEncTick = -1;
                     int maxXoffInMeas = -1;
+                    bool hasGraceAtStart = false;
+                    int regularXoffAtStart = -1;
                     for (const auto& elem : startEncMeas.elements) {
                         const EncMeasureElem* em = elem.get();
                         if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
                             continue;
                         }
-                        if (em->staffIdx != ps.staffIdx) {
+                        if (emLineSlot(em) != ps.staffIdx) {
                             continue;
                         }
                         const int xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
                         if (xoff > maxXoffInMeas) {
                             maxXoffInMeas = xoff;
+                        }
+                        if (static_cast<int>(em->tick) == startEncTick) {
+                            const EncNote* en = static_cast<const EncNote*>(em);
+                            if (en->graceType() != EncGraceType::NORMAL) {
+                                hasGraceAtStart = true;
+                            } else {
+                                // Keep the regular note whose xoffset is closest to
+                                // targetEndXoff; garbage notes parsed from the inter-
+                                // measure gap often have xoffset=0 and should not
+                                // suppress a better-matching regular note.
+                                const int thisDist = std::abs(xoff - targetEndXoff);
+                                if (regularXoffAtStart < 0
+                                    || thisDist < std::abs(regularXoffAtStart - targetEndXoff)) {
+                                    regularXoffAtStart = xoff;
+                                }
+                            }
                         }
                         // Only consider notes strictly after the start — the start note
                         // cannot be its own slur endpoint.
@@ -173,7 +199,19 @@ void resolveSlurs(BuildCtx& ctx)
                             bestEncTick = static_cast<int>(em->tick);
                         }
                     }
-                    if (bestEncTick > startEncTick) {
+                    // Grace-to-main shortcut: when a grace and a regular note share
+                    // startEncTick and the regular note is a better match for
+                    // targetEndXoff than any later note, force zero-span.
+                    // When a later note is closer (e.g. the arc extends beyond the
+                    // grace+main pair), let the heuristic resolve it as grace-to-later.
+                    if (hasGraceAtStart && regularXoffAtStart >= 0) {
+                        const int regularDist = std::abs(regularXoffAtStart - targetEndXoff);
+                        if (regularDist < bestDist) {
+                            endTick  = ps.startTick;
+                            resolved = true;
+                        }
+                    }
+                    if (!resolved && bestEncTick > startEncTick) {
                         const Fraction endRel(bestEncTick, wt);
                         const Fraction candidate = ctx.measuresByIdx[ps.startMeasIdx]->tick()
                                                    + endRel;
@@ -206,7 +244,7 @@ void resolveSlurs(BuildCtx& ctx)
                     // in the next measure. Search up to 2 measures forward.
                     // Guard: if a same-measure note exists (bestEncTick >= 0), the slur
                     // ends there; do not extend cross-measure on a tiny overshoot.
-                    if (!ctx.alMezuroIsReliable && bestDist > 0
+                    if (!resolved && !ctx.alMezuroIsReliable && bestDist > 0
                         && targetEndXoff > maxXoffInMeas
                         && bestEncTick < 0) {
                         for (int nextMIdx = ps.startMeasIdx + 1;
@@ -227,7 +265,7 @@ void resolveSlurs(BuildCtx& ctx)
                                 if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
                                     continue;
                                 }
-                                if (em->staffIdx != ps.staffIdx) {
+                                if (emLineSlot(em) != ps.staffIdx) {
                                     continue;
                                 }
                                 const int xoff = static_cast<int>(
@@ -245,7 +283,7 @@ void resolveSlurs(BuildCtx& ctx)
                             }
                         }
                     }
-                } // if (!resolved): end of pixel-span endpoint search
+                } // integrated endpoint-search block
             }
         }
 
@@ -266,7 +304,7 @@ void resolveSlurs(BuildCtx& ctx)
                 if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
                     continue;
                 }
-                if (em->staffIdx != ps.staffIdx) {
+                if (emLineSlot(em) != ps.staffIdx) {
                     continue;
                 }
                 const int xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
