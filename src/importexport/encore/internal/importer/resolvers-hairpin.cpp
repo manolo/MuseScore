@@ -36,8 +36,9 @@ void resolveHairpins(BuildCtx& ctx)
     MasterScore* score = ctx.score;
     const EncFile& enc = ctx.enc;
 
-    // Resolve hairpin endpoints: min(next-dynamic tick, xoffset2 clamp).
-    // Cross-measure: xoffset2 < first-note xoffset means hairpin ends at the barline instead.
+    // Resolve hairpin endpoints: min(next-dynamic tick, xoffset2 snap to note).
+    // xoffset2 encodes the visual tip position; snap to the last note/rest whose xoffset <= xoff2.
+    // If xoff2 is before all notes in the target measure, end at the barline (measure start tick).
     for (const PendingHairpin& ph : ctx.pendingHairpins) {
         Fraction endTick = ph.maxEndTick;
 
@@ -64,33 +65,54 @@ void resolveHairpins(BuildCtx& ctx)
             }
         }
 
-        // (2) xoffset2 clamp: if xoffset2 < first note's xoffset in target measure, end at barline.
-        // Only when no Dynamic found in step (1).
+        // (2) xoffset2 snap: find the last note/rest in the target measure with xoffset <= xoff2.
+        // Mirrors the start-snap logic in snapTickByXoffset (noteloop-orn.cpp).
+        // Only when no Dynamic found in step (1) and xoff2 is meaningful (> 0).
         if (!foundNextDynamic
+            && ph.hairpinXoffset2 > 0
             && ph.endMeasIdx >= 0
             && ph.endMeasIdx < static_cast<int>(enc.measures.size())) {
             const EncMeasure& endEncMeas = enc.measures[ph.endMeasIdx];
             if (endEncMeas.beatTicks && endEncMeas.timeSigDen) {
+                const int wholeTicks = static_cast<int>(endEncMeas.beatTicks)
+                                       * static_cast<int>(endEncMeas.timeSigDen);
                 const int xoff2 = ph.hairpinXoffset2;
-                int firstNoteXoff = -1;
+                int bestEncTick = -1;
+                int bestXoff = -1;
+                int anyPositiveXoff = -1;   // sentinel: any note/rest with xoff > 0 exists
                 for (const auto& elem : endEncMeas.elements) {
                     const EncMeasureElem* em = elem.get();
-                    if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
+                    int xoff = 0;
+                    if (em->type == static_cast<quint8>(EncElemType::NOTE)) {
+                        xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
+                    } else if (em->type == static_cast<quint8>(EncElemType::REST)) {
+                        xoff = static_cast<int>(static_cast<const EncRest*>(em)->xoffset);
+                    } else {
                         continue;
                     }
                     if (em->staffIdx != ph.staffIdx || em->voice != ph.encVoice) {
                         continue;
                     }
-                    const int xoff = static_cast<int>(
-                        static_cast<const EncNote*>(em)->xoffset);
-                    if (xoff > 0 && (firstNoteXoff < 0 || xoff < firstNoteXoff)) {
-                        firstNoteXoff = xoff;
+                    if (xoff <= 0) {
+                        continue;
+                    }
+                    anyPositiveXoff = xoff;
+                    if (xoff <= xoff2 && xoff > bestXoff) {
+                        bestXoff = xoff;
+                        bestEncTick = static_cast<int>(em->tick);
                     }
                 }
-                if (firstNoteXoff > 0 && xoff2 < firstNoteXoff) {
-                    Fraction targetMeasTick = ctx.measuresByIdx[ph.endMeasIdx]->tick();
+                Fraction targetMeasTick = ctx.measuresByIdx[ph.endMeasIdx]->tick();
+                if (bestEncTick >= 0) {
+                    // Snap end to the note/rest whose xoffset best matches xoff2.
+                    Fraction snapEnd = targetMeasTick
+                                       + Fraction(bestEncTick, wholeTicks).reduced();
+                    endTick = std::min(endTick, snapEnd);
+                } else if (anyPositiveXoff >= 0) {
+                    // xoff2 precedes all notes with positive xoffsets: end at the barline.
                     endTick = std::min(endTick, targetMeasTick);
                 }
+                // else: no notes with positive xoffsets (synthetic/empty data); keep maxEndTick.
             }
         }
 

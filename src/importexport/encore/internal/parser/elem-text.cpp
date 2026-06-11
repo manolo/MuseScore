@@ -51,10 +51,19 @@ bool EncHeader::read(QDataStream& ds, const EncFormatReader& fmt)
     ds.skipRawData(0x28 - 5);
     ds >> chuVersio >> nekon1 >> fiksa1 >> lineCount >> pageCount;
     ds >> instrumentCount >> staffPerSystem >> measureCount;
-    // Skip to the first block. v0xA6 header ends at 0xA6 (TK00 starts there);
-    // v0xC2/v0xC4 go to 0xC2. Reading past the end on v0xA6 would consume TK00
-    // and shift all instrument slots.
-    ds.skipRawData(fmt.headerEnd() - 0x36);
+    // Staff-size selector at header offset 0x52 (1=small … 4=default).
+    // Present in v0xC2, v0xC4 and v0xC5; may be absent in v0xA6 (shorter header).
+    if (fmt.headerEnd() > 0x52) {
+        ds.skipRawData(0x52 - 0x36);           // skip from 0x36 to 0x51
+        quint8 sz;
+        ds >> sz;
+        if (sz >= 1 && sz <= 4) {
+            scoreSize = sz;
+        }
+        ds.skipRawData(fmt.headerEnd() - 0x53); // skip from 0x53 to header end
+    } else {
+        ds.skipRawData(fmt.headerEnd() - 0x36);
+    }
     return true;
 }
 

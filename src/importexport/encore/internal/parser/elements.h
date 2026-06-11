@@ -440,6 +440,7 @@ struct EncHeader {
     qint8 instrumentCount{ 0 };
     qint8 staffPerSystem { 0 };
     qint16 measureCount   { 0 };
+    quint8 scoreSize      { 4 };  // staff-size selector 1–4 at header offset 0x52; 4 = default
 
     bool readMagicAndVersion(QDataStream& ds);
     bool read(QDataStream& ds, const EncFormatReader& fmt);
