@@ -373,7 +373,8 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     }
     case EncOrnamentType::UPBOW: {
         const bool cm = !noteTicks.count(static_cast<int>(e->tick));
-        ctx.pendingBowings.push_back({ elemTick, track, SymId::stringsUpBow, measIdx, cm });
+        const SymId sid = enc.fmt->ornC4IsAccent() ? SymId::articAccentAbove : SymId::stringsUpBow;
+        ctx.pendingBowings.push_back({ elemTick, track, sid, measIdx, cm });
         break;
     }
     case EncOrnamentType::FINGER_1:
