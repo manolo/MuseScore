@@ -186,6 +186,19 @@ void buildNoteLoop(BuildCtx& ctx)
         lineStaffWithin[s]   = static_cast<int>(enc.lines[0].staffData[s].staffIndex());
     }
 
+    // Compact rawStaff encoding: the raw staff byte in a note element carries
+    // (staffWithin<<6)|instrIdx, the same format as instrStaffIdx in LINE blocks.
+    // Build a reverse map so we can translate the compact byte to a LINE slot index
+    // before applying the voice>=VOICES / staffWithin routing below.
+    // This handles multi-instrument files where earlier instruments have >1 staff
+    // (e.g. piano+organ both grand staff: organ has instrIdx=1 but LINE slot 2).
+    std::array<int, 256> lineSlotByRawByte;
+    lineSlotByRawByte.fill(-1);
+    for (int s = 0; s < nLineStaves; ++s) {
+        const quint8 key = enc.lines[0].staffData[s].instrStaffIdx;
+        lineSlotByRawByte[static_cast<unsigned char>(key)] = s;
+    }
+
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
         if (mb->isMeasure()) {
             ctx.measuresByIdx.push_back(toMeasure(mb));
@@ -429,10 +442,25 @@ void buildNoteLoop(BuildCtx& ctx)
                 if (et->isTieStart) {
                     int si = static_cast<int>(e->staffIdx);
                     int v  = static_cast<int>(e->voice);
+                    const quint8 tiRawByte = (static_cast<quint8>(e->staffWithin) << 6)
+                                             | static_cast<quint8>(e->staffIdx);
+                    const int tiOrigSW = static_cast<int>(e->staffWithin);
+                    bool tiResolved = false;
+                    if (lineSlotByRawByte[tiRawByte] >= 0) {
+                        si = lineSlotByRawByte[tiRawByte];
+                        tiResolved = true;
+                        // Remap voice for notes that used the per-staff half-range encoding.
+                        if (tiOrigSW > 0 && v < static_cast<int>(VOICES)) {
+                            const int vBase = tiOrigSW * (static_cast<int>(VOICES) / 2);
+                            if (v >= vBase) {
+                                v -= vBase;
+                            }
+                        }
+                    }
                     if (v >= static_cast<int>(VOICES)) {
                         v = 0;
-                    } else if (e->staffWithin > 0) {
-                        const int sw = static_cast<int>(e->staffWithin);
+                    } else if (!tiResolved && tiOrigSW > 0) {
+                        const int sw = tiOrigSW;
                         const int vBase = sw * (static_cast<int>(VOICES) / 2);
                         if (v >= vBase && si + sw < ctx.totalStaves) {
                             si += sw;
@@ -527,6 +555,33 @@ void buildNoteLoop(BuildCtx& ctx)
             int voice    = static_cast<int>(e->voice);
             const bool isNoteOrRest = (et == EncElemType::NOTE || et == EncElemType::REST);
 
+            // Translate compact rawStaff encoding to LINE slot index.
+            // The raw staff byte uses (staffWithin<<6)|instrIdx (same format as instrStaffIdx
+            // in LINE blocks). The lineSlotByRawByte map resolves it to the global LINE slot,
+            // handling multi-instrument files where earlier instruments have >1 staff.
+            // When the lookup succeeds:
+            //   - staffIdx is updated to the LINE slot (staff routing done).
+            //   - voice remap for notes/rests is still applied when origStaffWithin > 0 and
+            //     voice is in the per-staff half-range (matches case-B remap semantics).
+            //   - Case B (staffWithin routing) is then skipped to avoid double-routing.
+            const quint8 rawNoteStaff = (static_cast<quint8>(e->staffWithin) << 6)
+                                        | static_cast<quint8>(e->staffIdx);
+            const int origStaffWithin  = static_cast<int>(e->staffWithin);
+            bool rawByteResolved = false;
+            if (lineSlotByRawByte[rawNoteStaff] >= 0) {
+                staffIdx = lineSlotByRawByte[rawNoteStaff];
+                rawByteResolved = true;
+                // Apply voice remap when the original encoding used staffWithin>0 and voice
+                // falls in the upper half-range (vBase..vBase+VOICES/2-1). This preserves the
+                // case-B voice-remapping semantics for single-instrument grand-staff files.
+                if (isNoteOrRest && origStaffWithin > 0 && voice < static_cast<int>(VOICES)) {
+                    const int vBase = origStaffWithin * (static_cast<int>(VOICES) / 2);
+                    if (voice >= vBase) {
+                        voice -= vBase;
+                    }
+                }
+            }
+
             if (staffIdx >= ctx.totalStaves) {
                 continue;
             }
@@ -546,11 +601,11 @@ void buildNoteLoop(BuildCtx& ctx)
                     }
                 }
                 voice = 0;
-            } else if (e->staffWithin > 0) {
+            } else if (!rawByteResolved && origStaffWithin > 0) {
                 // staffWithin: route to staffIdx+sw.
                 // Notes/rests: also check voice is in the expected range, then remap.
                 // Standalone ORNs: always have voice=0; route by staffWithin alone, no voice remap.
-                const int sw    = static_cast<int>(e->staffWithin);
+                const int sw    = origStaffWithin;
                 const int vBase = sw * (static_cast<int>(VOICES) / 2);
                 const bool voiceInRange = !isNoteOrRest || voice >= vBase;
                 if (voiceInRange && staffIdx < nLineStaves) {

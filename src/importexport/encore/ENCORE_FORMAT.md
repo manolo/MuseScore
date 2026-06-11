@@ -227,17 +227,18 @@ After the 3-byte header every element starts with: 1-byte size + 1-byte **staff 
 
 **Staff byte encoding** (same format as `instrStaffIdx` in the LINE block):
 
-| Bits  | Mask   | Meaning                                                                 |
-|-------|--------|-------------------------------------------------------------------------|
-| 0-5   | `0x3F` | System staff index: which row in the current LINE staffData array.      |
-| 6-7   | `0xC0` | Staff-within-instrument (`staffWithin`): which staff of the instrument. |
+| Bits  | Mask   | Meaning                                                                      |
+|-------|--------|------------------------------------------------------------------------------|
+| 0-5   | `0x3F` | Instrument index: 0-based sequential instrument number (same as bits 0-5 of the LINE block's `instrStaffIdx`). For scores where every instrument has exactly one staff this equals the LINE slot; for multi-staff instruments it does NOT. |
+| 6-7   | `0xC0` | Staff-within-instrument (`staffWithin`): which staff of the instrument.      |
 
 `staffWithin = staffByte >> 6`. Values: 0 = first staff, 1 = second (bass), 2 or 3 = further staves.
 
-For a piano grand staff, notes on the treble staff use `staffWithin = 0`; notes on the bass staff use
-`staffWithin = 1`. All notes in the MEAS stream share `systemStaffIdx = 0` and the `staffWithin` field
-distinguishes the destination. The voice field (low nibble of the type/voice byte) is distributed across
-staves: voices 0-1 belong to `staffWithin=0`, voices 2-3 to `staffWithin=1`.
+The raw staff byte `(staffWithin<<6)|instrIdx` is identical to `instrStaffIdx` stored in the LINE block for the target staff. Readers resolve the byte to a global LINE slot by inverse-lookup through the LINE block's `instrStaffIdx` array.
+
+For a piano grand staff (single instrument), notes on the treble staff use `staffWithin = 0`; notes on the bass staff use `staffWithin = 1`. All notes in the MEAS stream share `instrIdx = 0` (the instrument's sequential index) and the `staffWithin` field distinguishes the destination. The voice field (low nibble of the type/voice byte) is distributed across staves: voices 0-1 belong to `staffWithin=0`, voices 2-3 to `staffWithin=1`.
+
+For multi-instrument scores where earlier instruments have more than one staff, subsequent instruments still use their sequential instrument index (not the global LINE slot) as bits 0-5. For example in a piano+organ score (both grand staff), organ notes carry `instrIdx=1` even though organ's first LINE slot is 2.
 
 | Type   | Name        |
 |--------|-------------|
@@ -587,17 +588,15 @@ nothing and returns null → slur removed.
 
 ### Multi-staff instruments: staffWithin field
 
-For instruments with more than one staff (piano, harp, organ), all notes from all staves share
-the same MEAS element stream with `systemStaffIdx = 0`. The destination staff is encoded in bits
-6-7 of the staff byte (`staffWithin = staffByte >> 6`):
+For instruments with more than one staff (piano, harp, organ), all notes from all staves of that instrument share the same MEAS element stream. The destination staff is encoded in bits 6-7 of the staff byte (`staffWithin = staffByte >> 6`):
 
 - `staffWithin = 0`: note belongs to the first (treble) staff.
 - `staffWithin = 1`: note belongs to the second (bass) staff.
 - `staffWithin = 2` or `3`: third or fourth staff (uncommon).
 
-Within each destination staff, voices are re-indexed from 0. For a 2-staff instrument, Encore
-stores voices 0-1 for the first staff and voices 2-3 for the second staff in the stream; the
-importer remaps voice by subtracting `staffWithin * 2` after routing.
+All notes of a given instrument carry that instrument's sequential index in bits 0-5. For a single piano grand staff (instrument 0), bits 0-5 = 0. For a piano+organ score where organ is instrument 1, all organ notes carry bits 0-5 = 1 regardless of how many LINE slots piano occupies.
+
+Within each destination staff, voices are re-indexed from 0. For a 2-staff instrument, Encore stores voices 0-1 for the first staff and voices 2-3 for the second staff in the stream; the importer remaps voice by subtracting `staffWithin * 2` after routing.
 
 ### System-level ornaments (voice = 4)
 
