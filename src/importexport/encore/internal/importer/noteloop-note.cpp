@@ -118,6 +118,24 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
                 }
             }
 
+            // Retroactive attachment: in v0xC4 files Encore serializes the main
+            // note BEFORE the grace note at the same beat. When isChordExt=TRUE a
+            // chord was already placed at elemTick; attach the grace directly to
+            // that chord rather than queuing it for the NEXT note.
+            if (isChordExt) {
+                Segment* existingSeg = measure->getSegment(
+                    SegmentType::ChordRest, elemTick);
+                if (existingSeg) {
+                    EngravingItem* existingEl = existingSeg->element(track);
+                    if (existingEl && existingEl->isChord()) {
+                        gc->setGraceIndex(0);   // prepend before the main chord
+                        toChord(existingEl)->add(gc);
+                        ctx.graceStolenTicks[trackKey] += faceValue2ticks(
+                            en->faceValue & 0x0F);
+                        return;
+                    }
+                }
+            }
             ctx.pendingGraces[trackKey].push_back(gc);
             // Accumulate stolen ticks for the post-grace snap guard (noteloop.cpp).
             ctx.graceStolenTicks[trackKey] += faceValue2ticks(en->faceValue & 0x0F);
