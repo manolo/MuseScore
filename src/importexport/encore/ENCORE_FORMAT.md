@@ -464,7 +464,7 @@ Type 5. Variable size. Offsets from element start:
 | 0xBB    | FINGER_3      | stand-alone fingering digit "3"                                                  |
 | 0xBC    | FINGER_4      | stand-alone fingering digit "4"                                                  |
 | 0xBD    | FINGER_5      | stand-alone fingering digit "5"                                                  |
-| 0xC4    | UPBOW         | up-bow stroke (V) as size-16 ORN; maps to Articulation stringsUpBow             |
+| 0xC4    | UPBOW/ACCENT  | v0xC4: up-bow stroke (V) as size-16 ORN; maps to stringsUpBow. v0xC2: accent above (>) attached to chord; maps to articAccentAbove. In v0xC2, NOTE articulationByte is absent (size=22 notes have no articulation slot); the accent is stored here instead. |
 | 0xC5    | DOWNBOW       | down-bow stroke (П) as size-16 ORN; maps to Articulation stringsDownBow         |
 | 0xC9    | STACCATO      | per-chord staccato dot                                                           |
 | 0xCC    | FERMATA_ABOVE | standalone fermata above (size-16 ORN; yoffset > 0)                             |

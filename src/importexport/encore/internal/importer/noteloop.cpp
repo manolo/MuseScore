@@ -245,7 +245,6 @@ void buildNoteLoop(BuildCtx& ctx)
     // Map enc.measures[i] → index into ctx.measuresByIdx (MuseScore measure index).
     // Required because single-block multi-measure rests expand 1 MEAS to N MuseScore measures,
     // so the indices diverge after the first such block.
-    std::vector<size_t> encToMsIdx(enc.measures.size(), 0);
     int measSkip = 0;
     size_t msIdxCounter = 0;
 
@@ -277,8 +276,6 @@ void buildNoteLoop(BuildCtx& ctx)
         if (measIdx >= static_cast<int>(enc.measures.size())) {
             break;
         }
-        encToMsIdx[static_cast<size_t>(measIdx)] = msIdxCounter;
-
         Measure* measure = toMeasure(mb);
         const EncMeasure& encMeas = enc.measures[measIdx];
         const Fraction measTick = measure->tick();
@@ -1040,7 +1037,7 @@ void buildNoteLoop(BuildCtx& ctx)
             if (mi > 0 && bpm == lastBpm) {
                 continue;
             }
-            const size_t msI = (mi < encToMsIdx.size()) ? encToMsIdx[mi] : mi;
+            const size_t msI = (mi < ctx.encToMsIdx.size()) ? ctx.encToMsIdx[mi] : mi;
             if (msI >= ctx.measuresByIdx.size()) {
                 continue;
             }

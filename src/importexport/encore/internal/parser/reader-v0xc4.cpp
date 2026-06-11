@@ -40,6 +40,7 @@ struct EncFormatReader_V0xC4 final : EncFormatReader
     bool usesG1LowTieSender() const override { return !m_hasMetaTables; }
     const char* formatName() const override { return m_hasMetaTables ? "v0xC4" : "v0xC2"; }
     bool alMezuroIsReliable() const override { return m_hasMetaTables; }
+    bool ornC4IsAccent() const override { return !m_hasMetaTables; }
     // v0xC2 lyric text starts at element offset +18; v0xC4 at +20.
     quint8 lyricTextGapAfterKie() const override { return m_hasMetaTables ? 9 : 7; }
 

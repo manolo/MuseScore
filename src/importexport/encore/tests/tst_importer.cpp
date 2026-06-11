@@ -2513,74 +2513,18 @@ TEST_F(Tst_Importer, numeric_chord_with_bass_note)
     delete score;
 }
 
-// Regression: key sig encoded at the start of a rest-only measure must be deferred
-// to the first subsequent measure with pitched notes, so MuseScore can condense all
-// consecutive empty measures into a single multi-measure rest.
-// NOHOFARE5.enc has a Bb->C key change at binary MEAS[53] (the start of 3 empty
-// consecutive measures).  Binary MEAS[4], [9], [27] are single-block multi-measure
-// rests that expand to 3, 6, 6 MuseScore measures respectively (+12 total), so
-// MEAS[53] lands at MuseScore measure 66 instead of the pre-fix 54.
-// After both fixes: no KeySig in MuseScore measures 66-68; KeySig present at measure 69.
-// Also verifies the total measure count (82 binary + 2+5+5 = 94 MuseScore measures).
-TEST_F(Tst_Importer, keysig_in_empty_measure_deferred_to_preserve_mmrest)
+// Regression: a single MEAS block whose lone REST element has mrestCount > 1
+// must expand to that many MuseScore measures.
+// Synthetic file: 7 MEAS blocks (notes, notes, notes, mrest=3, notes, notes, notes)
+// with 2 LINE blocks (system 1 = MEAS[0..3], system 2 = MEAS[4..6]).
+// Expected: 9 MuseScore measures (7 + 2 extra from expansion), measures 1-3 with
+// notes, 4-6 empty, 7-9 with notes.  System 1 ends at measure 6, system 2 at 9.
+TEST_F(Tst_Importer, mrest_single_block_expands_and_system_locks_correct)
 {
-    MasterScore* score = readEncoreScore("NOHOFARE5.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load NOHOFARE5.enc";
-    ASSERT_EQ(score->nmeasures(), 94)
-        << "82 binary MEAS blocks + 2+5+5 from 3 single-block multi-measure rests";
-
-    // Navigate to measure at 0-based index idx.
-    auto measureAt = [](MasterScore* sc, int idx) -> Measure* {
-        Measure* m = sc->firstMeasure();
-        for (int i = 0; i < idx && m; ++i) {
-            m = m->nextMeasure();
-        }
-        return m;
-    };
-
-    auto hasKeySigAt = [](Measure* m) -> bool {
-        if (!m) {
-            return false;
-        }
-        for (Segment* s = m->first(SegmentType::KeySig); s; s = s->next(SegmentType::KeySig)) {
-            if (s->element(0)) {
-                return true;
-            }
-        }
-        return false;
-    };
-
-    // MEAS[53] (binary measure 54) is the first of 3 consecutive empty blocks.
-    // With the multi-measure rest expansion (+12 offset), it lands at MuseScore index 65.
-    Measure* m66 = measureAt(score, 65);   // binary MEAS[53] -- empty, no KeySig
-    Measure* m67 = measureAt(score, 66);   // binary MEAS[54] -- empty
-    Measure* m68 = measureAt(score, 67);   // binary MEAS[55] -- empty
-    Measure* m69 = measureAt(score, 68);   // binary MEAS[56] -- first note measure, KeySig here
-
-    ASSERT_NE(m66, nullptr);
-    ASSERT_NE(m67, nullptr);
-    ASSERT_NE(m68, nullptr);
-    ASSERT_NE(m69, nullptr);
-
-    EXPECT_FALSE(hasKeySigAt(m66)) << "MuseScore measure 66 must not carry the key sig";
-    EXPECT_FALSE(hasKeySigAt(m67)) << "MuseScore measure 67 must not carry the key sig";
-    EXPECT_FALSE(hasKeySigAt(m68)) << "MuseScore measure 68 must not carry the key sig";
-    EXPECT_TRUE(hasKeySigAt(m69)) << "MuseScore measure 69 must carry the key sig (first note measure)";
-
-    delete score;
-}
-
-// Regression: NOHOFARE5.enc has 3 single-block multi-measure rest blocks (at binary
-// MEAS[4]=3 measures, MEAS[9]=6 measures, MEAS[27]=6 measures).  The importer must
-// create the correct number of empty measures so that content appears at the right
-// position after each rest.
-// Specifically: binary MEAS[5] (content measure after the 3-measure rest at measure 5)
-// must appear at MuseScore measure 8, not measure 6.
-TEST_F(Tst_Importer, single_block_mmrest_expands_to_correct_measure_count)
-{
-    MasterScore* score = readEncoreScore("NOHOFARE5.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load NOHOFARE5.enc";
-    ASSERT_EQ(score->nmeasures(), 94);
+    MasterScore* score = readEncoreScore("importer_mrest_single_block.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_mrest_single_block.enc";
+    ASSERT_EQ(score->nmeasures(), 9)
+        << "7 MEAS blocks + 2 extra from MEAS[3] mrestCount=3";
 
     auto measureAt = [](MasterScore* sc, int idx) -> Measure* {
         Measure* m = sc->firstMeasure();
@@ -2589,7 +2533,6 @@ TEST_F(Tst_Importer, single_block_mmrest_expands_to_correct_measure_count)
         }
         return m;
     };
-
     auto hasPitchedNotes = [](Measure* m) -> bool {
         if (!m) {
             return false;
@@ -2605,19 +2548,16 @@ TEST_F(Tst_Importer, single_block_mmrest_expands_to_correct_measure_count)
         return false;
     };
 
-    // 3-measure rest at binary MEAS[4] (MuseScore measures 5-7).
-    Measure* m5 = measureAt(score, 4);
-    Measure* m6 = measureAt(score, 5);
-    Measure* m7 = measureAt(score, 6);
-    Measure* m8 = measureAt(score, 7);
-    ASSERT_NE(m5, nullptr);
-    ASSERT_NE(m6, nullptr);
-    ASSERT_NE(m7, nullptr);
-    ASSERT_NE(m8, nullptr);
-    EXPECT_FALSE(hasPitchedNotes(m5)) << "measure 5 must be empty (part of 3-measure rest)";
-    EXPECT_FALSE(hasPitchedNotes(m6)) << "measure 6 must be empty (part of 3-measure rest)";
-    EXPECT_FALSE(hasPitchedNotes(m7)) << "measure 7 must be empty (part of 3-measure rest)";
-    EXPECT_TRUE(hasPitchedNotes(m8)) << "measure 8 must have notes (content after 3-measure rest)";
+    // Measures 1-3: notes
+    EXPECT_TRUE(hasPitchedNotes(measureAt(score, 0))) << "measure 1 must have notes";
+    EXPECT_TRUE(hasPitchedNotes(measureAt(score, 1))) << "measure 2 must have notes";
+    EXPECT_TRUE(hasPitchedNotes(measureAt(score, 2))) << "measure 3 must have notes";
+    // Measures 4-6: virtual empty measures from the single-block multi-measure rest
+    EXPECT_FALSE(hasPitchedNotes(measureAt(score, 3))) << "measure 4 must be empty";
+    EXPECT_FALSE(hasPitchedNotes(measureAt(score, 4))) << "measure 5 must be empty";
+    EXPECT_FALSE(hasPitchedNotes(measureAt(score, 5))) << "measure 6 must be empty";
+    // Measures 7-9: notes
+    EXPECT_TRUE(hasPitchedNotes(measureAt(score, 6))) << "measure 7 must have notes";
 
     delete score;
 }

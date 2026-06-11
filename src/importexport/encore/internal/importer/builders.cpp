@@ -361,6 +361,8 @@ void buildMeasures(BuildCtx& ctx)
 
     int currentTick = 0;
     bool firstMeasure = true;
+    size_t msIdxCounter = 0;
+    ctx.encToMsIdx.reserve(enc.measures.size());
     for (size_t mi = 0; mi < enc.measures.size(); ++mi) {
         const EncMeasure& encMeas = enc.measures[mi];
         int num = encMeas.timeSigNum > 0 ? encMeas.timeSigNum : 4;
@@ -370,6 +372,8 @@ void buildMeasures(BuildCtx& ctx)
         const EncMeasure* prev = (mi > 0) ? &enc.measures[mi - 1] : nullptr;
         const EncMeasure* next = (mi + 1 < enc.measures.size()) ? &enc.measures[mi + 1] : nullptr;
         const int displayCount = encMeasDisplayCount(encMeas, prev, next);
+
+        ctx.encToMsIdx.push_back(msIdxCounter);
 
         for (int di = 0; di < displayCount; ++di) {
             Measure* measure = Factory::createMeasure(score->dummy()->system());
@@ -409,6 +413,7 @@ void buildMeasures(BuildCtx& ctx)
             currentTick += ts.ticks();
         }
         firstMeasure = false;
+        msIdxCounter += static_cast<size_t>(displayCount);
     }
 }
 

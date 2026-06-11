@@ -127,7 +127,8 @@ struct PendingMeasureRepeat {
     int staffIdx;
 };
 
-// Bowing/stroke intents (tipo 0xC4=upbow, 0xC5=downbow), deferred like ARPEGGIO.
+// Bowing/stroke intents (tipo 0xC4, 0xC5), deferred like ARPEGGIO.
+// v0xC4: 0xC4=stringsUpBow, 0xC5=stringsDownBow; v0xC2: 0xC4=articAccentAbove.
 struct PendingBowing {
     Fraction tick;
     track_idx_t track;
@@ -184,6 +185,11 @@ struct BuildCtx
     // measures[0] when the first measure is a pickup / anacrusis).
     Fraction nominalTimeSig { 4, 4 };
 
+    // Populated by buildMeasures(): encToMsIdx[i] = MuseScore measure index of the
+    // first measure produced from enc.measures[i].  Accounts for single-block
+    // multi-measure rest expansion (mrestCount > 1).
+    std::vector<size_t> encToMsIdx {};
+
     // Populated by buildNoteLoop():
     std::vector<Measure*> measuresByIdx {};
     std::vector<PendingHairpin> pendingHairpins {};
@@ -226,7 +232,6 @@ struct BuildCtx
 
     // Grace chords held detached; attached to the next normal chord.
     std::map<std::pair<int, int>, std::vector<Chord*> > pendingGraces {};
-
 
     // Ticks borrowed by grace notes from the following note; used to suppress
     // spurious gap-snap rests after a grace group. Cleared each measure.
