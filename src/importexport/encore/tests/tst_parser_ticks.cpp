@@ -132,6 +132,28 @@ TEST(Tst_EncoreRhythm, dotCalculation)
     EXPECT_EQ(calcDotsSnap(180, 0), 0);
 }
 
+// computeDotCount: v0xC2 dotted-eighth scenario.
+// In v0xC2, the dotted-eighth has dotControl=0x60 (bit 0 = 0) and
+// realDuration=120 (plain-eighth gap).  Both paths return 0, so the dot is
+// missed.  calculateRealDurations fixes this by setting dotControl|=1 on
+// the eighth when the E→S@tick+120 pattern is detected.
+TEST(Tst_EncoreRhythm, computeDotCount_v0c2_dotted_eighth)
+{
+    // Pre-fix state: dotControl=0x60, rdur=120 (plain gap), fv=4 (eighth).
+    // calcDots(0x60=96, 4): base=120, 96≠180 → 0.
+    // calcDotsSnap(120, 4): |120-120|=0 → 0 (exact plain match).
+    // bit0 fallback: 0x60 & 1 = 0 → 0.
+    EXPECT_EQ(computeDotCount(0x60, 120, 4, /*useBit0Fallback=*/true), 0)
+        << "v0xC2 dotted-eighth without fix: dotControl=0x60 yields 0 dots (bug)";
+
+    // Post-fix state: calculateRealDurations sets dotControl|=1 → dotControl=0x61.
+    // calcDots(97, 4): 97≠180 → 0.
+    // calcDotsSnap(120, 4): exact match → 0.
+    // bit0 fallback: 0x61 & 1 = 1 → 1.
+    EXPECT_EQ(computeDotCount(0x61, 120, 4, /*useBit0Fallback=*/true), 1)
+        << "v0xC2 dotted-eighth after fix: dotControl=0x61 (bit 0 set) yields 1 dot";
+}
+
 TEST(Tst_EncoreRhythm, impliedTuplets)
 {
     int normalNotes = 0;
