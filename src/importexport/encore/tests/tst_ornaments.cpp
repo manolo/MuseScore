@@ -809,7 +809,7 @@ TEST_F(Tst_Ornaments, v0xc2_cross_measure_slur_ends_in_next_measure)
     // same-measure xoffset heuristic picked the last note of the start measure
     // because targetEndXoff exceeded all xoffsets in that measure; the correct
     // endpoint is in the following measure.
-    MasterScore* score = readEncoreScore("XEQUEABU.ENC");
+    MasterScore* score = readEncoreScore("ornaments_v0c2_cross_measure_slur.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
@@ -926,7 +926,7 @@ TEST_F(Tst_Ornaments, bowing_marks_from_orn_c4_c5)
 // ===========================================================================
 TEST_F(Tst_Ornaments, v0xc2_orn_c4_is_accent_not_upbow)
 {
-    MasterScore* score = readEncoreScore("BN-COLET.ENC");
+    MasterScore* score = readEncoreScore("ornaments_v0c2_orn_c4_accent.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
