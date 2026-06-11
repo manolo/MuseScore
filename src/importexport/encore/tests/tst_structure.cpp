@@ -641,3 +641,34 @@ TEST_F(Tst_Structure, page_margins_wini_bottom_margin_derived)
 
     delete score;
 }
+
+// Pickup (anacrusis) first measure: timeSig[0]=1/4, timeSig[1]=4/4.
+// The importer should produce a full-duration first measure (4/4) with
+// a leading invisible gap rest (3/4) and the pickup note at offset 3/4.
+TEST_F(Tst_Structure, pickup_measure_full_duration)
+{
+    MasterScore* score = readEncoreScore("structure_pickup_measure.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    Measure* m1 = measureAt(score, 1);
+    ASSERT_NE(m0, nullptr);
+    ASSERT_NE(m1, nullptr);
+
+    EXPECT_EQ(m0->timesig(), Fraction(4, 4)) << "Pickup m0 must display the nominal 4/4 time signature";
+    EXPECT_EQ(m0->ticks(), Fraction(4, 4))   << "Pickup m0 must have full nominal duration (not shortened)";
+    EXPECT_EQ(m1->tick(), Fraction(4, 4))    << "m1 must start after a full-duration m0";
+
+    // Pickup note must be at the END of m0, offset by 3/4 from the measure start.
+    Fraction noteOffset { -1, 1 };
+    for (Segment* s = m0->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) {
+            noteOffset = s->tick() - m0->tick();
+            break;
+        }
+    }
+    EXPECT_EQ(noteOffset, Fraction(3, 4)) << "Pickup note must be at offset 3/4 within m0 (after leading gap)";
+
+    delete score;
+}

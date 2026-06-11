@@ -379,9 +379,11 @@ void buildMeasures(BuildCtx& ctx)
             Measure* measure = Factory::createMeasure(score->dummy()->system());
             measure->setTick(Fraction::fromTicks(currentTick));
 
-            if (firstMeasure && ts != ctx.nominalTimeSig && di == 0) {
+            const bool isPickup = firstMeasure && ts != ctx.nominalTimeSig && di == 0;
+            if (isPickup) {
                 measure->setTimesig(ctx.nominalTimeSig);
-                measure->setTicks(ts);
+                measure->setTicks(ctx.nominalTimeSig);
+                ctx.measure0PickupOffset = ctx.nominalTimeSig - ts;
             } else {
                 measure->setTimesig(ts);
                 measure->setTicks(ts);
@@ -410,7 +412,7 @@ void buildMeasures(BuildCtx& ctx)
             }
 
             score->measures()->append(measure);
-            currentTick += ts.ticks();
+            currentTick += isPickup ? ctx.nominalTimeSig.ticks() : ts.ticks();
         }
         firstMeasure = false;
         msIdxCounter += static_cast<size_t>(displayCount);
