@@ -496,10 +496,14 @@ alMezuro (+18) = count of measures forward to the end measure.
 xoffset2 (+20) = visual x within that target measure.
 No separate WEDGESTOP or SLURSTOP element is emitted.
 
-**Hairpin endpoint.** Primary: walk forward from WEDGESTART for the first Dynamic on the same track within
-the alMezuro window and stop there.
-Fallback (no Dynamic found): use xoffset2 bar-line clamp — when xoffset2 < first NOTE's xoffset in the
-target measure, Encore drew the hairpin ending at the bar line; clamp to targetMeasure.tick.
+**Hairpin endpoint.** Three-tier resolution:
+1. **Next-dynamic** (primary): walk forward for the first Dynamic on the same track within the alMezuro
+   window and stop there.
+2. **xoffset2 note snap** (fallback): scan the target measure for the last NOTE/REST with
+   `xoffset <= xoffset2`. End the hairpin at that note's tick.
+3. **Bar-line clamp** (when no note found in step 2): if xoffset2 precedes all notes in the target
+   measure, clamp to targetMeasure.tick.
+Notes with xoffset == 0 are ignored in steps 2-3 (synthetic fixture guard).
 
 **Slur endpoint (pixel-span heuristic).** `slurXoffset2 - slurXoffset` equals `endNote.xoffset - firstNote.xoffset`.
 Recover end tick via `target = firstNote.xoffset + (slurXoffset2 - slurXoffset)` and snap to the nearest note.
@@ -1081,9 +1085,12 @@ enforces correct measure length using the following rules, applied in order:
    in the same voice slot; the importer treats only the first fill as valid and discards the
    rest.
 
-6. **Anacrusis / pickup measure.** When the first measure's time signature differs from the
-   score's nominal time signature, it is treated as a pickup measure (`isIrregular = true`).
-   No fill rests are added beyond the pickup duration.
+6. **Anacrusis / pickup measure.** When `timeSig[0] != timeSig[1]`, measure 0 is a
+   pickup. The nominal time signature (from measure 1) is used for display; measure 0
+   keeps the full nominal duration. Notes are placed at the end of the measure: all
+   `cumTick` entries are pre-initialized to `nominalTimeSig - pickupTimeSig` before the
+   note loop, so the pickup content lands at the tail of the measure. A leading invisible
+   gap rest spanning the offset fills the beginning of each voice.
 
 ### Tuplets: compaction into available space
 
