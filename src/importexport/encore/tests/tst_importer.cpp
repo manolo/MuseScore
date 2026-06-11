@@ -1654,6 +1654,21 @@ TEST_F(Tst_Importer, isolated_explicit_tuplet_caps_chord_ticks)
     delete score;
 }
 
+// Regression: note-level path-A cap deleted a chord that belonged to an inner (nested) tuplet.
+// Old code called tt.currentTuplet->remove(chord) — the outer tuplet — which does not contain the
+// chord, logging "cannot find element" and leaving a dangling pointer in the inner tuplet's
+// m_currentElements.  The next innerTuplet->add() call iterated over that dangling pointer → SIGSEGV.
+// Fix: use chord->tuplet() (the actual owning tuplet) rather than tt.currentTuplet.
+TEST_F(Tst_Importer, inner_tuplet_note_level_cap_no_crash)
+{
+    MasterScore* score = readEncoreScore("importer_inner_tuplet_note_level_cap.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_inner_tuplet_note_level_cap.enc";
+    EXPECT_GT(score->nmeasures(), 0);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+    delete score;
+}
+
 // Regression: both notes and rests updated prevMidiTick; a note at the same tick as a rest was mis-detected
 // as chord extension, replacing the rest's segment while cumTick was already advanced past it.
 TEST_F(Tst_Importer, rest_does_not_anchor_chord_extension)
