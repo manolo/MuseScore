@@ -366,6 +366,11 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         ctx.pendingBreaths.push_back({ elemTick, track, SymId::breathMarkComma });
         break;
     }
+    case EncOrnamentType::ACCENT: {
+        const bool cm = !noteTicks.count(static_cast<int>(e->tick));
+        ctx.pendingBowings.push_back({ elemTick, track, SymId::articAccentAbove, measIdx, cm });
+        break;
+    }
     case EncOrnamentType::DOWNBOW: {
         const bool cm = !noteTicks.count(static_cast<int>(e->tick));
         ctx.pendingBowings.push_back({ elemTick, track, SymId::stringsDownBow, measIdx, cm });
