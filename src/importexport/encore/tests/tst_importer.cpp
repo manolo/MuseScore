@@ -1084,6 +1084,32 @@ TEST_F(Tst_Importer, v0c4_hairpin_barline_clamp)
     delete score;
 }
 
+// Regression: when xoffset2 falls between two notes in the target measure, the hairpin must end
+// at the note with the largest xoffset still <= xoffset2, not at the end of the measure.
+// File: M1 has a DIM hairpin (xoffset2=70) pointing into M2 (notes at xoff=30,60,90,120).
+// Expected: hairpin ends at M2 beat 1 (tick 240 / wholeTicks 960 = Fraction(1,4) into M2).
+TEST_F(Tst_Importer, v0c4_hairpin_xoffset2_snap)
+{
+    MasterScore* score = readEncoreScore("importer_hairpin_xoffset2_snap.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_hairpin_xoffset2_snap.enc";
+
+    std::vector<Hairpin*> hairpins;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isHairpin()) {
+            hairpins.push_back(toHairpin(sp));
+        }
+    }
+    std::sort(hairpins.begin(), hairpins.end(),
+              [](Hairpin* a, Hairpin* b) { return a->tick() < b->tick(); });
+    ASSERT_GE(hairpins.size(), 1u);
+    // DIM from M1 with xoffset2=70: must snap to note at xoff=60 (tick=240 in M2 = Fraction(5,4)).
+    EXPECT_EQ(hairpins[0]->hairpinType(), HairpinType::DIM_HAIRPIN);
+    EXPECT_EQ(hairpins[0]->tick2(), Fraction(5, 4))
+        << "hairpin with xoffset2 between two notes must end at the note with largest xoffset <= xoffset2";
+    delete score;
+}
+
 // Regression: Encore sometimes writes duplicate dynamics on the same (staff, voice, tick) with different xoffsets.
 // Importer must drop the second when it lands on the same segment.
 TEST_F(Tst_Importer, v0c4_dyn_dedup)

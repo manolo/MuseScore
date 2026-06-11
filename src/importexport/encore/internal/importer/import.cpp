@@ -35,6 +35,7 @@
 #include "tuplets.h"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <map>
 #include <set>
@@ -114,7 +115,8 @@ static void logEncFileInfo(const EncFile& enc)
            << "  Pages:" << h.pageCount
            << "  Instruments:" << h.instrumentCount
            << "  Staves/sys:" << h.staffPerSystem
-           << "  Measures:" << h.measureCount;
+           << "  Measures:" << h.measureCount
+           << "  Size:" << static_cast<int>(h.scoreSize);
 
     LOGD() << "---- Titles ----";
     if (!enc.titleBlock.title.isEmpty()) {
@@ -197,38 +199,27 @@ static void logEncFileInfo(const EncFile& enc)
 }
 
 
-// Reduce spatium until the score fits within enc.header.pageCount pages.
-// Called after SystemLocks are in place (resolveAll) so the horizontal layout
-// (measures per system) is frozen; only the vertical system height changes.
-// The spatium floor is set to 0.4mm (~0.016in) to prevent unreadable output.
+// Set the score spatium from the Encore score-size field (1–4) and do a single
+// final layout.  No iteration: the size field encodes the original notation
+// density, so mapping it proportionally to MuseScore's spatium produces a layout
+// close to the original without expensive repeated doLayout calls.
+//
+// Mapping (linear):
+//   size 4 → 100 % of default spatium  (MuseScore default)
+//   size 1 →  75 % of default spatium  (MuseScore small-staff scale)
+//   sizes 2–3 interpolated at ~8.3 % per step
 static void fitSpatiumToPageCount(MasterScore* score, const EncFile& enc)
 {
-    const int targetPages = static_cast<int>(enc.header.pageCount);
-    if (targetPages <= 0 || enc.lines.empty()) {
-        return;
-    }
-
-    static constexpr double SPATIUM_FLOOR_MM = 0.40;   // ~0.016 in minimum
+    static constexpr double SPATIUM_FLOOR_MM = 0.40;
     static constexpr double SPATIUM_FLOOR    = SPATIUM_FLOOR_MM / 25.4 * 1200.0;
 
-    double spatium = score->style().spatium();
+    const int sz = std::clamp(static_cast<int>(enc.header.scoreSize), 1, 4);
+    const double sizeFactor = 0.75 + (sz - 1) * (0.25 / 3.0);
 
-    for (int iter = 0; iter < 20; ++iter) {
-        score->style().setSpatium(spatium);
-        score->doLayout();
-
-        const int actualPages = static_cast<int>(score->pages().size());
-        if (actualPages <= targetPages) {
-            break;
-        }
-
-        spatium *= 0.9;
-        if (spatium <= SPATIUM_FLOOR) {
-            score->style().setSpatium(SPATIUM_FLOOR);
-            break;
-        }
-    }
+    double spatium = score->style().spatium() * sizeFactor;
+    spatium = std::max(spatium, SPATIUM_FLOOR);
     score->style().setSpatium(spatium);
+    score->doLayout();
 }
 
 static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
