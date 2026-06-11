@@ -577,7 +577,7 @@ nothing and returns null → slur removed.
 1. **Grace-to-main** (`ps.startTick == endTick` after snapping, e.g. grace and parent both at
    measure beat 0): a slur is created with explicit `startElement = graceChord` and
    `endElement = mainChord`. Both `computeStartElement()` and `computeEndElement()` are
-   skipped in the validation loop.
+   skipped in the validation loop (see below for the post-pass design).
 
 2. **Grace-to-later** (`ps.startTick < endTick`, e.g. SLURSTART at Encore tick=450, grace at
    450, regular note at 480, half note at 0): `tick2rightSegment(ps.startTick)` finds the
@@ -585,6 +585,28 @@ nothing and returns null → slur removed.
    and sets `slur->setStartElement(graceChord)`. Only `computeStartElement()` is skipped in
    the validation loop; `computeEndElement()` runs normally and anchors the slur end to the
    correct later chord.
+
+**Co-located grace+regular**: when both a grace note and its principal note share the same
+Encore tick (e.g. an ACCIACCATURA at tick=480 with a regular note also at tick=480), the
+pixel-span heuristic would otherwise ignore the co-located regular note (it only considers
+notes strictly after startEncTick) and land on the NEXT note as the endpoint. Similarly, the
+fallback path can produce a zero-span that resolves to the end of the measure. In both cases:
+
+- **Heuristic shortcut** (Fix A, `resolvers-slur.cpp`): before the endpoint search loop, if a
+  grace and a regular note share `startEncTick` AND `targetEndXoff ≤ maxXoffInMeas`, the slur
+  is immediately resolved as grace-to-main (endTick = startTick). This prevents the heuristic
+  from wandering to the wrong note and applies for both v0xC2 and v0xC4 formats.
+
+- **tick2 = startTick invariant** (Fix B, `resolvers-slur.cpp`): the zero-span path sets
+  `gSlur->setTick2(ps.startTick)` (same as tick) so that the post-pass detects
+  `graceToMain = TRUE` and skips `computeEndElement()`. Without this, tick2 was set to
+  end-of-measure, causing `computeEndElement()` to find a rest or next-measure note instead
+  of the explicitly-set mainChord endElement.
+
+- **addSpanner(false)**: for grace-to-main slurs `score->addSpanner(gSlur, false)` is used
+  instead of `addElement` so MuseScore's default `computeStartElement()` (called by
+  `addElement` → `addSpanner(true)`) does not replace the explicitly-set grace startElement
+  with the main chord.
 
 ### Multi-staff instruments: staffWithin field
 

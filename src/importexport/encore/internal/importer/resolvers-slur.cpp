@@ -110,55 +110,138 @@ void resolveSlurs(BuildCtx& ctx)
             if (firstNoteXoff >= 0) {
                 const int pixelSpan = ps.slurXoffset2 - ps.slurXoffset;
                 const int targetEndXoff = firstNoteXoff + pixelSpan;
-                int bestDist = std::numeric_limits<int>::max();
-                int bestEncTick = -1;
-                for (const auto& elem : startEncMeas.elements) {
-                    const EncMeasureElem* em = elem.get();
-                    if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
-                        continue;
+                // Grace-to-main shortcut: when a grace note and a regular note share
+                // startEncTick (both at the same Encore beat), and targetEndXoff is
+                // within the measure (not a cross-measure arc), this SLURSTART is a
+                // grace-to-main slur. Force zero-span so the path below creates the
+                // correct grace→main element pair without guessing the endpoint.
+                {
+                    bool hasGrace = false, hasRegular = false;
+                    int maxXoffAtStart = -1;
+                    for (const auto& gElem : startEncMeas.elements) {
+                        const EncMeasureElem* gm = gElem.get();
+                        if (gm->type != static_cast<quint8>(EncElemType::NOTE)) {
+                            continue;
+                        }
+                        if (gm->staffIdx != ps.staffIdx) {
+                            continue;
+                        }
+                        const int gxoff = static_cast<int>(
+                            static_cast<const EncNote*>(gm)->xoffset);
+                        if (gxoff > maxXoffAtStart) {
+                            maxXoffAtStart = gxoff;
+                        }
+                        if (static_cast<int>(gm->tick) != startEncTick) {
+                            continue;
+                        }
+                        if (static_cast<const EncNote*>(gm)->graceType()
+                            != EncGraceType::NORMAL) {
+                            hasGrace = true;
+                        } else {
+                            hasRegular = true;
+                        }
                     }
-                    if (em->staffIdx != ps.staffIdx) {
-                        continue;
-                    }
-                    // Only consider notes strictly after the start — the start note
-                    // cannot be its own slur endpoint.
-                    if (static_cast<int>(em->tick) <= startEncTick) {
-                        continue;
-                    }
-                    const int xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
-                    const int dist = std::abs(xoff - targetEndXoff);
-                    if (dist < bestDist) {
-                        bestDist = dist;
-                        bestEncTick = static_cast<int>(em->tick);
+                    if (hasGrace && hasRegular && targetEndXoff <= maxXoffAtStart) {
+                        endTick  = ps.startTick;
+                        resolved = true;
                     }
                 }
-                if (bestEncTick > startEncTick) {
-                    const Fraction endRel(bestEncTick, wt);
-                    const Fraction candidate = ctx.measuresByIdx[ps.startMeasIdx]->tick()
-                                               + endRel;
-                    // Snap to the actual MuseScore chord segment at or before the
-                    // candidate tick. Grace notes steal time and shift the parent
-                    // note's cumTick earlier than the proportional tick suggests.
-                    Measure* sMeas = ctx.measuresByIdx[ps.startMeasIdx];
-                    Segment* snappedSeg = score->tick2leftSegment(
-                        candidate, false, SegmentType::ChordRest);
-                    if (snappedSeg && snappedSeg->measure() == sMeas
-                        && snappedSeg->tick() >= ps.startTick) {
-                        bool hasChord = false;
-                        for (int v = 0; v < static_cast<int>(VOICES) && !hasChord; ++v) {
-                            track_idx_t t = static_cast<track_idx_t>(
-                                ps.staffIdx * VOICES + v);
-                            if (snappedSeg->element(t)
-                                && snappedSeg->element(t)->isChord()) {
-                                hasChord = true;
+                if (!resolved) {
+                    int bestDist = std::numeric_limits<int>::max();
+                    int bestEncTick = -1;
+                    int maxXoffInMeas = -1;
+                    for (const auto& elem : startEncMeas.elements) {
+                        const EncMeasureElem* em = elem.get();
+                        if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
+                            continue;
+                        }
+                        if (em->staffIdx != ps.staffIdx) {
+                            continue;
+                        }
+                        const int xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
+                        if (xoff > maxXoffInMeas) {
+                            maxXoffInMeas = xoff;
+                        }
+                        // Only consider notes strictly after the start — the start note
+                        // cannot be its own slur endpoint.
+                        if (static_cast<int>(em->tick) <= startEncTick) {
+                            continue;
+                        }
+                        const int dist = std::abs(xoff - targetEndXoff);
+                        if (dist < bestDist) {
+                            bestDist = dist;
+                            bestEncTick = static_cast<int>(em->tick);
+                        }
+                    }
+                    if (bestEncTick > startEncTick) {
+                        const Fraction endRel(bestEncTick, wt);
+                        const Fraction candidate = ctx.measuresByIdx[ps.startMeasIdx]->tick()
+                                                   + endRel;
+                        // Snap to the actual MuseScore chord segment at or before the
+                        // candidate tick. Grace notes steal time and shift the parent
+                        // note's cumTick earlier than the proportional tick suggests.
+                        Measure* sMeas = ctx.measuresByIdx[ps.startMeasIdx];
+                        Segment* snappedSeg = score->tick2leftSegment(
+                            candidate, false, SegmentType::ChordRest);
+                        if (snappedSeg && snappedSeg->measure() == sMeas
+                            && snappedSeg->tick() >= ps.startTick) {
+                            bool hasChord = false;
+                            for (int v = 0; v < static_cast<int>(VOICES) && !hasChord; ++v) {
+                                track_idx_t t = static_cast<track_idx_t>(
+                                    ps.staffIdx * VOICES + v);
+                                if (snappedSeg->element(t)
+                                    && snappedSeg->element(t)->isChord()) {
+                                    hasChord = true;
+                                }
+                            }
+                            endTick = hasChord ? snappedSeg->tick() : candidate;
+                        } else {
+                            endTick = candidate;
+                        }
+                        resolved = true;
+                    }
+                    // Cross-measure extension for v0xC2 (unreliable alMezuro): when
+                    // targetEndXoff exceeds all xoffsets in the start measure the slur
+                    // endpoint is in the next measure. Search up to 2 measures forward.
+                    if (!ctx.alMezuroIsReliable && bestDist > 0
+                        && targetEndXoff > maxXoffInMeas) {
+                        for (int nextMIdx = ps.startMeasIdx + 1;
+                             nextMIdx <= ps.startMeasIdx + 2
+                             && nextMIdx < static_cast<int>(enc.measures.size())
+                             && nextMIdx < static_cast<int>(ctx.measuresByIdx.size());
+                             ++nextMIdx) {
+                            const EncMeasure& nextEncMeas = enc.measures[nextMIdx];
+                            const int nextWt
+                                = (nextEncMeas.durTicks && nextEncMeas.timeSigNum
+                                   && nextEncMeas.timeSigDen)
+                                  ? (static_cast<int>(nextEncMeas.durTicks)
+                                     * nextEncMeas.timeSigDen)
+                                  / nextEncMeas.timeSigNum : 960;
+                            Measure* nextMs = ctx.measuresByIdx[nextMIdx];
+                            for (const auto& elem : nextEncMeas.elements) {
+                                const EncMeasureElem* em = elem.get();
+                                if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
+                                    continue;
+                                }
+                                if (em->staffIdx != ps.staffIdx) {
+                                    continue;
+                                }
+                                const int xoff = static_cast<int>(
+                                    static_cast<const EncNote*>(em)->xoffset);
+                                const int dist = std::abs(xoff - targetEndXoff);
+                                if (dist < bestDist) {
+                                    bestDist = dist;
+                                    const Fraction endRel(static_cast<int>(em->tick), nextWt);
+                                    endTick = nextMs->tick() + endRel.reduced();
+                                    resolved = true;
+                                }
+                            }
+                            if (bestDist == 0) {
+                                break;
                             }
                         }
-                        endTick = hasChord ? snappedSeg->tick() : candidate;
-                    } else {
-                        endTick = candidate;
                     }
-                    resolved = true;
-                }
+                } // if (!resolved): end of pixel-span endpoint search
             }
         }
 
@@ -242,10 +325,17 @@ void resolveSlurs(BuildCtx& ctx)
                         gSlur->setTrack(graceTrack);
                         gSlur->setTrack2(graceTrack);
                         gSlur->setTick(ps.startTick);
-                        gSlur->setTick2(endMeas->tick() + endMeas->ticks());
+                        // tick2 = startTick (same as tick) so that the post-pass
+                        // sees graceToMain=true and skips computeEndElement(), which
+                        // would otherwise replace the explicitly-set endElement with
+                        // whatever is at end-of-measure (wrong note or rest).
+                        gSlur->setTick2(ps.startTick);
                         gSlur->setStartElement(graces.front());
                         gSlur->setEndElement(el);
-                        score->addElement(gSlur);
+                        // Use addSpanner(false) instead of addElement so that
+                        // MuseScore's default computeStartElement/computeEndElement
+                        // does not override the explicitly-set grace start element.
+                        score->addSpanner(gSlur, false);
                     }
                 }
             }
