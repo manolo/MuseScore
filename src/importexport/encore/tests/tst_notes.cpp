@@ -3313,3 +3313,59 @@ TEST_F(Tst_Notes, trailing_space_uses_invisible_gap_rests)
 
     delete score;
 }
+
+// ===========================================================================
+// BUG FIX: Triplet with one note missing the tup byte (orphan sandwich).
+// Live-recorded v0xC4 files occasionally store the tup=0x00 on one note in
+// the middle of a triplet run. computeImpliedTupletMembers broke the group at
+// that note, leaving it and the surrounding notes as isolated explicit notes.
+// Result: the isolated notes were treated as regular 8ths, filled the measure,
+// and the last triplet note was dropped entirely.
+// Fix: sandwich heuristic — when the orphan note is between two explicit tup
+// notes of the same ratio and is at the expected triplet-advance tick, include
+// it in the group.
+//
+// Fixture (4/4, dur=960):
+//   tick=0   8th tup=0x32  pitch=60  <- triplet note 1
+//   tick=80  8th tup=0x00  pitch=62  <- ORPHAN (missing tup byte)
+//   tick=160 8th tup=0x32  pitch=64  <- triplet note 3
+//   tick=240 Q   tup=0x00  pitch=65  <- regular quarter
+//   tick=480 H   tup=0x00  pitch=67  <- regular half
+// ===========================================================================
+TEST_F(Tst_Notes, triplet_orphan_middle_note_missing_tup_byte)
+{
+    MasterScore* score = readEncoreScore("notes_triplet_orphan_missing_tup.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+
+    // The first segment must carry a chord that is inside a 3:2 tuplet.
+    Segment* firstSeg = m0->first(SegmentType::ChordRest);
+    ASSERT_NE(firstSeg, nullptr);
+    EngravingItem* el = firstSeg->element(0);
+    ASSERT_NE(el, nullptr);
+    ASSERT_TRUE(el->isChord()) << "First element should be a chord (triplet note 1)";
+
+    Chord* firstChord = toChord(el);
+    ASSERT_NE(firstChord->tuplet(), nullptr) << "Triplet note 1 must be inside a tuplet";
+
+    Tuplet* tup = firstChord->tuplet();
+    EXPECT_EQ(tup->ratio().reduced(), Fraction(3, 2)) << "Tuplet must be 3:2";
+    EXPECT_EQ(static_cast<int>(tup->elements().size()), 3)
+        << "Triplet must have 3 elements (orphan middle note must NOT be dropped)";
+
+    // The measure must be properly full (no overflow from treating orphan as plain 8th).
+    Fraction measLen = m0->ticks();
+    Fraction usedTicks(0, 1);
+    for (Segment* s = m0->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        ChordRest* cr = e && e->isChordRest() ? toChordRest(e) : nullptr;
+        if (cr && !(cr->isRest() && toRest(cr)->isGap())) {
+            usedTicks += cr->actualTicks();
+        }
+    }
+    EXPECT_EQ(usedTicks, measLen) << "Measure must be exactly full (no overflow or gap)";
+
+    delete score;
+}
