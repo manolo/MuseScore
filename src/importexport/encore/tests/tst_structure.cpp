@@ -471,6 +471,63 @@ TEST_F(Tst_Structure, intermediate_time_sig_7_8)
 }
 
 // ===========================================================================
+// BUG FIX: 6/8 → 3/4 (and 3/4 → 6/8) time signature changes were silently
+// swallowed because buildInitialSignatures used Fraction::operator== to detect
+// changes, and 6/8 == 3/4 by cross-multiplication (6×4 == 3×8 = 24).
+// Fix: use Fraction::identical() which compares numerator/denominator directly.
+// Fixture: 2 measures 6/8, then 3 measures 3/4, then 2 measures 6/8.
+// ===========================================================================
+TEST_F(Tst_Structure, time_sig_change_6_8_to_3_4_and_back)
+{
+    MasterScore* score = readEncoreScore("timesig_change_6_8_to_3_4.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+    EXPECT_TRUE(m0->timesig().identical(Fraction(6, 8))) << "M0 should be 6/8";
+
+    // Measure 2: 6/8 → 3/4. Must have a visible TimeSig element.
+    Measure* m2 = measureAt(score, 2);
+    ASSERT_NE(m2, nullptr);
+    EXPECT_TRUE(m2->timesig().identical(Fraction(3, 4))) << "M2 should be 3/4";
+    {
+        Segment* tsSeg = m2->findSegment(SegmentType::TimeSig, m2->tick());
+        ASSERT_NE(tsSeg, nullptr) << "M2 must have a TimeSig segment (6/8 → 3/4 change)";
+        bool found = false;
+        for (EngravingItem* el : tsSeg->elist()) {
+            if (el && el->isTimeSig()) {
+                TimeSig* ts = toTimeSig(el);
+                if (ts->sig().identical(Fraction(3, 4))) {
+                    found = true;
+                }
+            }
+        }
+        EXPECT_TRUE(found) << "TimeSig at M2 must carry 3/4, not be merged silently with 6/8";
+    }
+
+    // Measure 5: 3/4 → 6/8. Must have a visible TimeSig element.
+    Measure* m5 = measureAt(score, 5);
+    ASSERT_NE(m5, nullptr);
+    EXPECT_TRUE(m5->timesig().identical(Fraction(6, 8))) << "M5 should be 6/8";
+    {
+        Segment* tsSeg = m5->findSegment(SegmentType::TimeSig, m5->tick());
+        ASSERT_NE(tsSeg, nullptr) << "M5 must have a TimeSig segment (3/4 → 6/8 change)";
+        bool found = false;
+        for (EngravingItem* el : tsSeg->elist()) {
+            if (el && el->isTimeSig()) {
+                TimeSig* ts = toTimeSig(el);
+                if (ts->sig().identical(Fraction(6, 8))) {
+                    found = true;
+                }
+            }
+        }
+        EXPECT_TRUE(found) << "TimeSig at M5 must carry 6/8, not be merged silently with 3/4";
+    }
+
+    delete score;
+}
+
+// ===========================================================================
 // FEATURE: LINE block data becomes SystemLocks — each Encore system is locked so the
 // layout engine keeps its measures together regardless of spatium.
 // ===========================================================================
