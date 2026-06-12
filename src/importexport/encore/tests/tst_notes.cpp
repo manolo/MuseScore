@@ -3315,6 +3315,38 @@ TEST_F(Tst_Notes, trailing_space_uses_invisible_gap_rests)
 }
 
 // ===========================================================================
+// BUG regression: a 16th note whose MIDI rdur from calculateRealDurations
+// equals 112 was falsely assigned 3 augmentation dots because
+// calcDotsSnap computed the triple-dotted threshold as (60*15)/8 = 112 via
+// C++ integer truncation (true value 112.5).  The note advanced 15/128 of a
+// whole note instead of 1/16, misaligning the rest of the measure.
+// Fixture: NOTE@0(16th) followed by NOTE@112, so calculateRealDurations
+// gives rdur=112 for the first note.
+// ===========================================================================
+TEST_F(Tst_Notes, rdur112_16th_note_not_triple_dotted)
+{
+    MasterScore* score = readEncoreScore("notes_16th_rdur112_no_triple_dot.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+
+    Segment* firstSeg = m0->first(SegmentType::ChordRest);
+    ASSERT_NE(firstSeg, nullptr);
+    EngravingItem* el = firstSeg->element(0);
+    ASSERT_NE(el, nullptr);
+    ASSERT_TRUE(el->isChord());
+
+    Chord* first = toChord(el);
+    EXPECT_EQ(first->durationType(), DurationType::V_16TH)
+        << "First chord must be a plain 16th note";
+    EXPECT_EQ(first->dots(), 0)
+        << "rdur=112 for a 16th must not be interpreted as triple-dotted";
+
+    delete score;
+}
+
+// ===========================================================================
 // BUG FIX: Triplet with one note missing the tup byte (orphan sandwich).
 // Live-recorded v0xC4 files occasionally store the tup=0x00 on one note in
 // the middle of a triplet run. computeImpliedTupletMembers broke the group at
@@ -3366,6 +3398,43 @@ TEST_F(Tst_Notes, triplet_orphan_middle_note_missing_tup_byte)
         }
     }
     EXPECT_EQ(usedTicks, measLen) << "Measure must be exactly full (no overflow or gap)";
+
+    delete score;
+}
+
+// ===========================================================================
+// BUG regression: same orphan scenario but with a prior complete triplet
+// group in the same measure (seenCompleteGroup=true). Verifies that the
+// sandwich heuristic is not blocked by the seenCompleteGroup flag.
+//
+// Fixture (4/4, dur=960):
+//   Group 1 (complete): ticks 0,80,160 all tup=0x32  <- always worked
+//   Q @240
+//   Group 2 (orphan):   tick=480(0x32), 560(0x00), 640(0x32)
+//   Q @720
+// ===========================================================================
+TEST_F(Tst_Notes, triplet_orphan_with_prior_complete_group)
+{
+    MasterScore* score = readEncoreScore("notes_triplet_orphan_prior_complete_group.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+
+    // Collect tuplets.
+    std::vector<Tuplet*> tuplets;
+    for (EngravingItem* e : m0->el()) {
+        if (e->isTuplet()) {
+            tuplets.push_back(toTuplet(e));
+        }
+    }
+    ASSERT_EQ(tuplets.size(), 2u) << "Measure must contain exactly two 3:2 tuplets";
+    for (int t = 0; t < 2; ++t) {
+        EXPECT_EQ(static_cast<int>(tuplets[t]->elements().size()), 3)
+            << "Tuplet " << t << " must have 3 elements (orphan must not be dropped)";
+        EXPECT_EQ(tuplets[t]->ratio().reduced(), Fraction(3, 2))
+            << "Tuplet " << t << " must be 3:2";
+    }
 
     delete score;
 }
