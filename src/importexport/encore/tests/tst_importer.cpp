@@ -44,6 +44,8 @@
 #include "engraving/dom/slur.h"
 #include "engraving/dom/spanner.h"
 #include "engraving/dom/volta.h"
+#include "engraving/dom/staff.h"
+#include "engraving/dom/stafftype.h"
 
 #include "testbase.h"
 
@@ -1692,6 +1694,28 @@ TEST_F(Tst_Importer, inner_tuplet_note_level_cap_no_crash)
     EXPECT_GT(score->nmeasures(), 0);
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+    delete score;
+}
+
+// Encore scoreSize=2 → Staff Properties Scale = 70 % (Pid::MAG = 0.70).
+TEST_F(Tst_Importer, score_size2_sets_staff_scale_70pct)
+{
+    MasterScore* score = readEncoreScore("importer_score_size2.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_score_size2.enc";
+    ASSERT_FALSE(score->staves().empty());
+    const double mag = score->staff(0)->staffType(mu::engraving::Fraction(0, 1))->userMag();
+    EXPECT_NEAR(mag, 0.70, 1e-6) << "Expected staff scale 70 % for scoreSize=2, got " << mag * 100 << " %";
+    delete score;
+}
+
+// Encore scoreSize=3 → Staff Properties Scale = 75 % (Pid::MAG = 0.75).
+TEST_F(Tst_Importer, score_size3_sets_staff_scale_75pct)
+{
+    MasterScore* score = readEncoreScore("importer_score_size3.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_score_size3.enc";
+    ASSERT_FALSE(score->staves().empty());
+    const double mag = score->staff(0)->staffType(mu::engraving::Fraction(0, 1))->userMag();
+    EXPECT_NEAR(mag, 0.75, 1e-6) << "Expected staff scale 75 % for scoreSize=3, got " << mag * 100 << " %";
     delete score;
 }
 

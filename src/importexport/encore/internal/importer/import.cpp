@@ -199,27 +199,19 @@ static void logEncFileInfo(const EncFile& enc)
 }
 
 
-// Set the score spatium from the Encore score-size field (1–4) and do a single
-// final layout.  No iteration: the size field encodes the original notation
-// density, so mapping it proportionally to MuseScore's spatium produces a layout
-// close to the original without expensive repeated doLayout calls.
-//
-// Mapping (linear):
-//   size 4 → 100 % of default spatium  (MuseScore default)
-//   size 1 →  75 % of default spatium  (MuseScore small-staff scale)
-//   sizes 2–3 interpolated at ~8.3 % per step
-static void fitSpatiumToPageCount(MasterScore* score, const EncFile& enc)
+// Map Encore score-size (1–4) to MuseScore Staff Properties → Scale (Pid::MAG).
+// 1=60%, 2=70%, 3=75%, 4=100%.  Global spatium is not changed.
+static void applyStaffScale(MasterScore* score, const EncFile& enc)
 {
-    static constexpr double SPATIUM_FLOOR_MM = 0.40;
-    static constexpr double SPATIUM_FLOOR    = SPATIUM_FLOOR_MM / 25.4 * 1200.0;
-
+    static const double kScaleBySize[4] = { 0.60, 0.70, 0.75, 1.00 };
     const int sz = std::clamp(static_cast<int>(enc.header.scoreSize), 1, 4);
-    const double sizeFactor = 0.75 + (sz - 1) * (0.25 / 3.0);
+    const double scale = kScaleBySize[sz - 1];
 
-    double spatium = score->style().spatium() * sizeFactor;
-    spatium = std::max(spatium, SPATIUM_FLOOR);
-    score->style().setSpatium(spatium);
-    score->doLayout();
+    LOGD("enc importer: scoreSize=%d → staff scale=%.0f%%", sz, scale * 100.0);
+
+    for (Staff* staff : score->staves()) {
+        staff->setProperty(Pid::MAG, PropertyValue(scale));
+    }
 }
 
 static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
@@ -282,17 +274,14 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     buildNoteLoop(ctx);
 
     applyPageMargins(score, enc.pageSetup);
+    applyStaffScale(score, enc);
 
     resolveAll(ctx);
 
     score->spell();
     addTitleFrame(score, enc.titleBlock);
     score->setUpTempoMap();
-
-    // SystemLocks (added by resolveAll) fix horizontal layout.
-    // Now reduce spatium vertically until the page count matches the original.
-    // Called after addTitleFrame so the VBox is included in the page count.
-    fitSpatiumToPageCount(score, enc);
+    score->doLayout();
 }
 
 Err importEncore(MasterScore* score, const QString& path)
