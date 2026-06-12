@@ -1200,50 +1200,18 @@ Test fixtures under `tests/data/`:
   mi Copla, bandurriator/Tie a Yellow Ribbon, etc.) referenced
   by the integration tests in `tst_encore.cpp`.
 
-## System layout fitting
+## Staff scale
 
-After the note loop and before resolvers (which place system breaks), the
-importer runs `fitSpatiumToLineBreaks` to reduce MuseScore's spatium (staff
-space) until the score's auto-layout produces at least as many measures per
-system as Encore's LINE blocks specify.
+The file header byte at 0x52 holds a staff-size selector (1-4, default 4).
+`applyStaffScale` maps it to `Pid::MAG` on every staff before `resolveAll`.
+Global spatium is not changed.
 
-### Why spatium adjustment is needed
-
-Encore stores exactly how many measures belong on each printed line in the
-LINE block's `measureCount` field (1 byte, immediately after `start`). After
-import the system breaks from `resolveAll` force the same boundaries. If
-MuseScore's default spatium (1.750 mm at A4) is too large for the page width,
-the layout engine auto-breaks a system before its forced break, moving one
-measure to the next line and violating the Encore structure.
-
-### Algorithm
-
-```
-1. Collect targets: enc.lines[0..3].measureCount (first 4 lines, skip zeros).
-2. Loop up to 20 iterations:
-   a. score->style().setSpatium(spatium); score->doLayout();
-   b. Collect actual music-system measure counts in document order.
-   c. For each j in [0, min(4, targets.size()) - 1]:
-        if sysCounts[j] < targets[j]: allFit = false; break.
-   d. If allFit: done.  Else: spatium *= 0.9.
-3. Safety floor: stop if spatium < 0.01.
-```
-
-Only the first 4 lines are checked: beyond that the lines in real scores
-are representative of the whole document and a density misfit in line 5+
-would be caught by the line 1-4 checks (the piece is usually consistent).
-The 10 % reduction per step converges in at most 20 steps (factor 0.9^20
-≈ 0.12 of the original value, well below any real score's practical minimum).
-
-The function runs BEFORE `resolveAll`, so no system breaks are in place
-during the doLayout calls; the reduced spatium is stored and respects the
-breaks placed later.
-
-### What is NOT adjusted
-
-Page margins: files that have never had Page Setup explicitly saved in Encore
-contain no WINI block and keep MuseScore defaults (15 mm per side). When the
-WINI block is present the margins are applied exactly as stored.
+| Header value | Staff scale |
+|---|---|
+| 1 | 60% |
+| 2 | 70% |
+| 3 | 75% |
+| 4 | 100% |
 
 ## Page margins
 
