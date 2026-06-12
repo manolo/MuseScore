@@ -896,6 +896,33 @@ beatTicks encoding.  `wholeTicks` is now a compile-time constant 960.  The
 same fix applies to the chord-symbol placement formula.  Exercised by
 `Tst_Importer.v0c4_2_2_beatticks240_gap_snap_no_false_fire`.
 
+## Percussion clef for drumset staves
+
+When `applyBestInstrument` assigns a drumset template (via PERC clef, GM
+range, or drumset name), the LINE block clef for that staff (often C3L, C4L
+or F in band files) would otherwise override the percussion clef in
+`buildInitialSignatures`.  After instrument assignment, `buildInitialSignatures`
+now checks whether the staff carries a drumset and, if so, forces
+`ClefType::PERC` instead of calling `pickStaffClef` on the enc clef.
+
+## MIDI artifact filter bypass for chord roots and chord extensions
+
+The MIDI artifact filter (lines 152–174 in `noteloop-note.cpp`) drops notes
+whose `realDuration` falls in the range 5–14 ticks when the face value is an
+eighth note or longer.  Two valid cases were incorrectly caught:
+
+1. **First note on staff in a measure** (`savedPrevMidiTick < 0`): can never
+   be a tie-continuation artifact because there is no prior note in this
+   measure to generate one from.  Its short `realDuration` comes from the
+   *next* chord note starting a few ticks later.
+
+2. **Chord extensions** (`isChordExt = true`): notes within
+   `CHORD_MIDI_THRESHOLD` (8 ticks) of the previous note are real chord tones
+   recorded with tight MIDI timing; they are not artifacts.
+
+Both are now bypassed, so all notes in a simultaneous chord group survive even
+when `calculateRealDurations` assigns a very short tick-diff rdur.
+
 ## Instruments in the GM Percussive range (MIDI programs 113–128)
 
 General MIDI programs 113–128 are the "Percussive" section (Agogo, Steel

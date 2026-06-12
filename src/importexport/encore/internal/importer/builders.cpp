@@ -447,7 +447,15 @@ void buildInitialSignatures(BuildCtx& ctx)
                                    ? ctx.staffTemplateTransposingClef[si] : ClefType::INVALID;
             const int keyOffset = si < static_cast<int>(ctx.staffPitchOffset.size())
                                   ? ctx.staffPitchOffset[si] : 0;
-            addInitialClef(score, si, pickStaffClef(sd.clef, cClef, tClef, keyOffset));
+            // If the staff's instrument carries a drumset (assigned via PERC clef or GM
+            // percussion range), use PERC clef regardless of the LINE block's enc clef.
+            // Without this, C3L/C4L/F clefs from the LINE block override the drumset clef.
+            const Staff* st = score->staff(static_cast<staff_idx_t>(si));
+            const bool hasDrumset = st && st->part() && st->part()->instrument()
+                                    && st->part()->instrument()->drumset();
+            const ClefType ct = hasDrumset ? ClefType::PERC
+                                : pickStaffClef(sd.clef, cClef, tClef, keyOffset);
+            addInitialClef(score, si, ct);
         }
     }
 
