@@ -879,6 +879,23 @@ Volta is closed and a new one is opened on the next non-zero
 measure. The `beginText` is set from the endings list ("1.",
 "2.", "1., 2.", ...) so the bracket label renders.
 
+## Gap-snap wholeTicks must always be 960
+
+The gap-snap logic converts an Encore MIDI tick to a fraction of the measure
+using `encTickFrac = Fraction(e->tick, wholeTicks)`.  The formula
+`wholeTicks = beatTicks * timeSigDen` gives 960 only when `beatTicks` is the
+raw note unit (240 for x/4, 120 for x/8).  Files that store a non-standard
+value — e.g. 2/2 with `beatTicks=240` instead of the correct 480 — produce
+`wholeTicks=480`.  A note at Encore tick=360 would then have
+`encTickFrac = 360/480 = 3/4`, exceeding `cumTick = 3/8` after a rest+quarter,
+causing gap-snap to fire and jump cumTick from 3/8 to 3/4.  All notes in the
+second half of the measure (ticks 480-840) are dropped (measure overflows).
+
+Encore always uses 960 ticks per whole note regardless of time signature or
+beatTicks encoding.  `wholeTicks` is now a compile-time constant 960.  The
+same fix applies to the chord-symbol placement formula.  Exercised by
+`Tst_Importer.v0c4_2_2_beatticks240_gap_snap_no_false_fire`.
+
 ## Tuplet group with one note missing the tup byte (sandwich orphan)
 
 Live-recorded v0xC4 files occasionally have `tup=0x00` on one note in the
