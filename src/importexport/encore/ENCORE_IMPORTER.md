@@ -876,6 +876,22 @@ Volta is closed and a new one is opened on the next non-zero
 measure. The `beginText` is set from the endings list ("1.",
 "2.", "1., 2.", ...) so the bracket label renders.
 
+## Time signature changes between metrically-equivalent meters
+
+`buildInitialSignatures` emits a `TimeSig` segment at each measure
+where the time signature differs from the previous one.  The detection
+used `Fraction::operator==`, which compares by cross-multiplication:
+`Fraction(6,8) == Fraction(3,4)` because `6×4 == 3×8 = 24`.  A score
+that changes from 6/8 to 3/4 (or back) has the same total tick duration
+in both meters (durTicks=720 in both), so the change was silently
+skipped and no visual time signature indicator was written.
+
+The fix uses `Fraction::identical()`, which compares numerator and
+denominator directly (`6 != 3`), so distinct time signatures with equal
+mathematical values are correctly detected as changes.  This applies to
+all pairs of metrically-equivalent but visually-distinct signatures:
+6/8 vs 3/4, 2/2 vs 4/4, 3/8 vs 6/16, etc.
+
 ## Ghost MEAS blocks past header.measureCount
 
 Encore 5 occasionally leaves trailing MEAS blocks in the file
