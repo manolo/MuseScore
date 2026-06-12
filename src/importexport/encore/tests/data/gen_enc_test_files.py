@@ -6738,15 +6738,44 @@ def gen_v0c4_triplet_orphan_prior_complete_group():
 
 def gen_v0c4_gm_perc_range_taiko():
     """BUG FIX: instrument with MIDI program in the GM Percussive range (113-128)
-    and a name that matches no standard template must be imported as drumset.
+    and a name that matches no standard template must be imported as drumset
+    with a percussion clef (not the LINE-block clef C3L/C4L/F).
     Fixture: TK00 name = "A. Marazuela 335" (no template match), prg=116 (Taiko Drum).
-    Without fix: falls back to Grand Piano.
-    With fix: Step 1b detects prg>=113 and routes to drumset.
+    Without fix: falls back to Grand Piano, clef taken from LINE block.
+    With fix: Step 1b detects prg>=113 → drumset; buildInitialSignatures forces PERC clef.
     """
     name_utf16 = 'A. Marazuela 335'.encode('utf-16-le') + b'\x00\x00'
     pre = _patch_tk00(name_utf16)
     pre = _patch_midi_program(pre, 0, 116)   # 116 = Taiko Drum (1-indexed GM)
     e   = end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
+def gen_v0c4_gm_perc_chord_notes():
+    """BUG FIX: chord notes on a percussion staff were dropped by the MIDI artifact
+    filter even though they are genuine simultaneous chord tones.
+    The filter condition 'rdur > CHORD_CLUSTER_THRESHOLD && not_in_tuplet' fired on:
+      (a) the first note on a staff when its tick-diff rdur is short because the
+          next chord note starts a few ticks later (savedPrevMidiTick < 0 → bypass);
+      (b) chord extensions (isChordExt=true → bypass).
+
+    Fixture: one percussion instrument (prg=116), measure with two H notes at
+    tick=0 (pit=60) and tick=5 (pit=64).  calculateRealDurations gives note@0 a
+    rdur of 5 ticks (5-0=5), which triggers the filter without the bypass.
+    With fix: both notes survive → chord has pitches 60 AND 64.
+    """
+    name_utf16 = 'A. Marazuela 335'.encode('utf-16-le') + b'\x00\x00'
+    pre = _patch_tk00(name_utf16)
+    pre = _patch_midi_program(pre, 0, 116)
+    # Two H notes at ticks 0 and 5 on the same staff/voice.
+    # note@0 → rdur = 5-0 = 5 (from calculateRealDurations tick diff) → triggers
+    # old artifact filter; bypassed by savedPrevMidiTick<0 in the new code.
+    # note@5 → isChordExt=TRUE (delta=5 < CHORD_MIDI_THRESHOLD=8) → bypassed by !isChordExt.
+    e  = note_v0c4(  0, 0, 0, fv=2, pitch=60)   # H note, pit=60
+    e += note_v0c4(  5, 0, 0, fv=2, pitch=64)   # H note, pit=64 (chord ext)
+    e += end_marker()
     body = meas_block(meas_hdr(4, 4), e)
     body += b''.join(empty_meas(4, 4) for _ in range(5))
     return pre + body + SKELETON_POST
@@ -7071,6 +7100,7 @@ if __name__=='__main__':
     write("importer_2_2_beatticks240_gap_snap.enc",         gen_v0c4_2_2_beatticks240_gap_snap())
     write("importer_2_2_beatticks480_correct.enc",          gen_v0c4_2_2_beatticks480_correct_encoding())
     write("instruments_gm_perc_range_taiko.enc",            gen_v0c4_gm_perc_range_taiko())
+    write("instruments_gm_perc_chord_notes.enc",            gen_v0c4_gm_perc_chord_notes())
     write("notes_16th_rdur112_no_triple_dot.enc",           gen_v0c4_16th_rdur112_no_triple_dot())
     write("timesig_change_2_2_to_4_4.enc",                  gen_v0c4_timesig_change_2_2_to_4_4())
     write("notes_triplet_orphan_prior_complete_group.enc",  gen_v0c4_triplet_orphan_prior_complete_group())
