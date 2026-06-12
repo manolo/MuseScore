@@ -46,18 +46,26 @@ struct EncFormatReader_V0xC4 final : EncFormatReader
 
     bool postProcessElement(EncMeasureElem* elem, QDataStream& ds, qint64 rawElemStart) const override
     {
-        (void)ds;
-        (void)rawElemStart;
         EncNote* en = dynamic_cast<EncNote*>(elem);
         if (!en) {
             return false;
         }
-        // Size=22: pitch in tuplet slot (v0xC2 layout). See ENCORE_FORMAT.md §Note element.
-        if (en->size == 22) {
+        if (!m_hasMetaTables) {
+            // v0xC2: MIDI pitch is always at offset +13 (the tuplet slot); implied-tuplet
+            // detection is used instead of the explicit tuplet byte. See ENCORE_FORMAT.md §Note element.
             en->semiTonePitch = en->tuplet;
             en->tuplet = 0;
+            // size=24 notes carry an articulation byte at +22 (2 bytes after alterGlyph at +21).
+            if (en->size == 24 && ds.device()->seek(rawElemStart + 22)) {
+                ds >> en->articulationUp;
+                en->articulationDown = 0;
+            } else {
+                en->articulationUp   = 0;
+                en->articulationDown = 0;
+            }
+            return false;
         }
-        // Clear artic bytes read beyond boundary for size<27.
+        // v0xC4: clear artic bytes read beyond element boundary for size<27.
         if (en->size < 27) {
             en->articulationUp   = 0;
             en->articulationDown = 0;
