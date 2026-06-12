@@ -100,13 +100,17 @@ int calcDots(qint16 realDur, quint8 fv)
     if (base <= 0 || realDur <= 0 || realDur == base) {
         return 0;
     }
-    if (realDur == (base * 3) / 2) {
+    // Guard: skip if the dotted value is non-integer (base not divisible by
+    // the denominator).  Integer division would truncate e.g. 112.5 → 112,
+    // creating a false match for a note whose rdur happens to equal that
+    // truncated value (seen with 16th notes where 60*15/8=112 ≠ 112.5).
+    if ((base * 3) % 2 == 0 && realDur == (base * 3) / 2) {
         return 1;
     }
-    if (realDur == (base * 7) / 4) {
+    if ((base * 7) % 4 == 0 && realDur == (base * 7) / 4) {
         return 2;
     }
-    if (realDur == (base * 15) / 8) {
+    if ((base * 15) % 8 == 0 && realDur == (base * 15) / 8) {
         return 3;
     }
     return 0;
@@ -124,13 +128,13 @@ int calcDotsSnap(qint16 dur, quint8 fv)
     if (near(dur, base)) {
         return 0;
     }
-    if (near(dur, (base * 3) / 2)) {
+    if ((base * 3) % 2 == 0 && near(dur, (base * 3) / 2)) {
         return 1;
     }
-    if (near(dur, (base * 7) / 4)) {
+    if ((base * 7) % 4 == 0 && near(dur, (base * 7) / 4)) {
         return 2;
     }
-    if (near(dur, (base * 15) / 8)) {
+    if ((base * 15) % 8 == 0 && near(dur, (base * 15) / 8)) {
         return 3;
     }
     return 0;
