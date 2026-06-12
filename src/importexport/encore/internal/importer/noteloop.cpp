@@ -320,15 +320,6 @@ void buildNoteLoop(BuildCtx& ctx)
         ctx.lastChordPos.clear();
         ctx.graceStolenTicks.clear();
 
-        // Pickup (Case A): pre-offset all tracks so notes land at the end of m0.
-        if (measIdx == 0 && ctx.measure0PickupOffset > Fraction(0, 1)) {
-            for (int s = 0; s < ctx.totalStaves; ++s) {
-                for (int v = 0; v < VOICES; ++v) {
-                    ctx.cumTick[{ s, v }] = ctx.measure0PickupOffset;
-                }
-            }
-        }
-
         // Delete unattached grace chords explicitly: not in score tree, so no auto-cleanup.
         for (auto& [key, vec] : ctx.pendingGraces) {
             for (Chord* gc : vec) {
@@ -950,20 +941,64 @@ void buildNoteLoop(BuildCtx& ctx)
         }
         // ctx.nextLyricHyphenBefore survives bar lines so a trailing hyphen (e.g. "RO -") carries into the next measure's first syllable.
 
-        // Pickup (Case A): insert leading invisible gap rests so checkMeasure does not
-        // fill the leading space with visible rests.
-        if (measIdx == 0 && ctx.measure0PickupOffset > Fraction(0, 1)) {
-            for (int si = 0; si < ctx.totalStaves; ++si) {
-                for (voice_idx_t v = 0; v < VOICES; ++v) {
-                    const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
-                    Segment* leadSeg = measure->getSegment(SegmentType::ChordRest, measTick);
-                    if (!leadSeg->element(tr)) {
-                        Rest* r = Factory::createRest(leadSeg, TDuration(DurationType::V_MEASURE));
-                        r->setTicks(ctx.measure0PickupOffset);
-                        r->setTrack(tr);
-                        r->setGap(true);
-                        leadSeg->add(r);
+        // Case B pickup: if measure 0 has same timesig as measure 1 but the note
+        // loop placed less content than the full measure, shorten it to the actual
+        // cumTick. Update all subsequent measures' tick positions accordingly.
+        // Guard: skip for Case A pickups (timesig != ticks means buildMeasures already
+        // applied the correct short duration; further shortening would double-reduce).
+        if (measIdx == 0 && measure->timesig() == measure->ticks()) {
+            Fraction maxCumTick { 0, 1 };
+            for (auto& [key, ct] : ctx.cumTick) {
+                if (ct > maxCumTick) {
+                    maxCumTick = ct;
+                }
+            }
+            if (maxCumTick > Fraction(0, 1) && maxCumTick < measure->ticks()) {
+                const Fraction delta = measure->ticks() - maxCumTick;
+                measure->setTicks(maxCumTick);
+                for (Measure* m = measure->nextMeasure(); m; m = m->nextMeasure()) {
+                    m->setTick(m->tick() - delta);
+                }
+                // Hairpin search boundaries store absolute ticks captured before this
+                // shift. Any maxEndTick that reaches past the shortened measure 0 must
+                // be adjusted by the same delta so resolution does not search too far
+                // and pick up a dynamic from the wrong measure.
+                const Fraction m0End = measure->tick() + maxCumTick;
+                for (PendingHairpin& ph : ctx.pendingHairpins) {
+                    if (ph.maxEndTick > m0End) {
+                        ph.maxEndTick -= delta;
                     }
+                }
+            }
+        }
+
+        // Pre-fill trailing silence with invisible gap rests so checkMeasure
+        // does not add visible rests for space that was never encoded in the file.
+        // Only applies to voices that have some content (cumTick > 0); fully
+        // empty voices are left for checkMeasure to handle normally.
+        for (int si = 0; si < ctx.totalStaves; ++si) {
+            for (voice_idx_t v = 0; v < VOICES; ++v) {
+                const auto key = std::make_pair(si, static_cast<int>(v));
+                if (!ctx.cumTick.count(key)) {
+                    continue;
+                }
+                const Fraction voicePos = ctx.cumTick.at(key);
+                if (voicePos <= Fraction(0, 1)) {
+                    continue;
+                }
+                const Fraction remaining = measure->ticks() - voicePos;
+                if (remaining <= Fraction(0, 1)) {
+                    continue;
+                }
+                const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
+                const Fraction fillTick = measTick + voicePos;
+                Segment* seg = measure->getSegment(SegmentType::ChordRest, fillTick);
+                if (!seg->element(tr)) {
+                    Rest* r = Factory::createRest(seg, TDuration(DurationType::V_MEASURE));
+                    r->setTicks(remaining);
+                    r->setTrack(tr);
+                    r->setGap(true);
+                    seg->add(r);
                 }
             }
         }

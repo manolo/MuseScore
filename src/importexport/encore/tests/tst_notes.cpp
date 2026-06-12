@@ -3238,3 +3238,35 @@ TEST_F(Tst_Notes, notes_v0c2_multiinstr_compact_routing)
 
     delete score;
 }
+
+// When a non-first measure has explicit notes filling only part of the
+// duration, the trailing empty space must be filled with invisible gap rests,
+// not visible rests. Measure 0 is fully filled (to avoid pickup shortening).
+// Measure 1 has two eighth notes (cumTick=1/4); trailing 3/4 must be invisible.
+TEST_F(Tst_Notes, trailing_space_uses_invisible_gap_rests)
+{
+    MasterScore* score = readEncoreScore("notes_implicit_trailing_gap.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m1 = measureAt(score, 1);   // measure 1 has partial content
+    ASSERT_NE(m1, nullptr);
+
+    int visibleRests = 0;
+    int gapRests = 0;
+    for (Segment* s = m1->first(SegmentType::ChordRest); s;
+         s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isRest()) {
+            if (toRest(el)->isGap()) {
+                ++gapRests;
+            } else {
+                ++visibleRests;
+            }
+        }
+    }
+
+    EXPECT_EQ(visibleRests, 0) << "Trailing silence must use invisible gap rests, not visible rests";
+    EXPECT_GT(gapRests, 0) << "Must have at least one invisible gap rest for the trailing 3/4";
+
+    delete score;
+}
