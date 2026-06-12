@@ -94,6 +94,18 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         }
     }
 
+    // Step 1b: GM Percussive range (programs 113–128, 1-indexed: Agogo, Steel Drums,
+    // Woodblock, Taiko, Melodic Tom, Synth Drum…).  Instruments in this range cannot
+    // be matched by name — Encore files often use performer credits or catalog numbers
+    // instead of instrument names — so detect percussion from the MIDI program alone.
+    static constexpr int GM_PERC_FIRST = 113;   // 1-indexed, matches GM "Percussive" section
+    if (!tmpl && instr.midiProgram >= GM_PERC_FIRST) {
+        tmpl = searchTemplate(String(u"drumset"));
+        if (tmpl) {
+            matchStep = 1;
+        }
+    }
+
     // Step 2: name + MIDI scoring with transposition filter — rejects templates whose non-octave transposition
     // conflicts with encKey; C/octave templates always qualify (octave handling via pickStaffClef).
     if (!tmpl) {

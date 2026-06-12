@@ -476,3 +476,29 @@ TEST_F(Tst_Instruments, no_tk_blocks_reads_midi_and_key_from_large_tk_offsets)
         << "Key=6 must be read from large-TK offset 2255 and applied as transposition";
     delete score;
 }
+
+// ===========================================================================
+// BUG FIX: instrument with a MIDI program in the GM Percussive range (113-128)
+// and a name that matches no standard template must import as drumset.
+//
+// Real-world trigger: "habas verdes5.enc" has two instruments named after
+// performers ("A. Marazuela 335", "Hermenegildo Lerma") carrying MIDI programs
+// 116 (Taiko Drum) and 117 (Melodic Tom).  Both are in GM Percussive range.
+// Without the fix they fell back to Grand Piano.
+//
+// Fixture: TK00 name = "A. Marazuela 335" (no template match), prg=116.
+// ===========================================================================
+TEST_F(Tst_Instruments, gm_perc_range_midi_program_routes_to_drumset)
+{
+    MasterScore* score = readEncoreScore("instruments_gm_perc_range_taiko.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->id(), String(u"drumset"))
+        << "MIDI program 116 (Taiko Drum, GM Percussive range 113-128) must route "
+        "to drumset even when the instrument name matches nothing";
+    EXPECT_NE(inst->drumset(), nullptr)
+        << "Drumset instrument must carry a drumset object";
+    delete score;
+}
