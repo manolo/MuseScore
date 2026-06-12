@@ -896,6 +896,21 @@ beatTicks encoding.  `wholeTicks` is now a compile-time constant 960.  The
 same fix applies to the chord-symbol placement formula.  Exercised by
 `Tst_Importer.v0c4_2_2_beatticks240_gap_snap_no_false_fire`.
 
+## Instruments in the GM Percussive range (MIDI programs 113–128)
+
+General MIDI programs 113–128 are the "Percussive" section (Agogo, Steel
+Drums, Woodblock, Taiko Drum, Melodic Tom, Synth Drum, …).  Encore files
+sometimes name percussion parts with performer credits or catalog numbers
+(e.g. "A. Marazuela 335", "Hermenegildo Lerma") that match no instrument
+template.  Without a special case, the importer would reach the Grand Piano
+fallback and ignore the MIDI program entirely.
+
+`applyBestInstrument()` now checks for `instr.midiProgram >= 113` (Step 1b)
+immediately after the PERC-clef check (Step 1) and before any name search.
+When the program is in this range the instrument is routed to the drumset
+template.  Exercised by
+`Tst_Instruments.gm_perc_range_midi_program_routes_to_drumset`.
+
 ## Tuplet group with one note missing the tup byte (sandwich orphan)
 
 Live-recorded v0xC4 files occasionally have `tup=0x00` on one note in the
