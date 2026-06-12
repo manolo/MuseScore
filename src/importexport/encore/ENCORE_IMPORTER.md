@@ -790,6 +790,20 @@ note) the dotted mapping still applies. Exercised by
 64+73, face=quarter, rdur after inflation=720, previously
 rendered as a dotted half before the guard).
 
+**Fractional dotted values must not match integer rdur.** For
+some face values, the theoretical dotted duration is non-integer
+in the 960-tick system.  The triple-dotted 16th is `60×15/8 =
+112.5 ticks`; C++ integer division truncates this to 112.  A
+live-recorded note whose `calculateRealDurations` tick-diff
+happens to equal 112 would falsely match the triple-dot check
+without a guard.  `calcDots` and `calcDotsSnap` therefore skip
+each threshold when `(base × n) % d != 0` (i.e. when the dotted
+value is not exactly representable as an integer), preventing
+spurious dot counts that cause cumTick to overshoot and cap
+subsequent notes to shorter values.  Affected face values:
+16th (3-dot), 32nd (2-dot and 3-dot), 64th (all three), 128th
+(all three).
+
 **Partial tuplet ticks.** For ratios whose denominator is not a
 power of two (3:2, 5:4, 7:4, ...), the placed duration
 `N * baseLen * normalN / actualN` is not representable as a

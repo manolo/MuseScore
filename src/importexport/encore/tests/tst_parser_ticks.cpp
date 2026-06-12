@@ -143,14 +143,14 @@ TEST(Tst_EncoreRhythm, computeDotCount_v0c2_dotted_eighth)
     // calcDots(0x60=96, 4): base=120, 96≠180 → 0.
     // calcDotsSnap(120, 4): |120-120|=0 → 0 (exact plain match).
     // bit0 fallback: 0x60 & 1 = 0 → 0.
-    EXPECT_EQ(computeDotCount(0x60, 120, 4, /*useBit0Fallback=*/true), 0)
+    EXPECT_EQ(computeDotCount(0x60, 120, 4, /*useBit0Fallback=*/ true), 0)
         << "v0xC2 dotted-eighth without fix: dotControl=0x60 yields 0 dots (bug)";
 
     // Post-fix state: calculateRealDurations sets dotControl|=1 → dotControl=0x61.
     // calcDots(97, 4): 97≠180 → 0.
     // calcDotsSnap(120, 4): exact match → 0.
     // bit0 fallback: 0x61 & 1 = 1 → 1.
-    EXPECT_EQ(computeDotCount(0x61, 120, 4, /*useBit0Fallback=*/true), 1)
+    EXPECT_EQ(computeDotCount(0x61, 120, 4, /*useBit0Fallback=*/ true), 1)
         << "v0xC2 dotted-eighth after fix: dotControl=0x61 (bit 0 set) yields 1 dot";
 }
 
@@ -181,6 +181,46 @@ TEST(Tst_EncoreRhythm, impliedTuplets)
     normalNotes = 7;
     EXPECT_EQ(detectImpliedTuplet(0, 4, normalNotes), 0);
     EXPECT_EQ(normalNotes, 0);
+}
+
+// calcDots and calcDotsSnap must not return non-zero when the theoretical
+// dotted value is non-integer (fractional ticks).  Integer division truncates
+// (base * n) / d, making the truncated result accidentally equal to some real
+// rdur even though no valid dotted duration of that face value exists.
+//
+// Concrete case from Salome_port_5.enc compás 19: a live-recorded 16th note
+// (fv=5, base=60) has realDuration=112 from the tick-diff to the next event.
+// 60 * 15 / 8 = 900 / 8 = 112 (C++ integer division; true value = 112.5).
+// calcDotsSnap falsely returned 3, making the note a triple-dotted 16th.
+TEST(Tst_EncoreRhythm, dotCalculation_noFalsePositiveForFractionalDottedValues)
+{
+    // 16th (base=60): triple-dotted = 60*15/8 = 112.5 → truncated to 112.
+    // rdur=112 must NOT be 3 dots.
+    EXPECT_EQ(calcDots(112, 5), 0);
+    EXPECT_EQ(calcDotsSnap(112, 5), 0);
+    EXPECT_EQ(calcDotsSnap(111, 5), 0);
+    EXPECT_EQ(calcDotsSnap(113, 5), 0);
+
+    // 32nd (base=30): double-dotted = 30*7/4 = 52.5 → truncated to 52.
+    // rdur=52 must NOT be 2 dots.
+    EXPECT_EQ(calcDots(52, 6), 0);
+    EXPECT_EQ(calcDotsSnap(52, 6), 0);
+
+    // 32nd (base=30): triple-dotted = 30*15/8 = 56.25 → truncated to 56.
+    // rdur=56 must NOT be 3 dots.
+    EXPECT_EQ(calcDots(56, 6), 0);
+    EXPECT_EQ(calcDotsSnap(56, 6), 0);
+
+    // Valid integer-valued dotted durations must still work.
+    // 16th dotted (90) and double-dotted (105) are exact integers.
+    EXPECT_EQ(calcDots(90, 5), 1);
+    EXPECT_EQ(calcDotsSnap(90, 5), 1);
+    EXPECT_EQ(calcDots(105, 5), 2);
+    EXPECT_EQ(calcDotsSnap(105, 5), 2);
+    // 8th triple-dotted (225 = 120*15/8 exact).
+    EXPECT_EQ(calcDots(225, 4), 3);
+    EXPECT_EQ(calcDotsSnap(225, 4), 3);
+    EXPECT_EQ(calcDotsSnap(226, 4), 3);
 }
 
 TEST(Tst_EncoreRhythm, dottedAdvance)
