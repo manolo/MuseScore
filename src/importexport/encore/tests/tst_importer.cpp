@@ -2626,3 +2626,68 @@ TEST_F(Tst_Importer, mrest_single_block_expands_and_system_locks_correct)
 
     delete score;
 }
+
+// ===========================================================================
+// BUG FIX: 2/2 with non-standard beatTicks=240 causes gap-snap to fire at
+// the wrong positions.  The formula wholeTicks = beatTicks * timeSigDen
+// gives 240 * 2 = 480 instead of 960.  A note at Encore tick=360 maps to
+// encTickFrac = 360/480 = 3/4, which exceeds cumTick = 3/8 after rest+Q,
+// so gap-snap fires and jumps cumTick to 3/4.  All following notes in the
+// second half of the measure are dropped.
+// Fix: use wholeTicks = 960 (Encore always uses 960 ticks per whole note).
+//
+// Fixture (2/2, beatTicks=240, durTicks=960):
+//   REST@0(8th), Q@120(60), 8th@360(62)*, 8th@480(64), 8th@600(65),
+//   8th@720(67), 8th@840(69)   (* false-snap target without fix)
+// All 7 elements must appear at correct tick positions.
+// ===========================================================================
+TEST_F(Tst_Importer, v0c4_2_2_beatticks240_gap_snap_no_false_fire)
+{
+    MasterScore* score = readEncoreScore("importer_2_2_beatticks240_gap_snap.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = score->firstMeasure();
+    ASSERT_NE(m0, nullptr);
+
+    // Collect non-gap ChordRest elements.
+    std::vector<std::pair<Fraction, bool> > elements;  // (tick, isRest)
+    for (Segment* s = m0->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el) {
+            continue;
+        }
+        bool isGap = el->isRest() && toRest(el)->isGap();
+        if (!isGap) {
+            elements.emplace_back(s->tick() - m0->tick(), el->isRest());
+        }
+    }
+
+    ASSERT_EQ(elements.size(), 7u)
+        << "Measure must contain exactly 7 elements (rest + Q + 5 eighths); "
+        "gap-snap with wrong wholeTicks drops notes 3-7";
+
+    // tick 0: 8th rest
+    EXPECT_EQ(elements[0].first, Fraction(0, 1));
+    EXPECT_TRUE(elements[0].second) << "element 0 must be a rest";
+
+    // tick 1/8: quarter note
+    EXPECT_EQ(elements[1].first, Fraction(1, 8));
+    EXPECT_FALSE(elements[1].second) << "element 1 must be a chord (Q)";
+
+    // tick 3/8: first 8th note after Q — the false-snap target
+    EXPECT_EQ(elements[2].first, Fraction(3, 8))
+        << "element 2 must be at 3/8 (tick 360); "
+        "false gap-snap would place it at 3/4 (tick 720)";
+    EXPECT_FALSE(elements[2].second) << "element 2 must be a chord, not a rest";
+
+    // ticks 4/8 through 7/8: remaining 8th notes
+    EXPECT_EQ(elements[3].first, Fraction(4, 8));
+    EXPECT_EQ(elements[4].first, Fraction(5, 8));
+    EXPECT_EQ(elements[5].first, Fraction(6, 8));
+    EXPECT_EQ(elements[6].first, Fraction(7, 8));
+    for (int i = 3; i <= 6; ++i) {
+        EXPECT_FALSE(elements[i].second) << "element " << i << " must be a chord";
+    }
+
+    delete score;
+}

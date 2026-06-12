@@ -684,11 +684,14 @@ void buildNoteLoop(BuildCtx& ctx)
                         const int stolenTicks = ctx.graceStolenTicks.count(trackKey)
                                                 ? ctx.graceStolenTicks.at(trackKey) : 0;
                         if (onFaceGrid && !gracePending && !inActiveTuplet) {
-                            // wholeTicks = beatTicks * timeSigDen; using 4*beatTicks is wrong for x/8 meters. Fall back to 960 when the header has no time signature.
-                            const int wholeTicks
-                                = (encMeas.beatTicks && encMeas.timeSigDen)
-                                  ? encMeas.beatTicks * encMeas.timeSigDen
-                                  : 960;
+                            // Encore always uses 960 ticks per whole note.  The
+                            // previous formula (beatTicks * timeSigDen) gives 960
+                            // only when beatTicks is the raw note unit (e.g. 240 for
+                            // x/4, 120 for x/8).  Files that store a non-standard
+                            // beatTicks — e.g. 2/2 with beatTicks=240 instead of
+                            // the correct 480 — produce wholeTicks=480, causing
+                            // gap-snap to fire at wrong tick positions and drop notes.
+                            static constexpr int wholeTicks = 960;
                             const Fraction encTickFrac((int)e->tick, wholeTicks);
                             if (encTickFrac > ctx.cumTick[trackKey]) {
                                 const Fraction gap = encTickFrac - ctx.cumTick[trackKey];
@@ -749,8 +752,7 @@ void buildNoteLoop(BuildCtx& ctx)
                     //   - Near-miss to a subdivison note (e.g. tick=62 in a measure with notes
                     //     at tick=0 AND tick=60; without the beat-floor the chord would snap to
                     //     the second 16th note instead of beat 1).
-                    const int wt = (encMeas.beatTicks && encMeas.timeSigDen)
-                                   ? encMeas.beatTicks * encMeas.timeSigDen : 960;
+                    static constexpr int wt = 960;  // Encore whole note = 960 ticks always
                     const int bt = static_cast<int>(encMeas.beatTicks ? encMeas.beatTicks : 240);
                     const int chdEncTick = static_cast<int>(e->tick);
                     const int beatStart  = (chdEncTick / bt) * bt;  // floor to beat boundary
