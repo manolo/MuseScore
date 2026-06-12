@@ -528,6 +528,54 @@ TEST_F(Tst_Structure, time_sig_change_6_8_to_3_4_and_back)
 }
 
 // ===========================================================================
+// BUG regression: Fraction(2,2)==Fraction(4,4) via cross-multiplication
+// (2x4 == 4x2 = 8), so the 2/2 -> 4/4 change was silently swallowed by the
+// same buildInitialSignatures bug as 6/8 -> 3/4.
+// Fixture: 2 measures 2/2, then 2 measures 4/4, then 2 measures 2/2.
+// ===========================================================================
+TEST_F(Tst_Structure, time_sig_change_2_2_to_4_4_and_back)
+{
+    MasterScore* score = readEncoreScore("timesig_change_2_2_to_4_4.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+    EXPECT_TRUE(m0->timesig().identical(Fraction(2, 2))) << "M0 should be 2/2";
+
+    Measure* m2 = measureAt(score, 2);
+    ASSERT_NE(m2, nullptr);
+    EXPECT_TRUE(m2->timesig().identical(Fraction(4, 4))) << "M2 should be 4/4";
+    {
+        Segment* tsSeg = m2->findSegment(SegmentType::TimeSig, m2->tick());
+        ASSERT_NE(tsSeg, nullptr) << "M2 must have a TimeSig segment (2/2 -> 4/4)";
+        bool found = false;
+        for (EngravingItem* el : tsSeg->elist()) {
+            if (el && el->isTimeSig() && toTimeSig(el)->sig().identical(Fraction(4, 4))) {
+                found = true;
+            }
+        }
+        EXPECT_TRUE(found) << "TimeSig at M2 must carry 4/4";
+    }
+
+    Measure* m4 = measureAt(score, 4);
+    ASSERT_NE(m4, nullptr);
+    EXPECT_TRUE(m4->timesig().identical(Fraction(2, 2))) << "M4 should be 2/2";
+    {
+        Segment* tsSeg = m4->findSegment(SegmentType::TimeSig, m4->tick());
+        ASSERT_NE(tsSeg, nullptr) << "M4 must have a TimeSig segment (4/4 -> 2/2)";
+        bool found = false;
+        for (EngravingItem* el : tsSeg->elist()) {
+            if (el && el->isTimeSig() && toTimeSig(el)->sig().identical(Fraction(2, 2))) {
+                found = true;
+            }
+        }
+        EXPECT_TRUE(found) << "TimeSig at M4 must carry 2/2";
+    }
+
+    delete score;
+}
+
+// ===========================================================================
 // FEATURE: LINE block data becomes SystemLocks — each Encore system is locked so the
 // layout engine keeps its measures together regardless of spatium.
 // ===========================================================================

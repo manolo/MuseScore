@@ -802,7 +802,10 @@ value is not exactly representable as an integer), preventing
 spurious dot counts that cause cumTick to overshoot and cap
 subsequent notes to shorter values.  Affected face values:
 16th (3-dot), 32nd (2-dot and 3-dot), 64th (all three), 128th
-(all three).
+(all three).  Exercised by `notes_triplet_orphan_missing_tup.enc`
+(the Salome compas 19 scenario) and the dedicated unit tests in
+`Tst_EncoreRhythm.dotCalculation_noFalsePositiveForFractionalDottedValues`
+and the integration test `Tst_Notes.rdur112_16th_note_not_triple_dotted`.
 
 **Partial tuplet ticks.** For ratios whose denominator is not a
 power of two (3:2, 5:4, 7:4, ...), the placed duration
@@ -903,7 +906,11 @@ Two-part fix:
    else-branch then closes the active group.  A guard after the implied-tuplet
    block: if `actualN == 0` and the tuplet is active and not yet full and the
    note is in `validTupletGroupMember`, borrow the active tuplet's ratio so
-   the note is added to the bracket rather than closing it.
+   the note is added to the bracket rather than closing it.  Exercised by
+`Tst_Notes.triplet_orphan_middle_note_missing_tup_byte` (single orphan,
+no prior complete group) and
+`Tst_Notes.triplet_orphan_with_prior_complete_group` (seenCompleteGroup=true
+path).
 
 ## Time signature changes between metrically-equivalent meters
 
@@ -919,7 +926,9 @@ The fix uses `Fraction::identical()`, which compares numerator and
 denominator directly (`6 != 3`), so distinct time signatures with equal
 mathematical values are correctly detected as changes.  This applies to
 all pairs of metrically-equivalent but visually-distinct signatures:
-6/8 vs 3/4, 2/2 vs 4/4, 3/8 vs 6/16, etc.
+6/8 vs 3/4, 2/2 vs 4/4, 3/8 vs 6/16, etc.  Exercised by
+`Tst_Structure.time_sig_change_6_8_to_3_4_and_back` and
+`Tst_Structure.time_sig_change_2_2_to_4_4_and_back`.
 
 ## Ghost MEAS blocks past header.measureCount
 
