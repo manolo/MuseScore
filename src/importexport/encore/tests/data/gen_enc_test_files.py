@@ -6736,6 +6736,22 @@ def gen_v0c4_triplet_orphan_prior_complete_group():
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
 
+def gen_v0c4_gm_perc_range_taiko():
+    """BUG FIX: instrument with MIDI program in the GM Percussive range (113-128)
+    and a name that matches no standard template must be imported as drumset.
+    Fixture: TK00 name = "A. Marazuela 335" (no template match), prg=116 (Taiko Drum).
+    Without fix: falls back to Grand Piano.
+    With fix: Step 1b detects prg>=113 and routes to drumset.
+    """
+    name_utf16 = 'A. Marazuela 335'.encode('utf-16-le') + b'\x00\x00'
+    pre = _patch_tk00(name_utf16)
+    pre = _patch_midi_program(pre, 0, 116)   # 116 = Taiko Drum (1-indexed GM)
+    e   = end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
 def gen_v0c4_2_2_beatticks480_correct_encoding():
     """Regression guard: 2/2 with the CORRECT beatTicks=480 (half-note beat).
     This encoding gives beatTicks*timeSigDen = 480*2 = 960 = wholeTicks, so
@@ -7054,6 +7070,7 @@ if __name__=='__main__':
     write("notes_triplet_orphan_missing_tup.enc",           gen_v0c4_triplet_orphan_missing_tup())
     write("importer_2_2_beatticks240_gap_snap.enc",         gen_v0c4_2_2_beatticks240_gap_snap())
     write("importer_2_2_beatticks480_correct.enc",          gen_v0c4_2_2_beatticks480_correct_encoding())
+    write("instruments_gm_perc_range_taiko.enc",            gen_v0c4_gm_perc_range_taiko())
     write("notes_16th_rdur112_no_triple_dot.enc",           gen_v0c4_16th_rdur112_no_triple_dot())
     write("timesig_change_2_2_to_4_4.enc",                  gen_v0c4_timesig_change_2_2_to_4_4())
     write("notes_triplet_orphan_prior_complete_group.enc",  gen_v0c4_triplet_orphan_prior_complete_group())
