@@ -6675,6 +6675,67 @@ def gen_v0c4_pickup_caseb_no_reduce_full():
     ], fill_ts=(4, 4))
 
 
+def gen_v0c4_16th_rdur112_no_triple_dot():
+    """BUG regression: a 16th note whose MIDI rdur happens to equal 60*15/8=112
+    (integer truncation of the triple-dotted value 112.5) was falsely assigned
+    dots=3, advancing the cursor by 15/128 instead of 1/16 and corrupting the
+    rest of the measure.
+
+    Fixture: two notes in 4/4. NOTE@0 (16th) → NOTE@112 (half).
+    The rdur of NOTE@0 = 112-0 = 112 ticks.
+    After fix: dots=0, durationType=16th.
+    """
+    e  = note_v0c4(  0, 0, 0, fv=5, pitch=60)   # 16th at tick=0 (rdur=112 from next)
+    e += note_v0c4(112, 0, 0, fv=2, pitch=62)   # half
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+def gen_v0c4_timesig_change_2_2_to_4_4():
+    """BUG regression: Fraction(2,2)==Fraction(4,4) via cross-multiplication
+    (2x4==4x2=8), so the 2/2→4/4 change was silently swallowed just like 6/8→3/4.
+    Fix: use Fraction::identical() in buildInitialSignatures.
+    Fixture: 2 measures 2/2, 2 measures 4/4, 2 measures 2/2.
+    """
+    h22 = meas_hdr(2, 2, beatTicks=480, durTicks=960)
+    h44 = meas_hdr(4, 4, beatTicks=240, durTicks=960)
+    em  = b'\xff\xff'
+    measures = [
+        (h22, em), (h22, em),   # M0-M1: 2/2
+        (h44, em), (h44, em),   # M2-M3: 4/4
+        (h22, em), (h22, em),   # M4-M5: 2/2
+    ]
+    return assemble(0xC4, measures, fill_ts=(2, 2))
+
+
+def gen_v0c4_triplet_orphan_prior_complete_group():
+    """BUG regression: orphan sandwich with a prior complete group in the measure.
+    seenCompleteGroup=True after group 1 must not block the sandwich heuristic
+    for group 2.
+
+    Fixture: 4/4 (dur=960):
+      Group 1 (complete):  tick=0(0x32), tick=80(0x32), tick=160(0x32)  <- 3:2
+      Regular Q:           tick=240
+      Group 2 (orphan):    tick=480(0x32), tick=560(0x00), tick=640(0x32) <- 3:2
+      Regular Q:           tick=720
+    """
+    def note_tup(tick, pitch, tuplet):
+        d = bytearray(25)
+        d[0] = 28; d[2] = 4; d[10] = tuplet; d[12] = pitch
+        return struct.pack('<H', tick) + bytes([(9 << 4)]) + bytes(d)
+
+    e  = note_tup(  0, 60, 0x32)   # group 1, note 1
+    e += note_tup( 80, 62, 0x32)   # group 1, note 2
+    e += note_tup(160, 64, 0x32)   # group 1, note 3
+    e += note_v0c4(240, 0, 0, fv=3, pitch=65)   # regular Q
+    e += note_tup(480, 67, 0x32)   # group 2, note 1
+    e += note_tup(560, 69, 0x00)   # group 2, note 2 — ORPHAN
+    e += note_tup(640, 70, 0x32)   # group 2, note 3
+    e += note_v0c4(720, 0, 0, fv=3, pitch=72)   # regular Q
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
 def gen_v0c4_triplet_orphan_missing_tup():
     """BUG FIX: Live-recorded v0xC4 files occasionally have the tup byte missing on
     one note in the middle of a triplet (sandwich pattern: tup=3:2, tup=0, tup=3:2).
@@ -6939,5 +7000,8 @@ if __name__=='__main__':
     write("structure_pickup_caseb_hairpin.enc",              gen_v0c4_pickup_caseb_hairpin())
     write("timesig_change_6_8_to_3_4.enc",                  gen_v0c4_timesig_change_6_8_to_3_4())
     write("notes_triplet_orphan_missing_tup.enc",           gen_v0c4_triplet_orphan_missing_tup())
+    write("notes_16th_rdur112_no_triple_dot.enc",           gen_v0c4_16th_rdur112_no_triple_dot())
+    write("timesig_change_2_2_to_4_4.enc",                  gen_v0c4_timesig_change_2_2_to_4_4())
+    write("notes_triplet_orphan_prior_complete_group.enc",  gen_v0c4_triplet_orphan_prior_complete_group())
     print("Done.")
 
