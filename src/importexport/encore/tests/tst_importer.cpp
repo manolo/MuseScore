@@ -2628,6 +2628,42 @@ TEST_F(Tst_Importer, mrest_single_block_expands_and_system_locks_correct)
 }
 
 // ===========================================================================
+// Regression guard: 2/2 with the CORRECT beatTicks=480 still imports all
+// notes correctly after wholeTicks was changed from beatTicks*timeSigDen
+// to the constant 960.  beatTicks=480 gives 480*2=960=960, so the old
+// formula was coincidentally correct; this test ensures the fix does not
+// break properly-encoded 2/2 files.
+// ===========================================================================
+TEST_F(Tst_Importer, v0c4_2_2_beatticks480_correct_encoding_still_works)
+{
+    MasterScore* score = readEncoreScore("importer_2_2_beatticks480_correct.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = score->firstMeasure();
+    ASSERT_NE(m0, nullptr);
+
+    std::vector<std::pair<Fraction, bool> > elements;
+    for (Segment* s = m0->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el) {
+            continue;
+        }
+        bool isGap = el->isRest() && toRest(el)->isGap();
+        if (!isGap) {
+            elements.emplace_back(s->tick() - m0->tick(), el->isRest());
+        }
+    }
+
+    ASSERT_EQ(elements.size(), 7u)
+        << "Correct 2/2 (beatTicks=480) must also produce 7 elements";
+    EXPECT_EQ(elements[2].first, Fraction(3, 8))
+        << "Third element must be at 3/8 — no regression from wholeTicks fix";
+    EXPECT_FALSE(elements[2].second) << "Third element must be a chord, not a rest";
+
+    delete score;
+}
+
+// ===========================================================================
 // BUG FIX: 2/2 with non-standard beatTicks=240 causes gap-snap to fire at
 // the wrong positions.  The formula wholeTicks = beatTicks * timeSigDen
 // gives 240 * 2 = 480 instead of 960.  A note at Encore tick=360 maps to
