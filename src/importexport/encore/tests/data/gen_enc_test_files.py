@@ -6736,6 +6736,37 @@ def gen_v0c4_triplet_orphan_prior_complete_group():
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
 
+def gen_v0c4_2_2_beatticks240_gap_snap():
+    """BUG FIX: For 2/2 with beatTicks=240 the gap-snap formula computed
+    wholeTicks = beatTicks * timeSigDen = 240 * 2 = 480 instead of 960.
+    A note at Encore tick=360 mapped to encTickFrac=360/480=3/4, which was
+    greater than cumTick=3/8 after placing rest+Q, so gap-snap fired and
+    advanced cumTick to 3/4. Subsequent notes were dropped (measure overflow).
+    Fix: always use wholeTicks=960.
+
+    Fixture: 2/2, beatTicks=240, durTicks=960.
+      REST  tick=0   fv=8th  (cumTick: 0 -> 1/8)
+      NOTE  tick=120 fv=Q    pitch=60  (cumTick: 1/8 -> 3/8)
+      NOTE  tick=360 fv=8th  pitch=62  <- false gap-snap triggers here with old formula
+      NOTE  tick=480 fv=8th  pitch=64
+      NOTE  tick=600 fv=8th  pitch=65
+      NOTE  tick=720 fv=8th  pitch=67
+      NOTE  tick=840 fv=8th  pitch=69
+    Total: 120+240+5*120 = 960 ticks. All 7 elements must be placed.
+    """
+    e  = rest_v0c4(  0, 0, 0, fv=4)              # 8th rest
+    e += note_v0c4(120, 0, 0, fv=3, pitch=60)    # quarter
+    e += note_v0c4(360, 0, 0, fv=4, pitch=62)    # 8th (false snap target)
+    e += note_v0c4(480, 0, 0, fv=4, pitch=64)    # 8th
+    e += note_v0c4(600, 0, 0, fv=4, pitch=65)    # 8th
+    e += note_v0c4(720, 0, 0, fv=4, pitch=67)    # 8th
+    e += note_v0c4(840, 0, 0, fv=4, pitch=69)    # 8th
+    e += end_marker()
+    # Use beatTicks=240 explicitly (non-standard for 2/2 — the bug trigger).
+    return assemble(0xC4, [(meas_hdr(2, 2, beatTicks=240, durTicks=960), e)],
+                    fill_ts=(2, 2))
+
+
 def gen_v0c4_triplet_orphan_missing_tup():
     """BUG FIX: Live-recorded v0xC4 files occasionally have the tup byte missing on
     one note in the middle of a triplet (sandwich pattern: tup=3:2, tup=0, tup=3:2).
@@ -7000,6 +7031,7 @@ if __name__=='__main__':
     write("structure_pickup_caseb_hairpin.enc",              gen_v0c4_pickup_caseb_hairpin())
     write("timesig_change_6_8_to_3_4.enc",                  gen_v0c4_timesig_change_6_8_to_3_4())
     write("notes_triplet_orphan_missing_tup.enc",           gen_v0c4_triplet_orphan_missing_tup())
+    write("importer_2_2_beatticks240_gap_snap.enc",         gen_v0c4_2_2_beatticks240_gap_snap())
     write("notes_16th_rdur112_no_triple_dot.enc",           gen_v0c4_16th_rdur112_no_triple_dot())
     write("timesig_change_2_2_to_4_4.enc",                  gen_v0c4_timesig_change_2_2_to_4_4())
     write("notes_triplet_orphan_prior_complete_group.enc",  gen_v0c4_triplet_orphan_prior_complete_group())
