@@ -6736,6 +6736,27 @@ def gen_v0c4_triplet_orphan_prior_complete_group():
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
 
+def gen_v0c4_2_2_beatticks480_correct_encoding():
+    """Regression guard: 2/2 with the CORRECT beatTicks=480 (half-note beat).
+    This encoding gives beatTicks*timeSigDen = 480*2 = 960 = wholeTicks, so
+    the old formula was coincidentally correct.  Verify it still works after
+    the fix (wholeTicks hardcoded to 960).
+
+    Same note layout as gen_v0c4_2_2_beatticks240_gap_snap but with correct
+    beatTicks=480.  All 7 elements must appear at the same tick positions.
+    """
+    e  = rest_v0c4(  0, 0, 0, fv=4)
+    e += note_v0c4(120, 0, 0, fv=3, pitch=60)
+    e += note_v0c4(360, 0, 0, fv=4, pitch=62)
+    e += note_v0c4(480, 0, 0, fv=4, pitch=64)
+    e += note_v0c4(600, 0, 0, fv=4, pitch=65)
+    e += note_v0c4(720, 0, 0, fv=4, pitch=67)
+    e += note_v0c4(840, 0, 0, fv=4, pitch=69)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(2, 2, beatTicks=480, durTicks=960), e)],
+                    fill_ts=(2, 2))
+
+
 def gen_v0c4_2_2_beatticks240_gap_snap():
     """BUG FIX: For 2/2 with beatTicks=240 the gap-snap formula computed
     wholeTicks = beatTicks * timeSigDen = 240 * 2 = 480 instead of 960.
@@ -7032,6 +7053,7 @@ if __name__=='__main__':
     write("timesig_change_6_8_to_3_4.enc",                  gen_v0c4_timesig_change_6_8_to_3_4())
     write("notes_triplet_orphan_missing_tup.enc",           gen_v0c4_triplet_orphan_missing_tup())
     write("importer_2_2_beatticks240_gap_snap.enc",         gen_v0c4_2_2_beatticks240_gap_snap())
+    write("importer_2_2_beatticks480_correct.enc",          gen_v0c4_2_2_beatticks480_correct_encoding())
     write("notes_16th_rdur112_no_triple_dot.enc",           gen_v0c4_16th_rdur112_no_triple_dot())
     write("timesig_change_2_2_to_4_4.enc",                  gen_v0c4_timesig_change_2_2_to_4_4())
     write("notes_triplet_orphan_prior_complete_group.enc",  gen_v0c4_triplet_orphan_prior_complete_group())

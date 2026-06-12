@@ -166,7 +166,7 @@ The staff type is constant across all LINE blocks for the same staff position.
 |-------------|--------|----------------------------------------------------------------------------------------|
 | 0x00        | 2      | BPM (quarter-note beats-per-minute; applies forward until next change)                 |
 | 0x02        | 1      | time-signature glyph                                                                   |
-| 0x04        | 2      | ticks per beat (beatTicks); for compound meters e.g. 6/8 this is the compound beat (dotted quarter = 360), not the simple beat |
+| 0x04        | 2      | ticks per beat (beatTicks); **standard values**: 240=x/4, 120=x/8, 480=x/2, 360=compound dotted-quarter. **Non-standard**: some Encore builds store 240 even for 2/2 (correct value is 480). The importer never uses `beatTicks × timeSigDen` for position computation (that formula gives wrong wholeTicks for non-standard files); it always treats 960 as the whole-note tick count. |
 | 0x06        | 2      | total ticks in measure (durTicks)                                                      |
 | 0x08        | 1      | time-signature numerator                                                               |
 | 0x09        | 1      | time-signature denominator                                                             |
