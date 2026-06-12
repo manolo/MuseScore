@@ -440,10 +440,14 @@ void buildInitialSignatures(BuildCtx& ctx)
     }
 
     // Emit TimeSig elements at change points (buildMeasures sets per-measure properties only).
+    // Use identical() rather than operator== to distinguish time signatures whose fractions
+    // are mathematically equal but musically distinct: Fraction(6,8) == Fraction(3,4) via
+    // cross-multiplication (6×4 == 3×8 = 24), so operator== silently suppresses 6/8 → 3/4
+    // and 3/4 → 6/8 changes.  identical() compares numerator and denominator directly.
     Fraction prevTs = ctx.nominalTimeSig;
     for (const Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
         Fraction mTs = m->timesig();
-        if (mTs == prevTs) {
+        if (mTs.identical(prevTs)) {
             continue;
         }
         // Time sig changed — add a TimeSig element on every staff at this measure.
