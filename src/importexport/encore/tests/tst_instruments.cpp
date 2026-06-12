@@ -488,6 +488,75 @@ TEST_F(Tst_Instruments, no_tk_blocks_reads_midi_and_key_from_large_tk_offsets)
 //
 // Fixture: TK00 name = "A. Marazuela 335" (no template match), prg=116.
 // ===========================================================================
+// ===========================================================================
+// BUG regression: drumset staves imported via GM percussion range (113-128)
+// must receive a percussion clef, not the C3L/C4L/F clef stored in the
+// LINE block.  buildInitialSignatures now checks for a drumset and forces
+// ClefType::PERC.
+// ===========================================================================
+TEST_F(Tst_Instruments, gm_perc_range_drumset_staff_gets_perc_clef)
+{
+    MasterScore* score = readEncoreScore("instruments_gm_perc_range_taiko.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->staves().empty());
+
+    const Staff* st = score->staff(0);
+    ASSERT_NE(st, nullptr);
+
+    Measure* m0 = score->firstMeasure();
+    ASSERT_NE(m0, nullptr);
+    Segment* cs = m0->findSegment(SegmentType::HeaderClef, m0->tick());
+    ASSERT_NE(cs, nullptr) << "First measure must have a header clef segment";
+
+    bool foundPerc = false;
+    for (EngravingItem* el : cs->elist()) {
+        if (el && el->isClef()) {
+            const Clef* clef = toClef(el);
+            if (clef->clefType() == ClefType::PERC || clef->clefType() == ClefType::PERC2) {
+                foundPerc = true;
+            }
+        }
+    }
+    EXPECT_TRUE(foundPerc)
+        << "Drumset staff (GM prg=116) must use percussion clef, "
+        "not the LINE-block clef (C3L/C4L/F)";
+
+    delete score;
+}
+
+// ===========================================================================
+// BUG regression: chord notes on percussion staves were dropped by the MIDI
+// artifact filter even when they are genuine simultaneous chord tones.
+// Two bypass conditions added: (a) first note on staff in a measure
+// (savedPrevMidiTick<0), (b) chord extensions (isChordExt=true).
+//
+// Fixture: prg=116, measure with H@tick=0 (pit=60) and H@tick=5 (pit=64).
+// calculateRealDurations gives note@0 rdur=5 (tick diff 5-0).  Without the
+// bypass, that triggers the artifact filter and drops note@0.
+// ===========================================================================
+TEST_F(Tst_Instruments, gm_perc_chord_notes_not_dropped_by_artifact_filter)
+{
+    MasterScore* score = readEncoreScore("instruments_gm_perc_chord_notes.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = score->firstMeasure();
+    ASSERT_NE(m0, nullptr);
+
+    Segment* firstSeg = m0->first(SegmentType::ChordRest);
+    ASSERT_NE(firstSeg, nullptr);
+    EngravingItem* el = firstSeg->element(0);
+    ASSERT_NE(el, nullptr);
+    ASSERT_TRUE(el->isChord());
+
+    const Chord* chord = toChord(el);
+    EXPECT_EQ(static_cast<int>(chord->notes().size()), 2)
+        << "Both chord notes (pit=60 and pit=64) must survive the MIDI artifact "
+        "filter: note@0 is the first on-staff note (bypass: savedPrevMidiTick<0) "
+        "and note@5 is a chord extension (bypass: isChordExt=true)";
+
+    delete score;
+}
+
 TEST_F(Tst_Instruments, gm_perc_range_midi_program_routes_to_drumset)
 {
     MasterScore* score = readEncoreScore("instruments_gm_perc_range_taiko.enc");
