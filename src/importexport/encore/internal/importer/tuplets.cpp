@@ -134,7 +134,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
     int totalStaves,
     std::set<const EncMeasureElem*>* partialEndGroup,
     std::vector<NestedTupletInfo>* nestedInfos,
-    std::map<const EncMeasureElem*, std::pair<int,int>>* overrideRatios)
+    std::map<const EncMeasureElem*, std::pair<int, int> >* overrideRatios)
 {
     std::set<const EncMeasureElem*> result;
 
@@ -273,7 +273,10 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
             while (j < n) {
                 int a0 = 0, n0 = 0;
                 getExplicit(chords[j], a0, n0);
-                if (a0 <= 0) { ++j; continue; }
+                if (a0 <= 0) {
+                    ++j;
+                    continue;
+                }
 
                 // Find end of same-tup run.
                 int segStart = j;
@@ -357,7 +360,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                 //   total=960 ≤ 960 → leave alone (note 4 is a legit isolated tup note).
                 {
                     const int completeTicks = (N / a0) * (fvEnc * n0);
-                    const int orphanTicks   = (N % a0)  * fvEnc;
+                    const int orphanTicks   = (N % a0) * fvEnc;
                     const int noOverrideTotal = leadingDur + completeTicks + orphanTicks + trailingDur;
                     if (noOverrideTotal <= static_cast<int>(encMeas.durTicks)) {
                         continue;  // non-override interpretation fits: skip override
@@ -424,7 +427,35 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     int a2 = 0, n2 = 0;
                     getExplicit(chords[i], a2, n2);
                     if (a2 != actualN || n2 != normalN) {
-                        break;
+                        // Sandwich heuristic: include a note with a missing tup byte when
+                        // it is sandwiched between two notes with the same explicit ratio
+                        // and lies at the expected triplet-advance tick position.
+                        // Real-world trigger: live-recorded v0xC4 files occasionally omit
+                        // the tup byte on one note in the middle of a triplet run.
+                        bool includeOrphan = false;
+                        if (faceSum > Fraction(0, 1) && i + 1 < n
+                            && !chords[i].empty() && !chords[i - 1].empty()) {
+                            int a3 = 0, n3 = 0;
+                            getExplicit(chords[i + 1], a3, n3);
+                            const Fraction fvOrphan = getFaceValue(chords[i]);
+                            if (a3 == actualN && n3 == normalN && fvOrphan == baseLen) {
+                                // Check that the orphan is at the expected advance tick.
+                                const int advNum = baseLen.numerator() * normalN;
+                                const int advDen = baseLen.denominator() * actualN;
+                                const int advTicks = (advNum * 960 + advDen / 2) / advDen;
+                                const int tol = std::max(4, advTicks / 4);
+                                const int lastTick   = static_cast<int>(chords[i - 1][0]->tick);
+                                const int orphanTick = static_cast<int>(chords[i][0]->tick);
+                                if (std::abs(orphanTick - lastTick - advTicks) <= tol) {
+                                    includeOrphan = true;
+                                    a2 = actualN;
+                                    n2 = normalN;
+                                }
+                            }
+                        }
+                        if (!includeOrphan) {
+                            break;
+                        }
                     }
                     // No-downdate: update baseLen only when the NEW smaller face value
                     // still fits within the new threshold given the CURRENT faceSum.
@@ -563,7 +594,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     if (rdurFillsMeasure && faceWouldOverflow && !seenCompleteGroup) {
                         for (int j = groupStart; j < i; ++j) {
                             for (const EncMeasureElem* e2 : chords[j]) {
-                                        result.insert(e2);
+                                result.insert(e2);
                                 if (partialEndGroup) {
                                     partialEndGroup->insert(e2);
                                 }

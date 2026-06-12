@@ -876,6 +876,35 @@ Volta is closed and a new one is opened on the next non-zero
 measure. The `beginText` is set from the endings list ("1.",
 "2.", "1., 2.", ...) so the bracket label renders.
 
+## Tuplet group with one note missing the tup byte (sandwich orphan)
+
+Live-recorded v0xC4 files occasionally have `tup=0x00` on one note in the
+middle of a triplet run, surrounded by notes with the correct explicit ratio
+(e.g. `tup=0x32, tup=0x00, tup=0x32`).  Without a fix, the group breaks at
+the orphan, the surrounding explicit notes are treated as isolated single-note
+groups, all three are placed as regular 8ths, the measure overflows, and the
+last triplet note is dropped entirely.
+
+Two-part fix:
+
+1. **`computeImpliedTupletMembers` — sandwich heuristic**: when the main
+   explicit-group loop breaks (next note has wrong/no tup byte) but the group
+   is still incomplete, check whether:
+   - the orphan has the same face value as the group's base note;
+   - the note after the orphan resumes the same explicit ratio;
+   - the orphan's binary tick is within `max(4, advTicks/4)` ticks of the
+     expected advance from the last included note.
+   If all three hold, set `a2/n2` to the group's ratio so the loop continues
+   and marks the orphan as a group member.
+
+2. **`handleNote` — active-tuplet bypass**: even after the orphan is in
+   `validTupletGroupMember`, `handleNote` recomputes `actualN/normalN` from
+   `en->actualNotes()/normalNotes()`, which returns 0 for `tup=0x00`.  The
+   else-branch then closes the active group.  A guard after the implied-tuplet
+   block: if `actualN == 0` and the tuplet is active and not yet full and the
+   note is in `validTupletGroupMember`, borrow the active tuplet's ratio so
+   the note is added to the bracket rather than closing it.
+
 ## Time signature changes between metrically-equivalent meters
 
 `buildInitialSignatures` emits a `TimeSig` segment at each measure
