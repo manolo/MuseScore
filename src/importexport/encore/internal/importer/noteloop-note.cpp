@@ -166,8 +166,14 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
             // For 8th+ notes: filter only when realDuration > CHORD_CLUSTER_THRESHOLD; at exactly the threshold the note is a live-recorded chord root.
             // Bypass for notes in a validated tuplet group: the last note of a measure-spanning
             // tuplet legitimately has a short rdur because it's cut off at the measure boundary.
+            // Also bypass for chord extensions (isChordExt=TRUE: within 8 ticks of prior note,
+            // so they are real simultaneous chord tones, not tie artifacts) and for the first note
+            // on a staff in a measure (savedPrevMidiTick<0: no prior context to generate an artifact
+            // from, so this must be a genuine note even if its tick-diff rdur is short).
             if (en->realDuration > CHORD_CLUSTER_THRESHOLD
-                && !validTupletGroupMember.count(e)) {
+                && !validTupletGroupMember.count(e)
+                && !isChordExt
+                && savedPrevMidiTick >= 0) {
                 return;
             }
         }
