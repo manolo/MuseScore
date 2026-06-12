@@ -379,15 +379,13 @@ void buildMeasures(BuildCtx& ctx)
             Measure* measure = Factory::createMeasure(score->dummy()->system());
             measure->setTick(Fraction::fromTicks(currentTick));
 
-            const bool isPickup = firstMeasure && ts != ctx.nominalTimeSig && di == 0;
-            if (isPickup) {
-                measure->setTimesig(ctx.nominalTimeSig);
-                measure->setTicks(ctx.nominalTimeSig);
-                ctx.measure0PickupOffset = ctx.nominalTimeSig - ts;
-            } else {
-                measure->setTimesig(ts);
-                measure->setTicks(ts);
-            }
+            // Case A: timeSig[0] != timeSig[1] — Encore stored a shorter time signature
+            // for the pickup measure. Shorten the measure immediately.
+            // Case B (same timesig, partial content): detected after the note loop in
+            // noteloop.cpp using the actual cumTick across all staves.
+            const bool isPickupA = firstMeasure && di == 0 && ts != ctx.nominalTimeSig;
+            measure->setTimesig(isPickupA ? ctx.nominalTimeSig : ts);
+            measure->setTicks(ts);
 
             if (di == 0) {
                 if (encMeas.startBarline() == EncBarlineType::REPEATSTART) {
@@ -412,7 +410,7 @@ void buildMeasures(BuildCtx& ctx)
             }
 
             score->measures()->append(measure);
-            currentTick += isPickup ? ctx.nominalTimeSig.ticks() : ts.ticks();
+            currentTick += ts.ticks();
         }
         firstMeasure = false;
         msIdxCounter += static_cast<size_t>(displayCount);

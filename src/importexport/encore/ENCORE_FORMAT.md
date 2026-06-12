@@ -65,8 +65,9 @@ The plaintext `SCOW` equivalent is structurally different, so re-saving from Enc
 | 0x32     | 1      | number of instrument blocks             |
 | 0x33     | 1      | staves per system                       |
 | 0x34     | 2      | **rendered measure count** (see below)  |
+| 0x52     | 1      | staff-size selector 1-4 (4 = default; see Staff scale below) |
 
-Bytes 0x36..0xC1 are padding.
+Bytes 0x36..0xC1 are padding except 0x52 (noted above).
 
 **Rendered measure count.** The field at 0x34 is the number of measures Encore displays.
 Files can contain extra "ghost" MEAS blocks from prior edits.
@@ -465,7 +466,7 @@ Type 5. Variable size. Offsets from element start:
 | 0xBB    | FINGER_3      | stand-alone fingering digit "3"                                                  |
 | 0xBC    | FINGER_4      | stand-alone fingering digit "4"                                                  |
 | 0xBD    | FINGER_5      | stand-alone fingering digit "5"                                                  |
-| 0xC4    | UPBOW/ACCENT  | v0xC4: up-bow stroke (V) as size-16 ORN; maps to stringsUpBow. v0xC2: accent above (>) attached to chord; maps to articAccentAbove. In v0xC2, NOTE articulationByte is absent (size=22 notes have no articulation slot); the accent is stored here instead. |
+| 0xC4    | UPBOW/ACCENT  | v0xC4: up-bow stroke (V) as size-16 ORN; maps to stringsUpBow. v0xC2: accent above (>) attached to chord; maps to articAccentAbove. In v0xC2, the accent is stored as an ORN rather than a NOTE articulation byte; size=22 notes have no articulation slot and size=24 notes use +22 only for staccato/tenuto, not accent. |
 | 0xC5    | DOWNBOW       | down-bow stroke (П) as size-16 ORN; maps to Articulation stringsDownBow         |
 | 0xC9    | STACCATO      | per-chord staccato dot                                                           |
 | 0xCC    | FERMATA_ABOVE | standalone fermata above (size-16 ORN; yoffset > 0)                             |
@@ -742,6 +743,38 @@ Syllabic role (begin/middle/end/single) derived from hyphen-before / hyphen-afte
 | +21      | 1      | alteration glyph (accidental override)                                           |
 | +24      | 1      | articulation byte — above slot                                                   |
 | +26      | 1      | articulation byte — below slot                                                   |
+
+### v0xC2 (size = 22 or 24)
+
+The v0xC2 note layout is more compact than v0xC4. MIDI pitch is stored at offset +13 (where
+v0xC4 keeps its tuplet byte); implied-tuplet detection is used instead of an explicit tuplet byte.
+
+**size = 22** (no articulation):
+
+| Offset   | Size   | Description                                                                      |
+|----------|--------|----------------------------------------------------------------------------------|
+| +5       | 1      | face value (same encoding as v0xC4)                                              |
+| +6       | 1      | grace1                                                                           |
+| +7       | 1      | grace2                                                                           |
+| +10      | 2      | layout x-position                                                                |
+| +13      | 1      | **MIDI pitch (0-127)** — NOT a tuplet byte (implied-tuplet detection is used)    |
+| +14      | 1      | dotControl bitmask (same semantics as v0xC4)                                     |
+| +16      | 2      | playback duration in ticks                                                       |
+| +19      | 1      | velocity                                                                         |
+| +20      | 1      | options                                                                          |
+| +21      | 1      | alteration glyph                                                                 |
+
+**size = 24** (note carries an articulation):
+
+Same layout as size=22, plus:
+
+| Offset   | Size   | Description                                                                      |
+|----------|--------|----------------------------------------------------------------------------------|
+| +22      | 1      | articulation byte (same encoding as v0xC4 articulationUp; see Articulation bytes) |
+| +23      | 1      | placement/direction flag (0x01 or 0x08); NOT a second articulation byte          |
+
+`dotControl = 0xC0` at offset +14 is characteristic of size=24 notes (bits 7 and 6 set as a
+layout flag; bit 0 is clear, so these notes are not dotted).
 
 ### v0xA6 (size = 10, slot = 20 bytes = size × 2)
 
@@ -1064,33 +1097,57 @@ cleanly to standard MuseScore notation.
 Encore does not require measures to be completely filled with notes and rests. The importer
 enforces correct measure length using the following rules, applied in order:
 
-1. **Fill with rests.** After all notes are placed, MuseScore's `checkMeasure` fills any
-   gaps with invisible gap rests so that every voice sums to exactly the measure duration.
+1. **Trailing silence → invisible gap rests (pre-fill).** Before `checkMeasure`, for
+   every voice that has some content (`cumTick > 0`), the importer adds an invisible
+   `V_MEASURE` gap rest spanning `measure->ticks() - cumTick`. This prevents `checkMeasure`
+   from generating visible rests for space that was never encoded in the Encore file.
+   Voices with no content at all (cumTick absent from the map) are left for `checkMeasure`
+   to handle normally (primary voice gets a visible whole rest).
 
-2. **Overshoot removal (small).** If the voice total exceeds the measure length by ≤ 1/24
+2. **Fill internal gaps with visible rests.** `checkMeasure` fills any remaining intra-voice
+   gaps (between explicit notes/rests) with visible rests.
+
+3. **Overshoot removal (small).** If the voice total exceeds the measure length by ≤ 1/24
    of a whole note after gap-fill, the importer removes the smallest trailing gap rests
    until the sum is correct.
 
-3. **Undershoot fill (small).** If the voice total falls short by ≤ 1/24, a single
+4. **Undershoot fill (small).** If the voice total falls short by ≤ 1/24, a single
    invisible V_MEASURE gap rest is added for the deficit.
 
-4. **Hard nuclear cap.** If the voice still overflows after steps 1–3 (by any amount),
+5. **Hard nuclear cap.** If the voice still overflows after steps 2–4 (by any amount),
    trailing ChordRest elements are removed from the end of the voice, smallest-first, until
    the sum is ≤ measure length. Any remaining deficit is filled with a gap rest.
    This guarantees the importer never produces a corrupt measure (`sanityCheck` always passes).
 
-5. **Notes discarded, not moved.** Notes that arrive after the voice is already full
+6. **Notes discarded, not moved.** Notes that arrive after the voice is already full
    (`cumTick ≥ measure->ticks()`) are **silently dropped**. They are never routed to a
    second MuseScore voice (voice 1). Encore sometimes stores multiple MIDI recording passes
    in the same voice slot; the importer treats only the first fill as valid and discards the
    rest.
 
-6. **Anacrusis / pickup measure.** When `timeSig[0] != timeSig[1]`, measure 0 is a
-   pickup. The nominal time signature (from measure 1) is used for display; measure 0
-   keeps the full nominal duration. Notes are placed at the end of the measure: all
-   `cumTick` entries are pre-initialized to `nominalTimeSig - pickupTimeSig` before the
-   note loop, so the pickup content lands at the tail of the measure. A leading invisible
-   gap rest spanning the offset fills the beginning of each voice.
+7. **Anacrusis / pickup measure.** Two detection cases:
+
+   **Case A** (`timeSig[0] != timeSig[1]`, detected in `buildMeasures()`): Encore explicitly
+   stores a shorter time signature for the pickup. `measure->setTimesig(nominalTimeSig)` for
+   display and `measure->setTicks(ts)` for the actual (shorter) duration. `currentTick`
+   advances by the shorter duration so measure 1 starts immediately after.
+
+   **Case B** (`timeSig[0] == timeSig[1]`, detected after the note loop in `buildNoteLoop()`):
+   Encore stores the full time signature but the note loop places less content than the full
+   measure (`maxCumTick < measure->ticks()`). Detection and action:
+
+   - Guard: skipped when `measure->timesig() != measure->ticks()` — that condition means
+     Case A already applied the correct short duration; further shortening would double-reduce.
+   - `maxCumTick = max(cumTick)` across all voices/staves after the note loop.
+   - If `maxCumTick > 0` and `maxCumTick < measure->ticks()`:
+     - `measure->setTicks(maxCumTick)` — shrink to actual content.
+     - All subsequent measures: `m->setTick(m->tick() - delta)` — shift back by
+       `delta = original_ticks - maxCumTick` so there is no gap between measure 0 and 1.
+     - Pending hairpin `maxEndTick` values that extend past the new measure 0 end are
+       reduced by the same `delta` to keep their search boundaries correct.
+   - Because `maxCumTick` is the maximum across **all** staves, multi-staff scores are
+     handled consistently: all instruments share the same measure duration; no instrument
+     can end up with a different actual length.
 
 ### Tuplets: compaction into available space
 

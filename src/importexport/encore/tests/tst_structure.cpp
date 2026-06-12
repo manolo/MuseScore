@@ -161,7 +161,6 @@ TEST_F(Tst_Structure, key_sig_no_invalid_large_values)
     delete score;
 }
 
-
 // ===========================================================================
 // FIX: KEYCHANGE tipo=0 (C major modulation) must be emitted; previous guard silently dropped it.
 // ===========================================================================
@@ -212,10 +211,15 @@ TEST_F(Tst_Structure, all_encore_navigation_options)
         for (EngravingItem* e : mb->el()) {
             if (e && e->isMarker()) {
                 MarkerType mt = toMarker(e)->markerType();
-                if (mt == MarkerType::SEGNO) ++segnoMarkers;
-                else if (mt == MarkerType::CODA) ++codaMarkers;
-                else if (mt == MarkerType::TOCODA) ++toCodaMarkers;
-                else if (mt == MarkerType::FINE) ++fineMarkers;
+                if (mt == MarkerType::SEGNO) {
+                    ++segnoMarkers;
+                } else if (mt == MarkerType::CODA) {
+                    ++codaMarkers;
+                } else if (mt == MarkerType::TOCODA) {
+                    ++toCodaMarkers;
+                } else if (mt == MarkerType::FINE) {
+                    ++fineMarkers;
+                }
             } else if (e && e->isJump()) {
                 jumpTypes.insert(toJump(e)->jumpType());
             }
@@ -387,7 +391,6 @@ TEST_F(Tst_Structure, old_format_v0c2_triplets_detected)
     delete score;
 }
 
-
 // ===========================================================================
 // BUG FIX: v0xA6 (very old format) — wrong element offset and pitch encoding
 // ===========================================================================
@@ -507,7 +510,9 @@ TEST_F(Tst_Structure, fit_spatium_first_system_measure_count)
     for (const System* sys : score->systems()) {
         int mc = 0;
         for (const MeasureBase* mb : sys->measures()) {
-            if (mb->isMeasure()) { ++mc; }
+            if (mb->isMeasure()) {
+                ++mc;
+            }
         }
         if (mc > 0) {
             firstSystemMeasureCount = mc;
@@ -530,7 +535,9 @@ TEST_F(Tst_Structure, fit_spatium_multiple_systems_measure_count)
     for (const System* sys : score->systems()) {
         int mc = 0;
         for (const MeasureBase* mb : sys->measures()) {
-            if (mb->isMeasure()) { ++mc; }
+            if (mb->isMeasure()) {
+                ++mc;
+            }
         }
         if (mc > 0) {
             sysCounts.push_back(mc);
@@ -643,9 +650,10 @@ TEST_F(Tst_Structure, page_margins_wini_bottom_margin_derived)
 }
 
 // Pickup (anacrusis) first measure: timeSig[0]=1/4, timeSig[1]=4/4.
-// The importer should produce a full-duration first measure (4/4) with
-// a leading invisible gap rest (3/4) and the pickup note at offset 3/4.
-TEST_F(Tst_Structure, pickup_measure_full_duration)
+// The importer should produce a shortened first measure (actual ticks=1/4)
+// that displays the nominal 4/4 time signature. The pickup note is at
+// offset 0 within the short measure, and m1 starts right after at tick=1/4.
+TEST_F(Tst_Structure, pickup_measure_shortened)
 {
     MasterScore* score = readEncoreScore("structure_pickup_measure.enc");
     ASSERT_NE(score, nullptr);
@@ -656,10 +664,10 @@ TEST_F(Tst_Structure, pickup_measure_full_duration)
     ASSERT_NE(m1, nullptr);
 
     EXPECT_EQ(m0->timesig(), Fraction(4, 4)) << "Pickup m0 must display the nominal 4/4 time signature";
-    EXPECT_EQ(m0->ticks(), Fraction(4, 4))   << "Pickup m0 must have full nominal duration (not shortened)";
-    EXPECT_EQ(m1->tick(), Fraction(4, 4))    << "m1 must start after a full-duration m0";
+    EXPECT_EQ(m0->ticks(), Fraction(1, 4)) << "Pickup m0 must be shortened to the pickup duration";
+    EXPECT_EQ(m1->tick(), Fraction(1, 4)) << "m1 must start immediately after the shortened m0";
 
-    // Pickup note must be at the END of m0, offset by 3/4 from the measure start.
+    // The pickup note must be at offset 0 within the short measure.
     Fraction noteOffset { -1, 1 };
     for (Segment* s = m0->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
@@ -668,7 +676,96 @@ TEST_F(Tst_Structure, pickup_measure_full_duration)
             break;
         }
     }
-    EXPECT_EQ(noteOffset, Fraction(3, 4)) << "Pickup note must be at offset 3/4 within m0 (after leading gap)";
+    EXPECT_EQ(noteOffset, Fraction(0, 1)) << "Pickup note must be at offset 0 within the shortened m0";
+
+    delete score;
+}
+
+// Case B (pure cumTick): same timeSig=4/4, 8 32nd notes from tick=0.
+// No gap-snap (notes at exact cumTick positions). cumTick = 8/32 = 1/4.
+// Measure 0 must be shortened to 1/4 based purely on cumTick, no barline needed.
+TEST_F(Tst_Structure, pickup_caseb_reduces_to_max_content)
+{
+    MasterScore* score = readEncoreScore("structure_pickup_caseb_reduces.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    Measure* m1 = measureAt(score, 1);
+    ASSERT_NE(m0, nullptr);
+    ASSERT_NE(m1, nullptr);
+
+    EXPECT_EQ(m0->timesig(), Fraction(4, 4)) << "Pickup m0 must display nominal 4/4";
+    EXPECT_EQ(m0->ticks(), Fraction(1, 4)) << "Pickup m0 must be shortened to cumTick=8/32=1/4";
+    EXPECT_EQ(m1->tick(), Fraction(1, 4)) << "m1 must start immediately after the shortened m0";
+
+    delete score;
+}
+
+// Case B: whole note (fv=1) at tick=0 fills the measure completely.
+// cumTick = 1 = measure->ticks() -> NOT less than -> no shortening.
+TEST_F(Tst_Structure, pickup_caseb_no_reduce_when_full_content)
+{
+    MasterScore* score = readEncoreScore("structure_pickup_caseb_no_reduce_full.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+
+    EXPECT_EQ(m0->ticks(), Fraction(4, 4)) << "Measure 0 must NOT be shortened: whole note cumTick=1=measure->ticks()";
+
+    delete score;
+}
+
+// Regression: Case A pickup (timeSig[0]=2/4, timeSig[1]=4/4) whose note-loop
+// content is less than the short ts (cumTick=3/8 < ticks=2/4). The Case B
+// shortening guard must fire (timesig=4/4 != ticks=2/4) and leave measure 0
+// at 2/4. Without the guard, Case B would double-shorten to 3/8 and shift all
+// subsequent measures by an extra 1/8.
+TEST_F(Tst_Structure, pickup_casea_guard_prevents_double_shortening)
+{
+    MasterScore* score = readEncoreScore("structure_pickup_casea_sparse.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    Measure* m1 = measureAt(score, 1);
+    ASSERT_NE(m0, nullptr);
+    ASSERT_NE(m1, nullptr);
+
+    EXPECT_EQ(m0->timesig(), Fraction(4, 4)) << "Case A pickup must display nominal 4/4";
+    EXPECT_EQ(m0->ticks(), Fraction(2, 4)) << "Case A pickup must stay at its explicit 2/4, not be further shortened by Case B";
+    EXPECT_EQ(m1->tick(), Fraction(2, 4)) << "m1 must start at 2/4, not be shifted by a spurious Case B delta";
+
+    delete score;
+}
+
+// Regression: Case B pickup (4/4 with cumTick=1/4, shortens by delta=3/4) plus a
+// WEDGESTART hairpin spanning from measure 0 into measure 1. Without the maxEndTick
+// fix, the hairpin search boundary would be 3/4 too large (stale absolute tick from
+// before the Case B shift), potentially resolving the endpoint in the wrong measure.
+// Test verifies: (a) at least one hairpin exists, (b) it ends within measure 1.
+TEST_F(Tst_Structure, pickup_caseb_hairpin_maxendtick_not_stale)
+{
+    MasterScore* score = readEncoreScore("structure_pickup_caseb_hairpin.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m1 = measureAt(score, 1);
+    ASSERT_NE(m1, nullptr);
+
+    int hairpinCount = 0;
+    bool hairpinEndsInM1 = false;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isHairpin()) {
+            ++hairpinCount;
+            const Fraction tick2 = sp->tick2();
+            if (tick2 >= m1->tick() && tick2 <= m1->endTick()) {
+                hairpinEndsInM1 = true;
+            }
+        }
+    }
+
+    EXPECT_GE(hairpinCount, 1) << "At least one hairpin must be imported";
+    EXPECT_TRUE(hairpinEndsInM1) << "Hairpin must end within measure 1 (stale maxEndTick would push it past)";
 
     delete score;
 }
