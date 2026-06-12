@@ -3239,6 +3239,49 @@ TEST_F(Tst_Notes, notes_v0c2_multiinstr_compact_routing)
     delete score;
 }
 
+// v0xC2 size=24 notes: MIDI pitch is at offset +13 (tuplet slot), same as size=22.
+// Articulation byte is at offset +22. Before this fix, size=24 notes used offset +15
+// for pitch (which is 0 in v0xC2 files), producing C-1 instead of the correct note.
+TEST_F(Tst_Notes, notes_v0c2_size24_correct_pitch_and_artic)
+{
+    MasterScore* score = readEncoreScore("notes_v0c2_size24_artic_pitch.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    std::vector<int> pitches;
+    std::vector<SymId> artics;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        Chord* c = toChord(el);
+        pitches.push_back(c->notes().front()->pitch());
+        for (Articulation* a : c->articulations()) {
+            artics.push_back(a->symId());
+        }
+    }
+
+    ASSERT_EQ(pitches.size(), 2u);
+    EXPECT_EQ(pitches[0], 67) << "First note should be G4 (67), not C-1 (0)";
+    EXPECT_EQ(pitches[1], 64) << "Second note should be E4 (64), not C-1 (0)";
+
+    // MuseScore flips Above/Below based on stem direction after layout; compare kind only.
+    auto isStaccato = [](SymId s) {
+        return s == SymId::articStaccatoAbove || s == SymId::articStaccatoBelow;
+    };
+    auto isTenuto = [](SymId s) {
+        return s == SymId::articTenutoAbove || s == SymId::articTenutoBelow;
+    };
+    ASSERT_EQ(artics.size(), 2u);
+    EXPECT_TRUE(isStaccato(artics[0])) << "G4 should have staccato (0x1d)";
+    EXPECT_TRUE(isTenuto(artics[1])) << "E4 should have tenuto (0x1c)";
+
+    delete score;
+}
+
 // When a non-first measure has explicit notes filling only part of the
 // duration, the trailing empty space must be filled with invisible gap rests,
 // not visible rests. Measure 0 is fully filled (to avoid pickup shortening).
