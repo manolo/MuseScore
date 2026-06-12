@@ -236,7 +236,7 @@ void resolveOrnaments(BuildCtx& ctx)
                 }
             }
             return false;
-        }();
+        } ();
         const bool standaloneAlt = pt.isAlt && !altWithinSpan;
 
         Fraction endTick;
@@ -335,20 +335,45 @@ void resolveOrnaments(BuildCtx& ctx)
     ctx.pendingTrillEnds.clear();
 
     // Breath marks and caesuras (tipo 0xA7/0xA8).
-    // In standard notation, breath/caesura is placed AFTER the preceding note.
-    // The Encore ORN is at the tick of the note it precedes; we attach to the Breath
-    // segment at (prev_note_tick + prev_note_ticks), i.e., after the note at that tick.
+    // pb.tick is the tick of the note the breath precedes. The breath must be attached
+    // after the preceding chord, so we search backward from pb.tick to find it.
     for (const PendingBreath& pb : ctx.pendingBreaths) {
-        Chord* c = findChordAt(score, pb.tick, pb.track);
-        if (!c) {
-            continue;
+        // If pb.tick is exactly at a measure boundary, the preceding chord is in the
+        // previous measure; otherwise it is in the measure containing pb.tick.
+        Measure* m = score->tick2measure(pb.tick);
+        if (m && m->tick() == pb.tick) {
+            MeasureBase* prevBase = m->prev();
+            while (prevBase && !prevBase->isMeasure()) {
+                prevBase = prevBase->prev();
+            }
+            if (prevBase) {
+                m = toMeasure(prevBase);
+            }
         }
-        Measure* m = c->measure();
         if (!m) {
             continue;
         }
-        const Fraction breathTick = c->tick() + c->ticks();
-        Segment* seg = m->getSegment(SegmentType::Breath, breathTick);
+        // Find the last chord on this track whose endpoint is at or before pb.tick.
+        Chord* prevChord = nullptr;
+        for (Segment* s = m->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(pb.track);
+            if (el && el->isChord()) {
+                Chord* c = toChord(el);
+                if (c->tick() + c->actualTicks() <= pb.tick) {
+                    prevChord = c;
+                }
+            }
+        }
+        // Fall back to pb.tick if no preceding chord found (e.g. breath before first note).
+        const Fraction breathTick = prevChord
+                                    ? prevChord->tick() + prevChord->actualTicks()
+                                    : pb.tick;
+        Measure* breathMeasure = prevChord ? prevChord->measure() : m;
+        if (!breathMeasure) {
+            continue;
+        }
+        Segment* seg = breathMeasure->getSegment(SegmentType::Breath, breathTick);
         Breath* breath = Factory::createBreath(seg);
         breath->setTrack(pb.track);
         breath->setSymId(pb.symId);
