@@ -184,8 +184,6 @@ struct BuildCtx
     // Populated by buildMeasures(): nominal time sig of the score (differs from
     // measures[0] when the first measure is a pickup / anacrusis).
     Fraction nominalTimeSig { 4, 4 };
-    // Non-zero when measure 0 is a pickup: leading gap to insert before notes.
-    Fraction measure0PickupOffset { 0, 1 };
 
     // Populated by buildMeasures(): encToMsIdx[i] = MuseScore measure index of the
     // first measure produced from enc.measures[i].  Accounts for single-block
