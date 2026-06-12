@@ -359,6 +359,14 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
             && ((tt.inTuplet() && !tt.groupFull()) || impliedGroupMember.count(e))) {
             actualN = detectImpliedTuplet(en->realDuration, en->faceValue, normalN);
         }
+        // Sandwich orphan: the note has tup=0 but computeImpliedTupletMembers placed it
+        // in the group via the sandwich heuristic (surrounded by tup=N:M notes).
+        // Use the active tuplet's ratio so the note is added to the bracket rather than
+        // exiting the group early.
+        if (actualN == 0 && tt.inTuplet() && !tt.groupFull() && validTupletGroupMember.count(e)) {
+            actualN = tt.actualN;
+            normalN = tt.normalN;
+        }
 
         if (actualN > 0 && normalN > 0) {
             // Close full group before starting a new one. Isolated explicit notes (not pre-validated) are treated as plain to avoid partial-group checkMeasure overshoot.

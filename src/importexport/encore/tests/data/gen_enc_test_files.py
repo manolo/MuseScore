@@ -6675,6 +6675,41 @@ def gen_v0c4_pickup_caseb_no_reduce_full():
     ], fill_ts=(4, 4))
 
 
+def gen_v0c4_triplet_orphan_missing_tup():
+    """BUG FIX: Live-recorded v0xC4 files occasionally have the tup byte missing on
+    one note in the middle of a triplet (sandwich pattern: tup=3:2, tup=0, tup=3:2).
+    Without the fix, the group breaks at the orphan, the surrounding notes are treated
+    as isolated explicit notes (plain), overflow occurs and the last note is dropped.
+
+    Fixture: 4/4 (dur=960).
+      tick=0   fv=8th tup=0x32  pitch=60  ← triplet note 1
+      tick=80  fv=8th tup=0x00  pitch=62  ← ORPHAN: missing tup byte
+      tick=160 fv=8th tup=0x32  pitch=64  ← triplet note 3
+      tick=240 fv=Q   tup=0x00  pitch=65  ← regular quarter
+      tick=480 fv=H   tup=0x00  pitch=67  ← regular half
+    Total: triplet(240) + Q(240) + H(480) = 960 ticks.
+    """
+    def note_orphan(tick, pitch, tuplet):
+        """Build a v0xC4 note with a specific tuplet byte (may be 0)."""
+        d = bytearray(25)
+        d[0] = 28; d[1] = 0           # size=28, staffIdx=0
+        d[2] = 4                       # faceValue=8th
+        d[10] = tuplet                 # tuplet byte at element offset +13 (d[10] in 25-byte payload)
+        d[12] = pitch                  # semiTonePitch at element offset +15 (d[12])
+        return struct.pack('<H', tick) + bytes([(9 << 4) | 0]) + bytes(d)
+
+    # Note: in note_v0c4 the layout is:
+    # d[0]=size=28, d[1]=staffIdx, d[2]=faceValue, d[10]=tuplet, d[12]=pitch
+    # matching offsets: elem+3=size, elem+4=rawStaff, elem+5=fv, elem+13=tuplet, elem+15=pitch
+    e  = note_orphan(  0, 60, 0x32)   # 8th, tup=3:2
+    e += note_orphan( 80, 62, 0x00)   # 8th, tup=MISSING (orphan)
+    e += note_orphan(160, 64, 0x32)   # 8th, tup=3:2
+    e += note_v0c4(240, 0, 0, fv=3, pitch=65)  # quarter
+    e += note_v0c4(480, 0, 0, fv=2, pitch=67)  # half
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
 def gen_v0c4_timesig_change_6_8_to_3_4():
     """BUG FIX: 6/8 and 3/4 have the same total duration (durTicks=720), so
     Fraction(6,8)==Fraction(3,4) via cross-multiplication.  buildInitialSignatures
@@ -6903,5 +6938,6 @@ if __name__=='__main__':
     write("structure_pickup_casea_sparse.enc",               gen_v0c4_pickup_casea_sparse())
     write("structure_pickup_caseb_hairpin.enc",              gen_v0c4_pickup_caseb_hairpin())
     write("timesig_change_6_8_to_3_4.enc",                  gen_v0c4_timesig_change_6_8_to_3_4())
+    write("notes_triplet_orphan_missing_tup.enc",           gen_v0c4_triplet_orphan_missing_tup())
     print("Done.")
 
