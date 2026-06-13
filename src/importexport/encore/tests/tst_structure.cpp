@@ -874,3 +874,59 @@ TEST_F(Tst_Structure, pickup_caseb_hairpin_maxendtick_not_stale)
 
     delete score;
 }
+
+// v0xC2 4/4 with timeSigGlyph=0x63 ('c' = common time "C" symbol in Encore).
+// Regression: the initial TimeSig must have TimeSigType::FOUR_FOUR, not NORMAL.
+// Without the fix the glyph byte was ignored and all v0xC2 4/4 scores displayed
+// numeric "4/4" even when the original had the "C" symbol.
+TEST_F(Tst_Structure, timesig_v0c2_common_time_glyph_preserved)
+{
+    MasterScore* score = readEncoreScore("notes_v0c2_common_time_glyph.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+
+    Segment* tsSeg = m0->findSegment(SegmentType::TimeSig, m0->tick());
+    ASSERT_NE(tsSeg, nullptr) << "Measure 0 must have a TimeSig segment";
+
+    bool foundFourFour = false;
+    for (EngravingItem* el : tsSeg->elist()) {
+        if (el && el->isTimeSig()) {
+            TimeSig* ts = toTimeSig(el);
+            if (ts->timeSigType() == TimeSigType::FOUR_FOUR) {
+                foundFourFour = true;
+            }
+        }
+    }
+    EXPECT_TRUE(foundFourFour) << "TimeSig glyph 0x63 must produce TimeSigType::FOUR_FOUR (common time C), not NORMAL";
+
+    delete score;
+}
+
+// Same as above but for glyph=0x43 ('C', uppercase ASCII), the variant produced by
+// older Encore versions (e.g. Encore 3.x/4.x files vs. 5.x files with 0x63).
+TEST_F(Tst_Structure, timesig_v0c2_common_time_glyph_uppercase_preserved)
+{
+    MasterScore* score = readEncoreScore("notes_v0c2_common_time_glyph_uc.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+
+    Segment* tsSeg = m0->findSegment(SegmentType::TimeSig, m0->tick());
+    ASSERT_NE(tsSeg, nullptr) << "Measure 0 must have a TimeSig segment";
+
+    bool foundFourFour = false;
+    for (EngravingItem* el : tsSeg->elist()) {
+        if (el && el->isTimeSig()) {
+            TimeSig* ts = toTimeSig(el);
+            if (ts->timeSigType() == TimeSigType::FOUR_FOUR) {
+                foundFourFour = true;
+            }
+        }
+    }
+    EXPECT_TRUE(foundFourFour) << "TimeSig glyph 0x43 must produce TimeSigType::FOUR_FOUR (common time C), not NORMAL";
+
+    delete score;
+}

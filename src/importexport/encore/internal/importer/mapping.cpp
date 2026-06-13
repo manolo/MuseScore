@@ -246,7 +246,7 @@ void addInitialKeySig(MasterScore* score, int staffIdx, quint8 encKey)
     seg->add(ks);
 }
 
-void addInitialTimeSig(MasterScore* score, int nstaves, Fraction ts)
+void addInitialTimeSig(MasterScore* score, int nstaves, Fraction ts, TimeSigType tsType)
 {
     Measure* m = score->tick2measure(Fraction(0, 1));
     if (!m) {
@@ -256,7 +256,7 @@ void addInitialTimeSig(MasterScore* score, int nstaves, Fraction ts)
         Segment* seg = m->getSegment(SegmentType::TimeSig, Fraction(0, 1));
         TimeSig* tsig = Factory::createTimeSig(seg);
         tsig->setTrack(staffIdx * VOICES);
-        tsig->setSig(ts);
+        tsig->setSig(ts, tsType);
         seg->add(tsig);
     }
 }

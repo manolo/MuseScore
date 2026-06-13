@@ -171,7 +171,7 @@ The staff type is constant across all LINE blocks for the same staff position.
 | Offset      | Size   | Description                                                                            |
 |-------------|--------|----------------------------------------------------------------------------------------|
 | 0x00        | 2      | BPM (quarter-note beats-per-minute; applies forward until next change)                 |
-| 0x02        | 1      | time-signature glyph                                                                   |
+| 0x02        | 1      | time-signature glyph (see table below)                                                 |
 | 0x04        | 2      | ticks per beat (beatTicks); **standard values**: 240=x/4, 120=x/8, 480=x/2, 360=compound dotted-quarter. **Non-standard**: some Encore builds store 240 even for 2/2 (correct value is 480). The importer never uses `beatTicks × timeSigDen` for position computation (that formula gives wrong wholeTicks for non-standard files); it always treats 960 as the whole-note tick count. |
 | 0x06        | 2      | total ticks in measure (durTicks)                                                      |
 | 0x08        | 1      | time-signature numerator                                                               |
@@ -181,6 +181,17 @@ The staff type is constant across all LINE blocks for the same staff position.
 | 0x0F        | 1      | repeat-alternative bitmask (see Volta section)                                         |
 | 0x1A        | 4      | repeat-mark field — LOW byte = repeat type (see table); upper 3 bytes = position/style |
 | 0x10–0x35   | 38     | layout data: measure width, x-offsets, "Writer" UTF-16 tag                             |
+
+#### Time-signature glyph values
+
+| Value  | Meaning                                                                          |
+|--------|----------------------------------------------------------------------------------|
+| 0x00   | Numeric display — show numerator / denominator digits (e.g. "4/4", "3/4", "6/8") |
+| 0x43   | Common time "C" — `TimeSigType::FOUR_FOUR`; numerator=4, denominator=4; produced by Encore 3.x / 4.x |
+| 0x63   | Common time "C" — `TimeSigType::FOUR_FOUR`; numerator=4, denominator=4; produced by Encore 5.x |
+
+Values other than 0x00, 0x43, and 0x63 have been observed (0x01, 0x02, 0x06, 0x07) in files
+with unusual meter strings; their meaning is unknown and the importer treats them as NORMAL.
 
 #### Barline types
 
@@ -752,8 +763,17 @@ Syllabic role (begin/middle/end/single) derived from hyphen-before / hyphen-afte
 
 ### v0xC2 (size = 22 or 24)
 
-The v0xC2 note layout is more compact than v0xC4. MIDI pitch is stored at offset +13 (where
-v0xC4 keeps its tuplet byte); implied-tuplet detection is used instead of an explicit tuplet byte.
+The v0xC2 note layout is more compact than v0xC4. Implied-tuplet detection is used instead of
+an explicit tuplet byte. **Two pitch-storage sub-variants exist** (distinguishable at runtime by
+the value at offset +13):
+
+- **Sub-variant A** (`+13 != 0`): MIDI pitch is at offset +13, same slot where v0xC4 keeps its
+  tuplet byte. The importer swaps it: `semiTonePitch = byte[+13]; byte[+13] = 0`.
+- **Sub-variant B** (`+13 == 0`): MIDI pitch is already at offset +15 (the standard
+  `semiTonePitch` slot). The swap must NOT fire; the importer leaves `semiTonePitch` unchanged.
+
+Sub-variant B is produced by some Encore 4.x builds and is identified by `byte[+13] == 0`
+combined with a non-zero `byte[+15]`.
 
 **size = 22** (no articulation):
 
@@ -763,8 +783,9 @@ v0xC4 keeps its tuplet byte); implied-tuplet detection is used instead of an exp
 | +6       | 1      | grace1                                                                           |
 | +7       | 1      | grace2                                                                           |
 | +10      | 2      | layout x-position                                                                |
-| +13      | 1      | **MIDI pitch (0-127)** — NOT a tuplet byte (implied-tuplet detection is used)    |
+| +13      | 1      | **MIDI pitch** (sub-variant A: non-zero) or 0 (sub-variant B: pitch is at +15)  |
 | +14      | 1      | dotControl bitmask (same semantics as v0xC4)                                     |
+| +15      | 1      | **MIDI pitch** (sub-variant B only); 0 in sub-variant A                          |
 | +16      | 2      | playback duration in ticks                                                       |
 | +19      | 1      | velocity                                                                         |
 | +20      | 1      | options                                                                          |
