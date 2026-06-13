@@ -349,6 +349,17 @@ static int encMeasDisplayCount(const EncMeasure& m, const EncMeasure* prev, cons
     return cnt;
 }
 
+// Map an Encore time-signature glyph byte to the MuseScore TimeSigType.
+// Encore encodes common time as 0x43 ('C') or 0x63 ('c') depending on version.
+// Glyph 0x00 means normal numeric display.
+static TimeSigType encGlyphToTimeSigType(quint8 glyph, Fraction ts)
+{
+    if ((glyph == 0x43 || glyph == 0x63) && ts == Fraction(4, 4)) {
+        return TimeSigType::FOUR_FOUR;
+    }
+    return TimeSigType::NORMAL;
+}
+
 void buildMeasures(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
@@ -371,6 +382,20 @@ void buildMeasures(BuildCtx& ctx)
         }
     }
 
+    // Nominal time sig type (common time "C" or normal numeric display).
+    {
+        // The nominal measure is [1] when [0] is a pickup with a different fraction.
+        const size_t nomIdx = (enc.measures.size() >= 2
+                               && ctx.nominalTimeSig != Fraction(
+                                   enc.measures[0].timeSigNum > 0 ? enc.measures[0].timeSigNum : 4,
+                                   enc.measures[0].timeSigDen > 0 ? enc.measures[0].timeSigDen : 4))
+                              ? 1 : 0;
+        if (nomIdx < enc.measures.size()) {
+            ctx.nominalTimeSigType = encGlyphToTimeSigType(enc.measures[nomIdx].timeSigGlyph,
+                                                           ctx.nominalTimeSig);
+        }
+    }
+
     int currentTick = 0;
     bool firstMeasure = true;
     size_t msIdxCounter = 0;
@@ -380,6 +405,7 @@ void buildMeasures(BuildCtx& ctx)
         int num = encMeas.timeSigNum > 0 ? encMeas.timeSigNum : 4;
         int den = encMeas.timeSigDen > 0 ? encMeas.timeSigDen : 4;
         Fraction ts(num, den);
+        ctx.measTickToTimeSigType[currentTick] = encGlyphToTimeSigType(encMeas.timeSigGlyph, ts);
 
         const EncMeasure* prev = (mi > 0) ? &enc.measures[mi - 1] : nullptr;
         const EncMeasure* next = (mi + 1 < enc.measures.size()) ? &enc.measures[mi + 1] : nullptr;
@@ -434,7 +460,7 @@ void buildInitialSignatures(BuildCtx& ctx)
     MasterScore* score = ctx.score;
     const EncFile& enc = ctx.enc;
     if (!enc.measures.empty()) {
-        addInitialTimeSig(score, ctx.totalStaves, ctx.nominalTimeSig);
+        addInitialTimeSig(score, ctx.totalStaves, ctx.nominalTimeSig, ctx.nominalTimeSigType);
     }
     if (!enc.lines.empty()) {
         const auto& firstLine = enc.lines[0];
@@ -472,11 +498,14 @@ void buildInitialSignatures(BuildCtx& ctx)
         }
         // Time sig changed — add a TimeSig element on every staff at this measure.
         Fraction mTick = m->tick();
+        auto tsTypeIt = ctx.measTickToTimeSigType.find(mTick.ticks());
+        TimeSigType tsType = (tsTypeIt != ctx.measTickToTimeSigType.end())
+                             ? tsTypeIt->second : TimeSigType::NORMAL;
         for (int si = 0; si < ctx.totalStaves; ++si) {
             Segment* seg = const_cast<Measure*>(m)->getSegment(SegmentType::TimeSig, mTick);
             TimeSig* tsig = Factory::createTimeSig(seg);
             tsig->setTrack(static_cast<track_idx_t>(si) * VOICES);
-            tsig->setSig(mTs);
+            tsig->setSig(mTs, tsType);
             seg->add(tsig);
         }
         prevTs = mTs;
