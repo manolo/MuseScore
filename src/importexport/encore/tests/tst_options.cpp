@@ -28,6 +28,7 @@
 #include "engraving/dom/layoutbreak.h"
 #include "engraving/dom/spanner.h"
 #include "engraving/dom/volta.h"
+#include "engraving/dom/chord.h"
 #include "engraving/dom/rest.h"
 #include "engraving/dom/segment.h"
 #include "engraving/dom/instrument.h"
@@ -54,9 +55,81 @@ protected:
     void SetUp() override { setRootDir(ENC_DIR); }
 };
 
-// importPageBreaks tests (importPageBreaks_true_places_page_break,
-// importPageBreaks_false_produces_no_page_breaks) deferred to B13:
-// applyPageBreaksFromLines is in resolvers-fingering.cpp.
+// ===========================================================================
+// importPageBreaks
+// structure_page_break.enc: 2 LINE blocks, both pageIdx=0 → page break after
+// the last measure of the first system.
+// ===========================================================================
+
+TEST_F(Tst_Options, importPageBreaks_true_places_page_break)
+{
+    MasterScore* score = readEncoreScore("structure_page_break.enc");
+    ASSERT_NE(score, nullptr);
+
+    bool foundPageBreak = false;
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (EngravingItem* e : m->el()) {
+            if (e && e->isLayoutBreak() && toLayoutBreak(e)->isPageBreak()) {
+                foundPageBreak = true;
+                break;
+            }
+        }
+        if (foundPageBreak) {
+            break;
+        }
+    }
+    EXPECT_TRUE(foundPageBreak)
+        << "Default (importPageBreaks=true): score must contain at least one page break";
+    delete score;
+}
+
+TEST_F(Tst_Options, importPageBreaks_false_produces_no_page_breaks)
+{
+    EncImportOptions opts;
+    opts.importPageBreaks = false;
+    MasterScore* score = readEncoreScoreWithOpts("structure_page_break.enc", opts);
+    ASSERT_NE(score, nullptr);
+
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (EngravingItem* e : m->el()) {
+            EXPECT_FALSE(e && e->isLayoutBreak() && toLayoutBreak(e)->isPageBreak())
+                << "importPageBreaks=false must produce no page breaks";
+        }
+    }
+    delete score;
+}
+
+// ===========================================================================
+// importSystemLocks
+// ===========================================================================
+
+TEST_F(Tst_Options, importSystemLocks_true_creates_system_locks)
+{
+    MasterScore* score = readEncoreScore("structure_system_break.enc");
+    ASSERT_NE(score, nullptr);
+    Measure* m0 = score->firstMeasure();
+    ASSERT_NE(m0, nullptr);
+    EXPECT_TRUE(m0->isStartOfSystemLock())
+        << "Default: first measure must be start of a SystemLock";
+    delete score;
+}
+
+TEST_F(Tst_Options, importSystemLocks_false_produces_no_system_locks)
+{
+    EncImportOptions opts;
+    opts.importSystemLocks = false;
+    MasterScore* score = readEncoreScoreWithOpts("structure_system_break.enc", opts);
+    ASSERT_NE(score, nullptr);
+    bool foundLock = false;
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        if (m->isStartOfSystemLock() || m->isEndOfSystemLock()) {
+            foundLock = true;
+            break;
+        }
+    }
+    EXPECT_FALSE(foundLock) << "importSystemLocks=false must produce no SystemLocks";
+    delete score;
+}
 
 // ===========================================================================
 // importStaffSize
@@ -456,6 +529,173 @@ TEST_F(Tst_Options, overfill_irregular_measure_does_not_crash)
     opts.overfillMeasureStrategy = OverfillStrategy::IrregularMeasure;
     MasterScore* score = readEncoreScoreWithOpts("bazo.enc", opts);
     ASSERT_NE(score, nullptr) << "IrregularMeasure overfill strategy must not crash during import";
+    delete score;
+}
+
+TEST_F(Tst_Options, overfill_irregular_measure_extends_measure_ticks)
+{
+    // options_overfill_irregular_facevalue.enc: 4/4 measure with Q+H+H.
+    // Note 3 (tick=720, fv=half) has realDuration=240 (gap to durTicks=960) but
+    // faceValue=half, so realDuration2DurationType returns V_HALF.  With the default
+    // Truncate strategy both capping points in emitters-note.cpp shrink it to a
+    // quarter, keeping voiceSum=1/1 and leaving the measure at 4/4.  With
+    // IrregularMeasure the caps must be skipped, cumTick reaches 5/4, and
+    // capMeasureLength extends the measure so ticks() > timesig().
+    EncImportOptions opts;
+    opts.overfillMeasureStrategy = OverfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("options_overfill_irregular_facevalue.enc", opts);
+    ASSERT_NE(score, nullptr);
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_NE(m->ticks(), m->timesig())
+        << "IrregularMeasure overfill: measure ticks must differ from timesig (measure must be extended)";
+    EXPECT_GT(m->ticks(), m->timesig())
+        << "IrregularMeasure overfill: measure ticks must be greater than timesig";
+    delete score;
+}
+
+TEST_F(Tst_Options, overfill_irregular_measure_extends_past_exact_boundary)
+{
+    // options_overfill_irregular_emitdrop.enc: 4/4 measure with Q+DH+Q+Q.
+    // After Q+DH, cumTick = exactly measure->ticks() (4/4).  Without the fix,
+    // emitters.cpp drops notes 3 and 4 at the "cumTick >= measure->ticks()" guard
+    // before they ever reach the per-note caps in emitters-note.cpp.
+    // With IrregularMeasure the guard must be bypassed so capMeasureLength
+    // can extend the measure to 6/4 and all four notes are preserved.
+    EncImportOptions opts;
+    opts.overfillMeasureStrategy = OverfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("options_overfill_irregular_emitdrop.enc", opts);
+    ASSERT_NE(score, nullptr);
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    // Count Chord elements in voice 0 to diagnose how many notes were emitted
+    int chordCount = 0;
+    for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        EngravingItem* el = seg->element(0);  // track 0 = staff 0 voice 0
+        if (el && el->isChord()) {
+            ++chordCount;
+        }
+    }
+    EXPECT_EQ(chordCount, 4)
+        << "Expected 4 chords (Q+DH+Q+Q) in measure, got " << chordCount;
+    EXPECT_GT(m->ticks(), m->timesig())
+        << "IrregularMeasure: notes past exact measure boundary must extend the measure";
+    delete score;
+}
+
+TEST_F(Tst_Options, overfill_irregular_measure_fills_short_staves)
+{
+    // options_overfill_irregular_twostaves.enc: 2 staves in 4/4.
+    // Staff 0: Q+DH+Q+Q (extends to 6/4). Staff 1: Q+Q+Q (only 3/4).
+    // After IrregularMeasure extends the measure to 6/4, staff 1 must be
+    // filled with a visible rest so that sanityCheck finds no incomplete measures.
+    EncImportOptions opts;
+    opts.overfillMeasureStrategy = OverfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("options_overfill_irregular_twostaves.enc", opts);
+    ASSERT_NE(score, nullptr);
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_GT(m->ticks(), m->timesig())
+        << "Measure must be extended past 4/4 by the overfilling staff";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret)
+        << "IrregularMeasure: short staves must be filled with rests after extension: " << ret.text();
+    delete score;
+}
+
+TEST_F(Tst_Options, overfill_irregular_crossing_note_keeps_full_duration)
+{
+    // options_overfill_irregular_facevalue.enc: 4/4, single staff, Q + H + H.
+    // The third note (H) starts at cumTick 3/4: only 1/4 remains before the barline.
+    // Without Fix C (resolveNoteDuration + advanceCumulativeTick cap bypass in
+    // emitters-note.cpp), that 1/4 remaining space would demote it to V_QUARTER.
+    // IrregularMeasure must bypass the cap and preserve V_HALF, extending to 5/4.
+    EncImportOptions opts;
+    opts.overfillMeasureStrategy = OverfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("options_overfill_irregular_facevalue.enc", opts);
+    ASSERT_NE(score, nullptr);
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    std::vector<ChordRest*> chords;
+    for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        EngravingItem* el = seg->element(0);
+        if (el && el->isChord()) {
+            chords.push_back(toChordRest(el));
+        }
+    }
+    ASSERT_EQ(chords.size(), 3u) << "Q + H + H: 3 chords expected";
+    EXPECT_EQ(chords[2]->durationType().type(), DurationType::V_HALF)
+        << "Crossing note must keep face-value V_HALF, not be capped to V_QUARTER";
+    EXPECT_EQ(m->ticks(), m->timesig() + Fraction(1, 4))
+        << "Measure must extend to exactly 5/4 (one quarter past 4/4 timesig)";
+    delete score;
+}
+
+TEST_F(Tst_Options, overfill_irregular_single_staff_sanity_check)
+{
+    // Same fixture (single staff Q+H+H in 4/4). End-to-end test for Fix C + Fix D:
+    // after the measure extends to 5/4 the single staff must be complete
+    // (voice 0 sums to the extended measure length), so sanityCheck must pass.
+    EncImportOptions opts;
+    opts.overfillMeasureStrategy = OverfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("options_overfill_irregular_facevalue.enc", opts);
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret)
+        << "IrregularMeasure single-staff overfill must pass sanityCheck: " << ret.text();
+    delete score;
+}
+
+TEST_F(Tst_Options, overfill_truncate_caps_crossing_note)
+{
+    // Negative regression guard for Fix C: Truncate mode must still cap the
+    // note that crosses the barline. Same fixture (Q+H+H in 4/4), default strategy.
+    // The third note has only 1/4 of space left, so it must NOT be V_HALF,
+    // and the measure must stay at 4/4.
+    MasterScore* score = readEncoreScore("options_overfill_irregular_facevalue.enc");
+    ASSERT_NE(score, nullptr);
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    std::vector<ChordRest*> chords;
+    for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        EngravingItem* el = seg->element(0);
+        if (el && el->isChord()) {
+            chords.push_back(toChordRest(el));
+        }
+    }
+    ASSERT_GE(chords.size(), 3u) << "All 3 notes must be emitted (none before barline)";
+    EXPECT_NE(chords[2]->durationType().type(), DurationType::V_HALF)
+        << "Truncate mode must cap the crossing note (must not remain V_HALF)";
+    EXPECT_EQ(m->ticks(), m->timesig())
+        << "Truncate mode must not extend the measure past its time signature";
+    delete score;
+}
+
+TEST_F(Tst_Options, overfill_truncate_drops_notes_at_barline)
+{
+    // Negative regression guard for Fix B: Truncate mode must drop notes whose
+    // cumTick reaches the barline. options_overfill_irregular_emitdrop.enc: Q+DH+Q+Q.
+    // After Q+DH, cumTick = exactly 4/4. Notes 3 and 4 must be dropped by the
+    // overflow guard, leaving fewer than 4 chords, and the measure stays 4/4.
+    MasterScore* score = readEncoreScore("options_overfill_irregular_emitdrop.enc");
+    ASSERT_NE(score, nullptr);
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    int chordCount = 0;
+    for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        EngravingItem* el = seg->element(0);
+        if (el && el->isChord()) {
+            ++chordCount;
+        }
+    }
+    EXPECT_LT(chordCount, 4)
+        << "Truncate: notes 3 and 4 start at/past the barline and must be dropped";
+    EXPECT_EQ(m->ticks(), m->timesig())
+        << "Truncate mode must not extend the measure";
     delete score;
 }
 
