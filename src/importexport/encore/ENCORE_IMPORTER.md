@@ -989,6 +989,44 @@ all pairs of metrically-equivalent but visually-distinct signatures:
 `Tst_Structure.time_sig_change_6_8_to_3_4_and_back` and
 `Tst_Structure.time_sig_change_2_2_to_4_4_and_back`.
 
+## Common time "C" symbol (timeSigGlyph)
+
+The MEAS header byte at offset 0x02 (`timeSigGlyph`) encodes the
+visual form of the time signature.  Two values denote common time:
+
+- `0x43` ('C', uppercase ASCII) — produced by Encore 3.x / 4.x
+- `0x63` ('c', lowercase ASCII) — produced by Encore 5.x
+
+Both map to `TimeSigType::FOUR_FOUR` (MuseScore's common-time C symbol).
+When `timeSigGlyph == 0x00` the normal numeric display is used.
+
+`buildMeasures` populates `ctx.nominalTimeSigType` and
+`ctx.measTickToTimeSigType` (a tick-to-type map for change points) via
+`encGlyphToTimeSigType()`.  `addInitialTimeSig` and the change-detection
+loop in `buildInitialSignatures` call `tsig->setSig(ts, tsType)` with the
+resolved type so that the "C" symbol survives the round-trip through MSCX.
+
+Exercised by `Tst_Structure.timesig_v0c2_common_time_glyph_preserved`
+(glyph=0x63) and `Tst_Structure.timesig_v0c2_common_time_glyph_uppercase_preserved`
+(glyph=0x43).
+
+## v0xC2 size=24 pitch sub-variants
+
+The v0xC2 pitch-swap (`semiTonePitch = byte[+13]; byte[+13] = 0`) was
+introduced to handle notes where Encore stores pitch in the tuplet slot
+(+13).  A second sub-variant exists in some Encore 4.x files where the
+pitch is already in the standard `semiTonePitch` slot (+15) and the
+tuplet slot contains 0.
+
+The importer guards the swap with `if (en->tuplet > 0)` in
+`postProcessElement` (`reader-v0xc4.cpp`): when `tuplet == 0` the swap
+is skipped and `semiTonePitch` is preserved as-is.
+
+Without this guard all notes in sub-variant B files (e.g. TUVEHAMB.ENC)
+imported as MIDI note 0 (C-1) — same pitch, far below the staff.
+
+Exercised by `Tst_Notes.notes_v0c2_size24_semitone_pitch`.
+
 ## Ghost MEAS blocks past header.measureCount
 
 Encore 5 occasionally leaves trailing MEAS blocks in the file
