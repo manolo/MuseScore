@@ -3282,6 +3282,33 @@ TEST_F(Tst_Notes, notes_v0c2_size24_correct_pitch_and_artic)
     delete score;
 }
 
+// v0xC2 size=24 notes where tuplet==0 and the MIDI pitch is already stored in
+// semiTonePitch (not in the tuplet slot). Found in some Encore 4.x files (e.g.
+// TUVEHAMB.ENC). The pitch-swap must be skipped so the correct pitch is preserved.
+TEST_F(Tst_Notes, notes_v0c2_size24_semitone_pitch)
+{
+    MasterScore* score = readEncoreScore("notes_v0c2_size24_semitonepitch.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    std::vector<int> pitches;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        pitches.push_back(toChord(el)->notes().front()->pitch());
+    }
+
+    ASSERT_EQ(pitches.size(), 2u);
+    EXPECT_EQ(pitches[0], 60) << "C4 (60): pitch from semiTonePitch must survive; swap must not fire when tuplet==0";
+    EXPECT_EQ(pitches[1], 64) << "E4 (64): pitch from semiTonePitch must survive; swap must not fire when tuplet==0";
+
+    delete score;
+}
+
 // When a non-first measure has explicit notes filling only part of the
 // duration, the trailing empty space must be filled with invisible gap rests,
 // not visible rests. Measure 0 is fully filled (to avoid pickup shortening).
