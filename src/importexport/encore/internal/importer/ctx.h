@@ -38,6 +38,7 @@
 #include "engraving/dom/lyrics.h"
 #include "engraving/dom/hairpin.h"
 #include "engraving/dom/masterscore.h"
+#include "engraving/dom/timesig.h"
 #include "engraving/dom/arpeggio.h"
 #include "engraving/dom/ornament.h"
 #include "engraving/dom/marker.h"
@@ -184,6 +185,11 @@ struct BuildCtx
     // Populated by buildMeasures(): nominal time sig of the score (differs from
     // measures[0] when the first measure is a pickup / anacrusis).
     Fraction nominalTimeSig { 4, 4 };
+    TimeSigType nominalTimeSigType { TimeSigType::NORMAL };
+
+    // Populated by buildMeasures(): tick (in engraving ticks) → TimeSigType for
+    // measures whose glyph encodes a non-numeric display (e.g. common time "C").
+    std::map<int, TimeSigType> measTickToTimeSigType {};
 
     // Populated by buildMeasures(): encToMsIdx[i] = MuseScore measure index of the
     // first measure produced from enc.measures[i].  Accounts for single-block

@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "engraving/dom/clef.h"
+#include "engraving/dom/timesig.h"
 
 #include "engraving/types/symid.h"
 #include "engraving/types/types.h"
@@ -51,7 +52,8 @@ int encKeyToFifths(quint8 key);
 
 void addTitleFrame(mu::engraving::MasterScore* score, const EncTitle& titleBlock);
 void addInitialKeySig(mu::engraving::MasterScore* score, int staffIdx, quint8 encKey);
-void addInitialTimeSig(mu::engraving::MasterScore* score, int nstaves, mu::engraving::Fraction ts);
+void addInitialTimeSig(mu::engraving::MasterScore* score, int nstaves, mu::engraving::Fraction ts,
+                       mu::engraving::TimeSigType tsType = mu::engraving::TimeSigType::NORMAL);
 void addInitialClef(mu::engraving::MasterScore* score, int staffIdx, EncClefType ct);
 void addInitialClef(mu::engraving::MasterScore* score, int staffIdx, mu::engraving::ClefType clef);
 void addRepeatMark(mu::engraving::Score* score, mu::engraving::Measure* measure, EncRepeatType rt);

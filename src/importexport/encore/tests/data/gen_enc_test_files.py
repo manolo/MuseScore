@@ -34,7 +34,7 @@ def set_chumagio(chuMagio):
 # ---------------------------------------------------------------------------
 # Measure helpers
 # ---------------------------------------------------------------------------
-def meas_hdr(timeSigNum, timeSigDen, bpm=100, barTypeEnd=0, beatTicks=None, durTicks=None):
+def meas_hdr(timeSigNum, timeSigDen, bpm=100, barTypeEnd=0, beatTicks=None, durTicks=None, glyph=0):
     """54-byte MEAS header, with layout bytes copied from bazo.enc MEAS 0.
 
     Bytes 0x10..0x35 carry layout/position data (measure width, x offsets,
@@ -52,6 +52,7 @@ def meas_hdr(timeSigNum, timeSigDen, bpm=100, barTypeEnd=0, beatTicks=None, durT
     """
     h = bytearray(0x36)
     struct.pack_into('<H', h, 0, bpm)
+    h[2] = glyph & 0xFF  # time-signature glyph (0x00=numeric, 0x43/'C'=common time, 0x63/'c'=common time v5)
     if beatTicks is None:
         # Legacy default: hard-code 240 (quarter) regardless of denominator
         # and back-compute durTicks via *4/den. Existing fixtures rely on
@@ -317,6 +318,42 @@ def gen_v0c2_size24_artic_pitch():
     e += note_v0c2_size24(480, 0, 0, fv=3, pitch=64, artic=0x1c)  # E4 tenuto
     e += end_marker()
     return assemble(0xC2,[(meas_hdr(4,4),e)])
+
+def note_v0c2_size24_semitone(tick, voice, staffIdx, fv, pitch):
+    """24-byte v0xC2 note with pitch at semiTonePitch slot (d[12]=rawElemStart+15),
+    tuplet=0. Matches the layout found in some Encore 4.x v0xC2 files (e.g. TUVEHAMB.ENC)
+    where the pitch is already in the correct field and the tuplet swap must NOT fire."""
+    d = bytearray(21)
+    d[0]=24; d[1]=staffIdx&0x3F; d[2]=fv
+    # d[10] (tuplet, rawElemStart+13) = 0: pitch is NOT here.
+    d[12]=pitch          # semiTonePitch at rawElemStart+15: the real pitch.
+    struct.pack_into('<H', d, 13, 480)  # playback duration
+    return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)
+
+def gen_v0c2_size24_semitonepitch():
+    # Two v0xC2 size=24 notes with tuplet=0 and pitch at semiTonePitch (not tuplet).
+    # Regression: the pitch-swap (semiTonePitch=tuplet) must be skipped when tuplet==0.
+    e  = note_v0c2_size24_semitone(0,   0, 0, fv=3, pitch=60)  # C4
+    e += note_v0c2_size24_semitone(240, 0, 0, fv=3, pitch=64)  # E4
+    e += end_marker()
+    return assemble(0xC2,[(meas_hdr(4,4),e)])
+
+def gen_v0c2_common_time_glyph():
+    # v0xC2 4/4 with timeSigGlyph=0x63 ('c' = common time "C" symbol in Encore 5.x).
+    # Regression: the importer must preserve TimeSigType::FOUR_FOUR, not silently
+    # downgrade to NORMAL (numeric 4/4).
+    e  = note_v0c2(0, 0, 0, fv=3, pitch=60)    # C4
+    e += note_v0c2(240, 0, 0, fv=3, pitch=64)  # E4
+    e += end_marker()
+    return assemble(0xC2, [(meas_hdr(4, 4, glyph=0x63), e)])
+
+def gen_v0c2_common_time_glyph_uppercase():
+    # v0xC2 4/4 with timeSigGlyph=0x43 ('C' = common time "C" symbol in older Encore).
+    # Same semantic as 0x63 but produced by different Encore versions.
+    e  = note_v0c2(0, 0, 0, fv=3, pitch=60)    # C4
+    e += note_v0c2(240, 0, 0, fv=3, pitch=64)  # E4
+    e += end_marker()
+    return assemble(0xC2, [(meas_hdr(4, 4, glyph=0x43), e)])
 
 def gen_v0c2_triplets():
     e = b''.join(note_v0c2(i*80,0,0,4,p) for i,p in enumerate([67,69,71,67,64,62]))
@@ -6894,6 +6931,9 @@ if __name__=='__main__':
     print("Generating synthetic Encore test files (using bazo.enc skeleton):")
     write("structure_v0c2_pitches.enc",       gen_v0c2_pitches())
     write("notes_v0c2_size24_artic_pitch.enc", gen_v0c2_size24_artic_pitch())
+    write("notes_v0c2_size24_semitonepitch.enc", gen_v0c2_size24_semitonepitch())
+    write("notes_v0c2_common_time_glyph.enc",         gen_v0c2_common_time_glyph())
+    write("notes_v0c2_common_time_glyph_uc.enc",     gen_v0c2_common_time_glyph_uppercase())
     write("structure_v0c2_triplets.enc",      gen_v0c2_triplets())
     write("importer_v0c2_snap.enc",          gen_v0c2_snap())
     write("notes_triplets.enc",      gen_v0c4_triplets())
