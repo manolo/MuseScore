@@ -125,12 +125,22 @@ void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& d
         // Primary probe.
         const qint64 off = NAME_BASE + static_cast<qint64>(n) * NAME_STEP;
         instruments[n].name = tryReadName(off);
+    }
 
-        // Compact-layout fallback: if the primary slot is empty or all-spaces,
-        // try the alternate compact base (offset 314, step 112).
-        if (instruments[n].name.trimmed().isEmpty()) {
-            const qint64 cOff = COMPACT_NAME_BASE + static_cast<qint64>(n) * COMPACT_NAME_STEP;
-            instruments[n].name = tryReadName(cOff);
+    // Compact-layout fallback: if the primary slot is empty or all-spaces,
+    // try the compact base (offset 314, step 112).  Compact entries are stored in
+    // REVERSE instrument order (entry 0 = last instrument, entry 1 = second-to-last,
+    // …). This correctly maps the single recoverable entry for the last instrument
+    // when earlier entries fall past the first block offset.
+    for (size_t k = 0; k < instruments.size(); ++k) {
+        const size_t target = instruments.size() - 1 - k;
+        if (!instruments[target].name.trimmed().isEmpty()) {
+            continue;
+        }
+        const qint64 cOff = COMPACT_NAME_BASE + static_cast<qint64>(k) * COMPACT_NAME_STEP;
+        const QString candidate = tryReadName(cOff);
+        if (!candidate.trimmed().isEmpty()) {
+            instruments[target].name = candidate;
         }
     }
 }
