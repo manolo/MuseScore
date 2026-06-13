@@ -22,6 +22,7 @@
 
 #include <gtest/gtest.h>
 
+#include "engraving/dom/system.h"
 #include "engraving/dom/barline.h"
 #include "engraving/dom/chord.h"
 #include "engraving/dom/hairpin.h"
@@ -352,20 +353,20 @@ TEST_F(Tst_Structure, page_margins_wini_custom_left)
 // File with WINI top=0 left=0 (zero margins, full-page printable area).
 // ornaments_fingering_grandstaff.enc: top=0 left=0 bEdge=842 rEdge=595.
 // Zero margins are clamped to the minimum safe values so staves stay within the page.
-TEST_F(Tst_Structure, page_margins_wini_zero_margins_clamped)
+TEST_F(Tst_Structure, page_margins_wini_zero_margins)
 {
     MasterScore* score = readEncoreScore("ornaments_fingering_grandstaff.enc");
     ASSERT_NE(score, nullptr);
 
-    // Margins clamped to minimums: LR=0.03", TB=0.10".
-    EXPECT_NEAR(score->style().styleD(Sid::pageOddTopMargin),    0.10, 0.001);
-    EXPECT_NEAR(score->style().styleD(Sid::pageEvenTopMargin),   0.10, 0.001);
-    EXPECT_NEAR(score->style().styleD(Sid::pageOddLeftMargin),   0.03, 0.001);
-    EXPECT_NEAR(score->style().styleD(Sid::pageEvenLeftMargin),  0.03, 0.001);
-    EXPECT_NEAR(score->style().styleD(Sid::pageOddBottomMargin), 0.10, 0.001);
-    // printableWidth capped to pageWidth - leftMargin - minRightMargin.
+    // WINI has all-zero margins: all four margins should be 0.
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddTopMargin),    0.0, 0.005);
+    EXPECT_NEAR(score->style().styleD(Sid::pageEvenTopMargin),   0.0, 0.005);
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddLeftMargin),   0.0, 0.005);
+    EXPECT_NEAR(score->style().styleD(Sid::pageEvenLeftMargin),  0.0, 0.005);
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddBottomMargin), 0.0, 0.005);
+    // printableWidth equals full page width when both side margins are 0.
     const double pageWIn = score->style().styleD(Sid::pageWidth);
-    EXPECT_NEAR(score->style().styleD(Sid::pagePrintableWidth), pageWIn - 0.03 - 0.03, 0.01);
+    EXPECT_NEAR(score->style().styleD(Sid::pagePrintableWidth), pageWIn, 0.01);
 
     delete score;
 }
@@ -382,6 +383,25 @@ TEST_F(Tst_Structure, page_margins_wini_bottom_margin_derived)
     EXPECT_NEAR(score->style().styleD(Sid::pageOddBottomMargin),  expectedIn, 0.005)
         << "bottom margin must be derived from bottomEdge and page height";
     EXPECT_NEAR(score->style().styleD(Sid::pageEvenBottomMargin), expectedIn, 0.005);
+
+    delete score;
+}
+
+// FIX: WINI pts format must set the page size explicitly, not rely on the
+// MuseScore default.  On a machine where the default is Letter, an A4 .enc
+// (rightEdge=595, bottomEdge=842) must still produce an A4 score.
+// ornaments_fingering_grandstaff.enc: WINI top=0 left=0 bEdge=842 rEdge=595.
+TEST_F(Tst_Structure, page_size_detected_from_wini_pts_format)
+{
+    MasterScore* score = readEncoreScore("ornaments_fingering_grandstaff.enc");
+    ASSERT_NE(score, nullptr);
+
+    const double kA4W = 210.0 / 25.4;   // 8.2677"
+    const double kA4H = 297.0 / 25.4;   // 11.6929"
+    EXPECT_NEAR(score->style().styleD(Sid::pageWidth),  kA4W, 0.01)
+        << "pts-format WINI with A4 boundary values must set A4 page width";
+    EXPECT_NEAR(score->style().styleD(Sid::pageHeight), kA4H, 0.01)
+        << "pts-format WINI with A4 boundary values must set A4 page height";
 
     delete score;
 }

@@ -834,11 +834,298 @@ TEST_F(Tst_Ornaments, multi_measure_hairpin_resolved_from_almezuro)
     EXPECT_TRUE(foundDim);
     delete score;
 }
-// bowing_marks_from_orn_c4_c5: deferred to B13.
-// v0xc2_orn_c4_is_accent_not_upbow: deferred to B13.
-// v0xc4_orn_be_is_accent: deferred to B13.
-// fingering_from_orn_b9_bd: deferred to B13.
-// fingering_grandstaff_routing: deferred to B13.
+TEST_F(Tst_Ornaments, bowing_marks_from_orn_c4_c5)
+{
+    MasterScore* score = readEncoreScore("ornaments_bowing.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<SymId> bowings;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Articulation* a : toChord(el)->articulations()) {
+                if (a->symId() == SymId::stringsDownBow
+                    || a->symId() == SymId::stringsUpBow) {
+                    bowings.push_back(a->symId());
+                }
+            }
+        }
+    }
+    const std::vector<SymId> expected = {
+        SymId::stringsDownBow, SymId::stringsUpBow,
+        SymId::stringsDownBow, SymId::stringsUpBow,
+    };
+    EXPECT_EQ(bowings, expected);
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: In v0xC2, ORN tipo 0xC4 = accent above (not up-bow as in v0xC4).
+// v0xC2 NOTE elements (size=22) have no articulation bytes; accent is in ORN.
+// ===========================================================================
+TEST_F(Tst_Ornaments, v0xc2_orn_c4_is_accent_not_upbow)
+{
+    MasterScore* score = readEncoreScore("ornaments_v0c2_orn_c4_accent.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int accentCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Articulation* a : toChord(el)->articulations()) {
+                EXPECT_NE(a->symId(), SymId::stringsUpBow)
+                    << "ORN 0xC4 in v0xC2 must not produce stringsUpBow";
+                if (a->symId() == SymId::articAccentAbove
+                    || a->symId() == SymId::articAccentBelow) {
+                    ++accentCount;
+                }
+            }
+        }
+    }
+    EXPECT_GE(accentCount, 5) << "Expected several accent marks in this v0xC2 score";
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: In v0xC4, ORN tipo 0xBE = accent above (standalone accent glyph).
+// ===========================================================================
+TEST_F(Tst_Ornaments, v0xc4_orn_be_is_accent)
+{
+    MasterScore* score = readEncoreScore("ornaments_v0c4_orn_be_accent.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int accentCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Articulation* a : toChord(el)->articulations()) {
+                EXPECT_NE(a->symId(), SymId::stringsUpBow)
+                    << "ORN 0xBE in v0xC4 must not produce stringsUpBow";
+                if (a->symId() == SymId::articAccentAbove
+                    || a->symId() == SymId::articAccentBelow) {
+                    ++accentCount;
+                }
+            }
+        }
+    }
+    EXPECT_GE(accentCount, 5) << "Expected several accent marks in this v0xC4 score";
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Stand-alone fingering from ORN tipo 0xB9..0xBD (tipo = 0xB8 + finger 1..5).
+// ===========================================================================
+TEST_F(Tst_Ornaments, fingering_from_orn_b9_bd)
+{
+    MasterScore* score = readEncoreScore("ornaments_fingering_orn.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> fingerings;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Note* n : toChord(el)->notes()) {
+                for (EngravingItem* e : n->el()) {
+                    if (e && e->isFingering()) {
+                        fingerings.push_back(toFingering(e)->plainText());
+                    }
+                }
+            }
+        }
+    }
+    const std::vector<String> expected = { u"1", u"2", u"3", u"4", u"5" };
+    EXPECT_EQ(fingerings, expected);
+    delete score;
+}
+
+// ===========================================================================
+// FIX: Grand-staff FINGER ORN routing: cross-measure (Pattern A) and multi-note same-tick (Pattern B).
+// ===========================================================================
+TEST_F(Tst_Ornaments, fingering_grandstaff_routing)
+{
+    MasterScore* score = readEncoreScore("ornaments_fingering_grandstaff.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    // Navigate to a measure by 0-based index (Encore measure order).
+    auto measureAt = [&](int idx) -> Measure* {
+        int n = 0;
+        for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+            if (!mb->isMeasure()) {
+                continue;
+            }
+            if (n++ == idx) {
+                return toMeasure(mb);
+            }
+        }
+        return nullptr;
+    };
+
+    // Collect fingerings attached to the first chord on `tr` in `m`.
+    auto fingeringsOnFirstChord = [](Measure* m, track_idx_t tr) -> std::vector<String> {
+        std::vector<String> out;
+        if (!m) {
+            return out;
+        }
+        for (Segment* s = m->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(tr);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Note* n : toChord(el)->notes()) {
+                for (EngravingItem* e : n->el()) {
+                    if (e && e->isFingering()) {
+                        out.push_back(toFingering(e)->plainText());
+                    }
+                }
+            }
+            break;
+        }
+        return out;
+    };
+
+    // Collect all fingerings on `tr` across every chord in `m`.
+    auto fingeringsOnTrack = [](Measure* m, track_idx_t tr) -> std::vector<String> {
+        std::vector<String> out;
+        if (!m) {
+            return out;
+        }
+        for (Segment* s = m->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(tr);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Note* n : toChord(el)->notes()) {
+                for (EngravingItem* e : n->el()) {
+                    if (e && e->isFingering()) {
+                        out.push_back(toFingering(e)->plainText());
+                    }
+                }
+            }
+        }
+        return out;
+    };
+
+    const track_idx_t staff1 = 0;
+    const track_idx_t staff2 = VOICES;
+
+    // Pattern A: 4 ORNs from m2's last voice=0 tick must land on m3 staff 2, not m2 staff 1.
+    Measure* m2 = measureAt(1);
+    ASSERT_NE(m2, nullptr);
+    Measure* m3 = measureAt(2);
+    ASSERT_NE(m3, nullptr);
+
+    // Last chord of m2, staff 1: must NOT carry the cross-measure fingerings.
+    {
+        std::vector<String> m2s1last;
+        Segment* lastSeg = nullptr;
+        for (Segment* s = m2->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            if (s->element(staff1) && s->element(staff1)->isChord()) {
+                lastSeg = s;
+            }
+        }
+        if (lastSeg) {
+            for (Note* n : toChord(lastSeg->element(staff1))->notes()) {
+                for (EngravingItem* e : n->el()) {
+                    if (e && e->isFingering()) {
+                        m2s1last.push_back(toFingering(e)->plainText());
+                    }
+                }
+            }
+        }
+        EXPECT_TRUE(m2s1last.empty())
+            << "Last chord of m2 staff 1 should have no fingerings (Pattern A regression)";
+    }
+
+    // First chord of m3, staff 2: receives the 4 Pattern A fingerings.
+    {
+        auto f = fingeringsOnFirstChord(m3, staff2);
+        EXPECT_EQ(f.size(), 4u) << "m3 staff 2 should have 4 fingerings from Pattern A";
+        if (f.size() == 4) {
+            EXPECT_EQ(f[0], u"1");
+            EXPECT_EQ(f[1], u"1");
+            EXPECT_EQ(f[2], u"3");
+            EXPECT_EQ(f[3], u"4");
+        }
+    }
+
+    // Staff 1 m3 melody fingerings are unaffected by the fix.
+    {
+        auto f = fingeringsOnTrack(m3, staff1);
+        EXPECT_EQ(f, (std::vector<String> { u"1", u"2", u"4" }));
+    }
+
+    // Pattern B: more ORNs at m11 tick=0 than voice=0 notes must land on staff 2, not staff 1.
+    Measure* m11 = measureAt(10);
+    ASSERT_NE(m11, nullptr);
+
+    // First chord of m11, staff 1: must NOT carry the Pattern B fingerings.
+    {
+        auto f = fingeringsOnFirstChord(m11, staff1);
+        // Staff 1 may legitimately have its own single fingering; check it has <=1.
+        EXPECT_LE(f.size(), 1u)
+            << "m11 staff 1 first chord should not carry 4 Pattern B fingerings";
+    }
+
+    // First chord of m11, staff 2: receives the 4 Pattern B fingerings.
+    {
+        auto f = fingeringsOnFirstChord(m11, staff2);
+        EXPECT_EQ(f.size(), 4u) << "m11 staff 2 should have 4 fingerings from Pattern B";
+        if (f.size() == 4) {
+            EXPECT_EQ(f[0], u"1");
+            EXPECT_EQ(f[1], u"2");
+            EXPECT_EQ(f[2], u"4");
+            EXPECT_EQ(f[3], u"4");
+        }
+    }
+
+    delete score;
+}
+
+// ===========================================================================
+// BUG FIX: articulationDown=0x21 on a non-tuplet note must create fermataBelow;
+// on a tuplet note it must be suppressed (same dual-meaning rule as 0x20 above).
+// ===========================================================================
 
 // ===========================================================================
 // BUG FIX: articulationDown=0x21 on a non-tuplet note must create fermataBelow;
@@ -1682,7 +1969,50 @@ TEST_F(Tst_Ornaments, guitar_bend_orns_skipped)
         << "Guitar bend ORNs 0x28-0x2B must not add articulations to chords";
     delete score;
 }
-// tremolo_orn_r16_and_string_numbers: deferred to B13.
+TEST_F(Tst_Ornaments, tremolo_orn_r16_and_string_numbers)
+{
+    MasterScore* score = readEncoreScore("ornaments_tremolo_r8_r16_r64.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<TremoloType> tremolos;
+    int stringNumCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            TremoloSingleChord* t = toChord(el)->tremoloSingleChord();
+            if (t) {
+                tremolos.push_back(t->tremoloType());
+            }
+            for (Note* n : toChord(el)->notes()) {
+                for (EngravingItem* e : n->el()) {
+                    if (e && e->isFingering()
+                        && toFingering(e)->textStyleType() == TextStyleType::STRING_NUMBER) {
+                        ++stringNumCount;
+                    }
+                }
+            }
+        }
+    }
+    // Only 0xEE produces a tremolo (R16).
+    EXPECT_EQ(tremolos, std::vector<TremoloType> { TremoloType::R16 });
+    // 0xE6 and 0xE9 produce string numbers (2 and 5).
+    EXPECT_EQ(stringNumCount, 2) << "0xE6 and 0xE9 must produce STRING_NUMBER fingerings, not tremolos";
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: ORN tipo 0x1C (GRAPHIC_LINE, user-drawn line) is silently skipped.
+// No articulation is added to the chord; score loads and passes sanity check.
+// ===========================================================================
 
 // ===========================================================================
 // FEATURE: ORN tipo 0x1C (GRAPHIC_LINE, user-drawn line) is silently skipped.
