@@ -51,10 +51,14 @@ struct EncFormatReader_V0xC4 final : EncFormatReader
             return false;
         }
         if (!m_hasMetaTables) {
-            // v0xC2: MIDI pitch is always at offset +13 (the tuplet slot); implied-tuplet
-            // detection is used instead of the explicit tuplet byte. See ENCORE_FORMAT.md §Note element.
-            en->semiTonePitch = en->tuplet;
-            en->tuplet = 0;
+            // v0xC2: in most files the MIDI pitch is at offset +13 (the tuplet slot) and
+            // semiTonePitch is 0; swap them. When tuplet is 0 the pitch is already in the
+            // semiTonePitch field (some Encore 4.x files), so leave it untouched.
+            // See ENCORE_FORMAT.md §Note element.
+            if (en->tuplet > 0) {
+                en->semiTonePitch = en->tuplet;
+                en->tuplet = 0;
+            }
             // size=24 notes carry an articulation byte at +22 (2 bytes after alterGlyph at +21).
             if (en->size == 24 && ds.device()->seek(rawElemStart + 22)) {
                 ds >> en->articulationUp;
@@ -81,33 +85,53 @@ private:
 namespace {
 void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& ds)
 {
+    // Primary layout (large-TK and most files): NAME_BASE=202, NAME_STEP=2158.
+    // Compact v0xC2 layout: some Encore 3.x/4.x files store names at a different base.
+    // The compact instrument table starts at a fixed offset (296 = 0x128) with
+    // 112-byte entries; the name field is 18 bytes into each entry → base = 314,
+    // step = 112.  This is tried as a fallback when the primary offset has blank/spaces.
     static constexpr qint64 NAME_BASE = 202;
     static constexpr qint64 NAME_STEP = 2158;
-    for (size_t n = 0; n < instruments.size(); ++n) {
-        if (!instruments[n].name.isEmpty()) {
-            continue;
-        }
-        const qint64 off = NAME_BASE + static_cast<qint64>(n) * NAME_STEP;
+    static constexpr qint64 COMPACT_NAME_BASE = 314;   // 296 (entry start) + 18 (name field)
+    static constexpr qint64 COMPACT_NAME_STEP = 112;   // one compact instrument entry
+
+    auto tryReadName = [&](qint64 off) -> QString {
         if (off + 2 >= static_cast<qint64>(ds.device()->size())) {
-            break;
+            return {};
         }
         if (!ds.device()->seek(off)) {
-            break;
+            return {};
         }
         quint8 b0 = 0, b1 = 0;
         ds >> b0 >> b1;
         if (b0 < 0x20 || b0 >= 0x7F) {
-            continue;
+            return {};
         }
         const bool isLatin1 = (b1 != 0x00 && b1 >= 0x20 && b1 < 0xFF);
         if (!probeUtf16LE(b0, b1) && !isLatin1) {
-            continue;
+            return {};
         }
         if (!ds.device()->seek(off)) {
-            break;
+            return {};
         }
         int remaining = static_cast<int>(ds.device()->size() - off);
-        instruments[n].name = readEncodedStringRemaining(ds, remaining);
+        return readEncodedStringRemaining(ds, remaining);
+    };
+
+    for (size_t n = 0; n < instruments.size(); ++n) {
+        if (!instruments[n].name.isEmpty()) {
+            continue;
+        }
+        // Primary probe.
+        const qint64 off = NAME_BASE + static_cast<qint64>(n) * NAME_STEP;
+        instruments[n].name = tryReadName(off);
+
+        // Compact-layout fallback: if the primary slot is empty or all-spaces,
+        // try the alternate compact base (offset 314, step 112).
+        if (instruments[n].name.trimmed().isEmpty()) {
+            const qint64 cOff = COMPACT_NAME_BASE + static_cast<qint64>(n) * COMPACT_NAME_STEP;
+            instruments[n].name = tryReadName(cOff);
+        }
     }
 }
 
@@ -153,6 +177,9 @@ void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds)
                 instruments[n].midiProgram = static_cast<int>(prg);
             }
         }
+        // Recover names even for no-TK files: some compact v0xC2 files store
+        // instrument names at header offsets not covered by the MIDI-program read above.
+        recoverMissingNames(instruments, ds);
         return;
     }
     const bool compact = (instruments[0].offset == 0);
@@ -350,10 +377,13 @@ bool EncFormatReader_V0xC4::readInstrumentMeta(std::vector<EncInstrument>& instr
                                                QDataStream& ds,
                                                const EncFile& /*file*/) const
 {
+    // v0xC2 files (m_hasMetaTables=false) have no TK meta tables, but instrument names
+    // can still be stored at compact header offsets.  Recover them so the importer does
+    // not always fall back to "Part N" names.
+    recoverMissingNames(instruments, ds);
     if (!m_hasMetaTables) {
         return true;
     }
-    recoverMissingNames(instruments, ds);
     readMidiPrograms(instruments, ds);
     readKeyTranspositions(instruments, ds);
     return true;
