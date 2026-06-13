@@ -118,9 +118,15 @@ NAME_BASE = 202     (offset of first instrument name in the file)
 NAME_STEP = 2158    (stride between instruments)
 instrument n → file offset  NAME_BASE + n * NAME_STEP
 ```
-The name is encoded as UTF-16 LE or Latin-1 (same probe as TK blocks). When no TK blocks are
-found, the parser creates instruments with empty names so `recoverMissingNames()` can fill them
-from these offsets. "Part N" fallback is applied only after recovery, for names still empty.
+Some compact v0xC2 files (Encore 3.x/4.x, no TK blocks, first-block-offset ≈ 418) store names in a
+**different compact-entry layout**: the instrument table begins at 0x128 (296); each entry is
+112 bytes; the name field is 18 bytes into each entry, giving
+`COMPACT_NAME_BASE = 314, COMPACT_NAME_STEP = 112`.  When `NAME_BASE + n × NAME_STEP` yields an
+empty or all-spaces string, `recoverMissingNames()` also probes the compact offsets.
+
+`recoverMissingNames()` is now called for v0xC2 files (previously the `!m_hasMetaTables` early
+return in `readInstrumentMeta` prevented it from running).  "Part N" fallback is applied only after
+recovery, for names still empty.
 
 **Percussion quirk.** Percussion tracks always report MIDI program 1 (GM Grand Piano);
 infer the actual kit from the track name.
