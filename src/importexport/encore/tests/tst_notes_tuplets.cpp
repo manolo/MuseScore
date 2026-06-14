@@ -1330,6 +1330,100 @@ TEST_F(Tst_NotesTuplets, triplet_orphan_with_prior_complete_group)
     delete score;
 }
 
+// Regression: isolated explicit tuplet note placed with face value but cumTick advance was capped;
+// voice overran by face - capped. Fix: always set chord duration to the capped value.
+TEST_F(Tst_NotesTuplets, isolated_explicit_tuplet_caps_chord_ticks)
+{
+    MasterScore* score = readEncoreScore("importer_isolated_explicit_tuplet_capped.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_isolated_explicit_tuplet_capped.enc";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+    delete score;
+}
+
+// Regression: note-level path-A cap deleted a chord that belonged to an inner (nested) tuplet.
+// Old code called tt.currentTuplet->remove(chord), the outer tuplet, which does not contain the
+// chord. Fix: use chord->tuplet() (the actual owning tuplet) rather than tt.currentTuplet.
+TEST_F(Tst_NotesTuplets, inner_tuplet_note_level_cap_no_crash)
+{
+    MasterScore* score = readEncoreScore("importer_inner_tuplet_note_level_cap.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_inner_tuplet_note_level_cap.enc";
+    EXPECT_GT(score->nmeasures(), 0);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+    delete score;
+}
+
+// ===========================================================================
+// BUG FIX: mixed-duration explicit tuplet bracket {Q,E} in a 3:2 group
+// was not closing correctly. faceSum(Q+E)=3/8 never reached the old
+// threshold 3Q=3/4, pulling subsequent notes into the same bracket.
+// Fix: close a group when faceSum/actualN is a valid standard TDuration.
+// ===========================================================================
+TEST_F(Tst_NotesTuplets, v0c4_mixed_duration_tuplet_bracket_closes_correctly)
+{
+    MasterScore* score = readEncoreScore("ornaments_tuplet_mixed_baseLen.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load ornaments_tuplet_mixed_baseLen.enc";
+
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Measure is corrupt (overrun): " << ret.text();
+
+    Measure* m1 = score->firstMeasure();
+    ASSERT_NE(m1, nullptr);
+
+    std::set<Tuplet*> tuplets;
+    int noteCount = 0;
+    for (Segment* s = m1->first(SegmentType::ChordRest); s;
+         s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        ++noteCount;
+        Chord* c = toChord(el);
+        if (c->tuplet()) {
+            tuplets.insert(c->tuplet());
+        }
+    }
+
+    EXPECT_EQ(noteCount, 6);
+    EXPECT_EQ(tuplets.size(), 2u)
+        << "Must form 2 tuplet brackets: {Q,E} and {Q,Q,Q}, not one big group";
+    delete score;
+}
+
+// ===========================================================================
+// BUG FIX: 4:3 quadruplet (tup=0x43) was not recognized; notes appeared
+// as plain, with wrong advance (Q instead of E per slot).
+// ===========================================================================
+TEST_F(Tst_NotesTuplets, v0c4_4to3_quadruplet_correct_advance)
+{
+    MasterScore* score = readEncoreScore("tuplet_4to3_quadruplet.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load tuplet_4to3_quadruplet.enc";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "4:3 quadruplet must import without measure corruption: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    std::vector<Chord*> chords;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChord()) {
+            chords.push_back(toChord(e));
+        }
+    }
+    ASSERT_EQ(chords.size(), 4u) << "Must have 4 chords in the 4:3 quadruplet";
+
+    for (int i = 0; i < 4; ++i) {
+        ASSERT_NE(chords[i]->tuplet(), nullptr) << "Chord " << i << " must be in a 4:3 tuplet";
+        EXPECT_EQ(chords[i]->tuplet(), chords[0]->tuplet()) << "All 4 in same bracket";
+    }
+    EXPECT_EQ(chords[0]->tuplet()->ratio(), Fraction(4, 3)) << "Ratio must be 4:3";
+    EXPECT_EQ(chords[0]->actualTicks(), Fraction(3, 32)) << "E in 4:3 = E*(3/4) = 3/32";
+    delete score;
+}
+
 // ===========================================================================
 // BUG FIX: two interacting bugs in the nested-tuplet detection path:
 //

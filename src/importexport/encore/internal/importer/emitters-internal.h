@@ -32,6 +32,7 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include <array>
 
 namespace mu::engraving {
 class Measure;
@@ -51,6 +52,7 @@ struct MeasEmitCtx {
     int nLineStaves = 0;
     const std::vector<int>* lineStaffInstrIdx = nullptr;
     const std::vector<int>* lineStaffWithin = nullptr;
+    const std::array<int, 256>* lineSlotByRawByte = nullptr;
 
     std::set<const EncMeasureElem*> validTupletGroupMember;
     std::set<const EncMeasureElem*> partialEndGroup;
@@ -111,7 +113,14 @@ void handleChordSym(BuildCtx& ctx, const MeasEmitCtx& mc, const NoteElemCtx& ec)
 // Queue one LYRIC element into ctx.pendingLyrics. (emitters-lyrics.cpp)
 void enqueueLyric(BuildCtx& ctx, const EncLyric* el, mu::engraving::track_idx_t track);
 // Attach queued lyrics to the nearest chords in the measure. (emitters-lyrics.cpp)
-void attachPendingLyrics(BuildCtx& ctx, mu::engraving::Measure* measure, const EncMeasure& encMeas, mu::engraving::Fraction measTick);
+void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc);
+
+// Route an element's raw (staffIdx, voice, staffWithin) to a MuseScore (staffIdx, voice, track).
+// Returns false if the element should be skipped. (emitters.cpp)
+bool routeElementStaffVoice(
+    const EncMeasureElem* e, bool isNoteOrRest, const std::array<int, 256>& lineSlotByRawByte, const MeasEmitCtx& mc, const BuildCtx& ctx,
+    int& staffIdx, int& voice, int& msVoice, mu::engraving::track_idx_t& track, std::pair<int, int>& trackKey, std::pair<int,
+                                                                                                                         int>& encVoiceKey);
 
 // Case-B pickup adjustment: shorten measure 0 if loop placed less than its nominal length. (emitters-fill.cpp)
 void adjustPickupMeasure(BuildCtx& ctx, mu::engraving::Measure* measure, int measIdx);
