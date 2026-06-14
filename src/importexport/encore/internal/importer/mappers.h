@@ -55,8 +55,7 @@ mu::engraving::DynamicType encOrnType2DynamicType(EncOrnamentType ot);
 // Pick octave-decorated clef when Encore's plain G/F plus a NEGATIVE octave Key implies one
 // (e.g. keyOffset=-12 -> G8_VB/F8_VB; -24 -> G15_MB/F15_MB). Positive octave Keys keep the plain
 // clef (the octave is carried as a playback transposition; see builders-parts.cpp).
-mu::engraving::ClefType pickStaffClef(EncClefType encClef, mu::engraving::ClefType concertClef, mu::engraving::ClefType transposingClef,
-                                      int keyOffsetSemitones);
+mu::engraving::ClefType pickStaffClef(EncClefType encClef, int keyOffsetSemitones);
 
 // Return the octave-down variant of an already-resolved MuseScore clef for a NEGATIVE octave Key
 // (-12/-24). Returns the input clef for non-octave or positive offsets, or when the clef has no
