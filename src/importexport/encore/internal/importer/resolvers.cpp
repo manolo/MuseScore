@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Post-pass driver: run all deferred spanner/ornament resolvers in order after the score is built.
+
 #include "resolvers.h"
 
 using namespace mu::engraving;
@@ -31,5 +33,6 @@ void resolveAll(BuildCtx& ctx)
     resolveHairpins(ctx);
     resolveOrnaments(ctx);
     resolveFingeringAndBowing(ctx);
+    resolveOttavas(ctx);
 }
 } // namespace mu::iex::enc
