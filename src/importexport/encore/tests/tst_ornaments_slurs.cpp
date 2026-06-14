@@ -20,6 +20,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Slur and ottava endpoint resolution: open-slur removal, alMezuro/+16 measure-count resolution, xoffset
+// pixel-span heuristics, multi-instrument routing, and grace-to-main/grace-to-later anchoring.
+// See ENCORE_IMPORTER.md §Slur endpoint resolution and ENCORE_IMPORTER.md §Grace-to-main and grace-to-later slurs.
+
 #include <gtest/gtest.h>
 
 #include "engraving/dom/arpeggio.h"
@@ -52,6 +56,7 @@
 #include "engraving/dom/breath.h"
 #include "engraving/dom/measurerepeat.h"
 #include "engraving/dom/ornament.h"
+#include "engraving/dom/ottava.h"
 #include "engraving/dom/slur.h"
 #include "engraving/dom/trill.h"
 
@@ -68,14 +73,10 @@ protected:
     void SetUp() override { setRootDir(ENC_DIR); }
 };
 
-// ===========================================================================
-// BUG FIX: Open slurs removed (no NaN in Bezier layout)
-// ===========================================================================
-
+// A SLURSTART with no matching stop has no endpoints and would NaN in Bezier layout; open slurs must be
+// dropped so every surviving spanner has a valid tick range.
 TEST_F(Tst_OrnamentsSlurs, no_nan_crash_from_open_slurs)
 {
-    // notes_corrupted.enc has SLURSTART without SLURSTOP. No endpoints → NaN in Bezier layout.
-    // Fix: remove all open slurs; all remaining spanners must have valid tick ranges.
     MasterScore* score = readEncoreScore("notes_corrupted.enc");
     ASSERT_NE(score, nullptr) << "Corrupted file should load without NaN crash";
     for (auto& [tick, sp] : score->spannerMap().map()) {
@@ -94,22 +95,10 @@ TEST_F(Tst_OrnamentsSlurs, no_nan_crash_opus27)
 
 TEST_F(Tst_OrnamentsSlurs, overfull_measure_slur_no_zero_length_arc)
 {
-    // An overfull measure shifts the ticks of the measures that follow, and a later
-    // cross-measure slur can then have both grips resolve to the same chord: findCR for the
-    // start grip finds no chord at/before the start tick and falls back to the measure's first
-    // chord, which is also what the (exact) end-tick lookup returns. startElement == endElement
-    // makes the Bezier layout take atan of a zero-length span and assert on a NaN control point.
-    // The importer must drop such a slur, so loading (which lays out) must not crash and no
-    // surviving slur may be zero-length.
-    //
-    // Fixture: a minimized, anonymized real-world v0xC4 (Encore 4.5) score - one staff, an
-    // overfull bar near the start, and the slur near the end. The degenerate layout only arises
-    // from this accumulated overfull tick drift, which a hand-built synthetic bar does not
-    // reproduce, so the fixture is a trimmed real file rather than generator output.
-    //
-    // The drift only appears under the IrregularMeasure overfill strategy (the shipped GUI/CLI
-    // default), which extends the bar instead of truncating it; the struct default used by
-    // readEncoreScore() is Truncate, which drops the overflow and hides the bug.
+    // Overfull-measure tick drift can make a cross-measure slur resolve start==end (a zero-length arc),
+    // which NaNs the Bezier layout; such slurs must be dropped. Needs the IrregularMeasure strategy (which
+    // extends the bar and produces the drift); the readEncoreScore default Truncate hides it. The fixture
+    // is a trimmed real file because a synthetic bar does not reproduce the accumulated drift.
     mu::iex::enc::EncImportOptions opts;
     opts.overfillMeasureStrategy = mu::iex::enc::OverfillStrategy::IrregularMeasure;
     MasterScore* score = readEncoreScoreWithOpts("structure_v0c4_slur_zero_length_overfull.enc", opts);
@@ -124,10 +113,7 @@ TEST_F(Tst_OrnamentsSlurs, overfull_measure_slur_no_zero_length_arc)
     delete score;
 }
 
-// ===========================================================================
-// FIX: SLURSTART resolves end tick from alMezuro after the measure pass (no SLURSTOP in .enc binaries).
-// ===========================================================================
-
+// .enc has no SLURSTOP; a SLURSTART resolves its end from the alMezuro measure count after the measure pass.
 TEST_F(Tst_OrnamentsSlurs, multi_measure_slur_resolved_from_almezuro)
 {
     MasterScore* score = readEncoreScore("ornaments_multi_measure_slur.enc");
@@ -149,28 +135,10 @@ TEST_F(Tst_OrnamentsSlurs, multi_measure_slur_resolved_from_almezuro)
     delete score;
 }
 
-// ===========================================================================
-// FIX: v0xC2 cross-measure slurs resolved via xoffset span heuristic extended
-// to the next measure when targetEndXoff exceeds the start measure's range.
-// ===========================================================================
-
+// A v0xC2 slur whose +16 measure-count marks it cross-measure must anchor its end to the downbeat of the
+// target measure; the stale xoffset2 must not be used.
 TEST_F(Tst_OrnamentsSlurs, v0xc2_cross_measure_slur_ends_in_next_measure)
 {
-    // Reproduces the XEQUEABU.ENC pattern: a v0xC2 slur whose arc (xoffset=1,
-    // xoffset2=5) starts before the first note of the measure (xoff=3) and extends
-    // beyond all same-measure notes (maxXoffInMeas=4, targetEndXoff=7).
-    //
-    // Measure 0: note@0(xoff=3) + SLURSTART(xoff=1,xoff2=5) + note@240(xoff=2)
-    //            + note@480(xoff=3) + note@720(xoff=4)
-    // Measure 1: note@0(xoff=7)   ← correct endpoint (dist=0)
-    //
-    // Bug (before fix): bestEncTick=720 >= 0 and resolved=true after finding the
-    // last same-measure note (dist=3). The cross-measure extension condition had
-    // !resolved && bestEncTick<0, so it was skipped and the slur landed on tick=720
-    // (last note of measure 0) instead of the first note of measure 1.
-    //
-    // Fix: remove !resolved and bestEncTick<0; replace with !usedTinyPixelSpan &&
-    // (targetEndXoff>maxXoffInMeas || bestEncTick<0), excluding grace-to-main slurs.
     MasterScore* score = readEncoreScore("ornaments_v0c2_cross_measure_slur.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -185,7 +153,6 @@ TEST_F(Tst_OrnamentsSlurs, v0xc2_cross_measure_slur_ends_in_next_measure)
         EXPECT_LT(sp->tick(), sp->tick2()) << "slur span must be positive";
         EXPECT_NE(sp->startElement(), nullptr) << "slur missing start element";
         EXPECT_NE(sp->endElement(), nullptr) << "slur missing end element";
-        // Determine whether the slur crosses a barline.
         if (sp->startElement() && sp->endElement()) {
             const EngravingItem* startEl = sp->startElement();
             const EngravingItem* endEl   = sp->endElement();
@@ -198,33 +165,20 @@ TEST_F(Tst_OrnamentsSlurs, v0xc2_cross_measure_slur_ends_in_next_measure)
             }
         }
     }
-    // All slurs in this file should be cross-measure (not same-measure).
     EXPECT_GT(crossMeasureCount, 0) << "expected at least one cross-measure slur";
     EXPECT_EQ(sameMeasureCount, 0) << "no same-measure slurs expected in this file";
     delete score;
 }
 
-// ===========================================================================
-// FIX: resolvers-slur.cpp staffIdx mismatch in multi-instrument compact-encoded files.
-// ps.staffIdx = routed LINE slot; em->staffIdx = raw compact instrument index.
-// Before fix: staves 1-3 find no notes (mismatch) → last-chord fallback picks note3.
-// After fix: emLineSlot() translates raw byte to LINE slot before comparing.
-// ===========================================================================
-
+// Regression: in multi-instrument compact-encoded files the raw instrument index must be translated to
+// the routed LINE slot before finding a slur's notes, or staves 1-3 miss and the last-chord fallback
+// wrongly picks note3. Each staff's slur must end at note2.
 TEST_F(Tst_OrnamentsSlurs, multiinstr_slur_endpoint_on_second_note_not_last_chord)
 {
-    // ornaments_multiinstr_slur_routing.enc: 2 instruments × 2 staves,
-    // 3 quarter notes per staff in measure 0 with a SLURSTART at note1.
-    // Expected: each slur ends at note2 (beat 2), not note3 (beat 3, last chord).
-    //   staff 0 (piano treble): note2 pitch = E4 = 64
-    //   staff 1 (piano bass):   note2 pitch = E3 = 52
-    //   staff 2 (organ treble): note2 pitch = B4 = 71
-    //   staff 3 (organ bass):   note2 pitch = B3 = 59
     MasterScore* score = readEncoreScore("ornaments_multiinstr_slur_routing.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_EQ(score->nstaves(), 4);
 
-    // Map staffIdx → expected note2 pitch
     std::map<int, int> expectedEndPitch = { { 0, 64 }, { 1, 52 }, { 2, 71 }, { 3, 59 } };
     std::map<int, bool> staffSeen;
 
@@ -241,7 +195,6 @@ TEST_F(Tst_OrnamentsSlurs, multiinstr_slur_endpoint_on_second_note_not_last_chor
         staffSeen[si] = true;
         EXPECT_LT(sp->tick(), sp->tick2()) << "slur span must be positive, staff " << si;
 
-        // Verify the end element is a chord and its pitch matches note2 (not note3).
         const EngravingItem* endEl = sp->endElement();
         ASSERT_TRUE(endEl->isChord()) << "slur end must be a chord, staff " << si;
         const int endPitch = toChord(endEl)->notes().back()->pitch();
@@ -259,14 +212,8 @@ TEST_F(Tst_OrnamentsSlurs, multiinstr_slur_endpoint_on_second_note_not_last_chor
     delete score;
 }
 
-// ===========================================================================
-// FIX: targetEndXoff = slurXoffset2 (not firstNoteXoff + pixelSpan).
-// When firstNoteXoff << slurXoffset the old formula underestimates the target
-// and a "decoy" note with a low xoffset wins over the correct endpoint.
-// Pattern: note1(xoff=2) + SLUR(xoff=10,xoff2=11) + note2(xoff=9) + note3(xoff=3).
-// OLD target=3 → note3(dist=0) wins ✗. NEW target=11 → note2(dist=2) wins ✓.
-// ===========================================================================
-
+// v0xC2 xoffset2 is stale, so a tiny-span slur is a note-to-next-note arc ending at note2, regardless of
+// a decoy note3 whose xoffset would otherwise match.
 TEST_F(Tst_OrnamentsSlurs, v0xc2_slur_ends_at_note2_not_decoy_note3)
 {
     MasterScore* score = readEncoreScore("ornaments_v0c2_slur_firstnote_xoff_mismatch.enc");
@@ -282,7 +229,6 @@ TEST_F(Tst_OrnamentsSlurs, v0xc2_slur_ends_at_note2_not_decoy_note3)
         }
         foundSlur = true;
         ASSERT_NE(sp->endElement(), nullptr) << "slur must have an end element";
-        // The slur must end at note2 (E4 = pitch 64), NOT at note3 (C4 = pitch 60).
         ASSERT_TRUE(sp->endElement()->isChord()) << "slur end must be a chord";
         const int endPitch = toChord(sp->endElement())->notes().back()->pitch();
         EXPECT_EQ(endPitch, 64) << "slur must end at E4 (note2), not C4 (decoy note3)";
@@ -291,19 +237,10 @@ TEST_F(Tst_OrnamentsSlurs, v0xc2_slur_ends_at_note2_not_decoy_note3)
     delete score;
 }
 
-// ===========================================================================
-// FIX: v0xC2 same-measure slur must not extend cross-measure when a note
-// exists after the slur start in the current measure.
-// ===========================================================================
-
+// A v0xC2 within-measure slur (+16 count = 0) must end at the next note in its own bar and not extend to
+// a decoy note in the next measure that an xoffset match would prefer.
 TEST_F(Tst_OrnamentsSlurs, v0xc2_same_measure_slur_not_extended_to_next_measure)
 {
-    // ornaments_v0c2_same_measure_slur_no_cross.enc reproduces the pattern from
-    // SALVEDOL.ENC measure 3: a slur from note 5 to note 6 within the same measure.
-    // firstNoteXoff=9, slurXoffset=11, slurXoffset2=12: pixelSpan=1,
-    // targetEndXoff=10 > maxXoffInMeas=9 -- tiny overshoot triggers the cross-measure
-    // extension without the fix. Measure 1 has a decoy G4 (xoff=9, dist=1) that the
-    // extension would incorrectly prefer over the correct same-measure E4 (xoff=5, dist=5).
     MasterScore* score = readEncoreScore("ornaments_v0c2_same_measure_slur_no_cross.enc");
     ASSERT_NE(score, nullptr);
 
@@ -330,23 +267,10 @@ TEST_F(Tst_OrnamentsSlurs, v0xc2_same_measure_slur_not_extended_to_next_measure)
     delete score;
 }
 
-// ===========================================================================
-// REGRESSION: v0xC2 multi-instrument slur routing, combined emLineSlot +
-// targetEndXoff fix. Reproduces the SALVEDOL organ-bass pattern on all 4 staves.
-// ===========================================================================
-
+// v0xC2 multi-instrument slur routing: staff-slot translation must let each staff's slur find its notes,
+// and the next-note rule must end each slur at note2 rather than a decoy note3.
 TEST_F(Tst_OrnamentsSlurs, v0xc2_multiinstr_slur_endpoint_on_note2_not_decoy)
 {
-    // ornaments_v0c2_multiinstr_slur_routing.enc: v0xC2, 2 instruments × 2 staves,
-    // 3 quarter notes per staff with a SLURSTART at note1.
-    // SALVEDOL organ-bass pattern: note1(xoff=2), SLUR(xoff=10,xoff2=11),
-    // note2(xoff=9, correct endpoint), note3(xoff=3, decoy — close to OLD target=3).
-    //
-    // Without emLineSlot fix: staves 1-3 find no notes, strategy-3 picks note3.
-    // Without targetEndXoff fix: target=3, note3(dist=0) beats note2(dist=6).
-    // Both fixes: note2 wins on every staff.
-    //
-    // Expected note2 pitches: staff0=60, staff1=52, staff2=71, staff3=59.
     MasterScore* score = readEncoreScore("ornaments_v0c2_multiinstr_slur_routing.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_EQ(score->nstaves(), 4);
@@ -380,17 +304,10 @@ TEST_F(Tst_OrnamentsSlurs, v0xc2_multiinstr_slur_endpoint_on_note2_not_decoy)
     delete score;
 }
 
+// A slur from an appoggiatura grace to its co-located main note must not be dropped: the zero-span end is
+// detected as grace-to-main with the grace chord as startElement.
 TEST_F(Tst_OrnamentsSlurs, grace_slur_to_main_not_dropped)
 {
-    // ornaments_grace_slur_to_main.enc: 4/4 measure with appoggiatura grace at
-    // Encore tick=0, SLURSTART at tick=0 (alMezuro=0), and regular note at tick=15.
-    //
-    // Both grace and regular note map to MuseScore cumTick=0 (grace steals 15
-    // ticks; regular note starts at measure beat 0). The heuristic converted
-    // tick=15 to measTick+Fraction(15,960) where no chord exists → slur dropped.
-    //
-    // Fix: snap end tick to nearest real segment, detect zero-span as
-    // grace-to-main, and create slur with startElement = grace chord.
     MasterScore* score = readEncoreScore("ornaments_grace_slur_to_main.enc");
     ASSERT_NE(score, nullptr);
 
@@ -424,19 +341,9 @@ TEST_F(Tst_OrnamentsSlurs, grace_slur_to_main_not_dropped)
     delete score;
 }
 
+// A slur from a grace to a later note must start at the grace chord, not fall back to an earlier note.
 TEST_F(Tst_OrnamentsSlurs, grace_slur_to_later_note_starts_from_grace)
 {
-    // ornaments_grace_slur_to_later.enc: 3/4 measure with half note at tick=0,
-    // then SLURSTART + appoggiatura graces at Encore tick=450, and quarter at tick=480.
-    //
-    // In MuseScore: half=cumTick=0, graces+quarter=cumTick=1/2.
-    // ps.startTick = measTick + Fraction(450,960) = measTick + 15/32.
-    // endTick snaps to measTick + 1/2 (the quarter) > ps.startTick → grace-to-LATER slur.
-    //
-    // Without fix: computeStartElement() creates a TimeTick anchor at 15/32 and
-    //   falls back to firstElement(staff) → half note → wrong start.
-    // With fix: tick2rightSegment(ps.startTick) finds the quarter note which has
-    //   graces → startElement set to first grace chord.
     MasterScore* score = readEncoreScore("ornaments_grace_slur_to_later.enc");
     ASSERT_NE(score, nullptr);
 
@@ -464,36 +371,10 @@ TEST_F(Tst_OrnamentsSlurs, grace_slur_to_later_note_starts_from_grace)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: Grace-to-main slur with co-located grace+regular (same Encore tick)
-//
-// When an ACCIACCATURA grace and its main note share the same Encore tick, two
-// bugs conspire to produce the wrong slur endpoint:
-//
-// Bug A (v0xC2): the pixel-span heuristic searches only notes AFTER startEncTick,
-// so the co-located main note is excluded and the NEXT note (one beat later) is
-// chosen → slur misses the main note.
-//
-// Bug B (both formats): the zero-span path sets tick2 = end-of-measure instead of
-// startTick, making graceToMain=false → computeEndElement() runs and overwrites
-// the explicit endElement with whatever is at end-of-measure (often a note in the
-// next measure, or a rest).
-//
-// Fix A: detect grace+regular co-location in the heuristic and force zero-span.
-// Fix B: set tick2 = startTick so graceToMain=true → computeEndElement skipped.
-// ===========================================================================
-
+// When an ACCIACCATURA grace and its main note share the same Encore tick, a grace-to-main slur must end
+// on the co-located main chord in the same measure, not spill to a rest or note in a later measure.
 TEST_F(Tst_OrnamentsSlurs, v0c4_grace_slur_to_main_coloc_correct_endpoint)
 {
-    // ornaments_v0c4_grace_slur_to_main_coloc.enc: 3/4 measure with
-    // ACCIACCATURA at Encore tick=480 followed by a regular note ALSO at
-    // tick=480, and SLURSTART at tick=480 (alMezuro=0, arc pointing within
-    // the same beat).
-    //
-    // Without Fix B: zero-span path sets tick2=end-of-measure → computeEndElement
-    // finds a rest or note in measure 2 → endElement is in the wrong measure.
-    // With Fix B: tick2=startTick → graceToMain=true → endElement preserved as
-    // the co-located main chord in measure 1.
     MasterScore* score = readEncoreScore("ornaments_v0c4_grace_slur_to_main_coloc.enc");
     ASSERT_NE(score, nullptr);
 
@@ -527,17 +408,10 @@ TEST_F(Tst_OrnamentsSlurs, v0c4_grace_slur_to_main_coloc_correct_endpoint)
     delete score;
 }
 
+// v0xC2 counterpart: the pixel-span heuristic must detect grace+regular co-location and force a zero-span
+// grace-to-main slur rather than being baited to a later note.
 TEST_F(Tst_OrnamentsSlurs, v0c2_grace_slur_to_main_coloc_correct_endpoint)
 {
-    // ornaments_v0c2_grace_slur_to_main_coloc.enc: 3/4 measure (v0xC2 format)
-    // with ACCIACCATURA at tick=480 (xoff=6), regular note at tick=480 (xoff=5,
-    // main note), regular note at tick=600 (xoff=4, the "bait" for the heuristic),
-    // and SLURSTART at tick=480 (xoffset=4, xoffset2=3).
-    //
-    // Without Fix A: heuristic finds note@600 (dist=1 from targetEnd=5) as best
-    // endpoint → endTick=measTick+5/8 ≠ startTick → slur ends at the WRONG note.
-    // With Fix A: grace+regular co-location detected → force zero-span → grace-
-    // to-main path creates slur with endElement = main chord at tick=480.
     MasterScore* score = readEncoreScore("ornaments_v0c2_grace_slur_to_main_coloc.enc");
     ASSERT_NE(score, nullptr);
 
@@ -556,8 +430,7 @@ TEST_F(Tst_OrnamentsSlurs, v0c2_grace_slur_to_main_coloc_correct_endpoint)
         if (sp->endElement() && sp->endElement()->isChord()) {
             const Chord* endCh = toChord(sp->endElement());
             endIsNonGrace = !endCh->isGrace();
-            // The main note and grace are co-located: the slur's tick and the
-            // endElement's segment tick must match (grace-to-main = zero span).
+            // Grace-to-main is a zero-span arc: end chord sits at the slur tick.
             endAtSameTick = (endCh->tick() == sp->tick());
         }
     }
@@ -571,33 +444,11 @@ TEST_F(Tst_OrnamentsSlurs, v0c2_grace_slur_to_main_coloc_correct_endpoint)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: v0xC4 grace follows main in binary (regular BEFORE acciaccatura)
-//
-// In v0xC4 files, Encore 5 serializes the regular (main) note BEFORE the
-// ACCIACCATURA grace note when they share the same Encore tick. This makes
-// the grace appear as a chord extension (isChordExt=TRUE) of the already-
-// placed regular note. Without the fix, the grace goes to pendingGraces and
-// is attached to the NEXT chord, creating wrong note→[grace|note] order.
-//
-// Fix: when isChordExt=TRUE for a grace and a chord already exists at
-// elemTick, attach the grace retroactively to that chord directly.
-// ===========================================================================
-
+// In v0xC4 the main note is serialized before the grace at the same tick, so the grace arrives as a chord
+// extension and must be retroactively attached to the already-placed main chord; the slur then anchors to
+// the grace. See ENCORE_IMPORTER.md §Grace note ordering (multi-grace groups).
 TEST_F(Tst_OrnamentsSlurs, v0c4_grace_after_main_in_binary_slur_anchors_to_grace)
 {
-    // ornaments_v0c4_grace_after_main_in_binary.enc: 4/4 measure with
-    // SLURSTART + Regular at tick=0 (FIRST in binary, main chord), then
-    // ACCIACCATURA at tick=0 (SECOND in binary, grace), then Regular at
-    // tick=240 (slur target for the grace-to-later slur).
-    //
-    // Without fix: ACCIACCATURA (isChordExt=TRUE) goes to pendingGraces and
-    //   is attached to the Regular@240 chord. tick2rightSegment(0) finds the
-    //   main chord at 0 with no graces → startElement is NOT set to grace.
-    //   Result: slur starts at the main chord, not the grace.
-    // With fix: ACCIACCATURA is attached retroactively to the already-placed
-    //   main chord at tick=0. tick2rightSegment(0) finds the grace → slur
-    //   startElement = ACCIACCATURA grace chord.
     MasterScore* score = readEncoreScore("ornaments_v0c4_grace_after_main_in_binary.enc");
     ASSERT_NE(score, nullptr);
 
@@ -619,29 +470,10 @@ TEST_F(Tst_OrnamentsSlurs, v0c4_grace_after_main_in_binary_slur_anchors_to_grace
     delete score;
 }
 
+// v0xC4 grace-after-main where the slur targets a LATER note: retroactive grace attachment plus the
+// xoffset shortcut must yield a grace-to-later slur (grace start, end at the later note), not zero-span.
 TEST_F(Tst_OrnamentsSlurs, v0c4_grace_after_main_grace_to_later_slur_anchors_to_grace)
 {
-    // ornaments_v0c4_grace_after_main_grace_to_later.enc: 4/4 measure with
-    // Regular at tick=240 (FIRST in binary, xoff=5), ACCIACCATURA at tick=240
-    // (SECOND, xoff=3), Note at tick=480 (xoff=9), SLURSTART at tick=240
-    // (xoffset=5, xoffset2=9).
-    //
-    // emitters, without Fix 1 (retroactive attachment):
-    //   Regular@240: gap-snap to 1/4, mainChord@1/4, cumTick→1/2. prevMidiTick=240.
-    //   ACCIACCATURA@240: isChordExt=TRUE → pendingGraces.
-    //   Note@480: cumTick=1/2, chord@1/2, pendingGraces flushed → ACCIACCATURA on
-    //     chord@1/2 (WRONG). With Fix 1: grace retroactively on mainChord@1/4.
-    //
-    // resolveSlurs, heuristic/shortcut interaction:
-    //   firstNoteXoff=5 (Regular@240), targetEnd=9. Note@480 bestDist=0, regularDist=4.
-    //   Refined shortcut: 4 > 0 → does NOT force zero-span (grace-to-LATER, not main).
-    //   Old shortcut: targetEnd(9) <= maxXoff(9) → DID force zero-span (wrong).
-    //
-    // Without Fix 1: mainChord@1/4 has no graces → slur startElement = mainChord.
-    //   graceStart=FALSE and endAtLaterTick=FALSE. Test FAILS.
-    // Without refined shortcut (Fix 2): old shortcut forces zero-span → endTick=tick.
-    //   graceStart=TRUE but endAtLaterTick=FALSE. Test FAILS.
-    // With both fixes: grace-to-LATER slur; grace@1/4 → Note@1/2.
     MasterScore* score = readEncoreScore("ornaments_v0c4_grace_after_main_grace_to_later.enc");
     ASSERT_NE(score, nullptr);
 
@@ -657,8 +489,7 @@ TEST_F(Tst_OrnamentsSlurs, v0c4_grace_after_main_grace_to_later_slur_anchors_to_
             graceStart = toChord(sp->startElement())->isGrace();
         }
         if (sp->endElement() && sp->endElement()->isChord()) {
-            // Grace-to-LATER: the slur must end at a chord AFTER the grace (not a
-            // zero-span where endElement is the co-located main chord at the same tick).
+            // Grace-to-later ends after the grace tick, not zero-span at the co-located main chord.
             endAtLaterTick = (toChord(sp->endElement())->tick() > sp->tick());
         }
     }
@@ -671,23 +502,10 @@ TEST_F(Tst_OrnamentsSlurs, v0c4_grace_after_main_grace_to_later_slur_anchors_to_
     delete score;
 }
 
+// Same grace-after-main case but with preceding notes advancing the tick cursor: the grace must still be
+// retroactively attached to its main chord, not carried forward to the later note.
 TEST_F(Tst_OrnamentsSlurs, v0c4_grace_after_main_preceding_notes_slur_anchors_to_grace)
 {
-    // ornaments_v0c4_grace_after_main_preceding_notes.enc: 4/4 measure with
-    // Quarter@0 (preceding note, pushes ctx.cumTick to 1/4 before the pair),
-    // Regular@240 (FIRST in binary, xoff=5), ACCIACCATURA@240 (SECOND, xoff=3),
-    // Note@480 (xoff=9), SLURSTART@240 (xoffset=5, xoffset2=9).
-    //
-    // This reproduces the BN-COLET5 scenario: ctx.cumTick was advanced to T by
-    // preceding notes, then Regular@240 places mainChord@T. The grace (isChordExt)
-    // must be retroactively attached to mainChord@T, not carried forward to Note@480.
-    //
-    // Without Fix 1 (retroactive attachment): ACCIACCATURA attaches to chord@1/2
-    //   (Note@480). mainChord@1/4 has no graces. Slur startElement = mainChord.
-    //   graceStart=FALSE and endAtLaterTick=FALSE → test FAILS.
-    // Without refined shortcut (Fix 2): old shortcut would force zero-span
-    //   (targetEnd=9 <= maxXoff=9). graceStart=TRUE but endAtLaterTick=FALSE.
-    // With both fixes: grace-to-later slur; grace@1/4 → Note@1/2. Both TRUE.
     MasterScore* score = readEncoreScore("ornaments_v0c4_grace_after_main_preceding_notes.enc");
     ASSERT_NE(score, nullptr);
 
@@ -716,36 +534,10 @@ TEST_F(Tst_OrnamentsSlurs, v0c4_grace_after_main_preceding_notes_slur_anchors_to
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: firstNoteXoff reference must be the grace note, not the regular
-//
-// In v0xC4 files the regular (main) note appears first in the binary, so the
-// firstNoteXoff search currently picks its xoffset. But the slur arc starts
-// at the GRACE position (slurXoffset ≈ grace xoffset), so using the regular's
-// larger xoffset as reference inflates targetEndXoff and causes the heuristic
-// to pick a far-away later note rather than the co-located main chord.
-//
-// Fix: prefer grace note xoffset as firstNoteXoff when a grace exists at
-// startEncTick (regardless of binary order).
-// ===========================================================================
-
+// The pixel-span reference xoffset must be the grace note's, not the main note's: the slur arc begins at
+// the grace, so using the main's larger xoffset would inflate the target and pick a far later note.
 TEST_F(Tst_OrnamentsSlurs, v0c4_grace_after_main_slur_arc_starts_at_grace_not_regular)
 {
-    // ornaments_v0c4_grace_after_main_slur_to_main.enc: 4/4 measure with
-    // Regular@0 (FIRST in binary, xoff=20), ACCIACCATURA@0 (SECOND, xoff=10),
-    // Regular@240 (xoff=40), SLURSTART@0 (xoffset=10, xoffset2=22).
-    //
-    // The slur arc starts near the grace (xoffset=10 ≈ grace xoff=10) and
-    // ends near the main note (xoffset2=22 ≈ main xoff=20+2).
-    //
-    // Without fix (firstNoteXoff = Regular xoff=20):
-    //   targetEnd = 20 + 12 = 32. Regular@240 (xoff=40, dist=8) beats
-    //   mainChord regularDist=12 → no zero-span → grace-to-later (WRONG).
-    //   endAtSameTick=FALSE → test FAILS.
-    //
-    // With fix (firstNoteXoff = ACCIACCATURA xoff=10):
-    //   targetEnd = 10 + 12 = 22. Main chord dist=2 beats Regular@240 dist=18
-    //   → zero-span → grace-to-main → endAtSameTick=TRUE → test PASSES.
     MasterScore* score = readEncoreScore("ornaments_v0c4_grace_after_main_slur_to_main.enc");
     ASSERT_NE(score, nullptr);
 
@@ -761,8 +553,7 @@ TEST_F(Tst_OrnamentsSlurs, v0c4_grace_after_main_slur_arc_starts_at_grace_not_re
             graceStart = toChord(sp->startElement())->isGrace();
         }
         if (sp->endElement() && sp->endElement()->isChord()) {
-            // Grace-to-main: the slur arc ends at the co-located main chord
-            // (same MuseScore tick), not at the later note.
+            // Grace-to-main: end at the co-located main chord (same tick), not the later note.
             endAtSameTick = (toChord(sp->endElement())->tick() == sp->tick());
         }
     }
@@ -775,22 +566,8 @@ TEST_F(Tst_OrnamentsSlurs, v0c4_grace_after_main_slur_arc_starts_at_grace_not_re
     delete score;
 }
 
-// ===========================================================================
-// REGRESSION: Cross-measure slur (alMezuro=2) endpoint resolved via Fallback 1
-// (xoffset2 direct comparison against note xoffsets in target measure).
-// The slur must land on D4 (pitch=62, xoff=15), NOT on F4 (last note, xoff=35).
-// Without Fallback 1, the "last ChordRest" fallback would select F4 instead.
-// Fixture: M0 SLURSTART(alMezuro=2, xoffset2=15); M2 has 4 notes with
-// xoffsets 5/15/25/35 (C4/D4/E4/F4). slurXoffset2=15 → D4 (pitch=62).
-
-// ===========================================================================
-// REGRESSION: Cross-measure slur (alMezuro=2) endpoint resolved via Fallback 1
-// (xoffset2 direct comparison against note xoffsets in target measure).
-// The slur must land on D4 (pitch=62, xoff=15), NOT on F4 (last note, xoff=35).
-// Without Fallback 1, the "last ChordRest" fallback would select F4 instead.
-// Fixture: M0 SLURSTART(alMezuro=2, xoffset2=15); M2 has 4 notes with
-// xoffsets 5/15/25/35 (C4/D4/E4/F4). slurXoffset2=15 → D4 (pitch=62).
-// ===========================================================================
+// A cross-measure slur's endpoint is resolved by comparing xoffset2 against the target measure's note
+// xoffsets, so it lands on the matching interior note (D4), not the last-ChordRest fallback (F4).
 TEST_F(Tst_OrnamentsSlurs, cross_measure_slur_endpoint_precision)
 {
     MasterScore* score = readEncoreScore("ornaments_cross_measure_slur_precision.enc");
@@ -911,5 +688,95 @@ TEST_F(Tst_OrnamentsSlurs, v0c4_slur_cross_measure_fallback)
     EXPECT_EQ(found->tick2(), Fraction(7, 4))
         << "cross-measure slur must fall back to the last ChordRest of "
         "the alMezuro target measure (m2 beat 4 = absolute tick 7/4)";
+    delete score;
+}
+
+// Two ottava spanners: 8va in m0, 8vb in m1.
+// resolveOttavas pins each endpoint to the next ottava's startTick, or scoreEnd.
+TEST_F(Tst_OrnamentsSlurs, v0c4_ottava_two_spanners)
+{
+    MasterScore* score = readEncoreScore("ornaments_ottava_two_spanners.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load ornaments_ottava_two_spanners.enc";
+
+    std::vector<Ottava*> ottavas;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isOttava()) {
+            ottavas.push_back(toOttava(sp));
+        }
+    }
+    ASSERT_EQ(ottavas.size(), 2u) << "expected exactly 2 ottava spanners";
+
+    std::sort(ottavas.begin(), ottavas.end(), [](Ottava* a, Ottava* b) {
+        return a->tick() < b->tick();
+    });
+
+    EXPECT_EQ(ottavas[0]->ottavaType(), OttavaType::OTTAVA_8VA);
+    EXPECT_EQ(ottavas[0]->tick(),  Fraction(0, 1));
+    EXPECT_EQ(ottavas[0]->tick2(), Fraction(1, 1));
+
+    EXPECT_EQ(ottavas[1]->ottavaType(), OttavaType::OTTAVA_8VB);
+    EXPECT_EQ(ottavas[1]->tick(),  Fraction(1, 1));
+    EXPECT_EQ(ottavas[1]->tick2(), Fraction(6, 1));
+
+    delete score;
+}
+
+
+
+// Regression: when any slur's +16 measure-count points past the last measure, the whole file's field is
+// unreliable, so every slur (even plausible-looking counts) must resolve inside its own bar.
+TEST_F(Tst_OrnamentsSlurs, v0c2_unreliable_slur_count_stays_in_measure)
+{
+    MasterScore* score = readEncoreScore("ornaments_v0c2_unreliable_slur_count.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load ornaments_v0c2_unreliable_slur_count.enc";
+
+    int total = 0;
+    int crossMeasure = 0;
+    for (auto it : score->spanner()) {
+        Spanner* sp = it.second;
+        if (!sp || !sp->isSlur()) {
+            continue;
+        }
+        ++total;
+        Measure* m1 = score->tick2measure(sp->tick());
+        Measure* m2 = score->tick2measure(sp->tick2());
+        if (m1 && m2 && m1 != m2) {
+            ++crossMeasure;
+        }
+    }
+    EXPECT_EQ(total, 2) << "both slurs must import";
+    EXPECT_EQ(crossMeasure, 0)
+        << "a plausible-looking count must not extend a slur past its bar when the file's "
+           "+16 field is unreliable";
+    delete score;
+}
+
+// Regression: some v0xC2 files store a per-staff CONSTANT in the slur +16 field, so every slur carries the
+// same in-range value regardless of start. A repeated large span (>=3) across different start measures
+// marks +16 unreliable, so each slur resolves inside its own bar instead of drawing a phantom span.
+TEST_F(Tst_OrnamentsSlurs, v0c2_constant_slur_count_stays_in_measure)
+{
+    MasterScore* score = readEncoreScore("ornaments_v0c2_constant_slur_count.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load ornaments_v0c2_constant_slur_count.enc";
+
+    int total = 0;
+    int crossMeasure = 0;
+    for (auto it : score->spanner()) {
+        Spanner* sp = it.second;
+        if (!sp || !sp->isSlur()) {
+            continue;
+        }
+        ++total;
+        Measure* m1 = score->tick2measure(sp->tick());
+        Measure* m2 = score->tick2measure(sp->tick2());
+        if (m1 && m2 && m1 != m2) {
+            ++crossMeasure;
+        }
+    }
+    EXPECT_EQ(total, 2) << "both slurs must import";
+    EXPECT_EQ(crossMeasure, 0)
+        << "a constant +16 value repeated across start measures must not extend the slurs "
+           "into an 11-measure phantom span";
     delete score;
 }
