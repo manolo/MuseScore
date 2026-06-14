@@ -629,6 +629,14 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         ctx.pendingOrnFingerings.push_back({ elemTick, track, sn, measIdx, false, false, true });
         break;
     }
+    case EncOrnamentType::OTTAVA_ALTA:
+    case EncOrnamentType::OTTAVA_BASSA: {
+        const OttavaType ot = (eo->ornType() == EncOrnamentType::OTTAVA_ALTA)
+                              ? OttavaType::OTTAVA_8VA
+                              : OttavaType::OTTAVA_8VB;
+        ctx.pendingOttavas.push_back({ elemTick, track, staffIdx, ot });
+        break;
+    }
     case EncOrnamentType::GRAPHIC_LINE:
         break;
     case EncOrnamentType::FINGER_1:

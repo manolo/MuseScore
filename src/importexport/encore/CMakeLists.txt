@@ -84,6 +84,7 @@ target_sources(iex_encore PRIVATE
     internal/importer/resolvers-hairpin.cpp
     internal/importer/resolvers-slur.cpp
     internal/importer/resolvers-fingering.cpp
+    internal/importer/resolvers-ottava.cpp
     internal/importer/mappers.h
     internal/importer/mappers-clefs.cpp
     internal/importer/mappers-title.cpp
