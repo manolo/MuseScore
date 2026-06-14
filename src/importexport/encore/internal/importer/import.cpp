@@ -20,29 +20,134 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include "ctx.h"
+#include "builders.h"
+#include "resolvers.h"
+
 // Encore (.enc) file importer for MuseScore.
 // Binary format reverse-engineered by Leon Vinken (Enc2MusicXML, GPL v3+) building on enc2ly by Felipe Castro.
 
 #include "import.h"
 
 #include "../parser/elem.h"
-#include "../parser/readers.h"
+#include "mappers.h"
+#include "../parser/ticks.h"
+#include "emitters-tuplets.h"
 
 #include <algorithm>
+#include <cmath>
+#include <memory>
+#include <map>
+#include <set>
+#include <vector>
 
 #include <QDataStream>
 #include <QFile>
 #include <QFileInfo>
+#include <QPageSize>
+#include <QRegularExpression>
 
+#include "engraving/dom/arpeggio.h"
+#include "engraving/dom/box.h"
+#include "engraving/dom/chord.h"
+#include "engraving/dom/dynamic.h"
+#include "engraving/dom/fermata.h"
+#include "engraving/dom/fingering.h"
+#include "engraving/dom/ornament.h"
+#include "engraving/dom/tremolosinglechord.h"
+#include "engraving/dom/clef.h"
+#include "engraving/dom/factory.h"
+#include "engraving/dom/hairpin.h"
+#include "engraving/dom/harmony.h"
+#include "engraving/dom/jump.h"
+#include "engraving/dom/key.h"
+#include "engraving/dom/keysig.h"
+#include "engraving/dom/lyrics.h"
+#include "engraving/dom/marker.h"
+#include "engraving/dom/masterscore.h"
+#include "engraving/dom/measure.h"
+#include "engraving/dom/note.h"
+#include "engraving/dom/instrtemplate.h"
+#include "engraving/dom/instrument.h"
+#include "engraving/dom/part.h"
+#include "engraving/dom/rest.h"
+#include "engraving/dom/segment.h"
+#include "engraving/dom/slur.h"
+#include "engraving/dom/staff.h"
+#include "engraving/dom/stafftext.h"
+#include "engraving/dom/tempotext.h"
+#include "engraving/dom/text.h"
+#include "engraving/dom/tie.h"
+#include "engraving/dom/timesig.h"
+#include "engraving/dom/tuplet.h"
+#include "engraving/dom/system.h"
+#include "engraving/dom/volta.h"
 #include "engraving/engravingerrors.h"
+
+#include "engraving/editing/editenharmonicspelling.h"
 
 #include "log.h"
 
 using namespace mu::engraving;
 
 namespace mu::iex::enc {
+// faceValue low nibble: 1=whole, 2=half ... 8=256th; 0 and 9..15 are invalid.
+// High nibble carries unrelated flags.
+bool isValidFaceValue(quint8 faceValue)
+{
+    const quint8 fv = faceValue & 0x0F;
+    return fv > 0 && fv <= 8;
+}
+
+void applyConcertPitch(Note* n, int semitone)
+{
+    // A transposed or garbage Encore semitone can land outside MIDI's [0,127]. Note::setPitch
+    // only asserts the range (no clamp), and downstream drumset lookups index a 128-entry table
+    // by pitch, so an out-of-range value is undefined behaviour. Clamp once, here, at the single
+    // choke point both the main and grace note paths go through.
+    n->setPitch(std::clamp(semitone, 0, 127));
+    n->setTpcFromPitch();
+}
+
+// score->spell() re-spells the whole score with a context-based heuristic that mishandles
+// transposing instruments: it can spell concert pitches with double-flats (e.g. a concert E in
+// A major rendered as a written double-flat) instead of the plain note the key wants. After
+// spell(), re-derive the TPC of notes on TRANSPOSING staves from the sounding pitch + concert key
+// + staff transposition (which honours the key); the pitch is unchanged. Non-transposing staves
+// keep spell()'s result, which is correct for them.
+static void respellTransposingStaves(MasterScore* score)
+{
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        Measure* m = toMeasure(mb);
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (track_idx_t t = 0; t < score->ntracks(); ++t) {
+                EngravingItem* e = s->element(t);
+                if (!e || !e->isChord()) {
+                    continue;
+                }
+                Chord* chord = toChord(e);
+                if (!chord->staff() || chord->staff()->transpose(chord->tick()).isZero()) {
+                    continue;   // non-transposing staff: keep spell()'s spelling
+                }
+                for (Chord* gc : chord->graceNotes()) {
+                    for (Note* n : gc->notes()) {
+                        n->setTpcFromPitch();
+                    }
+                }
+                for (Note* n : chord->notes()) {
+                    n->setTpcFromPitch();
+                }
+            }
+        }
+    }
+}
 
 // Derive display size (1-4) for a given instrument index.
+// LINE staff entry byte +13 (0-indexed 0-3) holds per-instrument size in both 4.x and 5.x.
+// header.scoreSize (byte 0x52) is a global fallback for files without LINE data.
 static int staffDisplaySize(const EncRoot& enc, int instrIdx)
 {
     if (!enc.lines.empty()) {
@@ -134,14 +239,291 @@ static void logEncRootInfo(const EncRoot& enc)
                << "  (" << QString::number(ps.top / 72.0, 'f', 3).toStdString() << "\""
                << " / " << QString::number(ps.left / 72.0, 'f', 3).toStdString() << "\" margins)";
     } else {
-        LOGD() << "  WINI: absent -- using MuseScore defaults";
+        LOGD() << "  WINI: absent — using MuseScore defaults";
     }
     LOGD() << "--------------------------";
 }
 
-// Stub: replaced in A6 when the score builder is added.
-static void buildScore(mu::engraving::MasterScore*, const EncRoot&, const EncImportOptions&)
+// Map Encore score-size (1 to 4) to MuseScore Staff Properties → Scale (Pid::MAG).
+// 1=60%, 2=75%, 3=100%, 4=130%.  Global spatium is not changed.
+static void applyStaffScale(MasterScore* score, const EncRoot& enc)
 {
+    static const double kScaleBySize[4] = { 0.60, 0.75, 1.00, 1.30 };
+    staff_idx_t msStaffIdx = 0;
+    for (size_t instrIdx = 0; instrIdx < enc.instruments.size(); ++instrIdx) {
+        const int sz = staffDisplaySize(enc, static_cast<int>(instrIdx));
+        const double scale = kScaleBySize[sz - 1];
+        const int ns = enc.instruments[instrIdx].nstaves > 0 ? enc.instruments[instrIdx].nstaves : 1;
+        for (int s = 0; s < ns && msStaffIdx < score->staves().size(); ++s, ++msStaffIdx) {
+            score->staves()[msStaffIdx]->setProperty(Pid::MAG, PropertyValue(scale));
+        }
+    }
+}
+
+// Detect standard paper size from typographic-point WINI coordinates.
+// rightEdge and bottomEdge are the right/bottom edges of the printable area
+// in pts (1/72 inch); the full page is at least that large.  Returns the
+// smallest standard size (by area) that contains the printable area.
+// Returns false when no standard size fits (custom page or rightEdge exceeds
+// all known widths, which signals screen-pixel format instead).
+//
+// 1 pt tolerance: ISO metric page heights (e.g. A4 297mm = 841.89pt) are
+// stored as integers in the WINI block, so bottomEdge may be 1pt larger than
+// the QPageSize fractional value.  Without tolerance, A4 files with
+// bottomEdge=842 fall through to a non-A4 page (wrong size and margins).
+static bool detectPtsPageSize(qint32 rightEdge, qint32 bottomEdge,
+                               double& outWidthIn, double& outHeightIn)
+{
+    static constexpr double kTol = 1.0;   // pts tolerance for metric rounding
+    double bestArea = 1e18;
+    bool found = false;
+    for (int id = 0; id <= static_cast<int>(QPageSize::LastPageSize); ++id) {
+        if (id == static_cast<int>(QPageSize::Custom)) {
+            continue;
+        }
+        const QSizeF sz = QPageSize::size(static_cast<QPageSize::PageSizeId>(id),
+                                          QPageSize::Inch);
+        const double wPts = sz.width()  * 72.0;
+        const double hPts = sz.height() * 72.0;
+        if (wPts + kTol < static_cast<double>(rightEdge)
+            || hPts + kTol < static_cast<double>(bottomEdge)) {
+            continue;
+        }
+        const double area = wPts * hPts;
+        if (area < bestArea) {
+            bestArea    = area;
+            outWidthIn  = sz.width();
+            outHeightIn = sz.height();
+            found       = true;
+        }
+    }
+    return found;
+}
+
+// Try to identify the paper size from WINI screen-pixel coordinates.
+// pageWUnits = rightEdge + left, pageHUnits = bottomEdge + top.
+//
+// Two-pass approach:
+//   Pass 1, ISO A-series only (A0..A10).  All AN sizes share the 1:√2 aspect
+//   ratio, so for A-series WINI data the only ambiguity is WHICH AN size, and
+//   that is resolved by smallest |dpiW−dpiH|.  Checking A-series first prevents
+//   non-A formats (e.g. 12"×18") from incorrectly winning when their
+//   accidentally smaller delta would beat the correct AN with a unified scan.
+//   Pass 2, all remaining standard sizes, pick smallest delta.
+//
+// Returns false when no standard size matches within tolerance (custom page).
+static bool detectWiniPageSize(int pageWUnits, int pageHUnits,
+                               double& outWidthIn, double& outHeightIn)
+{
+    static constexpr double kDpiMin   = 60.0;   // minimum plausible screen DPI
+    static constexpr double kDpiMax   = 135.0;  // maximum plausible screen DPI
+    static constexpr double kMaxDelta = 6.0;    // max |dpiW - dpiH|
+
+    // ISO A-series IDs in Qt's QPageSize enum (Qt 6).
+    static const QPageSize::PageSizeId kASeriesIds[] = {
+        QPageSize::A0, QPageSize::A1, QPageSize::A2, QPageSize::A3,
+        QPageSize::A4, QPageSize::A5, QPageSize::A6, QPageSize::A7,
+        QPageSize::A8, QPageSize::A9, QPageSize::A10,
+    };
+
+    auto tryCandidate = [&](QPageSize::PageSizeId id,
+                            double& bestDelta,
+                            double& bestW, double& bestH) -> bool {
+        const QSizeF sz = QPageSize::size(id, QPageSize::Inch);
+        const double w  = sz.width();
+        const double h  = sz.height();
+        if (w <= 0.0 || h <= 0.0) {
+            return false;
+        }
+        const double dpiW = pageWUnits / w;
+        const double dpiH = pageHUnits / h;
+        if (dpiW < kDpiMin || dpiW > kDpiMax || dpiH < kDpiMin || dpiH > kDpiMax) {
+            return false;
+        }
+        const double delta = std::abs(dpiW - dpiH);
+        if (delta < kMaxDelta && delta < bestDelta) {
+            bestDelta = delta;
+            bestW = w;
+            bestH = h;
+            return true;
+        }
+        return false;
+    };
+
+    // Build a set of A-series IDs for fast exclusion in pass 2.
+    std::set<int> aSeriesSet;
+    for (const auto id : kASeriesIds) {
+        aSeriesSet.insert(static_cast<int>(id));
+    }
+
+    // Pass 1: ISO A-series.
+    double bestDelta = kMaxDelta;
+    bool found = false;
+    for (const auto id : kASeriesIds) {
+        if (tryCandidate(id, bestDelta, outWidthIn, outHeightIn)) {
+            found = true;
+        }
+    }
+    if (found) {
+        return true;
+    }
+
+    // Pass 2: all other standard sizes (Letter, Legal, B-series, etc.).
+    for (int id = 0; id <= static_cast<int>(QPageSize::LastPageSize); ++id) {
+        if (id == static_cast<int>(QPageSize::Custom)) {
+            continue;
+        }
+        if (aSeriesSet.count(id)) {
+            continue;   // already tried in pass 1
+        }
+        if (tryCandidate(static_cast<QPageSize::PageSizeId>(id), bestDelta, outWidthIn, outHeightIn)) {
+            found = true;
+        }
+    }
+    return found;
+}
+
+static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
+{
+    if (!ps.hasData) {
+        return;
+    }
+    // WINI fields are nominally in typographic points (1/72 inch), but some
+    // Encore versions store them in screen pixels at the monitor's DPI (~84-85
+    // PPI on older hardware).  Symptom: rightEdge or bottomEdge exceeds the
+    // page dimensions in pts (e.g. rightEdge=672 > A4_width_pts=595).
+    //
+    // For pts format: detectPtsPageSize picks the smallest standard page that
+    // contains the printable area, which is locale-independent.
+    // For screen-pixel format: detectWiniPageSize matches via DPI ratio.
+    static constexpr double kMaxM = 0.60;   // max margin (inches)
+
+    double pageHIn = score->style().styleD(Sid::pageHeight);
+    double pageWIn = score->style().styleD(Sid::pageWidth);
+
+    // 1 pt tolerance mirrors detectPtsPageSize: metric page heights convert to
+    // fractional pts (A4 297mm = 841.89pt → stored as 842) so the integer
+    // WINI value can exceed floor(pageH*72) by 1 without being screen-pixels.
+    static constexpr double kPixelTol = 1.0;
+    const bool screenPixelFmt = (ps.rightEdge  > static_cast<qint32>(pageWIn * 72.0 + kPixelTol))
+                                || (ps.bottomEdge > static_cast<qint32>(pageHIn * 72.0 + kPixelTol));
+    double scaleUpi = 72.0;
+    if (screenPixelFmt) {
+        const int pageWUnits = ps.rightEdge + ps.left;
+        const int pageHUnits = ps.bottomEdge + ps.top;
+        double detectedW = 0.0, detectedH = 0.0;
+        if (detectWiniPageSize(pageWUnits, pageHUnits, detectedW, detectedH)) {
+            pageWIn  = detectedW;
+            pageHIn  = detectedH;
+            score->style().set(Sid::pageWidth,  pageWIn);
+            score->style().set(Sid::pageHeight, pageHIn);
+        }
+        scaleUpi = static_cast<double>(pageWUnits) / pageWIn;
+    } else {
+        double detectedW = 0.0, detectedH = 0.0;
+        if (detectPtsPageSize(ps.rightEdge, ps.bottomEdge, detectedW, detectedH)) {
+            pageWIn  = detectedW;
+            pageHIn  = detectedH;
+            score->style().set(Sid::pageWidth,  pageWIn);
+            score->style().set(Sid::pageHeight, pageHIn);
+        }
+        // scaleUpi stays 72.0 (pts = 1/72 inch by definition)
+    }
+
+    double topIn  = ps.top / scaleUpi;
+    double leftIn = ps.left / scaleUpi;
+    double printW = (ps.rightEdge - ps.left) / scaleUpi;
+    double printH = (ps.bottomEdge - ps.top) / scaleUpi;
+
+    LOGD() << "  enc margins (in): T=" << QString::number(topIn,  'f', 3).toStdString()
+           << "  L=" << QString::number(leftIn, 'f', 3).toStdString()
+           << "  R=" << QString::number(pageWIn - leftIn - printW, 'f', 3).toStdString()
+           << "  B=" << QString::number(pageHIn - topIn  - printH, 'f', 3).toStdString()
+           << "  paper=" << QString::number(pageWIn * 25.4, 'f', 1).toStdString()
+           << "x" << QString::number(pageHIn * 25.4, 'f', 1).toStdString() << "mm"
+           << (screenPixelFmt ? "  [pixels]" : "  [pts]");
+
+    topIn  = std::clamp(topIn,  0.0, kMaxM);
+    leftIn = std::clamp(leftIn, 0.0, kMaxM);
+
+    const double maxPrintW = pageWIn - leftIn;
+    if (printW > maxPrintW) {
+        printW = maxPrintW;
+    }
+
+    double bottomIn = std::max(0.0, pageHIn - topIn - printH);
+    bottomIn = std::min(bottomIn, kMaxM);
+
+    LOGD() << "  applied (in):     T=" << QString::number(topIn,   'f', 3).toStdString()
+           << "  L=" << QString::number(leftIn,   'f', 3).toStdString()
+           << "  R=" << QString::number(pageWIn - leftIn - printW, 'f', 3).toStdString()
+           << "  B=" << QString::number(bottomIn, 'f', 3).toStdString()
+           << "  paper=" << QString::number(pageWIn * 25.4, 'f', 1).toStdString()
+           << "x" << QString::number(pageHIn * 25.4, 'f', 1).toStdString() << "mm";
+
+    score->style().set(Sid::pageOddTopMargin,     topIn);
+    score->style().set(Sid::pageEvenTopMargin,    topIn);
+    score->style().set(Sid::pageOddLeftMargin,    leftIn);
+    score->style().set(Sid::pageEvenLeftMargin,   leftIn);
+    score->style().set(Sid::pagePrintableWidth,   printW);
+    score->style().set(Sid::pageOddBottomMargin,  bottomIn);
+    score->style().set(Sid::pageEvenBottomMargin, bottomIn);
+}
+
+static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOptions& opts)
+{
+    score->style().set(Sid::chordsXmlFile, true);
+    score->chordList()->read(u"chords.xml");
+
+    // Enable multi-measure rest display only when the Encore file actually uses them.
+    // A file with no mrestCount > 1 REST elements should show individual whole rests,
+    // not collapsed multi-measure rests.
+    const bool hasMMRest = std::any_of(enc.measures.begin(), enc.measures.end(),
+                                       [](const EncMeasure& m) {
+        if (m.elements.empty()) {
+            return false;
+        }
+        for (const auto& ep : m.elements) {
+            if (static_cast<EncElemType>(ep->type) != EncElemType::REST) {
+                return false;
+            }
+        }
+        return static_cast<const EncRest*>(m.elements[0].get())->mrestCount > 1;
+    });
+    score->style().set(Sid::createMultiMeasureRests, hasMMRest);
+
+    // Encore positions tuplet brackets/numbers flush against note heads and stems
+    // with no extra vertical gap, and never pushes them outside the staff.
+    score->style().set(Sid::tupletOutOfStaff,      false);
+    score->style().set(Sid::tupletVHeadDistance,   0.0);
+    score->style().set(Sid::tupletVStemDistance,   0.0);
+
+    BuildCtx ctx{ score, enc, opts };
+    buildParts(ctx);
+    buildMeasures(ctx);
+    buildInitialSignatures(ctx);
+    emitMeasures(ctx);
+
+    LOGD() << "  importPageLayout=" << (ctx.opts.importPageLayout ? "true" : "false");
+    if (ctx.opts.importPageLayout) {
+        applyPageMargins(score, enc.pageSetup);
+    }
+    if (ctx.opts.importStaffSize) {
+        applyStaffScale(score, enc);
+    }
+
+    resolveAll(ctx);
+
+    EditEnharmonicSpelling::spell(score);
+    respellTransposingStaves(score);
+    addTitleFrame(score, enc.titleBlock);
+    // Assign MIDI ports/channels to every part. The file read path does this on load,
+    // but a direct import builds the score in memory without it, leaving each channel
+    // at -1; that makes Part::midiPort() index m_midiMapping[-1] and crash on a
+    // straight-to-MusicXML export.
+    score->rebuildMidiMapping();
+    score->setUpTempoMap();
+    score->doLayout();
 }
 
 muse::String encoreLoadErrorMessage(const QString& path)
@@ -216,6 +598,11 @@ Err importEncore(MasterScore* score, const QString& path, const EncImportOptions
 
     logEncRootInfo(enc);
     buildScore(score, enc, opts);
+
+    muse::Ret integrity = score->sanityCheck();
+    if (!integrity) {
+        LOGW() << "Encore import: score corruption detected:\n" << integrity.text();
+    }
 
     return Err::NoError;
 }

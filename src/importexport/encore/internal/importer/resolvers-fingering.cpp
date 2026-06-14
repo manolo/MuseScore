@@ -186,7 +186,6 @@ static void applySystemLocksFromLines(BuildCtx& ctx)
         const int firstMsIdx = static_cast<int>(enc2ms[static_cast<size_t>(firstBlock)]);
         // Last MuseScore measure = first of the last MEAS block's range, plus however
         // many MuseScore measures that block produces (gap to next block, or to end).
-        const int lastBlockMs = static_cast<int>(enc2ms[static_cast<size_t>(lastBlock)]);
         // Last MS measure = first MS index of last block's range plus the block's span.
         const int nextBlockMs = (lastBlock + 1 < static_cast<int>(enc2ms.size()))
                                 ? static_cast<int>(enc2ms[static_cast<size_t>(lastBlock + 1)])
