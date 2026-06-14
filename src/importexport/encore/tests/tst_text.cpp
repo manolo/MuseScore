@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Text import: lyrics (syllable matching, verses, hyphen/melisma, encodings) and staff/rehearsal/tempo text,
+// including rich-text runs. See ENCORE_FORMAT.md §Lyric element and ENCORE_FORMAT.md §TEXT block.
+
 #include <gtest/gtest.h>
 
 #include "engraving/dom/arpeggio.h"
@@ -48,6 +51,7 @@
 #include "engraving/dom/tie.h"
 #include "engraving/dom/tremolosinglechord.h"
 #include "engraving/dom/timesig.h"
+#include "engraving/dom/harmony.h"
 #include "engraving/dom/tuplet.h"
 
 #include "../internal/importer/emitters-internal.h"
@@ -63,30 +67,275 @@ protected:
     void SetUp() override { setRootDir(ENC_DIR); }
 };
 
-// ===========================================================================
-// FIX: Encore "-" LYRIC elements are hyphen continuation markers; filter them out and tag adjacent
-// syllables with LyricsSyllabic. LaMorenaDeMiCopla m18 "JU - LIO RO -" reproduced the off-by-one shift.
-// ===========================================================================
-// lyrics_hyphen_separators_dropped_and_set_syllabic: deferred to B15 (requires lyrics emitter).
-// lyrics_two_verses_on_voice_0_chord: deferred to B15.
-// lyrics_variable_length_with_empty_placeholder: deferred to B15.
-// lyrics_offset_ticks_still_attach_correctly: deferred to B15.
-// lyrics_attached_to_chords: deferred to B15.
-// lyrics_latin1_text_decoded_as_one_byte_per_char: deferred to B15.
+// A sung syllable always belongs to a note: one whose stored tick falls between notes (beyond the match
+// window) with no rest available must attach to the nearest chord rather than being dropped.
+TEST_F(Tst_Text, lyrics_offgrid_syllable_attaches_to_nearest_chord)
+{
+    MasterScore* score = readEncoreScore("text_lyrics_offgrid_nearest_chord.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
 
-// ===========================================================================
-// FIX: lyrics on a grand-staff bottom staff were matched against the wrong staff's
-// notes and reversed. The bottom-staff notes reach MuseScore staff 1 via the
-// voice>=VOICES (case A) routing, and the lyric routes there too; but the note-tick
-// collection was keyed by RAW encStaff, so it grabbed a second instrument's notes
-// (raw staffIdx 1) instead. With the wrong ticks the syllables matched no chord and
-// fell back to rests in reverse ("ve Sal"). Collecting notes by their ROUTED staff
-// fixes the order and the anchors.
-// Fixture: 2 instruments x 2 staves. Bottom staff of instr 0 has quarter notes
-// (pitch 55, 57) at ticks 480/720 via voice 4; instr 1 treble (raw staffIdx 1) has
-// notes at 0/240. Lyrics "Sal-ve" (voice 4) belong to the bottom staff.
-// Expected: MuseScore staff 1 shows Sal (begin) on pitch 55 then ve (end) on 57.
-// ===========================================================================
+    int pitchWithLyric = -1;
+    int lyricCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* e = s->element(0);
+            if (!e || !e->isChord()) {
+                continue;
+            }
+            Chord* c = toChord(e);
+            for (Lyrics* ly : c->lyrics()) {
+                if (ly->plainText() == u"ge") {
+                    pitchWithLyric = c->upNote()->pitch();
+                    ++lyricCount;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(lyricCount, 1) << "the off-grid syllable must be kept, not dropped";
+    EXPECT_EQ(pitchWithLyric, 62) << "it must attach to the nearest chord (note at tick 120, pitch 62)";
+
+    delete score;
+}
+
+// A hyphen opening a measure must promote the previous measure's last syllable (SINGLE -> BEGIN) so the
+// connecting hyphen survives across the barline.
+TEST_F(Tst_Text, lyrics_hyphen_renders_across_barline)
+{
+    MasterScore* score = readEncoreScore("text_lyrics_hyphen_across_barline.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    LyricsSyllabic sofSyll = LyricsSyllabic::SINGLE;
+    LyricsSyllabic tlySyll = LyricsSyllabic::SINGLE;
+    bool sofSeen = false, tlySeen = false;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* e = s->element(0);
+            if (!e || !e->isChord()) {
+                continue;
+            }
+            for (Lyrics* ly : toChord(e)->lyrics()) {
+                if (ly->plainText() == u"sof") {
+                    sofSyll = ly->syllabic();
+                    sofSeen = true;
+                } else if (ly->plainText() == u"tly") {
+                    tlySyll = ly->syllabic();
+                    tlySeen = true;
+                }
+            }
+        }
+    }
+    ASSERT_TRUE(sofSeen && tlySeen);
+    EXPECT_EQ(sofSyll, LyricsSyllabic::BEGIN) << "first syllable must become BEGIN so the hyphen renders";
+    EXPECT_EQ(tlySyll, LyricsSyllabic::END) << "continuation syllable after the barline is END";
+
+    delete score;
+}
+
+TEST_F(Tst_Text, lyrics_hyphen_separators_dropped_and_set_syllabic)
+{
+    MasterScore* score = readEncoreScore("text_lyrics_hyphenated_words.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    struct Entry {
+        String text;
+        LyricsSyllabic syll;
+    };
+    std::vector<Entry> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Lyrics* ly : toChord(el)->lyrics()) {
+                seen.push_back({ ly->plainText(), ly->syllabic() });
+            }
+        }
+    }
+    ASSERT_EQ(seen.size(), 3u);
+    EXPECT_EQ(seen[0].text, String(u"JU"));
+    EXPECT_EQ(seen[0].syll, LyricsSyllabic::BEGIN)
+        << "JU is followed by a hyphen continuation";
+    EXPECT_EQ(seen[1].text, String(u"LIO"));
+    EXPECT_EQ(seen[1].syll, LyricsSyllabic::END)
+        << "LIO closes the JU-LIO word";
+    EXPECT_EQ(seen[2].text, String(u"RO"));
+    EXPECT_EQ(seen[2].syll, LyricsSyllabic::BEGIN)
+        << "RO is followed by a hyphen continuation past the bar";
+    delete score;
+}
+
+TEST_F(Tst_Text, lyrics_two_verses_on_voice_0_chord)
+{
+    MasterScore* score = readEncoreScore("text_lyrics_two_verses.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> verse0;
+    std::vector<String> verse1;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Lyrics* ly : toChord(el)->lyrics()) {
+                if (ly->verse() == 0) {
+                    verse0.push_back(ly->plainText());
+                } else if (ly->verse() == 1) {
+                    verse1.push_back(ly->plainText());
+                }
+            }
+        }
+    }
+    std::vector<String> expectedV0 = { u"JU", u"LIO", u"RO", u"ME" };
+    std::vector<String> expectedV1 = { u"Co", u"mo", u"ca", u"pa" };
+    EXPECT_EQ(verse0, expectedV0);
+    EXPECT_EQ(verse1, expectedV1);
+    delete score;
+}
+
+TEST_F(Tst_Text, lyrics_variable_length_with_empty_placeholder)
+{
+    MasterScore* score = readEncoreScore("text_lyrics_variable.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> expected = { u"JU", u"LIO", u"RO" };
+    std::vector<String> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Lyrics* ly : toChord(el)->lyrics()) {
+                seen.push_back(ly->plainText());
+            }
+        }
+    }
+    EXPECT_EQ(seen, expected);
+    delete score;
+}
+
+// A lyric whose tick is slightly after its note's (visual offset) must still attach to that note; the
+// note-tick mapping must not halve the Encore tick, which pushed offset lyrics past the match threshold.
+TEST_F(Tst_Text, lyrics_offset_ticks_still_attach_correctly)
+{
+    MasterScore* score = readEncoreScore("text_lyrics_6_8_offset_ticks.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> expected = { u"do", u"re", u"mi", u"fa" };
+    std::vector<String> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Lyrics* ly : toChord(el)->lyrics()) {
+                seen.push_back(ly->plainText());
+            }
+        }
+    }
+    EXPECT_EQ(seen, expected)
+        << "All 4 lyrics must attach to their correct note even when lyric encTick "
+        "is +50 ticks after the note encTick";
+    delete score;
+}
+
+TEST_F(Tst_Text, lyrics_attached_to_chords)
+{
+    MasterScore* score = readEncoreScore("text_lyrics.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> expected = { u"do", u"re", u"mi", u"fa" };
+    std::vector<String> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            Chord* c = toChord(el);
+            for (Lyrics* ly : c->lyrics()) {
+                seen.push_back(ly->plainText());
+            }
+        }
+    }
+    EXPECT_EQ(seen, expected);
+    delete score;
+}
+
+// Lyric encoding is detected per element: a Latin-1 (one byte/char) lyric must not be read as UTF-16 LE,
+// which produced spurious CJK code units.
+TEST_F(Tst_Text, lyrics_latin1_text_decoded_as_one_byte_per_char)
+{
+    MasterScore* score = readEncoreScore("text_lyrics_latin1.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Lyrics* ly : toChord(el)->lyrics()) {
+                seen.push_back(ly->plainText());
+            }
+        }
+    }
+    ASSERT_EQ(seen.size(), 2u);
+    EXPECT_EQ(seen[0], String(u"txã"));
+    EXPECT_EQ(seen[1], String(u"nã"));
+    delete score;
+}
+
+// Lyrics on a grand-staff bottom staff must be matched against that staff's routed notes, not the raw
+// encStaff (which grabs another instrument's notes and reverses the syllables).
 TEST_F(Tst_Text, lyrics_grandstaff_match_routed_staff_notes)
 {
     MasterScore* score = readEncoreScore("text_lyrics_grandstaff_routed_notes.enc");
@@ -126,10 +375,8 @@ TEST_F(Tst_Text, lyrics_grandstaff_match_routed_staff_notes)
     delete score;
 }
 
-// ===========================================================================
-// FIX: STAFFTEXT matching Italian tempo terms is promoted to TempoText.
-// Relative markings ("a tempo") get TempoText without absolute BPS; non-tempo strings stay StaffText.
-// ===========================================================================
+// STAFFTEXT matching an Italian tempo term is promoted to TempoText (relative markings like "a tempo" get
+// no absolute BPS); non-tempo strings stay StaffText.
 TEST_F(Tst_Text, staff_text_promoted_to_tempo_for_italian_terms)
 {
     MasterScore* score = readEncoreScore("text_stafftext_tempo_promotion.enc");
@@ -177,9 +424,8 @@ TEST_F(Tst_Text, staff_text_promoted_to_tempo_sets_tempo_map)
 }
 
 // ===========================================================================
-// FIX: TITL multi-line slots of the same category join with \n; headers/footers stack by alignment byte.
-// Also: Encore #P/#D/#T tokens are rewritten to MuseScore macros $P/$D/$m.
-// ===========================================================================
+// TITL slots of the same category join with newlines (headers/footers stack by alignment byte), and Encore
+// #P/#D/#T tokens are rewritten to the MuseScore macros $P/$D/$m.
 TEST_F(Tst_Text, multi_slot_text_joined_with_newlines)
 {
     MasterScore* score = readEncoreScore("text_multi_slot_stacked_text.enc");
@@ -205,9 +451,8 @@ TEST_F(Tst_Text, multi_slot_text_joined_with_newlines)
 }
 
 // ===========================================================================
-// FIX: some files write the TITL block twice. EncTitle::read() clears slot vectors on each pass
-// so the second block replaces the first instead of doubling composer/header/footer lines.
-// ===========================================================================
+// When a file writes the TITL block twice, the second pass must replace the first, not double the
+// composer/header/footer lines.
 TEST_F(Tst_Text, duplicate_titl_block_does_not_double_lines)
 {
     MasterScore* score = readEncoreScore("text_duplicate_titl_block.enc");
@@ -224,11 +469,8 @@ TEST_F(Tst_Text, duplicate_titl_block_does_not_double_lines)
 }
 
 // ===========================================================================
-// FIX: when a file contains multiple TITL blocks and the later ones are empty
-// (Encore writes one block per page and page 2+ blocks are often blank), the
-// second block must not overwrite the first block's title and author with empty
-// strings.
-// ===========================================================================
+// A later empty TITL block (Encore writes one per page, page 2+ often blank) must not overwrite the first
+// block's title and author with empty strings.
 TEST_F(Tst_Text, empty_second_titl_block_preserves_first_block_data)
 {
     MasterScore* score = readEncoreScore("text_titl_empty_second_block.enc");
@@ -245,10 +487,8 @@ TEST_F(Tst_Text, empty_second_titl_block_preserves_first_block_data)
     delete score;
 }
 
-// ===========================================================================
-// FIX: MEAS header BPM at offset 0 was read but never used, forcing 120 bpm on all imports.
-// Post-pass emits TempoText for the first measure and each BPM change, and calls Score::setTempo.
-// ===========================================================================
+// The MEAS header BPM must drive the tempo: a post-pass emits TempoText for the first measure and each BPM
+// change (and sets Score::setTempo), rather than defaulting every import to 120.
 TEST_F(Tst_Text, measure_header_bpm_drives_initial_tempo_and_changes)
 {
     MasterScore* score = readEncoreScore("text_tempo_changes.enc");
@@ -256,7 +496,6 @@ TEST_F(Tst_Text, measure_header_bpm_drives_initial_tempo_and_changes)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    // Collect every TempoText in the score with its host measure index.
     struct Found {
         int measureIdx;
         double bps;
@@ -304,9 +543,8 @@ TEST_F(Tst_Text, measure_header_bpm_drives_initial_tempo_and_changes)
 }
 
 // ===========================================================================
-// FIX: ORN TEMPO byte is beat-unit BPM, not quarter-note BPM. Compound meters (6/8, 9/8, 12/8) beat = dotted quarter;
-// multiply by 3/2. 6/8 TEMPO=80 → BPS=2.0 (120 qBPM); old code gave 80/60=1.333 (♩.=53).
-// ===========================================================================
+// The ORN TEMPO value is beat-unit BPM, so in a compound meter (dotted-quarter beat) it must be scaled by
+// 3/2 to quarter-note BPM, not used directly.
 TEST_F(Tst_Text, orn_tempo_compound_meter_dotted_quarter_bpm)
 {
     MasterScore* score = readEncoreScore("text_tempo_orn_compound_68.enc");
@@ -339,17 +577,8 @@ TEST_F(Tst_Text, orn_tempo_compound_meter_dotted_quarter_bpm)
     delete score;
 }
 
-// ===========================================================================
-// FIX: an ORN TEMPO is anchored in Encore to a note's tick but drawn (via a
-// smaller xoffset) over the earlier downbeat rest. The importer placed the
-// TempoText on the later note instead of the downbeat; it must snap the mark to
-// the chord-rest whose xoffset matches its drawn position, like dynamics do.
-// Fixture: 5/8 (beatTicks=120). Dotted-quarter REST at tick 0 (xoff 0), quarter
-// NOTE at tick 360 (xoff 67). ORN TEMPO=63 at tick 360 with xoffset=48 (left of
-// the note) belongs to the downbeat rest.
-// Expected: one TempoText at the measure downbeat (rtick 0), value quarter=63.
-// Before the fix it sat on the note at tick 360 (rtick 3/8).
-// ===========================================================================
+// A tempo ORN anchored to a note's tick but drawn (smaller xoffset) over the earlier downbeat rest must
+// snap to the chord-rest matching its drawn position, like dynamics do, not sit on the later note.
 TEST_F(Tst_Text, orn_tempo_snaps_to_downbeat_by_xoffset)
 {
     MasterScore* score = readEncoreScore("text_tempo_orn_xoffset_downbeat.enc");
@@ -385,13 +614,8 @@ TEST_F(Tst_Text, orn_tempo_snaps_to_downbeat_by_xoffset)
 }
 
 // ===========================================================================
-// FIX: the tempo mark's beat unit comes from the ORN `noto` byte, not a guess from
-// the meter. A "quarter = 198" mark in a 6/8 (noto=2, a plain quarter) must stay
-// quarter=198, not be rewritten as the compound default dotted-quarter=132. Here the
-// ORN value equals the header BPM, so the ORN is suppressed and the header path
-// renders the mark; it must still pick up the explicit quarter unit from noto.
-// Both forms are the same speed (198 quarter/min = 132 dotted-quarter/min = 3.3 BPS).
-// ===========================================================================
+// The tempo mark's beat unit comes from the ORN noto byte, not the meter: a "quarter = 198" mark in 6/8
+// must stay a quarter, not be rewritten as the compound-default dotted quarter.
 TEST_F(Tst_Text, tempo_beat_unit_from_noto_overrides_compound_meter)
 {
     MasterScore* score = readEncoreScore("text_tempo_orn_explicit_quarter_unit.enc");
@@ -421,13 +645,8 @@ TEST_F(Tst_Text, tempo_beat_unit_from_noto_overrides_compound_meter)
     delete score;
 }
 
-// ===========================================================================
-// FIX: v0xC2 (Encore 3.x/4.x) stores a tempo mark's BPM at ORN element +28, not at
-// +30 like v0xC4 (+30 holds a constant 52 here). Reading +30 imported "negra = 80"
-// as "negra = 52". The v0xC2 reader moves +28 into the tempo value.
-// Fixture: 4/4 v0xC2, header bpm=80, ORN TEMPO with BPM=80 at +28 and 52 at +30.
-// Expected: TempoText quarter=80, BPS=80/60; not quarter=52.
-// ===========================================================================
+// v0xC2 stores a tempo mark's BPM in a different ORN slot than v0xC4, so reading the v0xC4 slot gets a
+// constant, not the real BPM. See ENCORE_FORMAT.md §Note element (Tempo beat unit).
 TEST_F(Tst_Text, tempo_orn_v0c2_reads_bpm_from_offset_28)
 {
     MasterScore* score = readEncoreScore("text_tempo_orn_v0c2_bpm_offset.enc");
@@ -456,14 +675,38 @@ TEST_F(Tst_Text, tempo_orn_v0c2_reads_bpm_from_offset_28)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: MEAS-header and ORN tempo texts used a raw Unicode note symbol
-// (U+2669 "♩") in their xmlText.  TempoText::updateTempo() matches against
-// TempoPattern strings that use <sym>metNoteQuarterUp</sym>, so the Unicode
-// form never matched and editing the displayed BPM had no effect on playback.
-// Fix: tempoXmlText() now emits <sym> tags; all numeric BPM TempoTexts also
-// get followText=true so MuseScore keeps the tempo map in sync on edit.
-// ===========================================================================
+// Some v0xC2 files store the tempo the v0xC4 way (beat-unit code at +28, BPM at +30); the reader must keep
+// the +30 BPM when +28 is a valid beat-unit code, or a quarter=158 mark imports as quarter=2.
+TEST_F(Tst_Text, tempo_orn_v0c2_keeps_bpm_at_offset_30_when_28_is_beat_unit)
+{
+    MasterScore* score = readEncoreScore("text_tempo_orn_v0c2_v0c4_layout.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    TempoText* tt = nullptr;
+    for (MeasureBase* mb = score->first(); mb && !tt; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s && !tt; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isTempoText()) {
+                    tt = toTempoText(e);
+                    break;
+                }
+            }
+        }
+    }
+    ASSERT_NE(tt, nullptr) << "No TempoText found in score";
+    EXPECT_EQ(tt->xmlText(), u"<sym>metNoteQuarterUp</sym> = 158")
+        << "v0xC2 with a beat-unit code at +28 keeps the BPM at +30 (158), not the unit (2)";
+    EXPECT_NEAR(tt->tempo().val, 158.0 / 60.0, 1e-6);
+
+    delete score;
+}
+
+// Tempo texts must use <sym> note tags (not a raw Unicode note glyph) so TempoText::updateTempo matches,
+// and numeric BPM marks get followText=true so editing the displayed BPM keeps the tempo map in sync.
 TEST_F(Tst_Text, tempo_text_uses_sym_tags_and_follow_text_enabled)
 {
     MasterScore* score = readEncoreScore("ornaments_tempo_sym_followtext.enc");
@@ -535,11 +778,8 @@ TEST_F(Tst_Text, header_footer_tokens_translated_to_mscore_macros)
     delete score;
 }
 
-// ===========================================================================
-// FIX: STAFFTEXT 0x1E (ORN tind byte +32) indexes into the TEXT block for the display string.
-// Importer reads TEXT block entries and creates StaffText via the tind-derived index.
-// ===========================================================================
-
+// A STAFFTEXT's tind byte indexes into the TEXT block for its display string; the importer resolves the
+// StaffText via that index. See ENCORE_FORMAT.md §TEXT block.
 TEST_F(Tst_Text, staff_text_resolved_via_text_block)
 {
     MasterScore* score = readEncoreScore("text_staff_text.enc");
@@ -567,14 +807,68 @@ TEST_F(Tst_Text, staff_text_resolved_via_text_block)
     delete score;
 }
 
-// ===========================================================================
-// BUG: multi-part files write one TEXT block per part view, with the same
-// strings in different order. ORN tind indices match only the FIRST (score)
-// TEXT block. The parser used to overwrite textBlock with each block read,
-// keeping the LAST one, so every tind resolved against a reordered table and
-// showed the wrong text. The importer must keep the first TEXT block.
-// Fixture: STAFFTEXT tind=0 + two TEXT blocks ('Alpha' first, 'Beta' second).
-// ===========================================================================
+// A rich-text TEXT entry stores its text after a variable-length run header, so the text offset must be
+// derived from the run count; assuming the single-run offset resolves a multi-run entry to garbage.
+// See ENCORE_FORMAT.md §TEXT block.
+TEST_F(Tst_Text, staff_text_multirun_header)
+{
+    MasterScore* score = readEncoreScore("text_staff_text_multirun.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isStaffText()) {
+                    seen.push_back(toStaffText(e)->plainText());
+                }
+            }
+        }
+    }
+    std::vector<String> expected = { u"TAN TRAN" };
+    EXPECT_EQ(seen, expected)
+        << "A multi-run TEXT entry must resolve its text via the run-count-derived offset";
+    delete score;
+}
+
+// A rich-text TEXT entry can carry more than one formatting descriptor (count at the header), so the text
+// offset must account for the descriptor count; assuming a single descriptor reads into a descriptor and
+// decodes garbage. See ENCORE_FORMAT.md §TEXT block.
+TEST_F(Tst_Text, staff_text_two_descriptors_header)
+{
+    MasterScore* score = readEncoreScore("text_staff_text_two_descriptors.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isStaffText()) {
+                    seen.push_back(toStaffText(e)->plainText());
+                }
+            }
+        }
+    }
+    std::vector<String> expected = { u"Cajas y Tambores" };
+    EXPECT_EQ(seen, expected)
+        << "A two-descriptor TEXT entry must resolve its text via the descriptor-count-derived offset";
+    delete score;
+}
+
+// Multi-part files write one TEXT block per part view in different order, but tind indices match only the
+// first (score) block, so the importer must keep the first block, not overwrite it with each one read.
 TEST_F(Tst_Text, staff_text_uses_first_text_block)
 {
     MasterScore* score = readEncoreScore("text_staff_text_first_block_wins.enc");
@@ -601,13 +895,8 @@ TEST_F(Tst_Text, staff_text_uses_first_text_block)
     delete score;
 }
 
-// ===========================================================================
-// BUG: multi-line staff-text comments were truncated to their first line.
-// Encore separates lines inside a TEXT-block entry with U+0004 and terminates
-// the string with U+0000. The importer used to stop at the first U+0004,
-// dropping every line but the first. The fixture stores a two-line comment;
-// the importer must keep both lines, joined with '\n'.
-// ===========================================================================
+// Encore separates lines inside a TEXT-block entry with U+0004; a multi-line staff text must keep all lines
+// (joined with newlines), not stop at the first separator.
 TEST_F(Tst_Text, staff_text_multiline_preserved)
 {
     MasterScore* score = readEncoreScore("text_staff_text_multiline.enc");
@@ -634,9 +923,7 @@ TEST_F(Tst_Text, staff_text_multiline_preserved)
     delete score;
 }
 
-// ===========================================================================
-// FEATURE: STAFFTEXT placement from ORN yoffset: positive keeps ABOVE; negative (Cartesian below staff) maps to BELOW.
-// ===========================================================================
+// STAFFTEXT placement comes from the ORN yoffset: positive keeps ABOVE, negative (Cartesian below) maps to BELOW.
 TEST_F(Tst_Text, staff_text_placement_from_yoffset)
 {
     MasterScore* score = readEncoreScore("text_staff_text_placement.enc");
@@ -667,12 +954,8 @@ TEST_F(Tst_Text, staff_text_placement_from_yoffset)
     delete score;
 }
 
-// ===========================================================================
-// UNIT: tempoXmlText(), pure-function tests, no score needed.
-// Verifies that the note symbol is always emitted as a <sym> tag (not raw
-// Unicode), that beatTicks=360 (dotted quarter) uses the dotted-quarter variant,
-// and that beatTicks=240 (quarter) uses the plain quarter.
-// displayBpm is always the beat-unit BPM as displayed; no conversion happens inside.
+// Pure-function tests for tempoXmlText(): the note symbol is always a <sym> tag (not raw Unicode), the
+// beat-unit variant follows beatTicks, and displayBpm is the beat-unit BPM verbatim (no conversion).
 // ===========================================================================
 TEST(Tst_TempoXmlText, simple_meter_quarter_sym)
 {
@@ -716,21 +999,10 @@ TEST(Tst_TempoXmlText, beat_ticks_select_the_note_symbol)
               String(u"<sym>metNoteQuarterUp</sym> = 80"));
 }
 
-// ===========================================================================
-// Regression: ORN TEMPO with eighth-note beat (beatTicks=120) was suppressed when
-// it disagreed with the MEAS header BPM, even though the two are in different units
-// (ORN in eighth/min, MEAS in quarter/min).  The comparison is meaningless for
-// non-quarter beats; the ORN must be used.
-// File: 5/8, MEAS bpm=160 (quarter/min), ORN TEMPO=63 (eighth/min, "corchea=63").
-// Expected: TempoText "♪ = 63" with BPS = 63 × 0.5 / 60 = 0.525, NOT suppressed.
-// ===========================================================================
-
+// An ORN TEMPO must not be suppressed just because its value disagrees with the MEAS header BPM when the
+// beat is not a quarter (the two are in different units); the genuine ORN mark must be used.
 TEST_F(Tst_Text, orn_tempo_5_8_not_suppressed_and_uses_quarter_bpm)
 {
-    // text_orn_tempo_eighth_beat_not_suppressed.enc: 5/8, MEAS bpm=160,
-    // ORN TEMPO=63, no subsequent measure with bpm=63.
-    // The ORN tempo field always stores quarter-note BPM even when beatTicks=120 (5/8).
-    // The ORN is genuine (not misplaced) → must create TempoText ♩=63, BPS=63/60.
     MasterScore* score = readEncoreScore("text_orn_tempo_eighth_beat_not_suppressed.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -760,13 +1032,8 @@ TEST_F(Tst_Text, orn_tempo_5_8_not_suppressed_and_uses_quarter_bpm)
     delete score;
 }
 
-// ===========================================================================
-// FIX: 3/8 pieces with beatTicks=360 (dotted-quarter beat) played at 2/3 speed.
-// Old compound check: `numerator > 3` excluded 3/8 (numerator=3). Fix: also
-// check beatTicks==360 from the MEAS header so 3/8 files get the 1.5x BPS
-// adjustment the same as 6/8.
-// Expected: ORN TEMPO=80 in 3/8 (beatTicks=360) → BPS = 80*1.5/60 = 2.0.
-// ===========================================================================
+// A 3/8 piece with a dotted-quarter beat (beatTicks=360) must get the same 1.5x BPS adjustment as 6/8;
+// the compound check must key on beatTicks, not just numerator > 3 (which excludes 3/8).
 TEST_F(Tst_Text, orn_tempo_3_8_dotted_quarter_bps_correct)
 {
     MasterScore* score = readEncoreScore("text_orn_tempo_3_8_dotted_quarter.enc");
@@ -801,19 +1068,11 @@ TEST_F(Tst_Text, orn_tempo_3_8_dotted_quarter_bps_correct)
 }
 
 // ===========================================================================
-// FIX: When ORN TEMPO is placed at a later tick (first NOTE, not first REST),
-// the MEAS-header BPM guard only checked the segment at measTick (the rest
-// segment). It missed the ORN TEMPO, creating two conflicting tempo marks.
-// Fix: widen guard to scan all segments in the measure.
-// Expected: only ONE TempoText, from ORN TEMPO=63 (not the MEAS BPM=160).
-// ===========================================================================
+// An ORN TEMPO that is not a misplaced ornament (no later measure carries its BPM) is the genuine score
+// tempo and takes precedence over the MEAS header BPM. The header-BPM guard must scan the whole measure so
+// an ORN placed at a later tick (on the first note, not the first rest) does not produce a second mark.
 TEST_F(Tst_Text, orn_tempo_wins_over_meas_bpm_when_not_misplaced)
 {
-    // text_meas_bpm_suppressed_by_orn_tempo_later_tick.enc: 4/4, MEAS bpm=160,
-    // quarter REST at tick=0, ORN TEMPO=63 at tick=240, no subsequent measure with bpm=63.
-    // The ORN is NOT a misplaced ornament (no subsequent measure has the matching bpm),
-    // so it is the genuine score tempo marking and takes precedence over the MEAS header.
-    // Expected: ONE TempoText from the ORN = ♩=63, BPS=63/60.
     MasterScore* score = readEncoreScore("text_meas_bpm_suppressed_by_orn_tempo_later_tick.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -873,20 +1132,10 @@ TEST_F(Tst_Text, orn_tempo_suppressed_when_semantic_disabled)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: ORN TEMPO misplaced one system before its intended measure
-// ===========================================================================
-
+// An ORN TEMPO whose BPM conflicts with its measure's header but matches a later measure is a misplaced
+// ornament; it must be suppressed so the later measure gets the correct TempoText from the header path.
 TEST_F(Tst_Text, orn_tempo_mismatch_with_header_bpm_suppressed)
 {
-    // text_orn_tempo_mismatch_suppressed.enc: 2 content measures.
-    // M1: header BPM=249, ORN TEMPO=80 (BPM conflicts with header → misplaced ornament).
-    // M2: header BPM=80, no ORN TEMPO.
-    //
-    // Without fix: ORN TEMPO at M1 creates TempoText BPM=80 at M1 (wrong position),
-    //   and the !hasExisting guard in the header-BPM loop blocks M2's correct TempoText.
-    // With fix: ORN TEMPO suppressed because 80 != encMeas.bpm=249; header-BPM loop
-    //   creates TempoText BPM=80 at M2.
     MasterScore* score = readEncoreScore("text_orn_tempo_mismatch_suppressed.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1000,21 +1249,386 @@ TEST_F(Tst_Text, orn_tempo_equal_to_header_placed_at_measure_start)
     delete score;
 }
 
-// ===========================================================================
-// FIX: v0xC2 lyric text was read at element offset +20 instead of +18, dropping
-// the first two bytes of every syllable (e.g. "ver"→"r", "dad"→"d", "Es"→"").
-// Root cause: the 9-byte skip after the kie field should be 7 bytes for v0xC2.
-// Fix: EncFormatReader_V0xC4::lyricTextGapAfterKie() returns 7 when !m_hasMetaTables.
-//
-// FIX: lyric matching used a note-first greedy algorithm that let later syllables
-// steal the nearest note before earlier ones could claim it. Switched to lyrics-first.
-//
-// FIX: segEncTick formula used encTicksPerQuarter = beatTicks regardless of meter.
-// For compound meters (6/8, 9/8) beatTicks represents a dotted-quarter beat (= 1.5
-// quarter notes), so encTicksPerQuarter must be beatTicks * 2/3.
-// Test file: J-RONDA.ENC (v0xC2, 6/8, "Jota de ronda" - Spanish folk tune).
-// Before fixes: 24 garbled single-char fragments. After: 56 complete syllables.
-// ===========================================================================
+// End-to-end v0xC2 6/8 lyric fixture exercising three fixes together: the shorter post-kie text gap so
+// syllables are not truncated (see ENCORE_FORMAT.md §Lyric element), lyrics-first matching, and a
+// compound-meter encTicksPerQuarter (beatTicks * 2/3). All 56 syllables must import intact.
 
-// lyrics_v0xc2_text_offset_full_words: deferred to B15 (requires lyrics emitter).
-// lyrics_compound_meter_all_syllables_matched: deferred to B15.
+static std::vector<String> collectAllLyrics(MasterScore* score)
+{
+    std::vector<String> lyrics;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (track_idx_t t = 0; t < score->ntracks(); ++t) {
+                EngravingItem* el = s->element(t);
+                if (!el || !el->isChord()) {
+                    continue;
+                }
+                for (Lyrics* ly : toChord(el)->lyrics()) {
+                    lyrics.push_back(ly->plainText());
+                }
+            }
+        }
+    }
+    return lyrics;
+}
+
+TEST_F(Tst_Text, lyrics_v0xc2_text_offset_full_words)
+{
+    // lyrics_v0c2_compound_meter.enc: v0xC2 6/8, 3 measures × 6 eighth notes = 18 notes,
+    // each with a lyric. Syllables: "La","ro","sol","es","mi","do" (each >=2 chars).
+    // Wrong +20 offset would decode each as a single char ("L","r","s","e","m","d").
+    MasterScore* score = readEncoreScore("lyrics_v0c2_compound_meter.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> all = collectAllLyrics(score);
+    // 3 measures × 6 syllables = 18 lyrics after v0xC2 +18 offset fix.
+    EXPECT_GE(all.size(), 18u)
+        << "expected 18 lyrics after v0xC2 offset fix";
+
+    auto contains = [&](const String& s) {
+        return std::find(all.begin(), all.end(), s) != all.end();
+    };
+    EXPECT_TRUE(contains(u"La")) << "'La' must be present (wrong offset gives 'L')";
+    EXPECT_TRUE(contains(u"ro")) << "'ro' must be present (wrong offset gives 'r')";
+    EXPECT_TRUE(contains(u"sol")) << "'sol' must be present (wrong offset gives 's')";
+    EXPECT_TRUE(contains(u"es")) << "'es' must be present (wrong offset gives 'e')";
+    EXPECT_TRUE(contains(u"mi")) << "'mi' must be present (wrong offset gives 'm')";
+    EXPECT_TRUE(contains(u"do")) << "'do' must be present (wrong offset gives 'd')";
+
+    // Single-char garbled fragments must not appear after the fix.
+    EXPECT_FALSE(contains(u"L")) << "garbled fragment 'L' must not appear after offset fix";
+    EXPECT_FALSE(contains(u"s")) << "garbled fragment 's' must not appear after offset fix";
+
+    delete score;
+}
+
+TEST_F(Tst_Text, lyrics_compound_meter_all_syllables_matched)
+{
+    // lyrics_v0c2_compound_meter.enc: v0xC2 6/8 (beatTicks=360), 3 measures.
+    // In 6/8 the segEncTick formula must use encTicksPerQuarter = beatTicks*2/3 = 240.
+    // Using 360 inflates note positions, placing beat-2 syllables out of range.
+    // Each of the 6 syllables appears 3 times (once per measure).
+    MasterScore* score = readEncoreScore("lyrics_v0c2_compound_meter.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<String> all = collectAllLyrics(score);
+    int countLa = 0, countSol = 0, countEs = 0;
+    for (const String& s : all) {
+        if (s == u"La") {
+            ++countLa;
+        }
+        if (s == u"sol") {
+            ++countSol;
+        }
+        if (s == u"es") {
+            ++countEs;
+        }
+    }
+    EXPECT_GE(countLa, 2)
+        << "'La' must appear at least twice; before compound-meter fix: 0 or 1 occurrences.";
+    EXPECT_GE(countSol, 3)
+        << "'sol' must appear at least three times; before compound-meter fix: 0 occurrences.";
+    EXPECT_GE(countEs, 3)
+        << "'es' must appear at least three times; before compound-meter fix: 0 occurrences.";
+
+    delete score;
+}
+
+TEST_F(Tst_Text, lyrics_rest_does_not_shift_note_assignment)
+{
+    // Two lyric-matching invariants: rests must not consume note-tick entries (which would shift every
+    // note's encTick), and proximity matching must prefer a note at or before the lyric tick rather than a
+    // closer later note. Here LYRIC@140 must attach to NOTE@120, not NOTE@240.
+    MasterScore* score = readEncoreScore("lyrics_rest_does_not_shift_notes.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<String> all = collectAllLyrics(score);
+    ASSERT_GE(all.size(), 1u) << "fixture must have at least one lyric";
+    EXPECT_EQ(all[0], u"ma") << "lyric text must be 'ma'";
+
+    delete score;
+}
+
+TEST_F(Tst_Text, title_frame_created)
+{
+    // kordorkestro has title "String Orchestra w/Piano"
+    MasterScore* score = readEncoreScore("kordorkestro.enc");
+    ASSERT_NE(score, nullptr);
+    MeasureBase* first = score->first();
+    ASSERT_NE(first, nullptr);
+    EXPECT_TRUE(first->isVBox()) << "Score with title should start with a VBox frame";
+    delete score;
+}
+
+TEST_F(Tst_Text, no_title_frame_when_empty)
+{
+    // bazo.enc has no title, should not have a VBox frame
+    MasterScore* score = readEncoreScore("bazo.enc");
+    ASSERT_NE(score, nullptr);
+    MeasureBase* first = score->first();
+    ASSERT_NE(first, nullptr);
+    EXPECT_TRUE(first->isMeasure()) << "Score without title should start with a measure";
+    delete score;
+}
+
+TEST_F(Tst_Text, title_frame_instruction_and_copyright)
+{
+    MasterScore* score = readEncoreScore("text_title_instruction_copyright.enc");
+    ASSERT_NE(score, nullptr);
+
+    MeasureBase* first = score->first();
+    ASSERT_NE(first, nullptr);
+    ASSERT_TRUE(first->isVBox()) << "TITL with content must produce a VBox frame";
+
+    std::map<TextStyleType, String> texts;
+    for (const EngravingItem* el : first->el()) {
+        if (el->isText()) {
+            const TextBase* tb = toTextBase(el);
+            texts[tb->textStyleType()] = tb->plainText();
+        }
+    }
+
+    EXPECT_EQ(texts[TextStyleType::TITLE],    String(u"Test Title"));
+    EXPECT_EQ(texts[TextStyleType::SUBTITLE], String(u"Test Subtitle"));
+    EXPECT_EQ(texts[TextStyleType::LYRICIST], String(u"Test Instruction"))
+        << "instruction[0] must be added as LYRICIST text";
+    EXPECT_EQ(texts[TextStyleType::COMPOSER], String(u"Test Composer"));
+
+    EXPECT_EQ(score->metaTag(u"workTitle"),  String(u"Test Title"))
+        << "title must be stored in workTitle metadata";
+    EXPECT_EQ(score->metaTag(u"subtitle"),   String(u"Test Subtitle"))
+        << "subtitle[0] must be stored in subtitle metadata";
+    EXPECT_EQ(score->metaTag(u"lyricist"),   String(u"Test Instruction"))
+        << "instruction[0] must be stored in lyricist metadata";
+    EXPECT_EQ(score->metaTag(u"composer"),   String(u"Test Composer"))
+        << "author[0] must be stored in composer metadata";
+    EXPECT_EQ(score->metaTag(u"copyright"),  String(u"(c) 2026 Test"))
+        << "copyright[0] must be stored in copyright metadata";
+
+    delete score;
+}
+
+TEST_F(Tst_Text, title_frame_headers_footers)
+{
+    MasterScore* score = readEncoreScore("text_titl_headers_footers.enc");
+    ASSERT_NE(score, nullptr);
+
+    auto styleText = [score](Sid sid) -> String {
+        return score->style().styleSt(sid);
+    };
+
+    EXPECT_EQ(styleText(Sid::oddHeaderR),  String(u"Header Right"));
+    EXPECT_EQ(styleText(Sid::evenHeaderR), String(u"Header Right"));
+    EXPECT_EQ(styleText(Sid::oddHeaderC),  String(u"Header Center"));
+    EXPECT_EQ(styleText(Sid::evenHeaderC), String(u"Header Center"));
+    EXPECT_NE(styleText(Sid::oddHeaderL),  String(u"Header Right"));
+    EXPECT_NE(styleText(Sid::oddHeaderL),  String(u"Header Center"));
+    EXPECT_NE(styleText(Sid::evenHeaderL), String(u"Header Right"));
+    EXPECT_NE(styleText(Sid::evenHeaderL), String(u"Header Center"));
+
+    EXPECT_EQ(styleText(Sid::oddFooterC),  String(u"Footer Center"));
+    EXPECT_EQ(styleText(Sid::evenFooterC), String(u"Footer Center"));
+    EXPECT_EQ(styleText(Sid::oddFooterR),  String(u"Footer Right"));
+    EXPECT_EQ(styleText(Sid::evenFooterR), String(u"Footer Right"));
+    EXPECT_NE(styleText(Sid::oddFooterL),  String(u"Footer Center"));
+    EXPECT_NE(styleText(Sid::oddFooterL),  String(u"Footer Right"));
+    EXPECT_NE(styleText(Sid::evenFooterL), String(u"Footer Center"));
+    EXPECT_NE(styleText(Sid::evenFooterL), String(u"Footer Right"));
+
+    delete score;
+}
+
+TEST_F(Tst_Text, chord_symbols_present)
+{
+    // akordo.enc has chord symbols (Am, G7, etc.)
+    MasterScore* score = readEncoreScore("akordo.enc");
+    ASSERT_NE(score, nullptr);
+    bool foundHarmony = false;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            if (segmentHarmony(s)) {
+                foundHarmony = true;
+                break;
+            }
+        }
+        if (foundHarmony) {
+            break;
+        }
+    }
+    EXPECT_TRUE(foundHarmony) << "akordo.enc should contain chord symbols";
+    delete score;
+}
+
+// Regression: chord symbols stored without text (tipo bit0 == 0) were silently skipped.
+TEST_F(Tst_Text, numeric_chord_symbols)
+{
+    MasterScore* score = readEncoreScore("chord_parsing.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::map<int, String> harmonyByMeasure;
+    int measureIdx = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            if (Harmony* h = segmentHarmony(s)) {
+                harmonyByMeasure[measureIdx] = h->harmonyName();
+            }
+        }
+        ++measureIdx;
+    }
+
+    EXPECT_FALSE(harmonyByMeasure.empty()) << "numeric chord symbols must be imported (were silently dropped)";
+    EXPECT_EQ(harmonyByMeasure[0], String(u"C")) << "toniko=0 (major)";
+    EXPECT_EQ(harmonyByMeasure[1], String(u"Cm")) << "toniko=1 (minor)";
+    EXPECT_EQ(harmonyByMeasure[2], String(u"C+")) << "toniko=2 (augmented)";
+    EXPECT_EQ(harmonyByMeasure[4], String(u"C7")) << "toniko=24 (dom7 alternate)";
+    EXPECT_EQ(harmonyByMeasure[8], String(u"Cdim")) << "toniko=3 (diminished)";
+    EXPECT_EQ(harmonyByMeasure[9], String(u"CMaj7")) << "toniko=12 (maj7)";
+
+    delete score;
+}
+
+// Regression: the numeric chord-quality table (toniko -> suffix) was wrong from index 4 on.
+// Encore's real palette has "dim7" at 4 (the importer had dominant "7"), fills the slots the
+// importer left blank (maj7#11, 7#11, the multi-alteration dominants), and from 34 onward the
+// importer's entries were all shifted by one, so e.g. toniko 48 rendered as 9sus4 instead of
+// 7sus4. The fixture carries one numeric C chord per measure at the affected toniko values.
+TEST_F(Tst_Text, numeric_chord_quality_table)
+{
+    MasterScore* score = readEncoreScore("text_chord_quality_table.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::map<int, String> byMeasure;
+    int measureIdx = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            if (Harmony* h = segmentHarmony(s)) {
+                byMeasure[measureIdx] = h->harmonyName();
+            }
+        }
+        ++measureIdx;
+    }
+
+    EXPECT_EQ(byMeasure[0], String(u"Cdim7")) << "toniko=4 is diminished 7, not dominant 7";
+    EXPECT_EQ(byMeasure[1], String(u"CMaj7#11")) << "toniko=16 was blank, is maj7(#11)";
+    EXPECT_EQ(byMeasure[2], String(u"C9#11")) << "toniko=34 is 9(#11), not 11";
+    EXPECT_EQ(byMeasure[3], String(u"C13#11")) << "toniko=40 is 13(#11), not +7";
+    EXPECT_EQ(byMeasure[4], String(u"C7sus")) << "toniko=48 is 7sus4, not 9sus4";
+    EXPECT_EQ(byMeasure[5], String(u"Cm13")) << "toniko=63 was blank, is m13";
+
+    delete score;
+}
+
+// Regression: numeric chord with bass note (tipo bit 1 set) should produce a slash chord.
+TEST_F(Tst_Text, numeric_chord_with_bass_note)
+{
+    MasterScore* score = readEncoreScore("akordo.enc");
+    ASSERT_NE(score, nullptr);
+
+    Harmony* slashChord = nullptr;
+    for (MeasureBase* mb = score->first(); mb && !slashChord; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s && !slashChord; s = s->next(SegmentType::ChordRest)) {
+            if (Harmony* h = segmentHarmony(s)) {
+                if (h->harmonyName().contains(u"/")) {
+                    slashChord = h;
+                }
+            }
+        }
+    }
+
+    ASSERT_NE(slashChord, nullptr) << "akordo.enc must have a slash chord (tipo=2, bass note present)";
+    const String name = slashChord->harmonyName();
+    EXPECT_TRUE(name.startsWith(u"Ab"))
+        << "root should be Ab (radiko=0x25): " << name.toStdString();
+    EXPECT_TRUE(name.contains(u"/F#"))
+        << "bass should be F# (baso=0x13): " << name.toStdString();
+
+    delete score;
+}
+
+// Regression: CHORD symbol (type=7) text decoded unconditionally as UTF-16 LE.
+TEST_F(Tst_Text, v0c4_chord_sym_latin1)
+{
+    MasterScore* score = readEncoreScore("text_chord_sym_latin1.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load text_chord_sym_latin1.enc";
+
+    Harmony* found = nullptr;
+    for (MeasureBase* mb = score->first(); mb && !found; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            if (Harmony* h = segmentHarmony(s)) {
+                found = h;
+                break;
+            }
+        }
+    }
+    ASSERT_NE(found, nullptr) << "expected one Harmony from the chord-symbol element";
+    EXPECT_EQ(found->harmonyName(), String(u"Am"))
+        << "Latin-1 chord text must decode as 'Am', not as UTF-16 gibberish";
+    delete score;
+}
+
+// Regression: TITL encoding inherited TK00 charSize; files with large TK offset but Latin-1 TITL mis-decoded.
+TEST_F(Tst_Text, v0c4_titl_latin1_small_varsize)
+{
+    MasterScore* score = readEncoreScore("text_titl_latin1_small_varsize.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load text_titl_latin1_small_varsize.enc";
+
+    EXPECT_EQ(score->metaTag(u"workTitle"), String(u"Romeria"))
+        << "small-varsize TITL must decode as Latin-1, not as TWO_BYTES UTF-16";
+    delete score;
+}
+
+// Regression: formula-offset name recovery probed UTF-16 only; Latin-1 names were discarded silently.
+TEST_F(Tst_Text, v0c4_recovered_name_latin1)
+{
+    MasterScore* score = readEncoreScore("text_recovered_name_latin1.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load text_recovered_name_latin1.enc";
+
+    ASSERT_GE(score->parts().size(), 1u);
+    const Part* part = score->parts()[0];
+    ASSERT_NE(part, nullptr);
+    EXPECT_EQ(part->partName(), String(u"Tropa"))
+        << "Latin-1 name at NAME_BASE must be recovered when TK block name is empty";
+    delete score;
+}
+
+// Lightweight test macro for Tst_Text
+#ifndef ENC_SANITY_TEST_TEXT
+#define ENC_SANITY_TEST_TEXT(testName, fileName) \
+    TEST_F(Tst_Text, testName) { \
+        MasterScore* score = readEncoreScore(fileName); \
+        ASSERT_NE(score, nullptr) << "Failed to load " << fileName; \
+        EXPECT_GT(score->nmeasures(), 0); \
+        muse::Ret ret = score->sanityCheck(); \
+        EXPECT_TRUE(ret) << "Corrupted: " << ret.text(); \
+        delete score; \
+    }
+#endif
+
+ENC_SANITY_TEST_TEXT(staff_text,           "text_staff_text.enc")
+ENC_SANITY_TEST_TEXT(titl_headers_footers, "text_titl_headers_footers.enc")
+ENC_SANITY_TEST_TEXT(staff_text_placement, "text_staff_text_placement.enc")
+ENC_SANITY_TEST_TEXT(keychange_to_c,       "structure_keychange_to_c.enc")

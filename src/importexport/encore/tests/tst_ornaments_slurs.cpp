@@ -52,6 +52,7 @@
 #include "engraving/dom/breath.h"
 #include "engraving/dom/measurerepeat.h"
 #include "engraving/dom/ornament.h"
+#include "engraving/dom/slur.h"
 #include "engraving/dom/trill.h"
 
 #include "testbase.h"
@@ -816,5 +817,99 @@ TEST_F(Tst_OrnamentsSlurs, cross_measure_slur_endpoint_precision)
     EXPECT_EQ(endPitch, 62)
         << "slurXoffset2=15 must select D4 (pitch=62, xoff=15), not F4 (last note, xoff=35)";
 
+    delete score;
+}
+// Regression: slur end was anchored on the last ChordRest of the alMezuro measure, covering all remaining notes.
+// Fix: snap firstNote.xoffset + (xoffset2 - xoffset) to the closest note xoffset in the start measure.
+TEST_F(Tst_OrnamentsSlurs, v0c4_slur_pixel_span)
+{
+    MasterScore* score = readEncoreScore("importer_slur_pixel_span.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_slur_pixel_span.enc";
+
+    Slur* found = nullptr;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isSlur()) {
+            found = toSlur(sp);
+            break;
+        }
+    }
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->tick(), Fraction(0, 1))
+        << "slur start at the SLURSTART tick (beat 1)";
+    EXPECT_EQ(found->tick2(), Fraction(1, 2))
+        << "slur end snaps to note 3 at tick=480 (target xoff 70 matches "
+        "note xoff 70 exactly); not the last note of the measure";
+    delete score;
+}
+
+// Regression: pixel-span heuristic in 6/8 (compound meter) used beatTicks*timeSigDen as whole-note
+// ticks instead of durTicks*timeSigDen/timeSigNum.
+TEST_F(Tst_OrnamentsSlurs, v0c4_slur_pixel_span_6_8)
+{
+    MasterScore* score = readEncoreScore("importer_slur_pixel_span_6_8.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_slur_pixel_span_6_8.enc";
+
+    Slur* found = nullptr;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isSlur()) {
+            found = toSlur(sp);
+            break;
+        }
+    }
+    ASSERT_NE(found, nullptr) << "A slur must be created";
+    EXPECT_EQ(found->tick(), Fraction(1, 8))
+        << "slur start must be at the 2nd note (enc_tick=120 = 1/8 from measure start)";
+    EXPECT_EQ(found->tick2(), Fraction(1, 4))
+        << "slur end must be at note 3 (enc_tick=240 = 1/4); "
+        "with wrong formula it lands at note 4 (enc_tick=360 = 3/8)";
+    delete score;
+}
+
+// Regression: SLURSTART xoffset > 127 must be treated as unsigned for pixel-span computation.
+TEST_F(Tst_OrnamentsSlurs, v0c4_slur_xoffset_unsigned)
+{
+    MasterScore* score = readEncoreScore("importer_slur_xoffset_unsigned.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_slur_xoffset_unsigned.enc";
+
+    Slur* found = nullptr;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isSlur()) {
+            found = toSlur(sp);
+            break;
+        }
+    }
+    ASSERT_NE(found, nullptr) << "A slur must be created";
+    EXPECT_EQ(found->tick(), Fraction(1, 4))
+        << "slur starts at note 2 (tick=240 = 1/4)";
+    EXPECT_EQ(found->tick2(), Fraction(1, 2))
+        << "slur ends at note 3 (tick=480 = 1/2); with signed xoffset it lands too late";
+    delete score;
+}
+
+// Regression: pixel-span heuristic skips cross-measure slurs (alMezuro >= 1).
+// Pins the fallback: alMezuro=1 slur must anchor on the last ChordRest of the target measure.
+TEST_F(Tst_OrnamentsSlurs, v0c4_slur_cross_measure_fallback)
+{
+    MasterScore* score = readEncoreScore("importer_slur_cross_measure_fallback.enc");
+    ASSERT_NE(score, nullptr)
+        << "Failed to load importer_slur_cross_measure_fallback.enc";
+
+    Slur* found = nullptr;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isSlur()) {
+            found = toSlur(sp);
+            break;
+        }
+    }
+    ASSERT_NE(found, nullptr);
+    EXPECT_EQ(found->tick(), Fraction(0, 1))
+        << "slur start at the SLURSTART tick (m1 beat 1)";
+    EXPECT_EQ(found->tick2(), Fraction(7, 4))
+        << "cross-measure slur must fall back to the last ChordRest of "
+        "the alMezuro target measure (m2 beat 4 = absolute tick 7/4)";
     delete score;
 }

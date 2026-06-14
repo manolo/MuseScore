@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Ornaments and articulations: trills, mordents, fermatas, breaths/caesuras, arpeggios, tremolos and the
+// articulation-byte mapping, plus their placement/anchoring. See ENCORE_FORMAT.md §Ornament element.
+
 #include <gtest/gtest.h>
 
 #include "engraving/dom/arpeggio.h"
@@ -285,13 +288,8 @@ TEST_F(Tst_Ornaments, staccato_from_orn_c9)
     delete score;
 }
 
-// ===========================================================================
-// FIX: Size-28 ORN 0x36 (TRILL_START) + 0x35 (TRILL_END) now create a Trill spanner
-// (tr + wavy line) instead of a glyph-only Ornament. ORN 0x37 (TRILL_ALT) that appears
-// WITHIN a 0x36..0x35 span remains an Ornament glyph (secondary tr marker).
-// Fixture: 0x36 at tick=0, 0x37 at tick=240, 0x35 at tick=480 in a 4/4 measure.
-// Expected: one Trill spanner (from 0x36 to 0x35) + one Ornament glyph (from 0x37).
-// ===========================================================================
+// TRILL_START/TRILL_END markers create a Trill spanner (tr + wavy line), while a TRILL_ALT inside that span
+// stays a glyph-only Ornament.
 TEST_F(Tst_Ornaments, trill_spanner_start_markers)
 {
     MasterScore* score = readEncoreScore("ornaments_trill_spanner.enc");
@@ -331,7 +329,6 @@ TEST_F(Tst_Ornaments, trill_spanner_start_markers)
     EXPECT_EQ(ornamentGlyphs, 1)
         << "0x37 (TRILL_ALT) must remain an Ornament glyph (secondary tr, not a spanner)";
 
-    // Verify the Trill spanner covers from the TRILL_START tick to the TRILL_END tick.
     if (trillSpanners == 1) {
         for (auto& [tick, sp] : score->spannerMap().map()) {
             if (sp->isTrill()) {
@@ -575,12 +572,8 @@ TEST_F(Tst_Ornaments, trill_mordent_from_per_note_artic_byte)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: articulationUp=0x08 (ornamentTurn) must create an Ornament element,
-// not a plain Articulation. MuseScore's layout code calls Ornament-specific
-// methods (computeNotesAboveAndBelow, cueNoteChord) on ornament-family SymIds;
-// if the object is a plain Articulation the virtual dispatch fails with SIGSEGV.
-// ===========================================================================
+// An ornament-family articulation byte (e.g. turn) must create an Ornament, not a plain Articulation:
+// layout calls Ornament-only methods on those SymIds and crashes on a plain Articulation.
 TEST_F(Tst_Ornaments, ornament_turn_created_as_ornament_not_articulation)
 {
     MasterScore* score = readEncoreScore("ornaments_ornament_turn.enc");
@@ -693,13 +686,8 @@ TEST_F(Tst_Ornaments, dynamics_from_size16_ornaments)
     delete score;
 }
 
-// ===========================================================================
-// BUG: two dynamic ORNs at the identical tick+xoffset on one staff (e.g. an
-// ff from the score view and an fff from a part view) were both emitted,
-// stacking two contradictory dynamics on one ChordRest. Encore renders only
-// one per beat; the importer must keep the first (ff) and drop the second.
-// The fixture places ff (0x86) then fff (0x87) at tick 0, xoffset 13.
-// ===========================================================================
+// Two dynamic ORNs at the same tick+xoffset on one staff must collapse to the first; Encore renders only
+// one dynamic per beat.
 TEST_F(Tst_Ornaments, dynamics_stacked_collapsed_to_first)
 {
     MasterScore* score = readEncoreScore("ornaments_dynamics_stacked.enc");
@@ -1201,7 +1189,6 @@ TEST_F(Tst_Ornaments, new_artic_bytes_stopped_inverted_turn_half_stopped)
     ASSERT_NE(m, nullptr);
 
     auto articsOnNote = [&](int noteIdx) {
-        int count = 0;
         Segment* seg = m->first(SegmentType::ChordRest);
         for (int i = 0; i < noteIdx && seg; ++i) {
             seg = seg->next(SegmentType::ChordRest);
@@ -1452,16 +1439,10 @@ TEST_F(Tst_Ornaments, standalone_trill_alt_creates_trill_spanner)
     delete score;
 }
 
-// ===========================================================================
-// DEDUP: artic bytes on multi-note chords must not produce duplicate ornaments
-// Two notes at tick=0 both carry au=0x04 (→ ornamentTrill). Without dedup,
-// the chord would end up with two identical Ornament(ornamentTrill) elements.
-// Fix: skip adding if the chord already has the same SymId.
-// ===========================================================================
+// When several notes in a chord carry the same articulation byte, the ornament must be added once, not
+// duplicated per note.
 TEST_F(Tst_Ornaments, artic_byte_dedup_no_duplicate_ornament_on_chord)
 {
-    // Both notes in the chord have au=0x04 → ornamentTrill.
-    // Only one trill must be added.
     MasterScore* score = readEncoreScore("notes_artic_dedup_trill_on_chord.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_TRUE(score->sanityCheck()) << "Artic dedup must not corrupt";
@@ -1631,17 +1612,10 @@ TEST_F(Tst_Ornaments, accent_orn_attaches_to_nonzero_voice)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: ACCENT ORN at voice=0, mid-measure tick (enc tick=240) must attach
-// to the note in voice=1 at that same tick, not to the first note at tick=0.
-// Without fix: voice=0 cumTick stays 0 (no notes in v0), so elemTick=measTick
-// and pendingBowings stores start-of-measure tick. Resolver finds first note.
-// With fix: bowTick = measTick + Fraction(enc_tick, 960) targets the right beat.
-// ===========================================================================
+// An ACCENT ORN at voice 0 but a mid-measure tick must resolve by its own tick (not the measure start) so
+// it accents the note actually at that beat, even when that note lives in another voice.
 TEST_F(Tst_Ornaments, accent_orn_offset_tick_nonzero_voice_lands_on_correct_note)
 {
-    // Single staff: C4 quarter at voice=1 tick=0, E4 quarter at voice=1 tick=240.
-    // ORN 0xBE at voice=0 tick=240 → must accent E4 (track=1, MuseScore tick=480).
     MasterScore* score = readEncoreScore("ornaments_accent_offset_tick_nonzero_voice.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1656,7 +1630,7 @@ TEST_F(Tst_Ornaments, accent_orn_offset_tick_nonzero_voice_lands_on_correct_note
     Segment* seg = m->findSegment(SegmentType::ChordRest, targetTick);
     ASSERT_NE(seg, nullptr) << "Segment at MuseScore tick=480 must exist";
 
-    EngravingItem* el = seg->element(1);   // voice=1 → track=1
+    EngravingItem* el = seg->element(1);
     ASSERT_TRUE(el && el->isChord()) << "E4 chord must be in voice=1 at tick=480";
 
     int accentOnE4 = 0;
@@ -1684,17 +1658,8 @@ TEST_F(Tst_Ornaments, accent_orn_offset_tick_nonzero_voice_lands_on_correct_note
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: ACCENT ORN on staff 0 (notes in voice=3) must NOT redirect to
-// staff 1 via the sibling-staff fallback.
-// Without fix: resolver checks only track=staffBase+0 (voice=0) of staff 0
-// → no chord found → falls to sibTrack (staff 1 voice=0) → accent goes to
-// the wrong staff (E4 on staff 1 instead of C4 on staff 0 voice=3).
-// With fix: resolver scans all voices of staff 0 first → finds C4 at voice=3.
-//
-// 2-staff file: staff 0 has C4 in voice=3; staff 1 has E4 in voice=0 (trap).
-// ACCENT ORN on staff 0, voice=0, tick=0.
-// ===========================================================================
+// An ACCENT ORN must scan all voices of its own staff before falling back to the sibling staff, so it does
+// not spill to the wrong staff when the target note sits in a non-zero voice.
 TEST_F(Tst_Ornaments, accent_orn_does_not_spill_to_sibling_staff)
 {
     MasterScore* score = readEncoreScore("ornaments_accent_sibling_no_spillover.enc");
@@ -1707,7 +1672,6 @@ TEST_F(Tst_Ornaments, accent_orn_does_not_spill_to_sibling_staff)
     Segment* seg = m->first(SegmentType::ChordRest);
     ASSERT_NE(seg, nullptr);
 
-    // Staff 0, voice=3 (track = 0*VOICES+3 = 3): must have the accent.
     EngravingItem* el0v3 = seg->element(3);
     ASSERT_TRUE(el0v3 && el0v3->isChord())
         << "C4 chord must be in staff=0 voice=3 (track=3)";
@@ -1722,7 +1686,6 @@ TEST_F(Tst_Ornaments, accent_orn_does_not_spill_to_sibling_staff)
         << "ACCENT ORN on staff 0 (voice=0) must attach to the voice=3 chord on staff 0, "
         "not redirect to the sibling staff";
 
-    // Staff 1, voice=0 (track = 1*VOICES+0 = 4): must have NO accent.
     EngravingItem* el1v0 = seg->element(4);
     if (el1v0 && el1v0->isChord()) {
         for (Articulation* a : toChord(el1v0)->articulations()) {
@@ -1734,23 +1697,8 @@ TEST_F(Tst_Ornaments, accent_orn_does_not_spill_to_sibling_staff)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: When two ACCENT ORNs in the same measure have the same ornXoffset
-// (a common case because xoffset is relative-to-notehead, not absolute), and
-// one of them is at enc-tick=0 while the other is at enc-tick>0, Phase 1 of
-// correctBowingTickFromXoffset must NOT move the tick-0 ORN to the later tick.
-//
-// Without fix: Phase 1 finds the tick-480 ORN as an "anchor" for the tick-0 ORN
-// (|11-11|=0 <= BOW_XOFF_CLUSTER=6), moves tick-0 ORN to tick-480 → both
-// accents land on note 3.
-//
-// With fix: pre-check finds a note at enc-tick=0 with noteXoffset=8,
-// |ornXoffset(11)-noteXoffset(8)|=3 <= 6 → ORN is already at its chord, return
-// early; Phase 1 is not reached.
-//
-// Fixture: 3/4 measure, 3 quarter notes at tick=0/240/480 (xoff=8 each),
-// two ACCENT ORNs at tick=0 and tick=480 (ornXoffset=11 each).
-// ===========================================================================
+// When two ACCENT ORNs in a measure share the same ornXoffset (xoffset is relative to the notehead) and one
+// is at tick 0, the tick-0 ORN must stay on note 1 rather than clustering to the later ORN's note.
 TEST_F(Tst_Ornaments, accent_orn_tick0_stays_on_note1_when_same_xoffset_as_later_accent)
 {
     MasterScore* score = readEncoreScore("ornaments_accent_tick0_xoffset.enc");
@@ -1760,9 +1708,7 @@ TEST_F(Tst_Ornaments, accent_orn_tick0_stays_on_note1_when_same_xoffset_as_later
 
     Measure* m = score->firstMeasure();
     ASSERT_NE(m, nullptr);
-    const Fraction measTick = m->tick();
 
-    // Collect all chords in the measure and their accent counts.
     struct ChordInfo {
         Fraction tick;
         int accents { 0 };
@@ -1787,7 +1733,6 @@ TEST_F(Tst_Ornaments, accent_orn_tick0_stays_on_note1_when_same_xoffset_as_later
     ASSERT_GE(chords.size(), 2u)
         << "Measure must have at least 2 chords (note 1 and note 3)";
 
-    // Exactly 2 accents total.
     int totalAccents = 0;
     for (const auto& ci : chords) {
         totalAccents += ci.accents;
@@ -1795,12 +1740,10 @@ TEST_F(Tst_Ornaments, accent_orn_tick0_stays_on_note1_when_same_xoffset_as_later
     EXPECT_EQ(totalAccents, 2)
         << "Expected exactly 2 accent marks total (one on note 1 and one on note 3)";
 
-    // Note 1 (earliest tick) must carry exactly 1 accent.
     EXPECT_EQ(chords.front().accents, 1)
         << "Note 1 (enc-tick=0) must carry exactly 1 accent; "
            "without fix both accents land on note 3 (enc-tick=480)";
 
-    // No chord should carry 2 accents.
     for (const auto& ci : chords) {
         EXPECT_LE(ci.accents, 1)
             << "Chord at MuseScore tick "
@@ -1812,25 +1755,9 @@ TEST_F(Tst_Ornaments, accent_orn_tick0_stays_on_note1_when_same_xoffset_as_later
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: A bowing ORN at enc-tick=0 must stay on note 1 even when its
-// ornXoffset does not match note 1's xoffset. In real Encore files the ORN
-// xoffset and the note xoffset use different horizontal origins, so the tight
-// |ornXoffset - noteXoffset| <= 6 pre-check is not satisfied for a bow that
-// genuinely belongs to the first note.
-//
-// Without fix: the tick-0 up-bow (ornXoffset=69) skips the pre-check
-// (|69-9|=60 > 6), then Phase 2 of correctBowingTickFromXoffset snaps it to the
-// closest note xoffset <= 69 (note 3, xoffset=57 at enc-tick=480), moving the
-// up-bow off note 1.
-//
-// With fix: a note exists on the ORN's own staff at its raw enc-tick=0, so the
-// raw tick is trusted unconditionally and the up-bow stays on note 1.
-//
-// Fixture: 4/4 measure, 4 quarter notes at ticks 0/240/480/720
-// (note xoffsets 9/33/57/81); up-bow ORN at tick=0 (ornXoffset=69),
-// down-bow ORN at tick=480 (ornXoffset=120).
-// ===========================================================================
+// A bowing ORN at tick 0 must stay on note 1 even when its ornXoffset does not match note 1's xoffset
+// (ORN and note xoffsets use different origins): a note exists on the ORN's staff at tick 0, so the raw
+// tick is trusted rather than snapping the bow to a later note by xoffset.
 TEST_F(Tst_Ornaments, bowing_tick0_stays_on_note1_when_xoffset_mismatches)
 {
     MasterScore* score = readEncoreScore("ornaments_bowing_tick0_xoffset_mismatch.enc");
@@ -1841,7 +1768,6 @@ TEST_F(Tst_Ornaments, bowing_tick0_stays_on_note1_when_xoffset_mismatches)
     Measure* m = score->firstMeasure();
     ASSERT_NE(m, nullptr);
 
-    // Collect, per chord, the bowing symbols it carries (in tick order).
     std::vector<std::pair<Fraction, std::vector<SymId> > > perChord;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
@@ -1875,17 +1801,8 @@ TEST_F(Tst_Ornaments, bowing_tick0_stays_on_note1_when_xoffset_mismatches)
     delete score;
 }
 
-// ===========================================================================
-// FEATURE: Newly decoded single-SymId articulation ORN tipos:
-//   0xBF MARCATO (^)               -> articMarcato* family
-//   0xC6 MARCATO_BELOW (v)         -> articMarcato* family
-//   0xC0 MARCATO_STACCATO_BELOW    -> articMarcatoStaccato* family
-//   0xC8 TENUTO (-)                -> articTenuto* family
-//   0x30 GUITAR_BEND_V             -> skipped (guitar bend, not imported yet)
-//   0xB8 DOUBLE_MORDENT            -> ornamentMordent
-// MuseScore auto-adjusts Above/Below based on note stem direction, so we test
-// by family (canonicalized via subtype()) rather than exact symId.
-// ===========================================================================
+// Single-SymId articulation ORN tipos map to their MuseScore families (marcato, marcato-staccato, tenuto,
+// mordent; guitar bend skipped). Tested by family (via subtype()) since layout flips Above/Below by stem.
 TEST_F(Tst_Ornaments, new_artic_types_from_orns)
 {
     MasterScore* score = readEncoreScore("ornaments_new_artic_types.enc");
@@ -1939,11 +1856,8 @@ TEST_F(Tst_Ornaments, new_artic_types_from_orns)
     delete score;
 }
 
-// ===========================================================================
-// REGRESSION: ORN tipos 0x28-0x2B are guitar bends (size=28 spanner), NOT
-// staccatissimo. They must be silently skipped (LOGW) without adding any
-// articulation to the chords.
-// ===========================================================================
+// ORN tipos 0x28-0x2B are guitar bends (size-28 spanners), not staccatissimo, and must be skipped without
+// adding any articulation.
 TEST_F(Tst_Ornaments, guitar_bend_orns_skipped)
 {
     MasterScore* score = readEncoreScore("ornaments_staccatissimo_orns.enc");
@@ -2110,12 +2024,8 @@ TEST_F(Tst_Ornaments, v0c4_tremolo_orn_cross_voice_attaches)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: tremolo ORN on the tied-from note of a quarter->eighth tie.
-// The ORN's cumTick position falls on or past the eighth (tie-continuation),
-// so the "last chord" fallback resolves to the eighth. The importer must
-// check tieBack() on the resolved chord and walk back to the tie-start chord.
-// ===========================================================================
+// A tremolo ORN whose tick resolves to a tie-continuation note must walk back via tieBack() to the
+// tie-start chord, or it lands on the wrong (continuation) note.
 TEST_F(Tst_Ornaments, v0c4_tremolo_orn_on_tied_from_note)
 {
     MasterScore* score = readEncoreScore("ornaments_tremolo_orn_tied_from.enc");
@@ -2347,3 +2257,81 @@ TEST_F(Tst_Ornaments, encore_symbols_full_coverage)
     EXPECT_GE(hairpins,       2);
     EXPECT_GE(dotted_barlines, 1);
     delete score;
+}
+
+// Regression: Encore stores a run of articulations (an accent on each note of a bar) all
+// at the downbeat tick, separated only by xoffset. The importer used to trust the raw
+// tick when a note sat on the downbeat and stacked every accent on the first chord. It
+// must spread same-tick marks across the notes so each chord gets exactly one accent.
+TEST_F(Tst_Ornaments, v0c4_accents_distributed_across_notes)
+{
+    MasterScore* score = readEncoreScore("ornaments_accents_distributed.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load ornaments_accents_distributed.enc";
+
+    int chordsWithAccent = 0;
+    int totalAccents = 0;
+    int maxAccentsOnOneChord = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        Measure* m = toMeasure(mb);
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            int n = 0;
+            for (Articulation* a : toChord(el)->articulations()) {
+                // layout may flip the accent to its below-staff glyph variant.
+                if (a && (a->symId() == SymId::articAccentAbove
+                          || a->symId() == SymId::articAccentBelow)) {
+                    ++n;
+                }
+            }
+            if (n > 0) {
+                ++chordsWithAccent;
+            }
+            totalAccents += n;
+            maxAccentsOnOneChord = std::max(maxAccentsOnOneChord, n);
+        }
+    }
+    EXPECT_EQ(totalAccents, 4) << "all four accents must import";
+    EXPECT_EQ(chordsWithAccent, 4) << "each of the four notes must carry one accent";
+    EXPECT_EQ(maxAccentsOnOneChord, 1)
+        << "accents must not stack on a single chord";
+    delete score;
+}
+
+// Regression: a simple "TR" trill whose stored tick falls between two notes (no note on
+// that exact tick) used to anchor via the cumulative tick, which overshoots to the
+// following note. Encore draws the TR on the preceding note; the importer must anchor
+// from the raw tick and snap to the note it sits on.
+TEST_F(Tst_Ornaments, v0c4_trill_between_notes_snaps_to_preceding)
+{
+    MasterScore* score = readEncoreScore("ornaments_trill_between_notes.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load ornaments_trill_between_notes.enc";
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    Fraction trillTick(-1, 1);
+    int trillCount = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        for (Articulation* a : toChord(el)->articulations()) {
+            if (a && (a->symId() == SymId::ornamentTrill || a->symId() == SymId::ornamentShortTrill)) {
+                trillTick = s->tick() - m->tick();
+                ++trillCount;
+            }
+        }
+    }
+    EXPECT_EQ(trillCount, 1) << "exactly one trill must import";
+    // note@0 is beat 1 (tick 0); the following note@240(enc) is beat 2 (tick 480 in MuseScore).
+    EXPECT_EQ(trillTick, Fraction(0, 1))
+        << "the TR must land on its own (preceding) note, not the following one";
+    delete score;
+}
+

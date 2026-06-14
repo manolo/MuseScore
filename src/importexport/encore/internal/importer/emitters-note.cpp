@@ -720,10 +720,7 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
 
 void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
 {
-    MasterScore* score = ctx.score;
     Measure* measure = mc.measure;
-    const std::set<const EncMeasureElem*>& validTupletGroupMember = mc.validTupletGroupMember;
-    const std::set<const EncMeasureElem*>& partialEndGroup = mc.partialEndGroup;
     const std::set<const EncMeasureElem*>& impliedGroupMember = mc.validTupletGroupMember;
     std::set<std::tuple<int, int, int> >& filteredTieSenderPitches = mc.filteredTieSenderPitches;
     const EncMeasureElem* e = ec.e;
@@ -731,16 +728,11 @@ void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
     const bool isInnerLast   = mc.nestedByInnerLast.count(e) > 0;
     const bool isInnerMember = mc.innerGroupMembers.count(e) > 0;
     int staffIdx = ec.staffIdx;
-    int voice = ec.voice;
-    int msVoice = ec.msVoice;
     track_idx_t track = ec.track;
     auto trackKey = ec.trackKey;
     bool isChordExt = ec.isChordExt;
     Fraction elemTick = ec.elemTick;
     int savedPrevMidiTick = ec.savedPrevMidiTick;
-    bool hadLastChordPos = ec.hadLastChordPos;
-    Fraction savedLastChordPos = ec.savedLastChordPos;
-    auto isTieStart = [&](int si, int v, int t, int pos = -1) { return mc.isTieStartAt(si, v, t, pos); };
 
     const EncNote* en = static_cast<const EncNote*>(e);
 
