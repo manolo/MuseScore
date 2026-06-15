@@ -368,18 +368,25 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     }
     case EncOrnamentType::ACCENT: {
         const bool cm = !noteTicks.count(static_cast<int>(e->tick));
-        ctx.pendingBowings.push_back({ elemTick, track, SymId::articAccentAbove, measIdx, cm });
+        // Use the enc tick directly to compute the target MuseScore tick.
+        // elemTick is cumTick-based for the ORN's own voice=0; when the notes
+        // live in voice=1+ the cumTick for voice=0 is 0, placing the accent at
+        // the start of the measure instead of at the correct beat.
+        const Fraction bowTick = measTick + Fraction(static_cast<int>(e->tick), 960);
+        ctx.pendingBowings.push_back({ bowTick, track, SymId::articAccentAbove, measIdx, cm });
         break;
     }
     case EncOrnamentType::DOWNBOW: {
         const bool cm = !noteTicks.count(static_cast<int>(e->tick));
-        ctx.pendingBowings.push_back({ elemTick, track, SymId::stringsDownBow, measIdx, cm });
+        const Fraction bowTick = measTick + Fraction(static_cast<int>(e->tick), 960);
+        ctx.pendingBowings.push_back({ bowTick, track, SymId::stringsDownBow, measIdx, cm });
         break;
     }
     case EncOrnamentType::UPBOW: {
         const bool cm = !noteTicks.count(static_cast<int>(e->tick));
         const SymId sid = enc.fmt->ornC4IsAccent() ? SymId::articAccentAbove : SymId::stringsUpBow;
-        ctx.pendingBowings.push_back({ elemTick, track, sid, measIdx, cm });
+        const Fraction bowTick = measTick + Fraction(static_cast<int>(e->tick), 960);
+        ctx.pendingBowings.push_back({ bowTick, track, sid, measIdx, cm });
         break;
     }
     case EncOrnamentType::FINGER_1:

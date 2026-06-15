@@ -492,7 +492,7 @@ Type 5. Variable size. Offsets from element start:
 | 0xA3    | REPEAT_MEAS   | "%" repeat-last-bar glyph (size-16 ORN); replaces measure content with MeasureRepeat |
 | 0xA7    | CAESURA       | caesura (//) breath element placed after preceding note (size-16 ORN)           |
 | 0xA8    | BREATH_COMMA  | comma breath mark placed after preceding note (size-16 ORN)                     |
-| 0xBE    | ACCENT        | standalone accent above (>) in v0xC4 as size-16 ORN; maps to articAccentAbove. In v0xC2, accent is instead ORN tipo=0xC4. |
+| 0xBE    | ACCENT        | standalone accent above (>) in v0xC4 as size-16 ORN; maps to articAccentAbove. In v0xC2, accent is instead ORN tipo=0xC4. **Two implementation rules:** (1) **Voice scan** — the ORN's `voice` byte is always 0 regardless of which voice the annotated note is in; the resolver must scan all four voices of the ORN's own staff before falling back to the sibling staff, otherwise an accent on a staff whose notes are all in voice 1+ is silently dropped or mis-routed. (2) **Tick derivation** — the target tick must be `measTick + Fraction(e->tick, 960)` (from the ORN's raw Encore tick), NOT `elemTick` (cumTick-based). When voice=0 has no notes on that staff, cumTick[(staff, 0)] = 0 throughout the measure, so elemTick = measTick regardless of the ORN's beat position; using encTick directly always gives the correct beat. Same rules apply to DOWNBOW (0xC5) and UPBOW (0xC4 in v0xC4). |
 
 **Undecoded subtypes.** Silently ignored; observed in corpus:
 
@@ -1292,6 +1292,15 @@ would create spurious rests and misalign subsequent notes.
 additional notes with the same Encore voice byte are dropped. They are never routed to
 the next MuseScore voice.
 
+**Duplicate REST at same tick after voice routing.** When two Encore voices (e.g. voice=5
+and voice=6) both route to the same MuseScore voice (voice=0), and both carry an explicit
+REST element at the identical Encore tick, the second REST must not advance `cumTick` again.
+After the first REST is placed, `cumTick` advances by one rest duration. The second REST
+arrives with `encTickFrac < cumTick`; gap-snap does not fire, so it is placed at `cumTick`
+(one duration too late), which shifts all subsequent notes by that amount. The correct
+behaviour is to absorb the second REST as a no-op (treat it like a chord-extension for a
+rest at the position already occupied).
+
 ### Chord symbol placement
 
 CHD elements (type 7) contain harmony markings. Their encoded tick often carries a
@@ -1346,5 +1355,9 @@ tick=0 → harmony on beat 1, first 16th note. ✓
 - **Key=0 and template transposition.** When Encore's Key field is 0 (`0 = sounds as written`),
   the importer stores notes at written pitch with no chromatic shift (`staffPitchOffset = 0`).
   If the MIDI program causes a transposing template to be selected (e.g. Bb clarinet for MIDI 72),
-  the template's non-octave transposition is zeroed out so that the stored written pitch is
-  displayed as-is. Octave transpositions from the template (e.g. guitar, bass) are preserved.
+  **all** template transpositions are zeroed out (both non-octave and octave) so that the stored
+  written pitch is displayed as-is in MuseScore. In particular, if an acoustic-bass or double-bass
+  template carries `transposeChromatic = -12` but the enc file has Key=0, the -12 must also be
+  cleared; otherwise notes display one octave higher than Encore shows them.
+  When Key ≠ 0 and the offset is a pure octave multiple (±12, ±24 …), the template's existing
+  octave transposition is left intact and the offset shapes the clef selection via `pickStaffClef`.
