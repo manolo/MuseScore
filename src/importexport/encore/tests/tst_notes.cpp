@@ -3465,3 +3465,75 @@ TEST_F(Tst_Notes, triplet_orphan_with_prior_complete_group)
 
     delete score;
 }
+
+// ===========================================================================
+// BUG FIX: Two explicit REST elements at the same Encore tick (for voices 5
+// and 6, both routing to MuseScore voice=0) must not cause a cumTick drift.
+// Without fix: the second REST at tick=120 finds encTickFrac < cumTick and
+// places itself at cumTick=1/4 (tick=240 MuseScore) instead of being absorbed,
+// shifting all subsequent notes by one eighth note.
+// With fix: the second REST is recognized as a duplicate at the already-filled
+// position and does not advance cumTick again.
+// ===========================================================================
+TEST_F(Tst_Notes, dual_explicit_rests_same_tick_no_cumtick_drift)
+{
+    // voices 5+6 both route to voice=0; each has REST at enc tick=120 (eighth).
+    // After the D3+F#3 chord (tick=0) and one rest (tick=120), notes at enc
+    // tick=480 must land at MuseScore tick=960 (not 720, the buggy result).
+    MasterScore* score = readEncoreScore("notes_dual_rests_same_tick_routing.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    const Fraction measTick = m->tick();
+
+    // Collect chord ticks in voice=0 (track=0) of measure 0.
+    std::vector<Fraction> chordTicks;
+    int restCount = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el) {
+            continue;
+        }
+        if (el->isChord()) {
+            chordTicks.push_back(s->tick() - measTick);
+        } else if (el->isRest()) {
+            ++restCount;
+        }
+    }
+
+    // Expected: chord at 0, one rest, chord at half-measure (960 MuseScore ticks).
+    ASSERT_EQ(static_cast<int>(chordTicks.size()), 2)
+        << "Expected exactly two chords: D3+F#3 at start, B2+D3 at half-measure";
+
+    EXPECT_EQ(chordTicks[0].ticks(), 0)
+        << "First chord (D3+F#3) must be at the start of the measure";
+
+    EXPECT_EQ(chordTicks[1].ticks(), 960)
+        << "Second chord (B2+D3) must be at half-measure (MuseScore tick 960); "
+        "the two duplicate rests at enc tick=120 must not shift it to tick 720";
+
+    // At least one rest must appear (for the enc tick=120 eighth rest).
+    // A gap-fill rest may also appear between the explicit rest and the quarter
+    // note, so we only assert the minimum; the key invariant is the chord tick.
+    EXPECT_GE(restCount, 1)
+        << "At least one rest must appear for the enc tick=120 explicit rest";
+
+    // Verify pitches of the second chord.
+    Segment* seg2 = m->findSegment(SegmentType::ChordRest, measTick + Fraction(960, 1920));
+    if (seg2) {
+        EngravingItem* el2 = seg2->element(0);
+        if (el2 && el2->isChord()) {
+            std::set<int> pitches;
+            for (Note* n : toChord(el2)->notes()) {
+                pitches.insert(n->pitch());
+            }
+            EXPECT_TRUE(pitches.count(47)) << "B2 (midi=47) must be in the second chord";
+            EXPECT_TRUE(pitches.count(50)) << "D3 (midi=50) must be in the second chord";
+        }
+    }
+
+    delete score;
+}

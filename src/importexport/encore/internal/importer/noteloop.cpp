@@ -315,6 +315,7 @@ void buildNoteLoop(BuildCtx& ctx)
         ctx.prevMidiTick.clear();
         ctx.prevEncVoice.clear();
         ctx.lastChordPos.clear();
+        ctx.prevRestTick.clear();
         ctx.graceStolenTicks.clear();
 
         // Delete unattached grace chords explicitly: not in score tree, so no auto-cleanup.
@@ -636,6 +637,16 @@ void buildNoteLoop(BuildCtx& ctx)
                                 && (int)e->tick - (int)ctx.prevMidiTick.at(trackKey) >= 0
                                 && (int)e->tick - (int)ctx.prevMidiTick.at(trackKey)
                                 < CHORD_MIDI_THRESHOLD;
+            // REST-REST deduplication: when two Encore voices (e.g. 5 and 6) both route
+            // to the same MuseScore voice and each carry an explicit REST at the same enc
+            // tick, the second REST is redundant. Dropping it prevents cumTick from
+            // advancing a second time, which would shift all subsequent notes by one
+            // rest duration. The REST handler does not check isChordExt, so we skip here.
+            if (!isChordExt && et == EncElemType::REST
+                && ctx.prevRestTick.count(trackKey)
+                && ctx.prevRestTick.at(trackKey) == static_cast<int>(e->tick)) {
+                continue;
+            }
 
             // Drop notes that arrive after the voice is full: no multi-stream overflow to
             // the next MuseScore voice. Overflow notes are MIDI recording artifacts that
@@ -713,6 +724,8 @@ void buildNoteLoop(BuildCtx& ctx)
                     if (et == EncElemType::NOTE) {
                         ctx.prevMidiTick[trackKey] = e->tick;
                         ctx.prevEncVoice[trackKey] = voice;
+                    } else if (et == EncElemType::REST) {
+                        ctx.prevRestTick[trackKey] = static_cast<int>(e->tick);
                     }
                 }
             }
