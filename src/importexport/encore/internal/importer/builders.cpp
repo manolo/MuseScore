@@ -305,32 +305,43 @@ void buildParts(BuildCtx& ctx)
     }
 }
 
-static bool encMeasHasSingleRest(const EncMeasure& m)
+// True if every element in the measure is a REST element with mrestCount > 1.
+// Multi-staff files emit one REST per staff, so the measure can have N > 1 elements.
+static bool encMeasHasMultiRest(const EncMeasure& m)
 {
-    return m.elements.size() == 1
-           && static_cast<EncElemType>(m.elements[0]->type) == EncElemType::REST;
+    if (m.elements.empty()) {
+        return false;
+    }
+    for (const auto& ep : m.elements) {
+        if (static_cast<EncElemType>(ep->type) != EncElemType::REST) {
+            return false;
+        }
+    }
+    return static_cast<const EncRest*>(m.elements[0].get())->mrestCount > 1;
 }
 
 // Returns the number of MuseScore measures to create for a single EncMeasure.
 // Normally 1:1, but Encore stores "N consecutive empty display measures" as a single MEAS
-// block whose lone REST element has mrestCount == N (byte +15 of the REST element data).
-// Expansion applies to an isolated single-block rest:
-//   - exactly one REST element with mrestCount > 1
-//   - predecessor is NOT also a single-REST block (prevents cascading into a run)
+// block whose REST elements have mrestCount == N (byte +15 of the REST element data).
+// Multi-staff files emit one REST element per staff inside the block; the count is read
+// from the first element (all staves store the same count).
+// Expansion is suppressed when the predecessor is itself a multi-measure REST block
+// (prevents cascading in the rare case Encore writes consecutive mrest blocks).
 static int encMeasDisplayCount(const EncMeasure& m, const EncMeasure* prev)
 {
-    if (m.elements.size() != 1) {
+    if (m.elements.empty()) {
         return 1;
     }
-    const EncMeasureElem* e = m.elements[0].get();
-    if (static_cast<EncElemType>(e->type) != EncElemType::REST) {
-        return 1;
+    for (const auto& ep : m.elements) {
+        if (static_cast<EncElemType>(ep->type) != EncElemType::REST) {
+            return 1;
+        }
     }
-    const int cnt = static_cast<int>(static_cast<const EncRest*>(e)->mrestCount);
+    const int cnt = static_cast<int>(static_cast<const EncRest*>(m.elements[0].get())->mrestCount);
     if (cnt <= 1) {
         return 1;
     }
-    if (prev && encMeasHasSingleRest(*prev)) {
+    if (prev && encMeasHasMultiRest(*prev)) {
         return 1;
     }
     return cnt;

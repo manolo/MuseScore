@@ -2686,6 +2686,113 @@ TEST_F(Tst_Importer, mrest_single_block_expands_when_successor_is_rest)
 }
 
 // ===========================================================================
+// Regression: a single MEAS block with mrestCount > 1 must expand even when
+// the immediately preceding MEAS block is a plain single-measure rest
+// (mrestCount == 1).  Before the fix, encMeasHasSingleRest(*prev) incorrectly
+// returned true for any REST element (ignoring mrestCount), so the guard
+// suppressed expansion whenever the predecessor happened to be a rest measure.
+//
+// Synthetic file: [rest][rest][mrest=7][note]  (assemble() pads 4 blocks to min 6)
+// Expected: 1 + 1 + 7 + 1 + 1(pad) + 1(pad) = 12 MuseScore measures.
+// Without fix: 1 + 1 + 1 + 1 + 1 + 1 = 6 (the mrest=7 collapses to 1).
+// ===========================================================================
+TEST_F(Tst_Importer, mrest_single_block_expands_when_preceded_by_rest)
+{
+    MasterScore* score = readEncoreScore("importer_mrest_preceded_by_rest.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_mrest_preceded_by_rest.enc";
+    ASSERT_EQ(score->nmeasures(), 12)
+        << "4 MEAS blocks + 2 pad + 6 extra from mrestCount=7; without fix only 6 measures";
+
+    auto measureAt = [](MasterScore* sc, int idx) -> Measure* {
+        Measure* m = sc->firstMeasure();
+        for (int i = 0; i < idx && m; ++i) {
+            m = m->nextMeasure();
+        }
+        return m;
+    };
+    auto hasPitchedNotes = [](Measure* m) -> bool {
+        if (!m) {
+            return false;
+        }
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (size_t v = 0; v < VOICES; ++v) {
+                EngravingItem* el = s->element(v);
+                if (el && el->isChord()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    // Measures 1-2: plain single-measure rests (the predecessor case that triggered the bug)
+    EXPECT_FALSE(hasPitchedNotes(measureAt(score, 0))) << "measure 1 must be empty";
+    EXPECT_FALSE(hasPitchedNotes(measureAt(score, 1))) << "measure 2 must be empty";
+    // Measures 3-9: the 7-measure multi-measure rest expanded correctly
+    for (int i = 2; i < 9; ++i) {
+        EXPECT_FALSE(hasPitchedNotes(measureAt(score, i)))
+            << "measure " << (i + 1) << " must be empty (mrest expansion)";
+    }
+    // Measure 10: note after the multi-measure rest
+    EXPECT_TRUE(hasPitchedNotes(measureAt(score, 9))) << "measure 10 must have notes";
+    // Measures 11-12: padding empty measures added by assemble()
+    EXPECT_FALSE(hasPitchedNotes(measureAt(score, 10))) << "measure 11 (pad) must be empty";
+    EXPECT_FALSE(hasPitchedNotes(measureAt(score, 11))) << "measure 12 (pad) must be empty";
+
+    delete score;
+}
+
+// ===========================================================================
+// Regression: a multi-staff file stores one REST element per staff inside the
+// mrest MEAS block, so m.elements.size() > 1.  The old guard
+// 'if (m.elements.size() != 1) return 1' incorrectly collapsed the block to
+// a single measure for any file with more than one staff.
+//
+// Synthetic file: 2-staff, [mrest=7 (2 staves)][note (2 staves)]
+// Expected: 7 + 1 = 8 MuseScore measures.
+// Without fix: 1 + 1 = 2 (both staves' REST counted as size==2, suppressed).
+// ===========================================================================
+TEST_F(Tst_Importer, mrest_single_block_expands_for_multi_staff_file)
+{
+    MasterScore* score = readEncoreScore("importer_mrest_multistaff.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_mrest_multistaff.enc";
+    ASSERT_EQ(score->nmeasures(), 8)
+        << "mrest=7 across 2 staves must expand to 7 measures + 1 note; without fix only 2";
+
+    auto measureAt = [](MasterScore* sc, int idx) -> Measure* {
+        Measure* m = sc->firstMeasure();
+        for (int i = 0; i < idx && m; ++i) {
+            m = m->nextMeasure();
+        }
+        return m;
+    };
+    auto hasPitchedNotes = [](Measure* m) -> bool {
+        if (!m) {
+            return false;
+        }
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (size_t v = 0; v < VOICES; ++v) {
+                EngravingItem* el = s->element(v);
+                if (el && el->isChord()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    // Measures 1-7: virtual empty measures from the 2-staff mrest expansion
+    for (int i = 0; i < 7; ++i) {
+        EXPECT_FALSE(hasPitchedNotes(measureAt(score, i)))
+            << "measure " << (i + 1) << " must be empty (mrest expansion)";
+    }
+    // Measure 8: note measure (both staves)
+    EXPECT_TRUE(hasPitchedNotes(measureAt(score, 7))) << "measure 8 must have notes";
+
+    delete score;
+}
+
+// ===========================================================================
 // createMultiMeasureRests style flag: only set when the Encore file has at
 // least one MEAS block whose lone REST element carries mrestCount > 1.
 // Before the fix the flag was always true; files with only individual rests

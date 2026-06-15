@@ -228,25 +228,33 @@ void buildNoteLoop(BuildCtx& ctx)
     };
     std::vector<DeferredKeySig> pendingKeySigs;
 
-    auto hasSingleRest = [](const EncMeasure& m) -> bool {
-        return m.elements.size() == 1
-               && static_cast<EncElemType>(m.elements[0]->type) == EncElemType::REST;
+    auto hasMultiRest = [](const EncMeasure& m) -> bool {
+        if (m.elements.empty()) {
+            return false;
+        }
+        for (const auto& ep : m.elements) {
+            if (static_cast<EncElemType>(ep->type) != EncElemType::REST) {
+                return false;
+            }
+        }
+        return static_cast<const EncRest*>(m.elements[0].get())->mrestCount > 1;
     };
 
-    auto measDisplayCount = [&hasSingleRest](
+    auto measDisplayCount = [&hasMultiRest](
         const EncMeasure& m, const EncMeasure* prev) -> int {
-        if (m.elements.size() != 1) {
+        if (m.elements.empty()) {
             return 1;
         }
-        const EncMeasureElem* e = m.elements[0].get();
-        if (static_cast<EncElemType>(e->type) != EncElemType::REST) {
-            return 1;
+        for (const auto& ep : m.elements) {
+            if (static_cast<EncElemType>(ep->type) != EncElemType::REST) {
+                return 1;
+            }
         }
-        const int cnt = static_cast<int>(static_cast<const EncRest*>(e)->mrestCount);
+        const int cnt = static_cast<int>(static_cast<const EncRest*>(m.elements[0].get())->mrestCount);
         if (cnt <= 1) {
             return 1;
         }
-        if (prev && hasSingleRest(*prev)) {
+        if (prev && hasMultiRest(*prev)) {
             return 1;
         }
         return cnt;
