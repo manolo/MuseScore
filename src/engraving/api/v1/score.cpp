@@ -31,6 +31,8 @@
 #include "dom/score.h"
 #include "dom/masterscore.h"
 #include "dom/segment.h"
+#include "dom/chord.h"
+#include "dom/note.h"
 #include "dom/staff.h"
 #include "dom/stafftype.h"
 #include "dom/text.h"
@@ -642,4 +644,41 @@ void Score::showElementInScore(apiv1::EngravingItem* wrappedElement, int staffId
         return;
     }
     notation()->interaction()->showItem(wrappedElement->element(), staffIdx);
+}
+
+Note* Score::setGraceNote(Chord* chordWrapper, int pitch, int noteType, int duration)
+{
+    if (!chordWrapper) {
+        LOGW("setGraceNote: chord is null");
+        return nullptr;
+    }
+
+    mu::engraving::Chord* chord = chordWrapper->chord();
+    if (!chord) {
+        LOGW("setGraceNote: underlying chord is null");
+        return nullptr;
+    }
+
+    mu::engraving::NoteType nt = static_cast<mu::engraving::NoteType>(noteType);
+
+    // Validate note type is a grace note type
+    if (nt != mu::engraving::NoteType::ACCIACCATURA
+        && nt != mu::engraving::NoteType::APPOGGIATURA
+        && nt != mu::engraving::NoteType::GRACE4
+        && nt != mu::engraving::NoteType::GRACE16
+        && nt != mu::engraving::NoteType::GRACE32
+        && nt != mu::engraving::NoteType::GRACE8_AFTER
+        && nt != mu::engraving::NoteType::GRACE16_AFTER
+        && nt != mu::engraving::NoteType::GRACE32_AFTER) {
+        LOGW("setGraceNote: invalid note type %d", noteType);
+        return nullptr;
+    }
+
+    mu::engraving::Note* note = score()->setGraceNote(chord, pitch, nt, duration);
+    if (!note) {
+        LOGW("setGraceNote: failed to create grace note");
+        return nullptr;
+    }
+
+    return wrap<Note>(note, Ownership::SCORE);
 }

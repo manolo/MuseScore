@@ -54,6 +54,8 @@ class Staff;
 class Drumset;
 class Lyrics;
 class Spanner;
+class Note;
+class Chord;
 
 extern Selection* selectionWrap(mu::engraving::Selection* select);
 
@@ -766,6 +768,15 @@ public:
      * @since 4.6
     */
     Q_INVOKABLE void showElementInScore(apiv1::EngravingItem* element, int staffIdx = -1);
+
+    /// Add a grace note to a chord.
+    /// \param chord The chord to add the grace note to.
+    /// \param pitch The MIDI pitch of the grace note (0-127).
+    /// \param noteType The type of grace note (use NoteType enum: ACCIACCATURA, APPOGGIATURA, GRACE4, GRACE16, GRACE32).
+    /// \param duration The visual duration in ticks (e.g., 480 for quarter, 240 for eighth, 120 for sixteenth, 60 for thirty-second).
+    /// \returns The created Note, or null if creation failed.
+    /// \since MuseScore 4.6
+    Q_INVOKABLE apiv1::Note* setGraceNote(apiv1::Chord* chord, int pitch, int noteType, int duration);
 
     /** APIDOC
      * Create PlayEvents for all notes based on ornamentation.
