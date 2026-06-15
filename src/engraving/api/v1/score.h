@@ -778,6 +778,13 @@ public:
     /// \since MuseScore 4.6
     Q_INVOKABLE apiv1::Note* setGraceNote(apiv1::Chord* chord, int pitch, int noteType, int duration);
 
+    /// Load a style file (.mss) into the score.
+    /// \param filePath Path to the .mss style file.
+    /// \param allowAnyVersion If true, allows loading styles from any MuseScore version.
+    /// \returns true if the style was loaded successfully.
+    /// \since MuseScore 4.5
+    Q_INVOKABLE bool loadStyle(const QString& filePath, bool allowAnyVersion = false);
+
     /** APIDOC
      * Create PlayEvents for all notes based on ornamentation.
      * You need to call this if you are manipulating PlayEvent's
