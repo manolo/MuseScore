@@ -2377,6 +2377,12 @@ class Staff : public ScoreElement
     /// The primary (not linked) staff of this staff.
     /// \since MuseScore 4.6
     Q_PROPERTY(apiv1::Staff * primaryStaff READ primaryStaff)
+    /// Whether this staff is a tablature staff (at tick 0).
+    /// \since MuseScore 4.5
+    Q_PROPERTY(bool isTabStaff READ isTabStaffAtZero)
+    /// The number of linked staves (including this one).
+    /// \since MuseScore 4.5
+    Q_PROPERTY(int linkedStavesCount READ linkedStavesCount)
 
 public:
     /// \cond MS_INTERNAL
@@ -2390,6 +2396,8 @@ public:
     int idx() { return int(staff()->idx()); }
     bool show() { return staff()->show(); }
     Staff* primaryStaff() { return wrap<Staff>(staff()->primaryStaff()); }
+    bool isTabStaffAtZero() { return staff()->staffType(mu::engraving::Fraction(0, 1))->group() == mu::engraving::StaffGroup::TAB; }
+    int linkedStavesCount() { return static_cast<int>(staff()->staffList().size()); }
     /// \endcond
 
     /// The current clef type at a given tick in the score, one of
@@ -2496,6 +2504,11 @@ public:
     /// \param voice The voice number (0-3) to check.
     /// \since MuseScore 4.6
     Q_INVOKABLE bool isVoiceVisible(int voice);
+
+    /// Set whether the staff is visible.
+    /// \param visible Whether the staff should be visible.
+    /// \since MuseScore 4.6
+    Q_INVOKABLE void setShow(bool visible);
 };
 
 //---------------------------------------------------------
