@@ -304,16 +304,6 @@ void buildParts(BuildCtx& ctx)
     }
 }
 
-static bool encMeasHasPitchedNotes(const EncMeasure& m)
-{
-    for (const auto& elem : m.elements) {
-        if (static_cast<EncElemType>(elem->type) == EncElemType::NOTE) {
-            return true;
-        }
-    }
-    return false;
-}
-
 static bool encMeasHasSingleRest(const EncMeasure& m)
 {
     return m.elements.size() == 1
@@ -323,11 +313,10 @@ static bool encMeasHasSingleRest(const EncMeasure& m)
 // Returns the number of MuseScore measures to create for a single EncMeasure.
 // Normally 1:1, but Encore stores "N consecutive empty display measures" as a single MEAS
 // block whose lone REST element has mrestCount == N (byte +15 of the REST element data).
-// Expansion only applies to an ISOLATED single-block rest:
+// Expansion applies to an isolated single-block rest:
 //   - exactly one REST element with mrestCount > 1
-//   - predecessor is NOT also a single-REST block (otherwise we are in a consecutive run)
-//   - successor HAS pitched notes (ensures the next block is the real content)
-static int encMeasDisplayCount(const EncMeasure& m, const EncMeasure* prev, const EncMeasure* next)
+//   - predecessor is NOT also a single-REST block (prevents cascading into a run)
+static int encMeasDisplayCount(const EncMeasure& m, const EncMeasure* prev)
 {
     if (m.elements.size() != 1) {
         return 1;
@@ -341,9 +330,6 @@ static int encMeasDisplayCount(const EncMeasure& m, const EncMeasure* prev, cons
         return 1;
     }
     if (prev && encMeasHasSingleRest(*prev)) {
-        return 1;
-    }
-    if (!next || !encMeasHasPitchedNotes(*next)) {
         return 1;
     }
     return cnt;
@@ -408,8 +394,7 @@ void buildMeasures(BuildCtx& ctx)
         ctx.measTickToTimeSigType[currentTick] = encGlyphToTimeSigType(encMeas.timeSigGlyph, ts);
 
         const EncMeasure* prev = (mi > 0) ? &enc.measures[mi - 1] : nullptr;
-        const EncMeasure* next = (mi + 1 < enc.measures.size()) ? &enc.measures[mi + 1] : nullptr;
-        const int displayCount = encMeasDisplayCount(encMeas, prev, next);
+        const int displayCount = encMeasDisplayCount(encMeas, prev);
 
         ctx.encToMsIdx.push_back(msIdxCounter);
 

@@ -202,6 +202,14 @@ def rest_v0c4_dotted(tick, voice, staffIdx, fv, dotControl):
     d[11] = dotControl # actual sounding duration (encodes dots)
     return struct.pack('<H', tick) + bytes([(8<<4)|(voice&0xF)]) + bytes(d)
 
+def rest_v0c4_mrest(tick, voice, staffIdx, fv, mrestCount):
+    """18-byte v0xC4 rest with mrestCount at rawElemStart+15 (d[12]).
+    mrestCount > 1 means this single MEAS block represents that many empty measures."""
+    d = bytearray(15)
+    d[0] = 18; d[1] = staffIdx & 0x3F; d[2] = fv
+    d[12] = mrestCount & 0xFF
+    return struct.pack('<H', tick) + bytes([(8<<4)|(voice&0xF)]) + bytes(d)
+
 def tie_v0c4(tick, voice, staffIdx, direction=0xfe, startFlag=0):
     """16-byte TIE element (type=3). Marks note(s) at (staffIdx, voice, tick)
     as tie-start when EITHER the arc-direction byte at +5 (`direction`) OR
@@ -618,6 +626,23 @@ def gen_v0c4_overflow_extend():
 # The rest gets V_HALF (= 1/2 = mLen), NOT V_WHOLE (= 1).
 # This is a regression check: faceValue2DurationType(1) = V_WHOLE would break it.
 # ===========================================================================
+def gen_v0c4_mrest_followed_by_rest():
+    """mrestCount=3 block followed by a single rest (not notes).
+    Regression: the mrest must expand even when the successor is not a note measure.
+    Layout: [note][note][mrest=3][whole rest][note]
+    Expected: 2 + 3 + 1 + 1 = 7 MuseScore measures."""
+    n = note_v0c4(0, 0, 0, 3, 60) + end_marker()        # C4 quarter
+    mrest = rest_v0c4_mrest(0, 0, 0, 1, 3) + end_marker()  # whole rest, mrestCount=3
+    single_rest = rest_v0c4(0, 0, 0, 1) + end_marker()  # whole rest, mrestCount=0
+    n2 = note_v0c4(0, 0, 0, 3, 67) + end_marker()       # G4 quarter
+    return assemble(0xC4, [
+        (meas_hdr(4, 4), n),
+        (meas_hdr(4, 4), n),
+        (meas_hdr(4, 4), mrest),
+        (meas_hdr(4, 4), single_rest),
+        (meas_hdr(4, 4), n2),
+    ])
+
 def gen_v0c4_whole_rest_2_4():
     # Single whole-measure rest in 2/4 (rdur=480 in Encore ticks)
     e  = rest_v0c4(0, 0, 0, fv=1)   # whole-measure rest
@@ -7069,6 +7094,7 @@ if __name__=='__main__':
     write("structure_g_clef_key0_stays_plain.enc",         gen_v0c4_g_clef_key0_stays_plain())
     write("structure_c_clef_key_keeps_clef.enc",           gen_v0c4_c_clef_key_keeps_clef())
     write("structure_perc_clef_key_keeps_clef.enc",        gen_v0c4_perc_clef_key_keeps_clef())
+    write("importer_mrest_followed_by_rest.enc",          gen_v0c4_mrest_followed_by_rest())
     write("importer_gap_snap_eighth_meter.enc",           gen_v0c4_gap_snap_eighth_meter())
     write("importer_v0xa6_no_spurious_tremolo.enc",             gen_v0xa6_no_spurious_tremolo())
     write("importer_v0xa6_key_transposition.enc",               gen_v0xa6_key_transposition())
