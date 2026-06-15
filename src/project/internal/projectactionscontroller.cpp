@@ -1826,7 +1826,7 @@ void ProjectActionsController::warnProjectCriticallyCorrupted(const String& proj
 
 void ProjectActionsController::warnProjectCannotBeOpened(const Ret& ret, const muse::io::path_t& filepath)
 {
-    std::string title = muse::mtrc("project", "Cannot read file %1").arg(io::toNativeSeparators(filepath).toString()).toStdString();
+    std::string title = muse::mtrc("project", "Cannot read file\n%1").arg(io::filename(filepath).toString()).toStdString();
     std::string body;
 
     switch (ret.code()) {

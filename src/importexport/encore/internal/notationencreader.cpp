@@ -44,7 +44,7 @@ muse::Ret NotationEncoreReader::read(MasterScore* score, const muse::io::path_t&
                 return make_ret(Err::FileBadFormat,
                                 muse::mtrc("iex_encore",
                                            "This file was created with a very old version of Encore (prior to 4.x) "
-                                           "and uses an encrypted format that is not supported.\n"
+                                           "and uses an encrypted format that is not supported yet.\n"
                                            "Please open it in Encore 4.x or 5.x and re-save it as a regular .enc file."));
             }
         }
