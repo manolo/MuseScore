@@ -1027,6 +1027,29 @@ imported as MIDI note 0 (C-1) — same pitch, far below the staff.
 
 Exercised by `Tst_Notes.notes_v0c2_size24_semitone_pitch`.
 
+## Multi-measure rest expansion when successor is not a note measure
+
+A single MEAS block whose lone REST element has `mrestCount > 1` is
+expanded to that many MuseScore measures (`buildMeasures` and the
+noteloop's `measDisplayCount` lambda both track this).
+
+The original code guarded expansion with two conditions:
+
+1. Predecessor must not also be a single-REST block (prevents cascading).
+2. **Successor must contain pitched notes** (`hasPitchedNotes(*next)`).
+
+Condition 2 was the bug source: it collapsed a legitimate mrest when
+followed by a rest measure (e.g. a dotted-quarter rest in the measure
+after a 3-measure multi-measure rest). The successor content is
+irrelevant — Encore's `mrestCount` byte is authoritative.
+
+The fix removes condition 2 from `encMeasDisplayCount` (builders.cpp)
+and from the identical `measDisplayCount` lambda in noteloop.cpp. Both
+must agree or `buildMeasures` creates the right number of MuseScore
+measures but the noteloop places notes in the wrong ones.
+
+Exercised by `Tst_Importer.mrest_single_block_expands_when_successor_is_rest`.
+
 ## Ghost MEAS blocks past header.measureCount
 
 Encore 5 occasionally leaves trailing MEAS blocks in the file
