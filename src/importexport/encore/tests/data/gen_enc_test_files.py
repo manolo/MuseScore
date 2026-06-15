@@ -3080,6 +3080,180 @@ def gen_v0c4_lyrics_latin1():
 
 
 # ===========================================================================
+# ornaments_accent_sibling_no_spillover.enc
+# BUG FIX: ACCENT ORN (0xBE) on staff 0 whose notes are in voice=3 must NOT
+# redirect to staff 1.  Without fix: resolver checks track=staffBase+0 (voice=0),
+# finds no chord (notes in voice=3 only), falls to sibTrack=staffBase+VOICES
+# (staff 1 voice=0), finds E4 → accent lands on staff 1 instead of staff 0.
+# With fix: resolver scans all voices of the ORN's own staff first; finds C4
+# at track=3 (staff 0, voice=3) and attaches the accent there.
+#
+# 2 instruments × 1 staff each, 4/4, measure 0:
+#   Staff 0 (instrIdx=0): C4 quarter, voice=3
+#   Staff 1 (instrIdx=1): E4 quarter, voice=0   ← sibling trap
+#   ORN 0xBE on staff 0, voice=0, tick=0
+# Expected: accent on staff 0 voice=3 chord; NO accent on staff 1 voice=0.
+# ===========================================================================
+def gen_v0c4_accent_sibling_no_spillover():
+    # Custom 2-staff SCOW header (194 bytes)
+    hdr = bytearray(194)
+    hdr[0:4] = b'SCOW'
+    hdr[4] = 0xC4
+    struct.pack_into('<H', hdr, 0x28, 0x0420)    # chuVersio
+    struct.pack_into('<h', hdr, 0x2E, 1)          # lineCount
+    struct.pack_into('<h', hdr, 0x30, 1)          # pageCount
+    hdr[0x32] = 2                                  # instrumentCount
+    hdr[0x33] = 2                                  # staffPerSystem
+    struct.pack_into('<h', hdr, 0x34, 1)          # measureCount
+
+    # LINE block: 10-skip + start(u16) + measCount(u8) + 2×30-byte staff entries
+    def staff_entry(clef_byte, instr_staff_idx):
+        e = bytearray(30)
+        e[14] = clef_byte   # clef
+        e[19] = 1           # showByte = visible
+        e[21] = instr_staff_idx
+        return bytes(e)
+
+    line_data = (b'\x00' * 10
+                 + struct.pack('<H', 0)         # start measure = 0
+                 + bytes([1])                   # measureCount = 1
+                 + staff_entry(0, 0x00)         # instr 0, staffWithin 0 (treble G)
+                 + staff_entry(0, 0x01))        # instr 1, staffWithin 0 (treble G)
+    # toSkip = varSize + 8 - 21 - 30*2; for toSkip=0 → varSize = 73
+    assert len(line_data) == 73, len(line_data)
+    line_block = b'LINE' + struct.pack('<I', 73) + line_data
+
+    # MEAS elements
+    def note_raw(tick, voice, raw_staff, fv, pitch):
+        d = bytearray(25)
+        d[0] = 28; d[1] = raw_staff & 0xFF; d[2] = fv; d[12] = pitch
+        return struct.pack('<H', tick) + bytes([(9 << 4) | (voice & 0xF)]) + bytes(d)
+
+    def orn_raw(tick, voice, raw_staff, tipo):
+        d = bytearray(13)
+        d[0] = 16; d[1] = raw_staff & 0xFF; d[2] = tipo
+        return struct.pack('<H', tick) + bytes([(5 << 4) | (voice & 0xF)]) + bytes(d)
+
+    elems = (note_raw(0, 3, 0x00, fv=3, pitch=60)   # C4 quarter, staff 0, voice=3
+           + note_raw(0, 0, 0x01, fv=3, pitch=64)   # E4 quarter, staff 1, voice=0 (trap)
+           + orn_raw(0, 0, 0x00, tipo=0xBE)          # ACCENT on staff 0, voice=0
+           + end_marker())
+
+    meas = meas_block(meas_hdr(4, 4), elems)
+    return bytes(hdr) + line_block + meas + SKELETON_POST
+
+
+# ===========================================================================
+# instruments_bass_enckey0_no_octave_transpos.enc
+# BUG FIX: encKey=0 ("sounds as written") must zero the template's octave
+# transposition just as it already zeroes non-octave transpositions.
+# The acoustic-bass template carries transposeChromatic=-12; without the fix
+# the importer keeps that -12 and notes display one octave too high.
+#
+# File: name "Bajo" (resolves to acoustic-bass via short name + MIDI),
+# MIDI 33 (1-indexed Acoustic Bass), F clef, encKey=0 (sounds as written),
+# one quarter note A2 (midi=45).
+# ===========================================================================
+def gen_v0c4_bass_enckey0_no_octave_transpos():
+    name = 'Bajo'.encode('utf-16-le') + b'\x00\x00'
+    pre  = _patch_tk00(name)
+    pre  = _patch_midi_program(pre, 0, 33)     # 1-indexed Acoustic Bass (GM 32)
+    # encKey not patched → stays 0 (sounds as written)
+    pre  = _set_staff_clef(pre, 0x01)          # EncClefType::F (bass clef)
+    elems = note_v0c4(tick=0, voice=0, staffIdx=0, fv=3, pitch=45) + end_marker()
+    body  = meas_block(meas_hdr(4, 4), elems)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
+# ===========================================================================
+# ornaments_accent_nonzero_voice.enc
+# BUG FIX: ACCENT ORN (0xBE) at voice=0 should attach to the note at the
+# same tick even when that note is in a non-zero voice (here voice=1).
+# Without fix: resolver finds no chord at track=voice=0, falls back to the
+# sibling staff (track+VOICES), and drops the accent when no sibling exists.
+# With fix: resolver scans all voices of the ORN's own staff before giving up.
+#
+# Single staff, 4/4, measure 0:
+#   Note C4 (midi=60), voice=1, tick=0, quarter
+#   ORN 0xBE (ACCENT), voice=0, tick=0
+# Expected: chord in voice=1 at tick=0 has exactly 1 articAccentAbove.
+# ===========================================================================
+def gen_v0c4_accent_nonzero_voice():
+    # ORN 0xBE: size=16 standalone accent ORN at voice=0
+    orn = (struct.pack('<H', 0)               # tick=0
+           + bytes([(5 << 4) | 0])            # typeVoice: ORN(5) | voice=0
+           + bytes([16])                       # size=16
+           + bytes([0])                        # staffIdx=0
+           + bytes([0xBE])                     # tipo=0xBE (ACCENT)
+           + bytes([0] * 10))                  # payload zeros (10 bytes → total 16)
+    elems = (note_v0c4(tick=0, voice=1, staffIdx=0, fv=3, pitch=60)
+             + orn
+             + end_marker())
+    hdr  = meas_hdr(4, 4)
+    return assemble(0xC4, [(hdr, elems)], fill_ts=(4, 4))
+
+
+# ===========================================================================
+# ornaments_accent_nonzero_voice_offset_tick.enc
+# BUG FIX: ACCENT ORN at voice=0, tick=240 must attach to the note in voice=1
+# at tick=240, NOT to the note at tick=0.
+# Without fix: voice=0 cumTick=0 (no notes in v0), elemTick=measTick,
+# so pendingBowings stores measTick → accent lands on the first note (n1).
+# With fix: bowTick = measTick + Fraction(240, 960) → accent lands on n2.
+#
+# Single staff, 4/4, measure 0:
+#   Note C4 (midi=60), voice=1, tick=0, quarter
+#   Note E4 (midi=64), voice=1, tick=240, quarter  ← accent must land here
+#   ORN 0xBE (ACCENT), voice=0, tick=240
+# Expected: chord at voice=1, tick=240 (MuseScore tick 480) has the accent.
+# ===========================================================================
+def gen_v0c4_accent_offset_tick_nonzero_voice():
+    def orn16(tick, staffIdx, tipo):
+        return (struct.pack('<H', tick)
+                + bytes([(5 << 4) | 0])    # ORN voice=0
+                + bytes([16])               # size=16
+                + bytes([staffIdx & 0x3F])
+                + bytes([tipo])
+                + bytes([0] * 10))
+    elems = (note_v0c4(tick=0,   voice=1, staffIdx=0, fv=3, pitch=60)   # C4 quarter
+           + note_v0c4(tick=240, voice=1, staffIdx=0, fv=3, pitch=64)   # E4 quarter (accent here)
+           + orn16(tick=240, staffIdx=0, tipo=0xBE)
+           + end_marker())
+    hdr = meas_hdr(4, 4)
+    return assemble(0xC4, [(hdr, elems)], fill_ts=(4, 4))
+
+
+# ===========================================================================
+# notes_dual_rests_same_tick_routing.enc
+# BUG FIX: two explicit REST elements at the same Encore tick (120) for
+# voices 5 and 6 (both routing to MuseScore voice=0) must not cause a
+# cumTick drift that shifts all subsequent notes.
+# Without fix: the first REST at tick=120 advances cumTick to 1/4; the
+# second REST at tick=120 finds encTickFrac < cumTick, skips gap-snap, and
+# lands at cumTick=1/4 (tick=240 in MuseScore), advancing cumTick to 3/8.
+# This shifts the following notes by one eighth note (240 MuseScore ticks).
+#
+# Single staff, 4/4, measure 0:
+#   voice=6 (→ voice=0): D3@tick=0(eighth), REST@tick=120(eighth), B2@tick=480(quarter)
+#   voice=5 (→ voice=0): F#3@tick=0(eighth), REST@tick=120(eighth), D3@tick=480(quarter)
+# Expected MuseScore voice=0: D3+F#3 chord at measTick, rest at measTick+240,
+#   B2+D3 chord at measTick+960 (NOT measTick+720 as the buggy code produces).
+# ===========================================================================
+def gen_v0c4_dual_rests_same_tick_routing():
+    # Elements interleaved voice=6 / voice=5 per beat, as Encore would encode.
+    elems = (note_v0c4(tick=0,   voice=6, staffIdx=0, fv=4, pitch=50)   # D3 eighth
+           + note_v0c4(tick=0,   voice=5, staffIdx=0, fv=4, pitch=54)   # F#3 eighth
+           + rest_v0c4(tick=120, voice=6, staffIdx=0, fv=4)              # REST eighth (v6)
+           + rest_v0c4(tick=120, voice=5, staffIdx=0, fv=4)              # REST eighth (v5)
+           + note_v0c4(tick=480, voice=6, staffIdx=0, fv=3, pitch=47)   # B2 quarter
+           + note_v0c4(tick=480, voice=5, staffIdx=0, fv=3, pitch=50)   # D3 quarter
+           + end_marker())
+    hdr = meas_hdr(4, 4)
+    return assemble(0xC4, [(hdr, elems)], fill_ts=(4, 4))
+
+
+# ===========================================================================
 # instruments_instr_bass_midi_tiebreak.enc
 # Instrument named "Bass" with MIDI program 33 (1-indexed = GM 32 Acoustic
 # Bass). The choral Bass voice template (id="bass") matches the name
@@ -7170,5 +7344,10 @@ if __name__=='__main__':
     write("notes_16th_rdur112_no_triple_dot.enc",           gen_v0c4_16th_rdur112_no_triple_dot())
     write("timesig_change_2_2_to_4_4.enc",                  gen_v0c4_timesig_change_2_2_to_4_4())
     write("notes_triplet_orphan_prior_complete_group.enc",  gen_v0c4_triplet_orphan_prior_complete_group())
+    write("ornaments_accent_sibling_no_spillover.enc",       gen_v0c4_accent_sibling_no_spillover())
+    write("instruments_bass_enckey0_no_octave_transpos.enc", gen_v0c4_bass_enckey0_no_octave_transpos())
+    write("ornaments_accent_nonzero_voice.enc",             gen_v0c4_accent_nonzero_voice())
+    write("ornaments_accent_offset_tick_nonzero_voice.enc", gen_v0c4_accent_offset_tick_nonzero_voice())
+    write("notes_dual_rests_same_tick_routing.enc",         gen_v0c4_dual_rests_same_tick_routing())
     print("Done.")
 

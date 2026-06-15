@@ -235,6 +235,11 @@ struct BuildCtx
     std::map<std::pair<int, int>, int> prevEncVoice {};
     // MuseScore tick of last chord root.
     std::map<std::pair<int, int>, Fraction> lastChordPos {};
+    // Last Encore tick at which a REST was placed, per (staffIdx, msVoice).
+    // Used to absorb duplicate rests that arrive when multiple Encore voices
+    // (e.g. voice=5 and voice=6) both route to the same MuseScore voice: the
+    // second REST at the same enc tick is a chord-extension for rests.
+    std::map<std::pair<int, int>, int> prevRestTick {};
 
     // Grace chords held detached; attached to the next normal chord.
     std::map<std::pair<int, int>, std::vector<Chord*> > pendingGraces {};
