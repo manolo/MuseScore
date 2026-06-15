@@ -37,9 +37,14 @@
 #include "dom/staff.h"
 #include "dom/stafftype.h"
 #include "dom/text.h"
+#include "dom/excerpt.h"
+#include "dom/stafftype.h"
 #include "editing/editpart.h"
 #include "editing/editsystemlocks.h"
 #include "types/typesconv.h"
+
+#include "global/containers.h"
+#include "notation/imasternotation.h"
 
 // api
 #include "apistructs.h"
@@ -697,4 +702,295 @@ bool Score::loadStyle(const QString& filePath, bool allowAnyVersion)
     }
 
     return score()->loadStyle(styleFile, allowAnyVersion);
+}
+
+bool Score::addLinkedStaff(apiv1::Staff* staffWrapper, const QString& staffTypeId)
+{
+    if (!staffWrapper) {
+        LOGW("addLinkedStaff: staff is null");
+        return false;
+    }
+
+    mu::engraving::Staff* sourceStaff = staffWrapper->staff();
+    if (!sourceStaff) {
+        LOGW("addLinkedStaff: source staff is null");
+        return false;
+    }
+
+    mu::engraving::Part* part = sourceStaff->part();
+    if (!part) {
+        LOGW("addLinkedStaff: part is null");
+        return false;
+    }
+
+    const mu::engraving::StaffType* staffTypePreset = mu::engraving::StaffType::presetFromXmlName(staffTypeId);
+    if (!staffTypePreset) {
+        LOGW("addLinkedStaff: staff type <%s> not found", qPrintable(staffTypeId));
+        return false;
+    }
+
+    mu::engraving::StaffType staffType = *staffTypePreset;
+
+    if (staffType.group() == mu::engraving::StaffGroup::TAB) {
+        staffType.setMinimStyle(mu::engraving::TablatureMinimStyle::CIRCLED);
+    }
+
+    mu::engraving::Staff* linkedStaff = mu::engraving::Factory::createStaff(part);
+    linkedStaff->setScore(score());
+    linkedStaff->setPart(part);
+    linkedStaff->setStaffType(mu::engraving::Fraction(0, 1), staffType);
+
+    staff_idx_t sourceLocalIdx = sourceStaff->idx() - part->staff(0)->idx();
+    staff_idx_t insertLocalIdx = sourceLocalIdx + 1;
+
+    score()->undoInsertStaff(linkedStaff, insertLocalIdx, false);
+    mu::engraving::Excerpt::cloneStaff(sourceStaff, linkedStaff);
+
+    return true;
+}
+
+bool Score::resetExcerpt(apiv1::Excerpt* excerptWrapper)
+{
+    if (!excerptWrapper) {
+        LOGW("resetExcerpt: excerpt is null");
+        return false;
+    }
+
+    mu::engraving::Excerpt* targetExcerpt = excerptWrapper->excerpt();
+    if (!targetExcerpt) {
+        LOGW("resetExcerpt: underlying excerpt is null");
+        return false;
+    }
+
+    auto masterNotation = context()->currentMasterNotation();
+    if (!masterNotation) {
+        LOGW("resetExcerpt: master notation is null");
+        return false;
+    }
+
+    const auto& excerptNotations = masterNotation->excerpts();
+    mu::notation::IExcerptNotationPtr matchingExcerpt;
+
+    mu::engraving::Score* targetScore = targetExcerpt->excerptScore();
+    for (const auto& en : excerptNotations) {
+        if (en->notation() && en->notation()->elements()
+            && en->notation()->elements()->msScore() == targetScore) {
+            matchingExcerpt = en;
+            break;
+        }
+    }
+
+    if (!matchingExcerpt) {
+        LOGW("resetExcerpt: could not find matching excerpt notation");
+        return false;
+    }
+
+    masterNotation->resetExcerpt(matchingExcerpt);
+    return true;
+}
+
+Excerpt* Score::createExcerptFromPart(Part* partWrapper, const QString& name)
+{
+    if (!partWrapper) {
+        LOGW("createExcerptFromPart: part is null");
+        return nullptr;
+    }
+
+    mu::engraving::Part* part = partWrapper->part();
+    if (!part) {
+        LOGW("createExcerptFromPart: underlying part is null");
+        return nullptr;
+    }
+
+    mu::engraving::MasterScore* ms = score()->masterScore();
+    if (!ms) {
+        LOGW("createExcerptFromPart: master score is null");
+        return nullptr;
+    }
+
+    for (mu::engraving::Excerpt* ex : ms->excerpts()) {
+        if (ex->containsPart(part)) {
+            LOGW("createExcerptFromPart: excerpt already exists for this part");
+            return nullptr;
+        }
+    }
+
+    std::vector<mu::engraving::Part*> parts = { part };
+    std::vector<mu::engraving::Excerpt*> newExcerpts = mu::engraving::Excerpt::createExcerptsFromParts(parts, ms);
+
+    if (newExcerpts.empty()) {
+        LOGW("createExcerptFromPart: failed to create excerpt");
+        return nullptr;
+    }
+
+    mu::engraving::Excerpt* newExcerpt = newExcerpts.front();
+
+    if (!name.isEmpty()) {
+        newExcerpt->setName(name);
+    }
+
+    ms->initAndAddExcerpt(newExcerpt, false);
+    ms->setExcerptsChanged(true);
+
+    return excerptWrap(newExcerpt);
+}
+
+Excerpt* Score::duplicateExcerpt(Excerpt* excerptWrapper, const QString& name)
+{
+    if (!excerptWrapper) {
+        LOGW("duplicateExcerpt: excerpt is null");
+        return nullptr;
+    }
+
+    mu::engraving::Excerpt* sourceExcerpt = excerptWrapper->excerpt();
+    if (!sourceExcerpt) {
+        LOGW("duplicateExcerpt: underlying excerpt is null");
+        return nullptr;
+    }
+
+    mu::engraving::MasterScore* ms = score()->masterScore();
+    if (!ms) {
+        LOGW("duplicateExcerpt: master score is null");
+        return nullptr;
+    }
+
+    mu::engraving::Excerpt* newExcerpt = new mu::engraving::Excerpt(*sourceExcerpt);
+    newExcerpt->markAsCustom();
+
+    if (!name.isEmpty()) {
+        newExcerpt->setName(name);
+    }
+
+    ms->initAndAddExcerpt(newExcerpt, false);
+    ms->setExcerptsChanged(true);
+
+    return excerptWrap(newExcerpt);
+}
+
+bool Score::openExcerpt(Excerpt* excerptWrapper, bool setAsCurrent)
+{
+    if (!excerptWrapper) {
+        LOGW("openExcerpt: excerpt is null");
+        return false;
+    }
+
+    mu::engraving::Excerpt* targetExcerpt = excerptWrapper->excerpt();
+    if (!targetExcerpt) {
+        LOGW("openExcerpt: underlying excerpt is null");
+        return false;
+    }
+
+    auto masterNotation = context()->currentMasterNotation();
+    if (!masterNotation) {
+        LOGW("openExcerpt: master notation is null");
+        return false;
+    }
+
+    const auto& excerptNotations = masterNotation->excerpts();
+    mu::notation::IExcerptNotationPtr matchingExcerpt;
+
+    mu::engraving::Score* targetScore = targetExcerpt->excerptScore();
+    for (const auto& en : excerptNotations) {
+        if (en->notation() && en->notation()->elements()
+            && en->notation()->elements()->msScore() == targetScore) {
+            matchingExcerpt = en;
+            break;
+        }
+    }
+
+    if (!matchingExcerpt) {
+        LOGW("openExcerpt: could not find matching excerpt notation");
+        return false;
+    }
+
+    masterNotation->setExcerptIsOpen(matchingExcerpt->notation(), true);
+
+    if (setAsCurrent && matchingExcerpt->notation()) {
+        context()->setCurrentNotation(matchingExcerpt->notation());
+    }
+
+    return true;
+}
+
+void Score::resetTextStyleOverrides()
+{
+    score()->cmdResetTextStyleOverrides();
+}
+
+bool Score::removeExcerpt(Excerpt* excerptWrapper)
+{
+    if (!excerptWrapper) {
+        LOGW("removeExcerpt: excerpt is null");
+        return false;
+    }
+
+    mu::engraving::Excerpt* targetExcerpt = excerptWrapper->excerpt();
+    if (!targetExcerpt) {
+        LOGW("removeExcerpt: underlying excerpt is null");
+        return false;
+    }
+
+    auto masterNotation = context()->currentMasterNotation();
+    if (!masterNotation) {
+        LOGW("removeExcerpt: master notation is null");
+        return false;
+    }
+
+    const auto& excerptNotations = masterNotation->excerpts();
+    mu::notation::IExcerptNotationPtr matchingExcerpt;
+
+    mu::engraving::Score* targetScore = targetExcerpt->excerptScore();
+    for (const auto& en : excerptNotations) {
+        if (en->notation() && en->notation()->elements()
+            && en->notation()->elements()->msScore() == targetScore) {
+            matchingExcerpt = en;
+            break;
+        }
+    }
+
+    if (!matchingExcerpt) {
+        LOGW("removeExcerpt: could not find matching excerpt notation");
+        return false;
+    }
+
+    masterNotation->setExcerptIsOpen(matchingExcerpt->notation(), false);
+
+    mu::notation::ExcerptNotationList excerpts = masterNotation->excerpts();
+    if (muse::remove(excerpts, matchingExcerpt)) {
+        masterNotation->setExcerpts(excerpts);
+    } else {
+        LOGW("removeExcerpt: failed to remove excerpt from list");
+        return false;
+    }
+
+    return true;
+}
+
+bool Score::removeStaff(Staff* staffWrapper)
+{
+    if (!staffWrapper) {
+        LOGW("removeStaff: staff is null");
+        return false;
+    }
+
+    mu::engraving::Staff* staff = staffWrapper->staff();
+    if (!staff) {
+        LOGW("removeStaff: underlying staff is null");
+        return false;
+    }
+
+    mu::engraving::Score* sc = staff->score();
+    if (!sc) {
+        LOGW("removeStaff: staff has no score");
+        return false;
+    }
+
+    staff_idx_t staffIdx = staff->idx();
+    if (staffIdx == muse::nidx) {
+        LOGW("removeStaff: invalid staff index");
+        return false;
+    }
+
+    sc->cmdRemoveStaff(staffIdx);
+    return true;
 }

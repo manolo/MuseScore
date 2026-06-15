@@ -785,6 +785,57 @@ public:
     /// \since MuseScore 4.5
     Q_INVOKABLE bool loadStyle(const QString& filePath, bool allowAnyVersion = false);
 
+    /// Add a linked staff to the given staff with a specific staff type.
+    /// \param staff The source staff to link from.
+    /// \param staffTypeId The staff type identifier (e.g., "tab6StrFull" for Tab. 6-str. full).
+    /// \returns true if the linked staff was added successfully.
+    /// \since MuseScore 4.5
+    Q_INVOKABLE bool addLinkedStaff(apiv1::Staff* staff, const QString& staffTypeId);
+
+    /// Reset an excerpt to regenerate it with current staves from the main score.
+    /// Use this after adding linked staves to include them in existing parts.
+    /// \param excerpt The excerpt to reset.
+    /// \returns true if successful.
+    /// \since MuseScore 4.5
+    Q_INVOKABLE bool resetExcerpt(apiv1::Excerpt* excerpt);
+
+    /// Create a new excerpt (part) from an existing Part in the score.
+    /// \param part The Part to create an excerpt from.
+    /// \param name Optional custom name for the excerpt. If empty, uses the part name.
+    /// \returns The newly created Excerpt, or null if creation failed.
+    /// \since MuseScore 4.5
+    Q_INVOKABLE apiv1::Excerpt* createExcerptFromPart(apiv1::Part* part, const QString& name = QString());
+
+    /// Duplicate an existing excerpt with a new name.
+    /// \param excerpt The Excerpt to duplicate.
+    /// \param name The name for the duplicated excerpt.
+    /// \returns The newly created Excerpt, or null if duplication failed.
+    /// \since MuseScore 4.5
+    Q_INVOKABLE apiv1::Excerpt* duplicateExcerpt(apiv1::Excerpt* excerpt, const QString& name);
+
+    /// Open an excerpt in a new tab and optionally set it as the current view.
+    /// \param excerpt The Excerpt to open.
+    /// \param setAsCurrent If true, switch the view to this excerpt.
+    /// \returns true if successful.
+    /// \since MuseScore 4.5
+    Q_INVOKABLE bool openExcerpt(apiv1::Excerpt* excerpt, bool setAsCurrent = true);
+
+    /// Reset all text elements to use their default style properties.
+    /// \since MuseScore 4.5
+    Q_INVOKABLE void resetTextStyleOverrides();
+
+    /// Remove an excerpt (linked part) from the score.
+    /// \param excerpt The Excerpt to remove.
+    /// \returns true if successful.
+    /// \since MuseScore 4.6
+    Q_INVOKABLE bool removeExcerpt(apiv1::Excerpt* excerpt);
+
+    /// Remove a staff from the score.
+    /// \param staff The Staff to remove.
+    /// \returns true if successful.
+    /// \since MuseScore 4.6
+    Q_INVOKABLE bool removeStaff(apiv1::Staff* staff);
+
     /** APIDOC
      * Create PlayEvents for all notes based on ornamentation.
      * You need to call this if you are manipulating PlayEvent's
