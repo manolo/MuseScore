@@ -260,13 +260,14 @@ void buildParts(BuildCtx& ctx)
                        << " (chromatic=" << iv.chromatic << " diatonic=" << iv.diatonic << ")";
             } else if (pitchOffset == 0) {
                 // encKey=0: Encore's Key field is not set, meaning "sounds as written"
-                // (ENCORE_FORMAT.md: 0 = sounds as written). Zero out any non-octave
-                // transposition that the selected template may carry (e.g. Bb clarinet
-                // selected via MIDI fallback has transposeChromatic=-2). Without this,
-                // written notes would be shifted by the template's interval, displaying
-                // the wrong pitch (Bb4 → C5 for Bb clarinet template).
+                // (ENCORE_FORMAT.md: 0 = sounds as written). Zero out ANY transposition
+                // that the selected template may carry — including octave ones (±12, ±24).
+                // A double-bass template has transposeChromatic=-12; if the enc file stores
+                // the notes at written pitch with Key=0, keeping the -12 would shift the
+                // written display up one octave. Notes are placed at semiTonePitch + 0, so
+                // the display must also apply no shift.
                 const Interval tmplT = instrument->transpose();
-                if (!tmplT.isZero() && tmplT.chromatic % 12 != 0) {
+                if (!tmplT.isZero()) {
                     instrument->setTranspose(Interval(0, 0));
                     LOGD() << "  instrument \"" << instr.name.toStdString()
                            << "\": encKey=0 (sounds as written) → zeroing template transposition";
