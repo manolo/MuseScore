@@ -198,7 +198,6 @@ static void logEncFileInfo(const EncFile& enc)
     LOGD() << "--------------------------";
 }
 
-
 // Map Encore score-size (1–4) to MuseScore Staff Properties → Scale (Pid::MAG).
 // 1=60%, 2=70%, 3=75%, 4=100%.  Global spatium is not changed.
 static void applyStaffScale(MasterScore* score, const EncFile& enc)
@@ -256,7 +255,19 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     score->style().set(Sid::chordsXmlFile, true);
     score->chordList()->read(u"chords.xml");
 
-    score->style().set(Sid::createMultiMeasureRests, true);
+    // Enable multi-measure rest display only when the Encore file actually uses them.
+    // A file with no mrestCount > 1 REST elements should show individual whole rests,
+    // not collapsed multi-measure rests.
+    const bool hasMMRest = std::any_of(enc.measures.begin(), enc.measures.end(),
+                                       [](const EncMeasure& m) {
+        if (m.elements.size() != 1) {
+            return false;
+        }
+        const EncMeasureElem* e = m.elements[0].get();
+        return static_cast<EncElemType>(e->type) == EncElemType::REST
+               && static_cast<const EncRest*>(e)->mrestCount > 1;
+    });
+    score->style().set(Sid::createMultiMeasureRests, hasMMRest);
 
     // Encore positions tuplet brackets/numbers flush against note heads and stems
     // with no extra vertical gap, and never pushes them outside the staff.

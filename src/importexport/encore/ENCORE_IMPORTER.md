@@ -1050,6 +1050,22 @@ measures but the noteloop places notes in the wrong ones.
 
 Exercised by `Tst_Importer.mrest_single_block_expands_when_successor_is_rest`.
 
+## Sid::createMultiMeasureRests set only when file uses mrest blocks
+
+`buildScore` (`import.cpp`) sets `Sid::createMultiMeasureRests` only when the
+Encore file contains at least one MEAS block whose lone REST element has
+`mrestCount > 1`. When no such block exists the flag stays at its MuseScore
+default (false), so individual rest measures are rendered as individual whole
+rests — matching what Encore displays — rather than being collapsed into
+multi-measure rest objects.
+
+Detection: `std::any_of` over `enc.measures`, checking `elements.size() == 1`,
+element type `REST`, and `mrestCount > 1`.
+
+Exercised by:
+- `Tst_Importer.mmrest_flag_on_when_file_has_mrest_block` (flag true when mrest present)
+- `Tst_Importer.mmrest_flag_off_when_file_has_no_mrest_blocks` (flag false otherwise)
+
 ## Ghost MEAS blocks past header.measureCount
 
 Encore 5 occasionally leaves trailing MEAS blocks in the file
