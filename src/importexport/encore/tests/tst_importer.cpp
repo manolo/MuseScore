@@ -2686,6 +2686,32 @@ TEST_F(Tst_Importer, mrest_single_block_expands_when_successor_is_rest)
 }
 
 // ===========================================================================
+// createMultiMeasureRests style flag: only set when the Encore file has at
+// least one MEAS block whose lone REST element carries mrestCount > 1.
+// Before the fix the flag was always true; files with only individual rests
+// were incorrectly getting MMRest display (collapsing separate rest measures).
+// ===========================================================================
+TEST_F(Tst_Importer, mmrest_flag_off_when_file_has_no_mrest_blocks)
+{
+    // bazo.enc has no multi-measure rest blocks — only chord/note content.
+    MasterScore* score = readEncoreScore("bazo.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_FALSE(score->style().styleB(Sid::createMultiMeasureRests))
+        << "createMultiMeasureRests must be FALSE when the file has no mrestCount>1 blocks";
+    delete score;
+}
+
+TEST_F(Tst_Importer, mmrest_flag_on_when_file_has_mrest_block)
+{
+    // importer_mrest_single_block.enc has a REST with mrestCount=3.
+    MasterScore* score = readEncoreScore("importer_mrest_single_block.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->style().styleB(Sid::createMultiMeasureRests))
+        << "createMultiMeasureRests must be TRUE when the file contains mrestCount>1 blocks";
+    delete score;
+}
+
+// ===========================================================================
 // Regression guard: 2/2 with the CORRECT beatTicks=480 still imports all
 // notes correctly after wholeTicks was changed from beatTicks*timeSigDen
 // to the constant 960.  beatTicks=480 gives 480*2=960=960, so the old
