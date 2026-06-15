@@ -136,6 +136,9 @@ struct PendingBowing {
     mu::engraving::SymId symId;
     int measIdx = -1;       // source measure index
     bool crossMeasure = false;  // no voice=0 note at same raw Encore tick; belongs to next measure
+    // Used for xoffset-cluster tick correction (see resolveFingeringAndBowing).
+    int ornXoffset = 0;     // raw ORN.xoffset byte — absolute horizontal position in the measure
+    int encTickRaw = 0;     // raw Encore tick of the ORN element
 };
 
 // Fingering number intents from stand-alone ORN elements (tipo 0xB9..0xBD),
@@ -210,6 +213,9 @@ struct BuildCtx
     std::vector<PendingBreath> pendingBreaths {};
     std::vector<PendingMeasureRepeat> pendingMeasureRepeats {};
     std::vector<PendingBowing> pendingBowings {};
+    // Note xoffsets for bowing-mark xoffset clustering: (measIdx, staffIdx) →
+    // list of (enc_tick, note.xoffset). Populated during buildNoteLoop().
+    std::map<std::pair<int,int>, std::vector<std::pair<int,int>>> noteXoffByMeasStaff {};
     std::vector<PendingOrnFingering> pendingOrnFingerings {};
     std::vector<PendingMarker> pendingMarkers {};
     std::map<track_idx_t, std::vector<PendingLyric> > pendingLyrics {};

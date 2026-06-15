@@ -732,6 +732,14 @@ void buildNoteLoop(BuildCtx& ctx)
                     if (et == EncElemType::NOTE) {
                         ctx.prevMidiTick[trackKey] = e->tick;
                         ctx.prevEncVoice[trackKey] = voice;
+                        // Record note xoffset for bowing-mark cluster resolution.
+                        const auto* en = static_cast<const EncNote*>(e);
+                        auto& vec = ctx.noteXoffByMeasStaff[{ mc.measIdx, staffIdx }];
+                        const int encTick = static_cast<int>(e->tick);
+                        const int xoff = static_cast<int>(en->xoffset);
+                        bool already = false;
+                        for (const auto& p : vec) { if (p.first == encTick) { already = true; break; } }
+                        if (!already) { vec.push_back({ encTick, xoff }); }
                     } else if (et == EncElemType::REST) {
                         ctx.prevRestTick[trackKey] = static_cast<int>(e->tick);
                     }

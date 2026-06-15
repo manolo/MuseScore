@@ -82,6 +82,61 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
 
+    // Xoffset-cluster tick correction for bowing marks.
+    // Encore sometimes stores an ORN with enc tick=0 even though it visually
+    // appears at a later beat (e.g. beat 4). Other ORNs in the same measure on
+    // different staves target the same beat and carry matching ornXoffsets; if
+    // any of them has a reliable enc tick (> 0), the cluster inherits it.
+    // Fallback: when no anchor exists, find the note whose xoffset is closest
+    // to the ORN's ornXoffset using per-measure note xoffset data.
+    static constexpr int BOW_XOFF_CLUSTER = 6;   // ornXoffsets within ±6 → same beat
+    for (PendingBowing& pb : ctx.pendingBowings) {
+        if (pb.crossMeasure || pb.encTickRaw > 0) {
+            continue;   // reliable tick or cross-measure → no correction needed
+        }
+        // Phase 1: find an anchor in the same measure with a similar xoffset.
+        bool fixed = false;
+        for (const PendingBowing& anchor : ctx.pendingBowings) {
+            if (&anchor == &pb || anchor.measIdx != pb.measIdx || anchor.encTickRaw == 0) {
+                continue;
+            }
+            if (std::abs(anchor.ornXoffset - pb.ornXoffset) <= BOW_XOFF_CLUSTER) {
+                pb.tick = anchor.tick;
+                fixed = true;
+                break;
+            }
+        }
+        if (fixed) {
+            continue;
+        }
+        // Phase 2: no anchor — use the note on the same staff whose xoffset is
+        // closest (smallest non-negative ornXoffset – note.xoffset).
+        const int staffIdx = static_cast<int>(pb.track / VOICES);
+        auto it = ctx.noteXoffByMeasStaff.find({ pb.measIdx, staffIdx });
+        if (it == ctx.noteXoffByMeasStaff.end()) {
+            continue;
+        }
+        int bestTick = -1;
+        int bestDiff = INT_MAX;
+        for (const auto& p : it->second) {   // p = { enc_tick, note.xoffset }
+            const int diff = pb.ornXoffset - p.second;
+            if (diff >= 0 && diff < bestDiff) {
+                bestDiff = diff;
+                bestTick = p.first;
+            }
+        }
+        if (bestTick >= 0) {
+            // Compute wholeTicks from the measure's time signature.
+            // buildNoteLoop always uses 960 ticks per whole note.
+            static constexpr int wholeTicks = 960;
+            const Measure* m = (pb.measIdx >= 0 && pb.measIdx < static_cast<int>(ctx.measuresByIdx.size()))
+                               ? ctx.measuresByIdx[pb.measIdx] : nullptr;
+            if (m) {
+                pb.tick = m->tick() + Fraction(bestTick, wholeTicks);
+            }
+        }
+    }
+
     // Resolve bowing marks from stand-alone ORN elements.
     // crossMeasure=true: ORN misplaced by Encore; belongs to the next measure's first chord on the sibling staff.
     for (const PendingBowing& pb : ctx.pendingBowings) {
