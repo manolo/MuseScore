@@ -260,12 +260,15 @@ static void buildScore(MasterScore* score, const EncFile& enc)
     // not collapsed multi-measure rests.
     const bool hasMMRest = std::any_of(enc.measures.begin(), enc.measures.end(),
                                        [](const EncMeasure& m) {
-        if (m.elements.size() != 1) {
+        if (m.elements.empty()) {
             return false;
         }
-        const EncMeasureElem* e = m.elements[0].get();
-        return static_cast<EncElemType>(e->type) == EncElemType::REST
-               && static_cast<const EncRest*>(e)->mrestCount > 1;
+        for (const auto& ep : m.elements) {
+            if (static_cast<EncElemType>(ep->type) != EncElemType::REST) {
+                return false;
+            }
+        }
+        return static_cast<const EncRest*>(m.elements[0].get())->mrestCount > 1;
     });
     score->style().set(Sid::createMultiMeasureRests, hasMMRest);
 
