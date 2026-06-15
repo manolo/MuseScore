@@ -23,6 +23,7 @@
 #include "score.h"
 
 #include "compat/midi/compatmidirender.h"
+#include "io/file.h"
 #include "dom/factory.h"
 #include "dom/instrtemplate.h"
 #include "dom/measure.h"
@@ -37,6 +38,7 @@
 #include "dom/stafftype.h"
 #include "dom/text.h"
 #include "editing/editpart.h"
+#include "editing/editstyle.h"
 #include "editing/editsystemlocks.h"
 #include "editing/transaction/transaction.h"
 #include "types/typesconv.h"
@@ -692,4 +694,20 @@ Note* Score::setGraceNote(Chord* chordWrapper, int pitch, int noteType, int dura
     }
 
     return wrap<Note>(note, Ownership::SCORE);
+}
+
+//---------------------------------------------------------
+//   Score::loadStyle
+//---------------------------------------------------------
+
+bool Score::loadStyle(const QString& filePath, bool allowAnyVersion)
+{
+    muse::io::File styleFile(filePath);
+    if (!styleFile.exists()) {
+        LOGW("loadStyle: cannot open <%s>", qPrintable(filePath));
+        return false;
+    }
+
+    mu::engraving::Transaction& tx = score()->transactionManager()->currentOrDummyTransaction();
+    return mu::engraving::EditStyle::loadStyle(tx, score(), styleFile, allowAnyVersion);
 }
