@@ -2628,6 +2628,64 @@ TEST_F(Tst_Importer, mrest_single_block_expands_and_system_locks_correct)
 }
 
 // ===========================================================================
+// Regression: mrestCount expansion must not require the successor MEAS block
+// to contain pitched notes. A block with mrestCount=3 followed by a plain
+// rest measure (not notes) must still expand to 3 MuseScore measures.
+// Without the fix, encMeasDisplayCount collapsed the mrest to 1 because
+// encMeasHasPitchedNotes(next) returned false for the rest successor.
+//
+// Synthetic file: 5 real MEAS blocks [note, note, mrest=3, rest, note] plus
+// 1 filler block added by assemble() = 6 blocks total.
+// Expected: 2 + 3 + 1 + 1 + 1(filler) = 8 MuseScore measures.
+// Without fix: 2 + 1 + 1 + 1 + 1(filler) = 6 measures (loses 2 from unexpanded mrest).
+// ===========================================================================
+TEST_F(Tst_Importer, mrest_single_block_expands_when_successor_is_rest)
+{
+    MasterScore* score = readEncoreScore("importer_mrest_followed_by_rest.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_mrest_followed_by_rest.enc";
+    ASSERT_EQ(score->nmeasures(), 8)
+        << "5 real MEAS blocks + 2 extra from mrestCount=3 + 1 filler; without fix only 6";
+
+    auto measureAt = [](MasterScore* sc, int idx) -> Measure* {
+        Measure* m = sc->firstMeasure();
+        for (int i = 0; i < idx && m; ++i) {
+            m = m->nextMeasure();
+        }
+        return m;
+    };
+    auto hasPitchedNotes = [](Measure* m) -> bool {
+        if (!m) {
+            return false;
+        }
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (size_t v = 0; v < VOICES; ++v) {
+                EngravingItem* el = s->element(v);
+                if (el && el->isChord()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    // Measures 1-2: notes
+    EXPECT_TRUE(hasPitchedNotes(measureAt(score, 0))) << "measure 1 must have notes";
+    EXPECT_TRUE(hasPitchedNotes(measureAt(score, 1))) << "measure 2 must have notes";
+    // Measures 3-5: virtual empty measures from the mrest expansion (key regression case)
+    EXPECT_FALSE(hasPitchedNotes(measureAt(score, 2))) << "measure 3 (mrest) must be empty";
+    EXPECT_FALSE(hasPitchedNotes(measureAt(score, 3))) << "measure 4 (mrest) must be empty";
+    EXPECT_FALSE(hasPitchedNotes(measureAt(score, 4))) << "measure 5 (mrest) must be empty";
+    // Measure 6: the single-rest successor (not a note measure — this is what triggered the bug)
+    EXPECT_FALSE(hasPitchedNotes(measureAt(score, 5))) << "measure 6 (single rest) must be empty";
+    // Measure 7: note
+    EXPECT_TRUE(hasPitchedNotes(measureAt(score, 6))) << "measure 7 must have notes";
+    // Measure 8: filler (empty measure added by assemble())
+    EXPECT_FALSE(hasPitchedNotes(measureAt(score, 7))) << "measure 8 (filler) must be empty";
+
+    delete score;
+}
+
+// ===========================================================================
 // Regression guard: 2/2 with the CORRECT beatTicks=480 still imports all
 // notes correctly after wholeTicks was changed from beatTicks*timeSigDen
 // to the constant 960.  beatTicks=480 gives 480*2=960=960, so the old
