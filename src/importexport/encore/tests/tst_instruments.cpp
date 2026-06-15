@@ -571,3 +571,36 @@ TEST_F(Tst_Instruments, gm_perc_range_midi_program_routes_to_drumset)
         << "Drumset instrument must carry a drumset object";
     delete score;
 }
+
+// ===========================================================================
+// BUG FIX: encKey=0 ("sounds as written") must zero the template's OCTAVE
+// transposition, not just non-octave ones.
+// The acoustic-bass template carries transposeChromatic=-12; without the fix
+// the importer keeps that -12 (the guard `chromatic % 12 != 0` skips -12),
+// causing notes to display one octave too high in written-pitch view.
+// ===========================================================================
+TEST_F(Tst_Instruments, key0_zeroes_octave_template_transposition)
+{
+    // "Bajo" + MIDI 33 resolves to acoustic-bass (transposeChromatic=-12).
+    // encKey=0 means "sounds as written" so the -12 must be zeroed.
+    MasterScore* score = readEncoreScore("instruments_bass_enckey0_no_octave_transpos.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->transpose().chromatic, 0)
+        << "encKey=0 (sounds as written) must zero the template's octave transposition (-12) "
+        "so notes display at Encore's written pitch, not one octave higher";
+
+    // Verify the note pitch is preserved at the Encore-stored value (A2=45).
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Segment* seg = m->first(SegmentType::ChordRest);
+    ASSERT_NE(seg, nullptr);
+    EngravingItem* el = seg->element(0);
+    ASSERT_TRUE(el && el->isChord());
+    EXPECT_EQ(toChord(el)->notes().front()->pitch(), 45)
+        << "Concert pitch A2(45) must be stored unchanged; octave shift from template must not apply";
+
+    delete score;
+}
