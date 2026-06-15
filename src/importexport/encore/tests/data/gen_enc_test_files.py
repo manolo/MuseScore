@@ -643,6 +643,72 @@ def gen_v0c4_mrest_followed_by_rest():
         (meas_hdr(4, 4), n2),
     ])
 
+def gen_v0c4_mrest_preceded_by_rest():
+    """mrestCount=7 block preceded by two single-measure rests.
+    Regression: a multi-measure rest must expand even when the predecessor MEAS block
+    contains a plain single-measure rest (mrestCount=1).  Before the fix the guard
+    encMeasHasSingleRest(*prev) incorrectly suppressed expansion.
+    Layout: [rest][rest][mrest=7][note]  (assemble pads 4 blocks to min 6, adding 2 empty)
+    Expected: 1 + 1 + 7 + 1 + 1(pad) + 1(pad) = 12 MuseScore measures.
+    Without fix: 1 + 1 + 1 + 1 + 1 + 1 = 6 (the mrest=7 collapses to 1)."""
+    single_rest = rest_v0c4(0, 0, 0, 1) + end_marker()       # whole rest, mrestCount=0
+    mrest = rest_v0c4_mrest(0, 0, 0, 1, 7) + end_marker()    # whole rest, mrestCount=7
+    n = note_v0c4(0, 0, 0, 3, 60) + end_marker()             # C4 quarter
+    return assemble(0xC4, [
+        (meas_hdr(4, 4), single_rest),
+        (meas_hdr(4, 4), single_rest),
+        (meas_hdr(4, 4), mrest),
+        (meas_hdr(4, 4), n),
+    ])
+
+def gen_v0c4_mrest_multistaff():
+    """Multi-staff file (2 staves) with a mrest=7 block that has one REST element
+    per staff inside the same MEAS block (elements.size()==2, both mrestCount=7).
+    Regression: the old check 'elements.size() != 1' incorrectly suppressed expansion
+    for any multi-staff file, collapsing the 7-measure rest to 1 measure.
+    Layout (Encore): [mrest=7 (2 staves)][note (2 staves)]
+    Expected: 7 + 1 = 8 MuseScore measures.
+    Without fix: 1 + 1 = 2 MuseScore measures."""
+    # Custom 194-byte SCOW header for a 2-staff file
+    hdr = bytearray(194)
+    hdr[0:4] = b'SCOW'
+    hdr[4] = 0xC4
+    struct.pack_into('<H', hdr, 0x28, 0x0420)   # chuVersio
+    struct.pack_into('<h', hdr, 0x2E, 1)         # lineCount
+    struct.pack_into('<h', hdr, 0x30, 1)         # pageCount
+    hdr[0x32] = 2                                # instrumentCount
+    hdr[0x33] = 2                                # staffPerSystem
+    struct.pack_into('<h', hdr, 0x34, 2)         # measureCount
+
+    # LINE block: 1 system covering both MEAS blocks, 2 staff entries (30 bytes each)
+    def staff_entry(clef_byte, instr_staff_idx):
+        e = bytearray(30)
+        e[14] = clef_byte
+        e[19] = 1   # showByte = visible
+        e[21] = instr_staff_idx
+        return bytes(e)
+
+    line_data = (b'\x00' * 10
+                 + struct.pack('<H', 0)         # start measure index
+                 + bytes([2])                   # measureCount in this system = 2
+                 + staff_entry(0, 0x00)         # staff 0
+                 + staff_entry(0, 0x01))        # staff 1
+    line_block = b'LINE' + struct.pack('<I', len(line_data)) + line_data
+
+    # MEAS 1: both staves have mrestCount=7 (the multi-measure rest block)
+    mrest_elems = (rest_v0c4_mrest(0, 0, 0, 1, 7)   # staff 0
+                 + rest_v0c4_mrest(0, 0, 1, 1, 7)   # staff 1
+                 + end_marker())
+    meas1 = meas_block(meas_hdr(4, 4), mrest_elems)
+
+    # MEAS 2: a note on each staff
+    note_elems = (note_v0c4(0, 0, 0, 3, 60)   # C4, staff 0
+                + note_v0c4(0, 0, 1, 3, 64)   # E4, staff 1
+                + end_marker())
+    meas2 = meas_block(meas_hdr(4, 4), note_elems)
+
+    return bytes(hdr) + line_block + meas1 + meas2 + SKELETON_POST
+
 def gen_v0c4_whole_rest_2_4():
     # Single whole-measure rest in 2/4 (rdur=480 in Encore ticks)
     e  = rest_v0c4(0, 0, 0, fv=1)   # whole-measure rest
@@ -7269,6 +7335,8 @@ if __name__=='__main__':
     write("structure_c_clef_key_keeps_clef.enc",           gen_v0c4_c_clef_key_keeps_clef())
     write("structure_perc_clef_key_keeps_clef.enc",        gen_v0c4_perc_clef_key_keeps_clef())
     write("importer_mrest_followed_by_rest.enc",          gen_v0c4_mrest_followed_by_rest())
+    write("importer_mrest_preceded_by_rest.enc",         gen_v0c4_mrest_preceded_by_rest())
+    write("importer_mrest_multistaff.enc",               gen_v0c4_mrest_multistaff())
     write("importer_gap_snap_eighth_meter.enc",           gen_v0c4_gap_snap_eighth_meter())
     write("importer_v0xa6_no_spurious_tremolo.enc",             gen_v0xa6_no_spurious_tremolo())
     write("importer_v0xa6_key_transposition.enc",               gen_v0xa6_key_transposition())
