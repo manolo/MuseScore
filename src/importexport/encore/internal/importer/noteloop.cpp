@@ -233,8 +233,8 @@ void buildNoteLoop(BuildCtx& ctx)
                && static_cast<EncElemType>(m.elements[0]->type) == EncElemType::REST;
     };
 
-    auto measDisplayCount = [&hasPitchedNotes, &hasSingleRest](
-        const EncMeasure& m, const EncMeasure* prev, const EncMeasure* next) -> int {
+    auto measDisplayCount = [&hasSingleRest](
+        const EncMeasure& m, const EncMeasure* prev) -> int {
         if (m.elements.size() != 1) {
             return 1;
         }
@@ -247,9 +247,6 @@ void buildNoteLoop(BuildCtx& ctx)
             return 1;
         }
         if (prev && hasSingleRest(*prev)) {
-            return 1;
-        }
-        if (!next || !hasPitchedNotes(*next)) {
             return 1;
         }
         return cnt;
@@ -1134,9 +1131,7 @@ void buildNoteLoop(BuildCtx& ctx)
         }
 
         const EncMeasure* prevMeas = (measIdx > 0) ? &enc.measures[measIdx - 1] : nullptr;
-        const EncMeasure* nextMeas = (measIdx + 1 < static_cast<int>(enc.measures.size()))
-                                     ? &enc.measures[measIdx + 1] : nullptr;
-        measSkip = measDisplayCount(encMeas, prevMeas, nextMeas) - 1;
+        measSkip = measDisplayCount(encMeas, prevMeas) - 1;
         ++msIdxCounter;
         ++measIdx;
     }
