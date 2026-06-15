@@ -828,7 +828,7 @@ Byte +11 is the playable MIDI value.
 | +10      | 1      | layout x-position                                                                |
 | +13      | 1      | tuplet byte — high nibble = actualN, low nibble = normalN (same as note)         |
 | +14      | 1      | dotControl — **bitmask flag, NOT a tick count**. Bit 0 = dotted display hint.   |
-| +15      | 1      | **mrestCount** — Encore multi-measure rest display count. When > 1, this single MEAS block represents that many consecutive empty display measures (Encore draws one rest symbol with this count above it). Expansion applies when this is the sole element in the MEAS block and the predecessor is not also a single-REST block. The successor content does not affect validity — `mrestCount` is authoritative regardless of what follows. |
+| +15      | 1      | **mrestCount** — Encore multi-measure rest display count. When > 1, this single MEAS block represents that many consecutive empty display measures (Encore draws one rest symbol with this count above it). Multi-staff files emit one REST element per staff, so the MEAS block can contain N elements (all REST, all with the same mrestCount). The count is read from the first element. Expansion is applied when ALL elements are REST and `mrestCount > 1`. The only suppression case is when the predecessor MEAS block is itself a multi-measure rest (all-REST, mrestCount > 1), which prevents cascading in the rare event Encore writes consecutive mrest blocks. A predecessor that is a plain single-measure rest (mrestCount == 1) does NOT suppress expansion. The successor content never affects validity — `mrestCount` is authoritative regardless of what follows. |
 
 **dotControl semantics.** dotControl is a **bitmask**, not a sounding tick value:
 
