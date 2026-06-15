@@ -107,7 +107,7 @@ void TemplatePaintView::onNotationSetup()
 
     m_notationProject = notationCreator()->newProject(iocContext());
 
-    Ret ret = m_notationProject->load(m_templatePath);
+    Ret ret = m_notationProject->load(m_templatePath, OpenParams {});
 
     if (!ret) {
         LOGE() << ret.toString();

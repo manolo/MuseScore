@@ -58,6 +58,7 @@ struct OpenParams {
     OpenParams() {}
 
     muse::io::path_t stylePath;
+    muse::String stylePartsFilter;  // Glob pattern to filter which parts receive the style
     bool disablePlayback = false;
     bool forceMode = false;
     bool forcePageMode = false;
