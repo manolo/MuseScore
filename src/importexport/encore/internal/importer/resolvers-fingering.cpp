@@ -99,17 +99,26 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
             if (m) {
                 Segment* seg = m->findSegment(SegmentType::ChordRest, pb.tick);
                 if (seg) {
-                    EngravingItem* el = seg->element(pb.track);
-                    if (el && el->isChord()) {
-                        c = toChord(el);
-                        useTrack = pb.track;
-                    } else {
-                        // Sibling-staff fallback for same-measure ORNs.
-                        track_idx_t sibTrack = pb.track + VOICES;
-                        el = seg->element(sibTrack);
+                    // The ORN voice is always 0; scan all voices of the ORN's own staff
+                    // before falling back to the sibling staff. This handles the common
+                    // case where notes are in voice=1+ and the ORN is stored at voice=0.
+                    const track_idx_t staffBase = (pb.track / VOICES) * VOICES;
+                    for (track_idx_t v = 0; v < VOICES && !c; ++v) {
+                        EngravingItem* el = seg->element(staffBase + v);
                         if (el && el->isChord()) {
                             c = toChord(el);
-                            useTrack = sibTrack;
+                            useTrack = staffBase + v;
+                        }
+                    }
+                    if (!c) {
+                        // Sibling-staff fallback: same search across the adjacent staff.
+                        const track_idx_t sibBase = staffBase + VOICES;
+                        for (track_idx_t v = 0; v < VOICES && !c; ++v) {
+                            EngravingItem* el = seg->element(sibBase + v);
+                            if (el && el->isChord()) {
+                                c = toChord(el);
+                                useTrack = sibBase + v;
+                            }
                         }
                     }
                 }
