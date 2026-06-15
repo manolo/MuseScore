@@ -2212,3 +2212,156 @@ TEST_F(Tst_Ornaments, v0c4_grace_after_main_slur_arc_starts_at_grace_not_regular
 
     delete score;
 }
+
+// ===========================================================================
+// BUG FIX: ACCENT ORN (0xBE) at voice=0 must attach to the note at the same
+// tick even when that note lives in a non-zero voice.
+// Without fix: resolver checks track=staffIdx*VOICES+0 (voice=0), finds no
+// chord, then falls to the sibling staff (track+VOICES). In a single-staff
+// file the sibling doesn't exist, so the accent is silently dropped.
+// With fix: resolver scans all voices of the ORN's own staff before giving up.
+// ===========================================================================
+TEST_F(Tst_Ornaments, accent_orn_attaches_to_nonzero_voice)
+{
+    // Single-staff file: note C4 in voice=1 at tick=0, ORN 0xBE at voice=0.
+    MasterScore* score = readEncoreScore("ornaments_accent_nonzero_voice.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Segment* seg = m->first(SegmentType::ChordRest);
+    ASSERT_NE(seg, nullptr);
+
+    // Note is in voice=1 → track = staffIdx*VOICES + 1 = 1.
+    EngravingItem* el = seg->element(1);
+    ASSERT_TRUE(el && el->isChord())
+        << "Voice-1 note must be imported at track=1";
+
+    int accentCount = 0;
+    for (Articulation* a : toChord(el)->articulations()) {
+        if (a->symId() == SymId::articAccentAbove || a->symId() == SymId::articAccentBelow) {
+            ++accentCount;
+        }
+    }
+    EXPECT_EQ(accentCount, 1)
+        << "ACCENT ORN at voice=0 must attach to the voice=1 note on the same staff; "
+        "resolver must scan all voices before falling back to sibling staff";
+
+    // Voice=0 track must have no spurious accent (the ORN must not have redirected
+    // to a phantom sibling or the voice=0 rest).
+    EngravingItem* v0el = seg->element(0);
+    if (v0el && v0el->isChord()) {
+        for (Articulation* a : toChord(v0el)->articulations()) {
+            EXPECT_NE(a->symId(), SymId::articAccentAbove)
+                << "Accent must not appear on the voice=0 element";
+        }
+    }
+
+    delete score;
+}
+
+// ===========================================================================
+// BUG FIX: ACCENT ORN at voice=0, mid-measure tick (enc tick=240) must attach
+// to the note in voice=1 at that same tick, not to the first note at tick=0.
+// Without fix: voice=0 cumTick stays 0 (no notes in v0), so elemTick=measTick
+// and pendingBowings stores start-of-measure tick. Resolver finds first note.
+// With fix: bowTick = measTick + Fraction(enc_tick, 960) targets the right beat.
+// ===========================================================================
+TEST_F(Tst_Ornaments, accent_orn_offset_tick_nonzero_voice_lands_on_correct_note)
+{
+    // Single staff: C4 quarter at voice=1 tick=0, E4 quarter at voice=1 tick=240.
+    // ORN 0xBE at voice=0 tick=240 → must accent E4 (track=1, MuseScore tick=480).
+    MasterScore* score = readEncoreScore("ornaments_accent_offset_tick_nonzero_voice.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    const Fraction measTick = m->tick();
+
+    // enc tick=240 → MuseScore tick = 240/960 * 1920 = 480 ticks from measTick.
+    const Fraction targetTick = measTick + Fraction(480, 1920);
+    Segment* seg = m->findSegment(SegmentType::ChordRest, targetTick);
+    ASSERT_NE(seg, nullptr) << "Segment at MuseScore tick=480 must exist";
+
+    EngravingItem* el = seg->element(1);   // voice=1 → track=1
+    ASSERT_TRUE(el && el->isChord()) << "E4 chord must be in voice=1 at tick=480";
+
+    int accentOnE4 = 0;
+    for (Articulation* a : toChord(el)->articulations()) {
+        if (a->symId() == SymId::articAccentAbove || a->symId() == SymId::articAccentBelow) {
+            ++accentOnE4;
+        }
+    }
+    EXPECT_EQ(accentOnE4, 1)
+        << "ACCENT ORN at enc tick=240 must land on E4 at MuseScore tick=480, "
+        "not on C4 at tick=0 (which is the bug when cumTick=0 is used as the target tick)";
+
+    // C4 at tick=0 must NOT have an accent.
+    Segment* seg0 = m->first(SegmentType::ChordRest);
+    if (seg0) {
+        EngravingItem* el0 = seg0->element(1);
+        if (el0 && el0->isChord()) {
+            for (Articulation* a : toChord(el0)->articulations()) {
+                EXPECT_NE(a->symId(), SymId::articAccentAbove)
+                    << "C4 at tick=0 must not carry the accent that belongs to E4";
+            }
+        }
+    }
+
+    delete score;
+}
+
+// ===========================================================================
+// BUG FIX: ACCENT ORN on staff 0 (notes in voice=3) must NOT redirect to
+// staff 1 via the sibling-staff fallback.
+// Without fix: resolver checks only track=staffBase+0 (voice=0) of staff 0
+// → no chord found → falls to sibTrack (staff 1 voice=0) → accent goes to
+// the wrong staff (E4 on staff 1 instead of C4 on staff 0 voice=3).
+// With fix: resolver scans all voices of staff 0 first → finds C4 at voice=3.
+//
+// 2-staff file: staff 0 has C4 in voice=3; staff 1 has E4 in voice=0 (trap).
+// ACCENT ORN on staff 0, voice=0, tick=0.
+// ===========================================================================
+TEST_F(Tst_Ornaments, accent_orn_does_not_spill_to_sibling_staff)
+{
+    MasterScore* score = readEncoreScore("ornaments_accent_sibling_no_spillover.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Segment* seg = m->first(SegmentType::ChordRest);
+    ASSERT_NE(seg, nullptr);
+
+    // Staff 0, voice=3 (track = 0*VOICES+3 = 3): must have the accent.
+    EngravingItem* el0v3 = seg->element(3);
+    ASSERT_TRUE(el0v3 && el0v3->isChord())
+        << "C4 chord must be in staff=0 voice=3 (track=3)";
+
+    int accentOnStaff0 = 0;
+    for (Articulation* a : toChord(el0v3)->articulations()) {
+        if (a->symId() == SymId::articAccentAbove || a->symId() == SymId::articAccentBelow) {
+            ++accentOnStaff0;
+        }
+    }
+    EXPECT_EQ(accentOnStaff0, 1)
+        << "ACCENT ORN on staff 0 (voice=0) must attach to the voice=3 chord on staff 0, "
+        "not redirect to the sibling staff";
+
+    // Staff 1, voice=0 (track = 1*VOICES+0 = 4): must have NO accent.
+    EngravingItem* el1v0 = seg->element(4);
+    if (el1v0 && el1v0->isChord()) {
+        for (Articulation* a : toChord(el1v0)->articulations()) {
+            EXPECT_NE(a->symId(), SymId::articAccentAbove)
+                << "Staff 1 (the sibling-staff trap) must not receive a spurious accent";
+        }
+    }
+
+    delete score;
+}
+
