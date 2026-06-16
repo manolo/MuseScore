@@ -101,8 +101,27 @@ struct NoteElemCtx {
 void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec);
 void handleRest(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec);
 void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec);
+void handleChordSym(BuildCtx& ctx, const NoteLoopMeasCtx& mc, const NoteElemCtx& ec);
 
-// Render tempo text (beatTicks: 360=dotted-quarter, 240=quarter). Defined in noteloop.cpp.
+// Queue one LYRIC element into ctx.pendingLyrics. (noteloop-lyrics.cpp)
+void enqueueLyric(BuildCtx& ctx, const EncLyric* el, mu::engraving::track_idx_t track);
+// Attach queued lyrics to the nearest chords in the measure. (noteloop-lyrics.cpp)
+void attachPendingLyrics(BuildCtx& ctx, mu::engraving::Measure* measure,
+                         const EncMeasure& encMeas, mu::engraving::Fraction measTick);
+
+// Case-B pickup adjustment: shorten measure 0 if loop placed less than its nominal length. (noteloop-fill.cpp)
+void adjustPickupMeasure(BuildCtx& ctx, mu::engraving::Measure* measure, int measIdx);
+// Pre-fill trailing silence with invisible gap rests. (noteloop-fill.cpp)
+void fillTrailingGaps(BuildCtx& ctx, mu::engraving::Measure* measure, mu::engraving::Fraction measTick);
+// Fix over/undershoots up to 1/24. (noteloop-fill.cpp)
+void correctMeasureLength(mu::engraving::Measure* measure, int totalStaves);
+// Nuclear hard-cap: remove trailing elements and fill deficit. (noteloop-fill.cpp)
+void capMeasureLength(mu::engraving::Measure* measure, int totalStaves);
+
+// Apply per-measure BPM marks as TempoText elements. (noteloop-tempo.cpp)
+void applyMeasureBpmMarks(BuildCtx& ctx);
+
+// Render tempo text (beatTicks: 360=dotted-quarter, 240=quarter). (noteloop-tempo.cpp)
 mu::engraving::String tempoXmlText(int displayBpm, int beatTicks);
 } // namespace mu::iex::encore
 
