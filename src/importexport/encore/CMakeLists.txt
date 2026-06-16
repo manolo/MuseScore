@@ -23,7 +23,10 @@ muse_create_module(iex_encore)
 target_sources(iex_encore PRIVATE
     enc-module.cpp
     enc-module.h
-    internal/parser/elements.cpp
+    internal/parser/elem-note.cpp
+    internal/parser/elem-chord.cpp
+    internal/parser/elem-ornament.cpp
+    internal/parser/elem-lyric-tie.cpp
     internal/parser/elem-measure.cpp
     internal/parser/elem-metadata.cpp
     internal/parser/elem-text.cpp
