@@ -162,7 +162,7 @@ void NoteLoopMeasCtx::closeTupletWithFill(BuildCtx& ctx, TupletTracker& tt,
 void buildNoteLoop(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
-    const EncFile& enc = ctx.enc;
+    const EncRoot& enc = ctx.enc;
 
     // Per-LINE-staff lookup for multi-staff instrument detection (see voice >= VOICES below).
     const int nLineStaves = (!enc.lines.empty())

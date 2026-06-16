@@ -132,7 +132,7 @@ static TimeSigType encGlyphToTimeSigType(quint8 glyph, Fraction ts)
 void buildMeasures(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
-    const EncFile& enc = ctx.enc;
+    const EncRoot& enc = ctx.enc;
 
     // Pickup measure detection: measure 0 holds the short duration, measure 1 the real sig.
     {
@@ -226,7 +226,7 @@ void buildMeasures(BuildCtx& ctx)
 void buildInitialSignatures(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
-    const EncFile& enc = ctx.enc;
+    const EncRoot& enc = ctx.enc;
     if (!enc.measures.empty()) {
         addInitialTimeSig(score, ctx.totalStaves, ctx.nominalTimeSig, ctx.nominalTimeSigType);
     }

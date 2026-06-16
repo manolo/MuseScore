@@ -30,7 +30,7 @@ target_sources(iex_encore PRIVATE
     internal/parser/elem-measure.cpp
     internal/parser/elem-metadata.cpp
     internal/parser/elem-text.cpp
-    internal/parser/elem-file.cpp
+    internal/parser/elem-root.cpp
     internal/parser/encoding.h
     internal/parser/encoding.cpp
     internal/parser/reader.h

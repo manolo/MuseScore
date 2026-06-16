@@ -222,7 +222,7 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
 void buildParts(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
-    const EncFile& enc = ctx.enc;
+    const EncRoot& enc = ctx.enc;
     // staffPitchOffset: Encore stores written pitch; add Key field (chromatic semitones) to each note pitch for correct playback.
     // staffTemplateConcertClef/TransposingClef: template clefs for octave instruments (e.g. bass guitar). INVALID if no template.
     int cumStaffIdx = 0;  // running index into enc.lines[0].staffData

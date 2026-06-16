@@ -28,6 +28,6 @@
 #include "elements-ornament.h"
 #include "elements-text.h"
 #include "elements-measure.h"
-#include "elements-file.h"
+#include "elements-root.h"
 
 #endif // MU_IMPORTEXPORT_ENC_PARSER_ELEMENTS_H

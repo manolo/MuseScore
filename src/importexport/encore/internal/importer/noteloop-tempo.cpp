@@ -45,7 +45,7 @@ String tempoXmlText(int displayBpm, int beatTicks)
 // have an ORN TEMPO or STAFFTEXT tempo mark to avoid duplicates.
 void applyMeasureBpmMarks(BuildCtx& ctx)
 {
-    const EncFile& enc = ctx.enc;
+    const EncRoot& enc = ctx.enc;
     MasterScore* score = ctx.score;
 
     quint16 lastBpm = 0;

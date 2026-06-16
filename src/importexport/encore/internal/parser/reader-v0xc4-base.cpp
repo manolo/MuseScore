@@ -332,7 +332,7 @@ void readKeyTranspositions(std::vector<EncInstrument>& instruments, QDataStream&
 
 bool EncFormatReader_V0xC4Base::readInstrumentMeta(std::vector<EncInstrument>& instruments,
                                                    QDataStream& ds,
-                                                   const EncFile& /*file*/) const
+                                                   const EncRoot& /*file*/) const
 {
     recoverMissingNames(instruments, ds);
     readMidiPrograms(instruments, ds);
