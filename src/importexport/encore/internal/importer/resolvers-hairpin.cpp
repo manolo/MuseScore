@@ -30,7 +30,7 @@
 
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 void resolveHairpins(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
@@ -128,4 +128,4 @@ void resolveHairpins(BuildCtx& ctx)
         score->addElement(hp);
     }
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

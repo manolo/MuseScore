@@ -28,7 +28,7 @@
 #include "engraving/dom/segment.h"
 #include "engraving/dom/tempotext.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 // Render tempo text. displayBpm is the beat-unit BPM that Encore shows the user.
 // beatTicks=360 means the beat unit is a dotted quarter; beatTicks=240 is a quarter.
@@ -101,4 +101,4 @@ void applyMeasureBpmMarks(BuildCtx& ctx)
     }
 }
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

@@ -28,7 +28,7 @@
 
 #include "../internal/parser/elements.h"
 
-using namespace mu::iex::encore;
+using namespace mu::iex::enc;
 
 // Helper: build a numeric-only chord (tipo bit 0 clear = no text).
 static EncChordSym makeNumeric(quint8 toniko, quint8 radiko, quint8 baso = 0, quint8 tipo = 0)

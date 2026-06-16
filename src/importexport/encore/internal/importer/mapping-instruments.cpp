@@ -30,7 +30,7 @@
 
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 // Strip trailing ordinal numbers from instrument names ("Bandurria 1ª" -> "Bandurria"; standalone "ª"/"º" also removed).
 QString normalizeEncoreInstrName(const QString& name)
 {
@@ -273,4 +273,4 @@ const InstrumentTemplate* findTemplateByMidi(int encMidiProgram0indexed)
     }
     return best;
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

@@ -25,7 +25,7 @@
 #include "../internal/parser/ticks.h"
 
 using namespace mu::engraving;
-using namespace mu::iex::encore;
+using namespace mu::iex::enc;
 
 TEST(Tst_EncoreRhythm, faceValueToTicks)
 {

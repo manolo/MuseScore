@@ -40,7 +40,7 @@
 #include <set>
 #include <tuple>
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 using namespace mu::engraving;
 
 void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
@@ -594,4 +594,4 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         }
     }
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

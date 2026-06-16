@@ -38,7 +38,7 @@ class Measure;
 class Note;
 }
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 // faceValue low nibble: 1=whole, 2=half ... 8=256th; 0 and 9..15 are invalid.
 bool isValidFaceValue(quint8 faceValue);
 void applyConcertPitch(mu::engraving::Note* n, int semitone);
@@ -130,6 +130,6 @@ void applyMeasureBpmMarks(BuildCtx& ctx);
 
 // Render tempo text (beatTicks: 360=dotted-quarter, 240=quarter). (noteloop-tempo.cpp)
 mu::engraving::String tempoXmlText(int displayBpm, int beatTicks);
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc
 
 #endif // MU_IEX_ENCORE_NOTELOOP_INTERNAL_H

@@ -40,7 +40,7 @@ class Score;
 class InstrumentTemplate;
 }
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 mu::engraving::ClefType encClef2MuseScore(EncClefType ct);
 
 // Pick octave-decorated clef when Encore's plain G/F plus Key offset implies one
@@ -100,6 +100,6 @@ int encArticByteToScaleStringNumber(quint8 articByte);
 // Returns the trill upper-neighbor interval for artic bytes 0x05/0x06/0x07 (flat/sharp/natural).
 // Returns {SECOND, AUTO} for bytes with no accidental modifier.
 mu::engraving::OrnamentInterval encArticByteToTrillInterval(quint8 articByte);
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc
 
 #endif // MU_IMPORTEXPORT_ENC_IMPORT_MAPPING_H

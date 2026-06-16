@@ -24,7 +24,7 @@
 
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 void resolveAll(BuildCtx& ctx)
 {
     resolveSlurs(ctx);
@@ -32,4 +32,4 @@ void resolveAll(BuildCtx& ctx)
     resolveOrnaments(ctx);
     resolveFingeringAndBowing(ctx);
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

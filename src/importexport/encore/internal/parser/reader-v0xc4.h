@@ -26,12 +26,12 @@
 #include <memory>
 #include "reader.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 // Factory helper -- called from EncFormatReader::create().
 // Full class definition is in reader-v0xc4.cpp.
 std::unique_ptr<EncFormatReader> makeFormatReader_V0xC4();
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc
 
 #endif // MU_IMPORTEXPORT_ENC_PARSER_READER_V0XC4_H

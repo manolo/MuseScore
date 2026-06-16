@@ -36,7 +36,7 @@
 
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 // Scan `m` for the first chord on preferTrack, falling back to fallbackTrack.
 // Sets *outTrack to the track used; returns nullptr if neither is found.
 static Chord* findFirstChordInMeasure(Measure* m, track_idx_t preferTrack,
@@ -285,4 +285,4 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
         }
     }
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

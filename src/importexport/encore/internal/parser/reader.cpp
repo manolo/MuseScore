@@ -27,7 +27,7 @@
 
 #include "log.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 // Maps magic byte to format reader; add new format cases here.
 std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 magic)
@@ -46,4 +46,4 @@ std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 magic)
     }
 }
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

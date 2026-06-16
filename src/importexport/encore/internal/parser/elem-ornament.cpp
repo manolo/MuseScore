@@ -22,7 +22,7 @@
 
 #include "elements-ornament.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 bool EncOrnament::read(QDataStream& ds)
 {
@@ -57,4 +57,4 @@ bool EncOrnament::read(QDataStream& ds)
     return true;
 }
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

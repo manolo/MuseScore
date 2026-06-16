@@ -22,7 +22,7 @@
 
 #include "elements-note.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 bool EncMeasureElem::read(QDataStream& ds)
 {
@@ -111,4 +111,4 @@ bool EncGenericElem::read(QDataStream& ds)
     return true;
 }
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

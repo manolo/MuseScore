@@ -34,7 +34,7 @@
 #include "engraving/dom/stafftext.h"
 #include "engraving/dom/tempotext.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 using namespace mu::engraving;
 
 void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
@@ -538,4 +538,4 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         break;
     }
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

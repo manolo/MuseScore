@@ -24,7 +24,7 @@
 
 #include "reader.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 // ---------------------------------------------------------------------------
 // EncRoot - top-level container
 // ---------------------------------------------------------------------------
@@ -207,4 +207,4 @@ bool EncRoot::read(QDataStream& ds)
     addSpannerEnds(measures);
     return true;
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

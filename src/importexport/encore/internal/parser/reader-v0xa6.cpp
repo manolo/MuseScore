@@ -26,7 +26,7 @@
 
 #include "elements.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 // v0xA6 NOTE layouts: size=10 (pitch at +11, tuplet at +7), size=22 (pitch in tuplet slot),
 // size<27 (artic bytes lie beyond boundary, zero them). See ENCORE_FORMAT.md §Note element.
 bool EncFormatReader_V0xA6::postProcessElement(EncMeasureElem* elem,
@@ -107,4 +107,4 @@ void EncFormatReader_V0xA6::readKeyFromTKBlock(EncInstrument& instr,
     }
     ds.device()->seek(contentStart);
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

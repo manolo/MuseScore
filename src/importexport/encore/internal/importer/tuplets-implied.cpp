@@ -31,7 +31,7 @@
 
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 std::set<const EncMeasureElem*> computeImpliedTupletMembers(
     const MeasureElemRefVec& sortedElems,
@@ -491,4 +491,4 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
     return result;
 }
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

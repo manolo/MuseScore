@@ -30,7 +30,7 @@
 
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 bool TupletTracker::groupFull() const
 {
     // Close when accumulated face values reach actualN × baseLen.
@@ -103,4 +103,4 @@ Fraction TupletTracker::noteAdvance(DurationType baseType) const
     }
     return TDuration(baseType).fraction() * Fraction(normalN, actualN);
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc
