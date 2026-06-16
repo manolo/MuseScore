@@ -22,7 +22,10 @@
 
 #include "reader.h"
 #include "reader-v0xa6.h"
+#include "reader-v0xc2.h"
 #include "reader-v0xc4.h"
+
+#include "log.h"
 
 namespace mu::iex::encore {
 
@@ -35,7 +38,10 @@ std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 magic)
     case 0xC2:
         return makeFormatReader_V0xC2();
     case 0xC4:
+        return makeFormatReader_V0xC4();
     default:
+        LOGW() << QString("Encore: unsupported format version 0x%1 - import may fail")
+                      .arg(magic, 2, 16, QChar('0'));
         return makeFormatReader_V0xC4();
     }
 }
