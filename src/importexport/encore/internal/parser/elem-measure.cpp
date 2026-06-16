@@ -28,6 +28,159 @@
 
 namespace mu::iex::enc {
 // ---------------------------------------------------------------------------
+// Static helpers
+// ---------------------------------------------------------------------------
+
+static std::unique_ptr<EncMeasureElem> createMeasureElement(
+    quint16 tick, quint8 tp, quint8 vo,
+    const EncFormatReader& fmt)
+{
+    switch (static_cast<EncElemType>(tp)) {
+    case EncElemType::NOTE:
+        return std::make_unique<EncNote>(tick, tp, vo);
+    case EncElemType::REST:
+        return std::make_unique<EncRest>(tick, tp, vo);
+    case EncElemType::CHORD:
+        return std::make_unique<EncChordSym>(tick, tp, vo);
+    case EncElemType::ORNAMENT:
+        return std::make_unique<EncOrnament>(tick, tp, vo);
+    case EncElemType::LYRIC:
+    {
+        auto lyr = std::make_unique<EncLyric>(tick, tp, vo);
+        lyr->textGapAfterKie = fmt.lyricTextGapAfterKie();
+        return lyr;
+    }
+    case EncElemType::KEYCHANGE:
+        return std::make_unique<EncKeyChange>(tick, tp, vo);
+    case EncElemType::TIE:
+        return std::make_unique<EncTie>(tick, tp, vo);
+    case EncElemType::UNKNOWN1:
+        LOGD() << QString("Encore: unknown element type UNKNOWN1 (0xA) at tick %1")
+                      .arg(static_cast<int>(tick));
+        return std::make_unique<EncGenericElem>(tick, tp, vo);
+    case EncElemType::UNKNOWN2:
+        // MIDI CC event (sustain, volume, modulation) - expected in live-recorded files.
+        LOGD() << QString("Encore: MIDI CC event (UNKNOWN2/MIDI-CC) at tick %1")
+                      .arg(static_cast<int>(tick));
+        return std::make_unique<EncGenericElem>(tick, tp, vo);
+    case EncElemType::NONE:
+    case EncElemType::CLEF:
+    case EncElemType::BEAM:
+    default:
+        return std::make_unique<EncGenericElem>(tick, tp, vo);
+    }
+}
+
+// Phase 1: set realDuration from MIDI tick gaps (with optional grace time-borrowing).
+static void computeElementDurations(
+    std::vector<EncMeasureElem*>& elems,
+    qint16 durTicks,
+    bool hasGraceTimeBorrowing)
+{
+    for (size_t i = 0; i < elems.size(); ++i) {
+        size_t j = i + 1;
+        // Skip same-tick chord members, then near-simultaneous cluster notes.
+        while (j < elems.size() && elems[j]->tick == elems[i]->tick) {
+            ++j;
+        }
+        while (j < elems.size()
+               && elems[j]->tick - elems[i]->tick < CHORD_CLUSTER_THRESHOLD) {
+            ++j;
+        }
+        qint16 nextTick = (j < elems.size()) ? elems[j]->tick : durTicks;
+        qint16 dur = nextTick - elems[i]->tick;
+        // v0xA6 grace time-borrowing: grace notes shorten next note's gap; see ENCORE_FORMAT.md §v0xA6 grace note time-borrowing.
+        const EncNote* enCur = dynamic_cast<const EncNote*>(elems[i]);
+        if (hasGraceTimeBorrowing && enCur && dur > 0) {
+            const qint16 faceTicks = faceValue2ticks(enCur->faceValue);
+            if (faceTicks > dur && faceTicks <= durTicks) {
+                qint16 totalGraceFace = 0;
+                for (size_t k = 0; k < i; ++k) {
+                    const EncNote* en = dynamic_cast<const EncNote*>(elems[k]);
+                    if (en && en->graceType() != EncGraceType::NORMAL) {
+                        totalGraceFace += faceValue2ticks(en->faceValue);
+                    }
+                }
+                if (totalGraceFace == faceTicks - dur) {
+                    dur = faceTicks;
+                } else if (dur > faceTicks
+                           && totalGraceFace > 0
+                           && (dur - faceTicks) <= totalGraceFace) {
+                    dur = faceTicks;
+                }
+            }
+        }
+        if (dur > 0) {
+            elems[i]->realDuration = dur;
+        }
+    }
+}
+
+// Phase 2: mark inner-grace notes (en->isInnerGrace). Only runs when hasGraceTimeBorrowing.
+static void markInnerGraces(std::vector<EncMeasureElem*>& elems)
+{
+    // v0xA6 inner-grace marking: NORMAL notes with grace1&0x30==0x10 and fv > leading grace fv
+    // are inner graces; isInnerGrace routes them through the grace path in the noteloop.
+    quint8 leadingFv = 0;
+    for (EncMeasureElem* e : elems) {
+        EncNote* en = dynamic_cast<EncNote*>(e);
+        if (!en || en->size != 10) {
+            leadingFv = 0;
+            continue;
+        }
+        if (en->graceType() != EncGraceType::NORMAL) {
+            if (leadingFv == 0) {
+                leadingFv = en->faceValue & 0x0F;
+            }
+            continue;
+        }
+        if ((en->grace1 & 0x30) == 0x10 && leadingFv != 0) {
+            const quint8 fv = en->faceValue & 0x0F;
+            if (fv > leadingFv) {
+                en->isInnerGrace = true;
+                leadingFv = std::max(leadingFv, fv);  // keep running max
+                continue;
+            }
+        }
+        leadingFv = 0;  // regular note ends the grace group
+    }
+}
+
+// Phase 3: detect and fix dotted-eighth placement (v0xC2 quirk). Only runs when fixDottedEighth.
+static void fixDottedEighthPattern(
+    std::vector<EncMeasureElem*>& elems,
+    qint16 durTicks)
+{
+    // v0xC2: Encore places the sixteenth of a dotted-eighth+sixteenth group at tick+120
+    // (the undotted gap), not tick+180, so realDuration=120 is indistinguishable from a
+    // plain eighth. dotControl bit 0 is also 0, so the bit-0 fallback in computeDotCount
+    // does not fire. Fix: detect fv=4/rdur=120 followed by fv=5/rdur=60 exactly 120 ticks
+    // later in the same voice, then set dotControl bit 0 to force the dot.
+    (void)durTicks;
+    for (size_t i = 0; i < elems.size(); ++i) {
+        EncNote* en = dynamic_cast<EncNote*>(elems[i]);
+        if (!en || (en->faceValue & 0x0F) != 4 || en->realDuration != 120) {
+            continue;
+        }
+        const qint16 targetTick = static_cast<qint16>(elems[i]->tick + 120);
+        for (size_t j = i + 1; j < elems.size(); ++j) {
+            if (elems[j]->tick > targetTick) {
+                break;
+            }
+            if (elems[j]->tick == targetTick) {
+                const EncNote* enNext = dynamic_cast<const EncNote*>(elems[j]);
+                if (enNext
+                    && (enNext->faceValue & 0x0F) == 5
+                    && enNext->realDuration == 60) {
+                    en->dotControl |= 1;
+                    break;
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // EncMeasure
 // ---------------------------------------------------------------------------
 
@@ -86,51 +239,7 @@ bool EncMeasure::read(QDataStream& ds, const quint32 vs, const EncFormatReader& 
         const quint8 tp = typeVoice >> 4;
         const quint8 vo = typeVoice & 0x0F;
 
-        std::unique_ptr<EncMeasureElem> elem;
-        switch (static_cast<EncElemType>(tp)) {
-        case EncElemType::NOTE:
-            elem = std::make_unique<EncNote>(tick, tp, vo);
-            break;
-        case EncElemType::REST:
-            elem = std::make_unique<EncRest>(tick, tp, vo);
-            break;
-        case EncElemType::CHORD:
-            elem = std::make_unique<EncChordSym>(tick, tp, vo);
-            break;
-        case EncElemType::ORNAMENT:
-            elem = std::make_unique<EncOrnament>(tick, tp, vo);
-            break;
-        case EncElemType::LYRIC:
-        {
-            auto lyr = std::make_unique<EncLyric>(tick, tp, vo);
-            lyr->textGapAfterKie = fmt.lyricTextGapAfterKie();
-            elem = std::move(lyr);
-        }
-        break;
-        case EncElemType::KEYCHANGE:
-            elem = std::make_unique<EncKeyChange>(tick, tp, vo);
-            break;
-        case EncElemType::TIE:
-            elem = std::make_unique<EncTie>(tick, tp, vo);
-            break;
-        case EncElemType::UNKNOWN1:
-            LOGD() << QString("Encore: unknown element type UNKNOWN1 (0xA) at tick %1")
-                          .arg(static_cast<int>(tick));
-            elem = std::make_unique<EncGenericElem>(tick, tp, vo);
-            break;
-        case EncElemType::UNKNOWN2:
-            // MIDI CC event (sustain, volume, modulation) - expected in live-recorded files.
-            LOGD() << QString("Encore: MIDI CC event (UNKNOWN2/MIDI-CC) at tick %1")
-                          .arg(static_cast<int>(tick));
-            elem = std::make_unique<EncGenericElem>(tick, tp, vo);
-            break;
-        case EncElemType::NONE:
-        case EncElemType::CLEF:
-        case EncElemType::BEAM:
-        default:
-            elem = std::make_unique<EncGenericElem>(tick, tp, vo);
-            break;
-        }
+        auto elem = createMeasureElement(tick, tp, vo, fmt);
 
         elem->read(ds);
         EncMeasureElem* elemRaw = elem.get();
@@ -188,101 +297,12 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, bool fixDott
         std::sort(elems.begin(), elems.end(), [](const EncMeasureElem* a, const EncMeasureElem* b) {
             return a->tick < b->tick;
         });
-        for (size_t i = 0; i < elems.size(); ++i) {
-            size_t j = i + 1;
-            // Skip same-tick chord members, then near-simultaneous cluster notes.
-            while (j < elems.size() && elems[j]->tick == elems[i]->tick) {
-                ++j;
-            }
-            while (j < elems.size()
-                   && elems[j]->tick - elems[i]->tick < CHORD_CLUSTER_THRESHOLD) {
-                ++j;
-            }
-            qint16 nextTick = (j < elems.size()) ? elems[j]->tick : durTicks;
-            qint16 dur = nextTick - elems[i]->tick;
-            // v0xA6 grace time-borrowing: grace notes shorten next note's gap; see ENCORE_FORMAT.md §v0xA6 grace note time-borrowing.
-            const EncNote* enCur = dynamic_cast<const EncNote*>(elems[i]);
-            if (hasGraceTimeBorrowing && enCur && dur > 0) {
-                const qint16 faceTicks = faceValue2ticks(enCur->faceValue);
-                if (faceTicks > dur && faceTicks <= durTicks) {
-                    qint16 totalGraceFace = 0;
-                    for (size_t k = 0; k < i; ++k) {
-                        const EncNote* en = dynamic_cast<const EncNote*>(elems[k]);
-                        if (en && en->graceType() != EncGraceType::NORMAL) {
-                            totalGraceFace += faceValue2ticks(en->faceValue);
-                        }
-                    }
-                    if (totalGraceFace == faceTicks - dur) {
-                        dur = faceTicks;
-                    } else if (dur > faceTicks
-                               && totalGraceFace > 0
-                               && (dur - faceTicks) <= totalGraceFace) {
-                        dur = faceTicks;
-                    }
-                }
-            }
-            if (dur > 0) {
-                elems[i]->realDuration = dur;
-            }
-        }
-
-        // v0xA6 inner-grace marking: NORMAL notes with grace1&0x30==0x10 and fv > leading grace fv
-        // are inner graces; isInnerGrace routes them through the grace path in the noteloop.
+        computeElementDurations(elems, durTicks, hasGraceTimeBorrowing);
         if (hasGraceTimeBorrowing) {
-            quint8 leadingFv = 0;
-            for (EncMeasureElem* e : elems) {
-                EncNote* en = dynamic_cast<EncNote*>(e);
-                if (!en || en->size != 10) {
-                    leadingFv = 0;
-                    continue;
-                }
-                if (en->graceType() != EncGraceType::NORMAL) {
-                    if (leadingFv == 0) {
-                        leadingFv = en->faceValue & 0x0F;
-                    }
-                    continue;
-                }
-                if ((en->grace1 & 0x30) == 0x10 && leadingFv != 0) {
-                    const quint8 fv = en->faceValue & 0x0F;
-                    if (fv > leadingFv) {
-                        en->isInnerGrace = true;
-                        leadingFv = std::max(leadingFv, fv);  // keep running max
-                        continue;
-                    }
-                }
-                leadingFv = 0;  // regular note ends the grace group
-            }
+            markInnerGraces(elems);
         }
-    }
-
-    // v0xC2: Encore places the sixteenth of a dotted-eighth+sixteenth group at tick+120
-    // (the undotted gap), not tick+180, so realDuration=120 is indistinguishable from a
-    // plain eighth. dotControl bit 0 is also 0, so the bit-0 fallback in computeDotCount
-    // does not fire. Fix: detect fv=4/rdur=120 followed by fv=5/rdur=60 exactly 120 ticks
-    // later in the same voice, then set dotControl bit 0 to force the dot.
-    if (fixDottedEighth) {
-        for (auto& [key, elems] : groups) {
-            for (size_t i = 0; i < elems.size(); ++i) {
-                EncNote* en = dynamic_cast<EncNote*>(elems[i]);
-                if (!en || (en->faceValue & 0x0F) != 4 || en->realDuration != 120) {
-                    continue;
-                }
-                const qint16 targetTick = static_cast<qint16>(elems[i]->tick + 120);
-                for (size_t j = i + 1; j < elems.size(); ++j) {
-                    if (elems[j]->tick > targetTick) {
-                        break;
-                    }
-                    if (elems[j]->tick == targetTick) {
-                        const EncNote* enNext = dynamic_cast<const EncNote*>(elems[j]);
-                        if (enNext
-                            && (enNext->faceValue & 0x0F) == 5
-                            && enNext->realDuration == 60) {
-                            en->dotControl |= 1;
-                            break;
-                        }
-                    }
-                }
-            }
+        if (fixDottedEighth) {
+            fixDottedEighthPattern(elems, durTicks);
         }
     }
 }

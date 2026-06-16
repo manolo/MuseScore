@@ -31,6 +31,62 @@
 using namespace mu::engraving;
 
 namespace mu::iex::enc {
+// Returns adjusted endTick via xoffset2 snap; returns currentEndTick unchanged if no snap applies.
+// targetMeasTick is the MuseScore start tick of enc measure ph.endMeasIdx.
+static Fraction resolveHairpinEndByXoffset(
+    const PendingHairpin& ph,
+    const EncRoot& enc,
+    Fraction currentEndTick,
+    Fraction targetMeasTick)
+{
+    if (ph.endMeasIdx < 0
+        || ph.endMeasIdx >= static_cast<int>(enc.measures.size())) {
+        return currentEndTick;
+    }
+    const EncMeasure& endEncMeas = enc.measures[static_cast<size_t>(ph.endMeasIdx)];
+    if (!endEncMeas.beatTicks || !endEncMeas.timeSigDen) {
+        return currentEndTick;
+    }
+    const int wholeTicks = static_cast<int>(endEncMeas.beatTicks)
+                           * static_cast<int>(endEncMeas.timeSigDen);
+    const int xoff2 = ph.hairpinXoffset2;
+    int bestEncTick     = -1;
+    int bestXoff        = -1;
+    int anyPositiveXoff = -1;   // sentinel: any note/rest with xoff > 0 exists
+    for (const auto& elem : endEncMeas.elements) {
+        const EncMeasureElem* em = elem.get();
+        int xoff = 0;
+        if (em->type == static_cast<quint8>(EncElemType::NOTE)) {
+            xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
+        } else if (em->type == static_cast<quint8>(EncElemType::REST)) {
+            xoff = static_cast<int>(static_cast<const EncRest*>(em)->xoffset);
+        } else {
+            continue;
+        }
+        if (em->staffIdx != ph.staffIdx || em->voice != ph.encVoice) {
+            continue;
+        }
+        if (xoff <= 0) {
+            continue;
+        }
+        anyPositiveXoff = xoff;
+        if (xoff <= xoff2 && xoff > bestXoff) {
+            bestXoff    = xoff;
+            bestEncTick = static_cast<int>(em->tick);
+        }
+    }
+    if (bestEncTick >= 0) {
+        // Snap end to the note/rest whose xoffset best matches xoff2.
+        Fraction snapEnd = targetMeasTick + Fraction(bestEncTick, wholeTicks).reduced();
+        return std::min(currentEndTick, snapEnd);
+    } else if (anyPositiveXoff >= 0) {
+        // xoff2 precedes all notes with positive xoffsets: end at the barline.
+        return std::min(currentEndTick, targetMeasTick);
+    }
+    // else: no notes with positive xoffsets (synthetic/empty data); keep maxEndTick.
+    return currentEndTick;
+}
+
 void resolveHairpins(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
@@ -71,49 +127,10 @@ void resolveHairpins(BuildCtx& ctx)
         if (!foundNextDynamic
             && ph.hairpinXoffset2 > 0
             && ph.endMeasIdx >= 0
-            && ph.endMeasIdx < static_cast<int>(enc.measures.size())) {
-            const EncMeasure& endEncMeas = enc.measures[ph.endMeasIdx];
-            if (endEncMeas.beatTicks && endEncMeas.timeSigDen) {
-                const int wholeTicks = static_cast<int>(endEncMeas.beatTicks)
-                                       * static_cast<int>(endEncMeas.timeSigDen);
-                const int xoff2 = ph.hairpinXoffset2;
-                int bestEncTick = -1;
-                int bestXoff = -1;
-                int anyPositiveXoff = -1;   // sentinel: any note/rest with xoff > 0 exists
-                for (const auto& elem : endEncMeas.elements) {
-                    const EncMeasureElem* em = elem.get();
-                    int xoff = 0;
-                    if (em->type == static_cast<quint8>(EncElemType::NOTE)) {
-                        xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
-                    } else if (em->type == static_cast<quint8>(EncElemType::REST)) {
-                        xoff = static_cast<int>(static_cast<const EncRest*>(em)->xoffset);
-                    } else {
-                        continue;
-                    }
-                    if (em->staffIdx != ph.staffIdx || em->voice != ph.encVoice) {
-                        continue;
-                    }
-                    if (xoff <= 0) {
-                        continue;
-                    }
-                    anyPositiveXoff = xoff;
-                    if (xoff <= xoff2 && xoff > bestXoff) {
-                        bestXoff = xoff;
-                        bestEncTick = static_cast<int>(em->tick);
-                    }
-                }
-                Fraction targetMeasTick = ctx.measuresByIdx[ph.endMeasIdx]->tick();
-                if (bestEncTick >= 0) {
-                    // Snap end to the note/rest whose xoffset best matches xoff2.
-                    Fraction snapEnd = targetMeasTick
-                                       + Fraction(bestEncTick, wholeTicks).reduced();
-                    endTick = std::min(endTick, snapEnd);
-                } else if (anyPositiveXoff >= 0) {
-                    // xoff2 precedes all notes with positive xoffsets: end at the barline.
-                    endTick = std::min(endTick, targetMeasTick);
-                }
-                // else: no notes with positive xoffsets (synthetic/empty data); keep maxEndTick.
-            }
+            && ph.endMeasIdx < static_cast<int>(enc.measures.size())
+            && ph.endMeasIdx < static_cast<int>(ctx.measuresByIdx.size())) {
+            Fraction targetMeasTick = ctx.measuresByIdx[static_cast<size_t>(ph.endMeasIdx)]->tick();
+            endTick = resolveHairpinEndByXoffset(ph, enc, endTick, targetMeasTick);
         }
 
         if (endTick <= ph.startTick) {
