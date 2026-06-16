@@ -44,7 +44,11 @@ target_sources(iex_encore PRIVATE
     internal/parser/reader-v0xc4.h
     internal/parser/reader-v0xc4.cpp
     internal/parser/elements.h
-    internal/importer/mapping.cpp
+    internal/importer/mapping-clefs.cpp
+    internal/importer/mapping-title.cpp
+    internal/importer/mapping-instruments.cpp
+    internal/importer/mapping-tempo.cpp
+    internal/importer/mapping-articulations.cpp
     internal/importer/mapping.h
     internal/parser/ticks.cpp
     internal/parser/ticks.h
