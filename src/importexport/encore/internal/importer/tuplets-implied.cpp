@@ -33,6 +33,241 @@ using namespace mu::engraving;
 
 namespace mu::iex::enc {
 
+// Explicit tuplet ratio from the tup byte (high nibble = actual, low nibble = normal).
+static void getExplicit(const std::vector<const EncMeasureElem*>& grp,
+                        int& outActual, int& outNormal)
+{
+    outActual = 0;
+    outNormal = 0;
+    if (grp.empty()) {
+        return;
+    }
+    const EncMeasureElem* e = grp[0];
+    EncElemType et = static_cast<EncElemType>(e->type);
+    quint8 tup = 0;
+    if (et == EncElemType::NOTE) {
+        tup = static_cast<const EncNote*>(e)->tuplet;
+    } else if (et == EncElemType::REST) {
+        tup = static_cast<const EncRest*>(e)->tuplet;
+    }
+    int a = tup >> 4, n = tup & 0x0F;
+    if (isStandardExplicitTuplet(a, n)) {
+        outActual = a;
+        outNormal = n;
+    }
+}
+
+// Implied tuplet ratio from realDuration vs faceValue (v0xC2 files).
+static void getImplied(const std::vector<const EncMeasureElem*>& grp,
+                       int& outActual, int& outNormal)
+{
+    outActual = 0;
+    outNormal = 0;
+    if (grp.empty()) {
+        return;
+    }
+    const EncMeasureElem* e = grp[0];
+    EncElemType et = static_cast<EncElemType>(e->type);
+    quint8 fv = 0;
+    qint16 rdur = 0;
+    if (et == EncElemType::NOTE) {
+        fv   = static_cast<const EncNote*>(e)->faceValue & 0x0F;
+        rdur = e->realDuration;
+    } else if (et == EncElemType::REST) {
+        fv   = static_cast<const EncRest*>(e)->faceValue & 0x0F;
+        rdur = e->realDuration;
+    }
+    if (fv >= 4) {
+        outActual = detectImpliedTuplet(rdur, fv, outNormal);
+    }
+}
+
+// Face value as Fraction for the first element of a chord group.
+static Fraction getFaceValue(const std::vector<const EncMeasureElem*>& grp)
+{
+    if (grp.empty()) {
+        return Fraction(0, 1);
+    }
+    const EncMeasureElem* e = grp[0];
+    EncElemType et = static_cast<EncElemType>(e->type);
+    quint8 fv = 0;
+    if (et == EncElemType::NOTE) {
+        fv = static_cast<const EncNote*>(e)->faceValue & 0x0F;
+    } else if (et == EncElemType::REST) {
+        fv = static_cast<const EncRest*>(e)->faceValue & 0x0F;
+    }
+    return faceValue2DurationType(fv) == DurationType::V_INVALID ? Fraction(0, 1)
+           : TDuration(faceValue2DurationType(fv)).fraction();
+}
+
+// Actual Encore-tick duration of chord at index k.
+// = fv_ticks x (nn/an) for explicit tup, = fv_ticks for plain note.
+static int actualDurEnc(int k,
+                        const std::vector<std::vector<const EncMeasureElem*> >& chords,
+                        int n)
+{
+    if (k < 0 || k >= n || chords[k].empty()) {
+        return 0;
+    }
+    const EncMeasureElem* ch = chords[k][0];
+    EncElemType et = static_cast<EncElemType>(ch->type);
+    quint8 fv = 0;
+    quint8 tupByte = 0;
+    if (et == EncElemType::NOTE) {
+        fv      = static_cast<const EncNote*>(ch)->faceValue & 0x0F;
+        tupByte = static_cast<const EncNote*>(ch)->tuplet;
+    } else if (et == EncElemType::REST) {
+        fv      = static_cast<const EncRest*>(ch)->faceValue & 0x0F;
+        tupByte = static_cast<const EncRest*>(ch)->tuplet;
+    }
+    const int fvt = faceValue2ticks(fv);
+    const int an2 = tupByte >> 4, nn2 = tupByte & 0x0F;
+    if (an2 > 0 && nn2 > 0) {
+        return (fvt * nn2 + an2 / 2) / an2;  // tuplet-scaled, rounded
+    }
+    return fvt;
+}
+
+// Segment-override pre-pass: when N notes share a tup byte but N is not a multiple of actualN,
+// reinterpret as [N:m] where m = round(available / fv_ticks).
+// available = durTicks - leading_dur - trailing_dur.
+static void processSegmentOverrides(
+    const std::vector<std::vector<const EncMeasureElem*> >& chords,
+    int n,
+    const EncMeasure& encMeas,
+    std::map<const EncMeasureElem*, std::pair<int, int> >* overrideRatios,
+    std::set<const EncMeasureElem*>& result)
+{
+    int j = 0;
+    while (j < n) {
+        int a0 = 0, n0 = 0;
+        getExplicit(chords[j], a0, n0);
+        if (a0 <= 0) {
+            ++j;
+            continue;
+        }
+
+        // Find end of same-tup run.
+        int segStart = j;
+        while (j < n) {
+            int aj = 0, nj = 0;
+            getExplicit(chords[j], aj, nj);
+            if (aj != a0 || nj != n0) {
+                break;
+            }
+            ++j;
+        }
+        int N = j - segStart;
+
+        // Override only when N exceeds one group and is not a clean multiple.
+        if (N <= a0 || (N % a0) == 0) {
+            continue;
+        }
+
+        // Require uniform face value and NOTE type throughout the segment.
+        const Fraction fv0 = getFaceValue(chords[segStart]);
+        if (fv0 <= Fraction(0, 1)) {
+            continue;
+        }
+        bool allOk = !chords[segStart].empty()
+                     && (static_cast<EncElemType>(chords[segStart][0]->type) == EncElemType::NOTE);
+        for (int k = segStart + 1; k < j && allOk; ++k) {
+            allOk = !chords[k].empty()
+                    && (static_cast<EncElemType>(chords[k][0]->type) == EncElemType::NOTE)
+                    && (getFaceValue(chords[k]) == fv0);
+        }
+        if (!allOk) {
+            continue;
+        }
+
+        // Leading/trailing durations to compute available space for the segment.
+        int leadingDur = 0;
+        for (int k = 0; k < segStart; ++k) {
+            leadingDur += actualDurEnc(k, chords, n);
+        }
+        int trailingDur = 0;
+        for (int k = j; k < n; ++k) {
+            trailingDur += actualDurEnc(k, chords, n);
+        }
+
+        const int available = static_cast<int>(encMeas.durTicks) - leadingDur - trailingDur;
+        if (available <= 0) {
+            continue;
+        }
+
+        // fv_enc = fv0 x durTicks (fv0 is whole-note-relative; durTicks spans one measure).
+        const int fvEnc = static_cast<int>(
+            static_cast<long long>(fv0.numerator()) * encMeas.durTicks / fv0.denominator());
+        if (fvEnc <= 0) {
+            continue;
+        }
+
+        // m = round(available / fvEnc)
+        const int m = (available + fvEnc / 2) / fvEnc;
+        if (m <= 0) {
+            continue;
+        }
+
+        // Tolerance: error must be < 10% of available.
+        if (std::abs(m * fvEnc - available) * 10 > available) {
+            continue;
+        }
+
+        const Fraction tupTicks = fv0 * m;
+        if (!fitsTDuration(tupTicks) || !isStandardExplicitTuplet(N, m)) {
+            continue;
+        }
+
+        // Skip override when the non-override interpretation (complete groups + orphan plain notes) fits the measure.
+        // Example: 4 notes tup=3:2 + 1 plain Q: non-override total=960 <= 960 -> leave alone.
+        {
+            const int completeTicks = (N / a0) * (fvEnc * n0);
+            const int orphanTicks   = (N % a0) * fvEnc;
+            const int noOverrideTotal = leadingDur + completeTicks + orphanTicks + trailingDur;
+            if (noOverrideTotal <= static_cast<int>(encMeas.durTicks)) {
+                continue;  // non-override interpretation fits: skip override
+            }
+        }
+
+        // Mark segment and record override ratio.
+        for (int k = segStart; k < j; ++k) {
+            for (const EncMeasureElem* e2 : chords[k]) {
+                result.insert(e2);
+                (*overrideRatios)[e2] = { N, m };
+            }
+        }
+    }
+}
+
+// Implied (v0xC2): require exactly actualN consecutive matching groups.
+static void processImpliedTupletGroup(
+    int& i, int actualN, int normalN,
+    const std::vector<std::vector<const EncMeasureElem*> >& chords,
+    int n,
+    std::set<const EncMeasureElem*>& result)
+{
+    if (i + actualN > n) {
+        ++i;
+        return;
+    }
+    bool allMatch = true;
+    for (int j = 1; j < actualN && allMatch; ++j) {
+        int a2 = 0, n2 = 0;
+        getImplied(chords[i + j], a2, n2);
+        allMatch = (a2 == actualN && n2 == normalN);
+    }
+    if (allMatch) {
+        for (int j = 0; j < actualN; ++j) {
+            for (const EncMeasureElem* e : chords[i + j]) {
+                result.insert(e);
+            }
+        }
+        i += actualN;
+    } else {
+        ++i;
+    }
+}
+
 std::set<const EncMeasureElem*> computeImpliedTupletMembers(
     const MeasureElemRefVec& sortedElems,
     const EncMeasure& encMeas,
@@ -67,201 +302,11 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
         }
     }
 
-    // Explicit tuplet ratio from the tup byte (high nibble = actual, low nibble = normal).
-    auto getExplicit = [](const std::vector<const EncMeasureElem*>& grp,
-                          int& outActual, int& outNormal) {
-        outActual = 0;
-        outNormal = 0;
-        if (grp.empty()) {
-            return;
-        }
-        const EncMeasureElem* e = grp[0];
-        EncElemType et = static_cast<EncElemType>(e->type);
-        quint8 tup = 0;
-        if (et == EncElemType::NOTE) {
-            tup = static_cast<const EncNote*>(e)->tuplet;
-        } else if (et == EncElemType::REST) {
-            tup = static_cast<const EncRest*>(e)->tuplet;
-        }
-        int a = tup >> 4, n = tup & 0x0F;
-        if (isStandardExplicitTuplet(a, n)) {
-            outActual = a;
-            outNormal = n;
-        }
-    };
-
-    // Implied tuplet ratio from realDuration vs faceValue (v0xC2 files).
-    auto getImplied = [](const std::vector<const EncMeasureElem*>& grp,
-                         int& outActual, int& outNormal) {
-        outActual = 0;
-        outNormal = 0;
-        if (grp.empty()) {
-            return;
-        }
-        const EncMeasureElem* e = grp[0];
-        EncElemType et = static_cast<EncElemType>(e->type);
-        quint8 fv = 0;
-        qint16 rdur = 0;
-        if (et == EncElemType::NOTE) {
-            fv   = static_cast<const EncNote*>(e)->faceValue & 0x0F;
-            rdur = e->realDuration;
-        } else if (et == EncElemType::REST) {
-            fv   = static_cast<const EncRest*>(e)->faceValue & 0x0F;
-            rdur = e->realDuration;
-        }
-        if (fv >= 4) {
-            outActual = detectImpliedTuplet(rdur, fv, outNormal);
-        }
-    };
-
-    // Face value as Fraction for the first element of a chord group.
-    auto getFaceValue = [](const std::vector<const EncMeasureElem*>& grp) -> Fraction {
-        if (grp.empty()) {
-            return Fraction(0, 1);
-        }
-        const EncMeasureElem* e = grp[0];
-        EncElemType et = static_cast<EncElemType>(e->type);
-        quint8 fv = 0;
-        if (et == EncElemType::NOTE) {
-            fv = static_cast<const EncNote*>(e)->faceValue & 0x0F;
-        } else if (et == EncElemType::REST) {
-            fv = static_cast<const EncRest*>(e)->faceValue & 0x0F;
-        }
-        return faceValue2DurationType(fv) == DurationType::V_INVALID ? Fraction(0, 1)
-               : TDuration(faceValue2DurationType(fv)).fraction();
-    };
-
     for (auto& [key, chords] : voiceChords) {
         int n = static_cast<int>(chords.size());
 
-        // Segment-override pre-pass: when N notes share a tup byte but N is not a multiple of actualN,
-        // reinterpret as [N:m] where m = round(available / fv_ticks).
-        // available = durTicks - leading_dur - trailing_dur.
         if (overrideRatios && n >= 2 && encMeas.durTicks > 0) {
-            // Helper: actual Encore-tick duration of chord at index k.
-            // = fv_ticks × (nn/an) for explicit tup, = fv_ticks for plain note.
-            auto actualDurEnc = [&](int k) -> int {
-                if (k < 0 || k >= n || chords[k].empty()) {
-                    return 0;
-                }
-                const EncMeasureElem* ch = chords[k][0];
-                EncElemType et = static_cast<EncElemType>(ch->type);
-                quint8 fv = 0;
-                quint8 tupByte = 0;
-                if (et == EncElemType::NOTE) {
-                    fv      = static_cast<const EncNote*>(ch)->faceValue & 0x0F;
-                    tupByte = static_cast<const EncNote*>(ch)->tuplet;
-                } else if (et == EncElemType::REST) {
-                    fv      = static_cast<const EncRest*>(ch)->faceValue & 0x0F;
-                    tupByte = static_cast<const EncRest*>(ch)->tuplet;
-                }
-                const int fvt = faceValue2ticks(fv);
-                const int an2 = tupByte >> 4, nn2 = tupByte & 0x0F;
-                if (an2 > 0 && nn2 > 0) {
-                    return (fvt * nn2 + an2 / 2) / an2;  // tuplet-scaled, rounded
-                }
-                return fvt;
-            };
-
-            int j = 0;
-            while (j < n) {
-                int a0 = 0, n0 = 0;
-                getExplicit(chords[j], a0, n0);
-                if (a0 <= 0) {
-                    ++j;
-                    continue;
-                }
-
-                // Find end of same-tup run.
-                int segStart = j;
-                while (j < n) {
-                    int aj = 0, nj = 0;
-                    getExplicit(chords[j], aj, nj);
-                    if (aj != a0 || nj != n0) {
-                        break;
-                    }
-                    ++j;
-                }
-                int N = j - segStart;
-
-                // Override only when N exceeds one group and is not a clean multiple.
-                if (N <= a0 || (N % a0) == 0) {
-                    continue;
-                }
-
-                // Require uniform face value and NOTE type throughout the segment.
-                const Fraction fv0 = getFaceValue(chords[segStart]);
-                if (fv0 <= Fraction(0, 1)) {
-                    continue;
-                }
-                bool allOk = !chords[segStart].empty()
-                             && (static_cast<EncElemType>(chords[segStart][0]->type) == EncElemType::NOTE);
-                for (int k = segStart + 1; k < j && allOk; ++k) {
-                    allOk = !chords[k].empty()
-                            && (static_cast<EncElemType>(chords[k][0]->type) == EncElemType::NOTE)
-                            && (getFaceValue(chords[k]) == fv0);
-                }
-                if (!allOk) {
-                    continue;
-                }
-
-                // Leading/trailing durations to compute available space for the segment.
-                int leadingDur = 0;
-                for (int k = 0; k < segStart; ++k) {
-                    leadingDur += actualDurEnc(k);
-                }
-                int trailingDur = 0;
-                for (int k = j; k < n; ++k) {
-                    trailingDur += actualDurEnc(k);
-                }
-
-                const int available = static_cast<int>(encMeas.durTicks) - leadingDur - trailingDur;
-                if (available <= 0) {
-                    continue;
-                }
-
-                // fv_enc = fv0 × durTicks (fv0 is whole-note-relative; durTicks spans one measure).
-                const int fvEnc = static_cast<int>(
-                    static_cast<long long>(fv0.numerator()) * encMeas.durTicks / fv0.denominator());
-                if (fvEnc <= 0) {
-                    continue;
-                }
-
-                // m = round(available / fvEnc)
-                const int m = (available + fvEnc / 2) / fvEnc;
-                if (m <= 0) {
-                    continue;
-                }
-
-                // Tolerance: error must be < 10% of available.
-                if (std::abs(m * fvEnc - available) * 10 > available) {
-                    continue;
-                }
-
-                const Fraction tupTicks = fv0 * m;
-                if (!fitsTDuration(tupTicks) || !isStandardExplicitTuplet(N, m)) {
-                    continue;
-                }
-
-                // Skip override when the non-override interpretation (complete groups + orphan plain notes) fits the measure.
-                // Example: 4 notes tup=3:2 + 1 plain Q: non-override total=960 ≤ 960 → leave alone.
-                {
-                    const int completeTicks = (N / a0) * (fvEnc * n0);
-                    const int orphanTicks   = (N % a0) * fvEnc;
-                    const int noOverrideTotal = leadingDur + completeTicks + orphanTicks + trailingDur;
-                    if (noOverrideTotal <= static_cast<int>(encMeas.durTicks)) {
-                        continue;  // non-override interpretation fits: skip override
-                    }
-                }
-
-                // Mark segment and record override ratio.
-                for (int k = segStart; k < j; ++k) {
-                    for (const EncMeasureElem* e2 : chords[k]) {
-                        result.insert(e2);
-                        (*overrideRatios)[e2] = { N, m };
-                    }
-                }
-            }
+            processSegmentOverrides(chords, n, encMeas, overrideRatios, result);
         }
 
         int i = 0;
@@ -359,7 +404,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     }
 
                     // Nested-tuplet: group closed via no-downdate reduction, and the next (actualN-1)
-                    // notes also share innerBaseLen → record NestedTupletInfo for the noteloop.
+                    // notes also share innerBaseLen -> record NestedTupletInfo for the noteloop.
                     if (nestedInfos && innerGroupStartIdx >= 0
                         && innerBaseLen > Fraction(0, 1)
                         && innerBaseLen < originalBaseLen) {
@@ -464,27 +509,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     }
                 }
             } else {
-                // Implied (v0xC2): require exactly actualN consecutive matching groups.
-                if (i + actualN > n) {
-                    ++i;
-                    continue;
-                }
-                bool allMatch = true;
-                for (int j = 1; j < actualN && allMatch; ++j) {
-                    int a2 = 0, n2 = 0;
-                    getImplied(chords[i + j], a2, n2);
-                    allMatch = (a2 == actualN && n2 == normalN);
-                }
-                if (allMatch) {
-                    for (int j = 0; j < actualN; ++j) {
-                        for (const EncMeasureElem* e : chords[i + j]) {
-                            result.insert(e);
-                        }
-                    }
-                    i += actualN;
-                } else {
-                    ++i;
-                }
+                processImpliedTupletGroup(i, actualN, normalN, chords, n, result);
             }
         }
     }
