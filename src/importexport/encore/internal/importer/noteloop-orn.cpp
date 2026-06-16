@@ -563,6 +563,11 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         break;
     }
     default:
+        LOGW() << QString("Encore: unknown ornament type 0x%1 at measure %2 staff %3 tick %4")
+                      .arg(eo->tipo, 2, 16, QChar('0'))
+                      .arg(measIdx)
+                      .arg(staffIdx)
+                      .arg(static_cast<int>(e->tick));
         break;
     }
 }

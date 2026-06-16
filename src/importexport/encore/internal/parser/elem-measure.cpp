@@ -24,6 +24,7 @@
 
 #include "reader.h"
 #include "ticks.h"
+#include "log.h"
 
 namespace mu::iex::encore {
 // ---------------------------------------------------------------------------
@@ -112,11 +113,20 @@ bool EncMeasure::read(QDataStream& ds, const quint32 vs, const EncFormatReader& 
         case EncElemType::TIE:
             elem = std::make_unique<EncTie>(tick, tp, vo);
             break;
+        case EncElemType::UNKNOWN1:
+            LOGD() << QString("Encore: unknown element type UNKNOWN1 (0xA) at tick %1")
+                          .arg(static_cast<int>(tick));
+            elem = std::make_unique<EncGenericElem>(tick, tp, vo);
+            break;
+        case EncElemType::UNKNOWN2:
+            // MIDI CC event (sustain, volume, modulation) - expected in live-recorded files.
+            LOGD() << QString("Encore: MIDI CC event (UNKNOWN2/MIDI-CC) at tick %1")
+                          .arg(static_cast<int>(tick));
+            elem = std::make_unique<EncGenericElem>(tick, tp, vo);
+            break;
         case EncElemType::NONE:
         case EncElemType::CLEF:
         case EncElemType::BEAM:
-        case EncElemType::UNKNOWN1:
-        case EncElemType::UNKNOWN2:
         default:
             elem = std::make_unique<EncGenericElem>(tick, tp, vo);
             break;
