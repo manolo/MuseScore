@@ -99,6 +99,13 @@ struct NoteElemCtx {
 };
 
 void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec);
+// Returns true if note was a grace note (caller must return). (noteloop-note-grace.cpp)
+bool tryHandleGraceNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec,
+                        const EncNote* en);
+// Apply articulations, ornaments, tremolos, string numbers to a note/chord. (noteloop-note-artic.cpp)
+void applyNoteArticulations(mu::engraving::Note* note, mu::engraving::Chord* chord,
+                             const EncNote* en, mu::engraving::track_idx_t track,
+                             const NoteLoopMeasCtx& mc);
 void handleRest(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec);
 void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec);
 void handleChordSym(BuildCtx& ctx, const NoteLoopMeasCtx& mc, const NoteElemCtx& ec);

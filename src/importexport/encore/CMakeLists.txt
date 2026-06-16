@@ -58,6 +58,8 @@ target_sources(iex_encore PRIVATE
     internal/importer/builders.cpp
     internal/importer/noteloop-internal.h
     internal/importer/noteloop-note.cpp
+    internal/importer/noteloop-note-grace.cpp
+    internal/importer/noteloop-note-artic.cpp
     internal/importer/noteloop-rest.cpp
     internal/importer/noteloop-orn.cpp
     internal/importer/noteloop-chords.cpp
