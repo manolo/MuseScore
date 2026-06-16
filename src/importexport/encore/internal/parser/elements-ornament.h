@@ -20,14 +20,29 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef MU_IMPORTEXPORT_ENC_PARSER_ELEMENTS_H
-#define MU_IMPORTEXPORT_ENC_PARSER_ELEMENTS_H
+#pragma once
 
-#include "elements-enums.h"
 #include "elements-note.h"
-#include "elements-ornament.h"
-#include "elements-text.h"
-#include "elements-measure.h"
-#include "elements-file.h"
 
-#endif // MU_IMPORTEXPORT_ENC_PARSER_ELEMENTS_H
+namespace mu::iex::encore {
+
+struct EncOrnament : EncMeasureElem {
+    // Field names follow the Encore binary format notation used throughout the spec
+    quint8 tipo      { 0 };
+    qint16 yoffset   { 0 };  // signed 16-bit Cartesian y (positive = upward in Encore)
+    quint8 alMezuro  { 0 };
+    quint8 xoffset2  { 0 };
+    quint8 speguleco { 0 };
+    quint8 noto      { 0 };
+    quint8 tempo     { 0 };
+    quint8 tind      { 0 };
+
+    using EncMeasureElem::EncMeasureElem;
+
+    EncOrnamentType ornType() const { return static_cast<EncOrnamentType>(tipo); }
+    void setOrnType(EncOrnamentType t) { tipo = static_cast<quint8>(t); }
+
+    bool read(QDataStream& ds) override;
+};
+
+} // namespace mu::iex::encore
