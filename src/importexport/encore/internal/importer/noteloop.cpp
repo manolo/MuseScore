@@ -159,18 +159,6 @@ void NoteLoopMeasCtx::closeTupletWithFill(BuildCtx& ctx, TupletTracker& tt,
     tt.closeTuplet();
 }
 
-// Render tempo text. displayBpm is the beat-unit BPM that Encore shows the user.
-// beatTicks=360 means the beat unit is a dotted quarter; beatTicks=240 is a quarter.
-// For the MEAS header, bpm is QPM so displayBpm = bpm*2/3 when beatTicks=360.
-// For ORN TEMPO, eo->tempo is already the displayed beat-unit value.
-String tempoXmlText(int displayBpm, int beatTicks)
-{
-    if (beatTicks == 360) {
-        return String(u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = %1").arg(displayBpm);
-    }
-    return String(u"<sym>metNoteQuarterUp</sym> = %1").arg(displayBpm);
-}
-
 void buildNoteLoop(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
@@ -763,84 +751,6 @@ void buildNoteLoop(BuildCtx& ctx)
             ec.hadLastChordPos = hadLastChordPos;
             ec.savedLastChordPos = savedLastChordPos;
 
-            auto handleChordSym = [&]() {
-                const EncChordSym* ecs = static_cast<const EncChordSym*>(e);
-                const QString raw = ecs->chordName();
-                if (!raw.isEmpty()) {
-                    // CHD elements in live-recorded Encore files often carry a MIDI timing
-                    // offset from the note they annotate.  The key insight is that Encore
-                    // renders chord symbols at BEAT positions, not at individual note ticks.
-                    // Algorithm: floor the CHD tick to the start of the beat that contains it,
-                    // then attach the harmony to the FIRST ChordRest segment within that beat
-                    // that precedes the CHD.  This handles:
-                    //   - Small drift (e.g. tick=6 for a beat-1 chord, distance 6t from note=0)
-                    //   - Large drift (e.g. tick=87 for a beat-1 chord, distance 87t from note=0)
-                    //   - Near-miss to a subdivison note (e.g. tick=62 in a measure with notes
-                    //     at tick=0 AND tick=60; without the beat-floor the chord would snap to
-                    //     the second 16th note instead of beat 1).
-                    static constexpr int wt = 960;  // Encore whole note = 960 ticks always
-                    const int bt = static_cast<int>(encMeas.beatTicks ? encMeas.beatTicks : 240);
-                    const int chdEncTick = static_cast<int>(e->tick);
-                    const int beatStart  = (chdEncTick / bt) * bt;  // floor to beat boundary
-                    const Fraction beatStartFrac(beatStart, wt);
-                    const Fraction chdFrac(chdEncTick, wt);
-                    Segment* seg = nullptr;
-                    for (Segment* s = measure->first(SegmentType::ChordRest); s;
-                         s = s->next(SegmentType::ChordRest)) {
-                        const Fraction sRel = s->tick() - measTick;
-                        if (sRel < beatStartFrac) {
-                            continue;   // before the beat that contains this CHD
-                        }
-                        if (sRel > chdFrac) {
-                            break;      // past the CHD tick
-                        }
-                        if (!seg) {
-                            seg = s;    // take the FIRST segment in [beatStart, chdTick]
-                        }
-                    }
-                    if (!seg) {
-                        // Fallback: any segment at or before the CHD tick
-                        for (Segment* s = measure->first(SegmentType::ChordRest); s;
-                             s = s->next(SegmentType::ChordRest)) {
-                            if (s->tick() - measTick <= chdFrac) {
-                                seg = s;
-                            } else {
-                                break;
-                            }
-                        }
-                    }
-                    if (!seg) {
-                        seg = measure->getSegment(SegmentType::ChordRest, elemTick);
-                    }
-                    Harmony* h = Factory::createHarmony(score->dummy()->segment());
-                    h->setTrack(track);
-                    h->setHarmony(String(raw));
-                    seg->add(h);
-                }
-            };
-
-            auto handleLyric = [&]() {
-                const EncLyric* el = static_cast<const EncLyric*>(e);
-                const String text(el->text);
-                auto& queue = ctx.pendingLyrics[track];
-                if (text == u"-") {
-                    if (!queue.empty()) {
-                        queue.back().hyphenAfter = true;
-                    }
-                    ctx.nextLyricHyphenBefore[track] = true;
-                } else if (text.isEmpty()) {
-                    ctx.nextLyricHyphenBefore[track] = false;
-                } else {
-                    PendingLyric pl;
-                    pl.encTick = static_cast<int>(e->tick);
-                    pl.text = text;
-                    auto it = ctx.nextLyricHyphenBefore.find(track);
-                    pl.hyphenBefore = (it != ctx.nextLyricHyphenBefore.end()) && it->second;
-                    pl.hyphenAfter = false;
-                    ctx.nextLyricHyphenBefore[track] = false;
-                    queue.push_back(std::move(pl));
-                }
-            };
 
             auto handleKeyChange = [&]() {
                 const EncKeyChange* ekc = static_cast<const EncKeyChange*>(e);
@@ -875,9 +785,9 @@ void buildNoteLoop(BuildCtx& ctx)
                 break;
             case EncElemType::REST:      handleRest(ctx, mc, ec);
                 break;
-            case EncElemType::CHORD:     handleChordSym();
+            case EncElemType::CHORD:     handleChordSym(ctx, mc, ec);
                 break;
-            case EncElemType::LYRIC:     handleLyric();
+            case EncElemType::LYRIC:     enqueueLyric(ctx, static_cast<const EncLyric*>(e), track);
                 break;
             case EncElemType::ORNAMENT:  handleOrnament(ctx, mc, ec);
                 break;
@@ -892,272 +802,19 @@ void buildNoteLoop(BuildCtx& ctx)
             mc.closeTupletWithFill(ctx, tt, key);
         }
 
-        // Attach queued lyrics to the nearest chord segment (within half a beat). Encore PPQ from beatTicks; unmatched end-of-measure syllables are discarded.
-        // In compound meters (6/8, 9/8, 12/8) beatTicks = ticks per dotted-quarter beat = 1.5 quarter notes.
-        // The segEncTick formula uses ticks-per-quarter, so scale down by 2/3 for compound time.
-        // matchThreshold stays at beatTicks/2 (half a beat in ENC ticks) regardless of meter.
-        const bool isCompoundMeter = (encMeas.timeSigDen == 8 || encMeas.timeSigDen == 16)
-                                     && encMeas.timeSigNum >= 6
-                                     && (encMeas.timeSigNum % 3) == 0;
-        const int beatTicksVal = encMeas.beatTicks ? static_cast<int>(encMeas.beatTicks) : 240;
-        const int encTicksPerQuarter = isCompoundMeter ? beatTicksVal * 2 / 3 : beatTicksVal;
-        // Compound meters need a wider window: Encore places lyrics slightly before their note.
-        const int matchThreshold = isCompoundMeter ? beatTicksVal * 2 / 3 : beatTicksVal / 2;
-        for (auto& [lyTrack, entries] : ctx.pendingLyrics) {
-            if (entries.empty()) {
-                continue;
-            }
-            // Encore multi-verse: verse 1=voice 0, verse 2=voice 1. MuseScore anchors all verses to voice-0 chord via setVerse().
-            const int lyStaffIdx = static_cast<int>(lyTrack) / VOICES;
-            const int lyVerseNo = static_cast<int>(lyTrack) % VOICES;
-            const track_idx_t chordTrack = static_cast<track_idx_t>(lyStaffIdx) * VOICES;
+        attachPendingLyrics(ctx, measure, encMeas, measTick);
 
-            // Build (segEncTick, Chord*) table for this measure and verse track.
-            std::vector<std::pair<int, Chord*> > noteTickPairs;
-            for (Segment* s = measure->first(SegmentType::ChordRest);
-                 s; s = s->next(SegmentType::ChordRest)) {
-                EngravingItem* el = s->element(chordTrack);
-                if (!el || !el->isChord()) {
-                    continue;
-                }
-                const Fraction relTick = s->tick() - measure->tick();
-                const int segEncTick = (relTick.numerator() * encTicksPerQuarter * 4)
-                                       / std::max(1, relTick.denominator());
-                noteTickPairs.emplace_back(segEncTick, toChord(el));
-            }
+        adjustPickupMeasure(ctx, measure, measIdx);
 
-            // Lyrics-first assignment: for each lyric in tick order, claim the nearest
-            // available note within the threshold. This correctly handles cases where
-            // syllables are unevenly spaced relative to note positions — a note-first
-            // greedy pass would let a later syllable steal the note from an earlier one.
-            std::vector<bool> noteConsumed(noteTickPairs.size(), false);
-            for (const auto& pl : entries) {
-                int bestNoteIdx = -1;
-                int bestDelta = matchThreshold + 1;
-                for (size_t ni = 0; ni < noteTickPairs.size(); ++ni) {
-                    if (noteConsumed[ni]) {
-                        continue;
-                    }
-                    const int delta = std::abs(noteTickPairs[ni].first - pl.encTick);
-                    if (delta < bestDelta) {
-                        bestDelta = delta;
-                        bestNoteIdx = static_cast<int>(ni);
-                    }
-                }
-                if (bestNoteIdx < 0) {
-                    continue;
-                }
-                noteConsumed[bestNoteIdx] = true;
-                Chord* c = noteTickPairs[bestNoteIdx].second;
-                Lyrics* ly = Factory::createLyrics(c);
-                ly->setTrack(chordTrack);
-                ly->setVerse(lyVerseNo);
-                ly->setXmlText(pl.text);
-                LyricsSyllabic syll = LyricsSyllabic::SINGLE;
-                if (pl.hyphenBefore && pl.hyphenAfter) {
-                    syll = LyricsSyllabic::MIDDLE;
-                } else if (pl.hyphenBefore) {
-                    syll = LyricsSyllabic::END;
-                } else if (pl.hyphenAfter) {
-                    syll = LyricsSyllabic::BEGIN;
-                }
-                ly->setSyllabic(syll);
-                c->add(ly);
-            }
-            // Lyric ticks are measure-relative; unmatched leftovers cannot anchor in a later measure, so discard them.
-            entries.clear();
-        }
-        // ctx.nextLyricHyphenBefore survives bar lines so a trailing hyphen (e.g. "RO -") carries into the next measure's first syllable.
-
-        // Case B pickup: if measure 0 has same timesig as measure 1 but the note
-        // loop placed less content than the full measure, shorten it to the actual
-        // cumTick. Update all subsequent measures' tick positions accordingly.
-        // Guard: skip for Case A pickups (timesig != ticks means buildMeasures already
-        // applied the correct short duration; further shortening would double-reduce).
-        if (measIdx == 0 && measure->timesig() == measure->ticks()) {
-            Fraction maxCumTick { 0, 1 };
-            for (auto& [key, ct] : ctx.cumTick) {
-                if (ct > maxCumTick) {
-                    maxCumTick = ct;
-                }
-            }
-            if (maxCumTick > Fraction(0, 1) && maxCumTick < measure->ticks()) {
-                const Fraction delta = measure->ticks() - maxCumTick;
-                measure->setTicks(maxCumTick);
-                for (Measure* m = measure->nextMeasure(); m; m = m->nextMeasure()) {
-                    m->setTick(m->tick() - delta);
-                }
-                // Hairpin search boundaries store absolute ticks captured before this
-                // shift. Any maxEndTick that reaches past the shortened measure 0 must
-                // be adjusted by the same delta so resolution does not search too far
-                // and pick up a dynamic from the wrong measure.
-                const Fraction m0End = measure->tick() + maxCumTick;
-                for (PendingHairpin& ph : ctx.pendingHairpins) {
-                    if (ph.maxEndTick > m0End) {
-                        ph.maxEndTick -= delta;
-                    }
-                }
-            }
-        }
-
-        // Pre-fill trailing silence with invisible gap rests so checkMeasure
-        // does not add visible rests for space that was never encoded in the file.
-        // Only applies to voices that have some content (cumTick > 0); fully
-        // empty voices are left for checkMeasure to handle normally.
-        for (int si = 0; si < ctx.totalStaves; ++si) {
-            for (voice_idx_t v = 0; v < VOICES; ++v) {
-                const auto key = std::make_pair(si, static_cast<int>(v));
-                if (!ctx.cumTick.count(key)) {
-                    continue;
-                }
-                const Fraction voicePos = ctx.cumTick.at(key);
-                if (voicePos <= Fraction(0, 1)) {
-                    continue;
-                }
-                const Fraction remaining = measure->ticks() - voicePos;
-                if (remaining <= Fraction(0, 1)) {
-                    continue;
-                }
-                const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
-                const Fraction fillTick = measTick + voicePos;
-                Segment* seg = measure->getSegment(SegmentType::ChordRest, fillTick);
-                if (!seg->element(tr)) {
-                    Rest* r = Factory::createRest(seg, TDuration(DurationType::V_MEASURE));
-                    r->setTicks(remaining);
-                    r->setTrack(tr);
-                    r->setGap(true);
-                    seg->add(r);
-                }
-            }
-        }
+        fillTrailingGaps(ctx, measure, measTick);
 
         // Fill remaining gaps; faceValue-cumulative placement ensures they represent genuinely missing rests, not drift.
         for (int si = 0; si < ctx.totalStaves; ++si) {
             measure->checkMeasure(static_cast<staff_idx_t>(si));
         }
 
-        // Post-checkMeasure: fix over/undershoots ≤ 1/24 from non-standard gaps (cascade fills). Overshoot: remove smallest gap rests. Undershoot: add V_MEASURE gap rest for the deficit.
-        {
-            const Fraction mLen_fix = measure->ticks();
-            const Fraction maxDelta(1, 24);
-            for (int si = 0; si < ctx.totalStaves; ++si) {
-                for (voice_idx_t v = 0; v < VOICES; ++v) {
-                    track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
-                    Fraction voiceSum(0, 1);
-                    bool hasContent = false;
-                    std::vector<Rest*> gapRests;
-                    for (Segment* seg = measure->first(SegmentType::ChordRest);
-                         seg; seg = seg->next(SegmentType::ChordRest)) {
-                        EngravingItem* el = seg->element(tr);
-                        if (!el) {
-                            continue;
-                        }
-                        hasContent = true;
-                        ChordRest* cr = toChordRest(el);
-                        voiceSum += cr->actualTicks();
-                        if (el->isRest() && toRest(el)->isGap()) {
-                            gapRests.push_back(toRest(el));
-                        }
-                    }
-                    if (!hasContent) {
-                        continue;
-                    }
-
-                    // Overshoot: remove gap rests smallest-first
-                    if (voiceSum > mLen_fix && (voiceSum - mLen_fix) <= maxDelta) {
-                        std::stable_sort(gapRests.begin(), gapRests.end(),
-                                         [](Rest* a, Rest* b){
-                            return a->actualTicks() < b->actualTicks();
-                        });
-                        for (Rest* gr : gapRests) {
-                            if (voiceSum <= mLen_fix) {
-                                break;
-                            }
-                            Fraction at = gr->actualTicks();
-                            voiceSum -= at;
-                            Segment* gseg = gr->segment();
-                            gseg->remove(gr);
-                            delete gr;
-                        }
-                    }
-
-                    // Undershoot: add exact V_MEASURE gap rest for residual
-                    const Fraction deficit = mLen_fix - voiceSum;
-                    if (deficit > Fraction(0, 1) && deficit <= maxDelta) {
-                        const Fraction fillTick = measure->tick() + voiceSum;
-                        Segment* fillSeg = measure->getSegment(
-                            SegmentType::ChordRest, fillTick);
-                        if (!fillSeg->element(tr)) {
-                            Rest* r = Factory::createRest(
-                                fillSeg, TDuration(DurationType::V_MEASURE));
-                            r->setTicks(deficit);
-                            r->setTrack(tr);
-                            r->setGap(true);
-                            fillSeg->add(r);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Nuclear hard-cap: if any voice still overshoots by any amount (the 1/24 pass
-        // only handles gap rests, and the Tuplet.ticks fix may not cover all edge cases),
-        // remove trailing ChordRest elements until voiceSum <= measureLen, then fill
-        // any remaining deficit with an invisible V_MEASURE gap rest. This guarantees
-        // the importer never produces a measure with wrong total duration.
-        {
-            const Fraction mLen_cap = measure->ticks();
-            for (int si = 0; si < ctx.totalStaves; ++si) {
-                for (voice_idx_t v = 0; v < VOICES; ++v) {
-                    const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
-                    // Collect all ChordRests in order; compute voiceSum.
-                    std::vector<ChordRest*> crs;
-                    Fraction voiceSum(0, 1);
-                    for (Segment* seg = measure->first(SegmentType::ChordRest);
-                         seg; seg = seg->next(SegmentType::ChordRest)) {
-                        EngravingItem* el = seg->element(tr);
-                        if (!el) {
-                            continue;
-                        }
-                        ChordRest* cr = toChordRest(el);
-                        crs.push_back(cr);
-                        voiceSum += cr->actualTicks();
-                    }
-                    if (voiceSum <= mLen_cap || crs.empty()) {
-                        continue;
-                    }
-                    // Remove from the end (last placed) until we fit.
-                    while (voiceSum > mLen_cap && !crs.empty()) {
-                        ChordRest* last = crs.back();
-                        crs.pop_back();
-                        voiceSum -= last->actualTicks();
-                        // Detach from tuplet if needed.
-                        if (last->tuplet()) {
-                            last->tuplet()->remove(last);
-                            last->setTuplet(nullptr);
-                        }
-                        Segment* lseg = last->segment();
-                        lseg->remove(last);
-                        delete last;
-                    }
-                    // Fill any residual deficit with an invisible gap rest.
-                    const Fraction deficit2 = mLen_cap - voiceSum;
-                    if (deficit2 > Fraction(0, 1)) {
-                        const Fraction fillTick2 = measure->tick() + voiceSum;
-                        Segment* fillSeg2 = measure->getSegment(
-                            SegmentType::ChordRest, fillTick2);
-                        if (!fillSeg2->element(tr)) {
-                            Rest* r2 = Factory::createRest(
-                                fillSeg2, TDuration(DurationType::V_MEASURE));
-                            r2->setTicks(deficit2);
-                            r2->setTrack(tr);
-                            r2->setGap(true);
-                            fillSeg2->add(r2);
-                        }
-                    }
-                }
-            }
-        }
+        correctMeasureLength(measure, ctx.totalStaves);
+        capMeasureLength(measure, ctx.totalStaves);
 
         const EncMeasure* prevMeas = (measIdx > 0) ? &enc.measures[measIdx - 1] : nullptr;
         measSkip = measDisplayCount(encMeas, prevMeas) - 1;
@@ -1165,64 +822,7 @@ void buildNoteLoop(BuildCtx& ctx)
         ++measIdx;
     }
 
-    // Apply per-measure BPM from MEAS header; emit TempoText only when BPM changes.
-    // Skip when an ORN TEMPO or STAFFTEXT tempo is already present ANYWHERE in the measure,
-    // not just at measTick. ORN TEMPO elements are placed at their note's tick (which may
-    // differ from measTick when the measure starts with a rest), so the old per-segment
-    // guard missed them and created a duplicate tempo mark.
-    {
-        quint16 lastBpm = 0;
-        for (size_t mi = 0; mi < enc.measures.size(); ++mi) {
-            const quint16 bpm = enc.measures[mi].bpm;
-            if (bpm == 0) {
-                continue;
-            }
-            if (mi > 0 && bpm == lastBpm) {
-                continue;
-            }
-            const size_t msI = (mi < ctx.encToMsIdx.size()) ? ctx.encToMsIdx[mi] : mi;
-            if (msI >= ctx.measuresByIdx.size()) {
-                continue;
-            }
-            Measure* m = ctx.measuresByIdx[msI];
-            const Fraction measTick = m->tick();
-            Segment* seg = m->getSegment(SegmentType::ChordRest, measTick);
-            if (!seg) {
-                continue;
-            }
-            bool hasExisting = false;
-            for (Segment* s = m->first(SegmentType::ChordRest); s && !hasExisting;
-                 s = s->next(SegmentType::ChordRest)) {
-                for (EngravingItem* e : s->annotations()) {
-                    if (e && e->isTempoText()) {
-                        hasExisting = true;
-                        break;
-                    }
-                }
-            }
-            if (!hasExisting) {
-                // Detect dotted-quarter beat: MEAS header beatTicks=360, OR compound time sig
-                // (6/8, 9/8, 12/8). Old fixtures store beatTicks=240 even for 6/8, so keep
-                // the timesig fallback for backward compatibility.
-                const quint16 rawBeatTicks = enc.measures[mi].beatTicks;
-                const Fraction mts = m->timesig();
-                const bool cmpd = (rawBeatTicks == 360)
-                                  || (mts.denominator() == 8
-                                      && mts.numerator() % 3 == 0
-                                      && mts.numerator() > 3);
-                const double bps = bpm / 60.0;    // bpm is QPM; correct for playback
-                const int displayBpm = cmpd ? (bpm * 2 + 1) / 3 : static_cast<int>(bpm);
-                TempoText* tt = Factory::createTempoText(seg);
-                tt->setTrack(0);
-                tt->setTempo(BeatsPerSecond(bps));
-                tt->setXmlText(tempoXmlText(displayBpm, cmpd ? 360 : 240));
-                tt->setFollowText(true);
-                seg->add(tt);
-                score->setTempo(measTick, BeatsPerSecond(bps));
-            }
-            lastBpm = bpm;
-        }
-    }
+    applyMeasureBpmMarks(ctx);
 
     // Discard any grace chords still queued after the final measure (no main chord
     // followed them). They have no parent in the score tree, so delete them here.
