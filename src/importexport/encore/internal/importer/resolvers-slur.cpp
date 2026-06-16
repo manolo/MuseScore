@@ -50,6 +50,95 @@ static track_idx_t resolveChordTrack(MasterScore* score, Fraction tick, int staf
     return fallback;
 }
 
+static int getLineSlot(const EncMeasureElem* em, const std::array<int, 256>& lineSlotByRawByte)
+{
+    const quint8 raw = (static_cast<quint8>(em->staffWithin) << 6)
+                       | static_cast<quint8>(em->staffIdx);
+    const int slot = lineSlotByRawByte[static_cast<unsigned char>(raw)];
+    return (slot >= 0) ? slot : static_cast<int>(em->staffIdx);
+}
+
+static void removeOrphanSlurs(MasterScore* score)
+{
+    std::vector<Spanner*> toRemove;
+    for (auto& [tick, spanner] : score->spannerMap().map()) {
+        if (spanner->isSlur()) {
+            // Grace start: computeStartElement() uses tick2segment(), which returns the regular chord,
+            // not the grace sub-chord. Skip it when start element was set explicitly.
+            const bool graceStart = spanner->startElement()
+                                    && spanner->startElement()->isChord()
+                                    && toChord(spanner->startElement())->isGrace();
+            if (!graceStart) {
+                spanner->computeStartElement();
+            }
+            // Grace-to-main (tick == tick2): computeEndElement() fails because no segment
+            // exists at the same tick through the spanner tick lookup. Grace-to-later works normally.
+            const bool graceToMain = graceStart
+                                     && (spanner->tick() == spanner->tick2());
+            if (!graceToMain) {
+                spanner->computeEndElement();
+            }
+            if (!spanner->startElement() || !spanner->endElement()) {
+                toRemove.push_back(spanner);
+            }
+        }
+    }
+    for (Spanner* sp : toRemove) {
+        score->removeElement(sp);
+    }
+}
+
+static void createGraceToMainSlur(const PendingSlur& ps, MasterScore* score, Fraction startTick)
+{
+    // Zero span: SLURSTART at grace tick == parent cumTick. Build grace-to-main slur with explicit elements.
+    Segment* gSeg = score->tick2segment(startTick, true, SegmentType::ChordRest);
+    if (gSeg) {
+        const track_idx_t graceTrack = resolveChordTrack(score, startTick, ps.staffIdx, ps.track);
+        EngravingItem* el = gSeg->element(graceTrack);
+        if (el && el->isChord()) {
+            const std::vector<Chord*> graces = toChord(el)->graceNotesBefore();
+            if (!graces.empty()) {
+                Slur* gSlur = Factory::createSlur(score->dummy());
+                gSlur->setTrack(graceTrack);
+                gSlur->setTrack2(graceTrack);
+                gSlur->setTick(startTick);
+                // tick2 == tick signals graceToMain=true to the post-pass, preventing computeEndElement()
+                // from replacing the explicit end element with an end-of-measure chord.
+                gSlur->setTick2(startTick);
+                gSlur->setStartElement(graces.front());
+                gSlur->setEndElement(el);
+                // addSpanner(false): skip computeStartElement/computeEndElement so explicit grace element is preserved.
+                score->addSpanner(gSlur, false);
+            }
+        }
+    }
+}
+
+static void createNormalSlur(const PendingSlur& ps, track_idx_t startTrack, track_idx_t endTrack,
+                             Fraction endTick, MasterScore* score)
+{
+    Slur* slur = Factory::createSlur(score->dummy());
+    slur->setTrack(startTrack);
+    slur->setTrack2(endTrack);
+    slur->setTick(ps.startTick);
+    slur->setTick2(endTick);
+    // If the chord at/after startTick has grace notes, SLURSTART was co-located with the grace in Encore; anchor to it.
+    // tick2rightSegment handles grace-note tick stealing (startTick may be slightly before cumTick).
+    {
+        Segment* rSeg = score->tick2rightSegment(ps.startTick, false, SegmentType::ChordRest);
+        if (rSeg) {
+            EngravingItem* rEl = rSeg->element(startTrack);
+            if (rEl && rEl->isChord()) {
+                const std::vector<Chord*> graces = toChord(rEl)->graceNotesBefore();
+                if (!graces.empty()) {
+                    slur->setStartElement(graces.front());
+                }
+            }
+        }
+    }
+    score->addElement(slur);
+}
+
 void resolveSlurs(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
@@ -65,12 +154,6 @@ void resolveSlurs(BuildCtx& ctx)
             lineSlotByRawByte[static_cast<unsigned char>(sd[s].instrStaffIdx)] = s;
         }
     }
-    auto emLineSlot = [&](const EncMeasureElem* em) -> int {
-        const quint8 raw = (static_cast<quint8>(em->staffWithin) << 6)
-                           | static_cast<quint8>(em->staffIdx);
-        const int slot = lineSlotByRawByte[static_cast<unsigned char>(raw)];
-        return (slot >= 0) ? slot : static_cast<int>(em->staffIdx);
-    };
 
     // .enc has no SLURSTOP; endpoint derived from alMezuro (target measure) + xoffset heuristic.
     for (const PendingSlur& ps : ctx.pendingSlurs) {
@@ -111,7 +194,7 @@ void resolveSlurs(BuildCtx& ctx)
                     continue;
                 }
                 // Search all voices: slur ORN encVoice is the arc position, not necessarily the note voice.
-                if (emLineSlot(em) != ps.staffIdx) {
+                if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
                     continue;
                 }
                 if (static_cast<int>(em->tick) != startEncTick) {
@@ -149,7 +232,7 @@ void resolveSlurs(BuildCtx& ctx)
                         if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
                             continue;
                         }
-                        if (emLineSlot(em) != ps.staffIdx) {
+                        if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
                             continue;
                         }
                         const int xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
@@ -236,7 +319,7 @@ void resolveSlurs(BuildCtx& ctx)
                                 if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
                                     continue;
                                 }
-                                if (emLineSlot(em) != ps.staffIdx) {
+                                if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
                                     continue;
                                 }
                                 const int xoff = static_cast<int>(
@@ -273,7 +356,7 @@ void resolveSlurs(BuildCtx& ctx)
                 if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
                     continue;
                 }
-                if (emLineSlot(em) != ps.staffIdx) {
+                if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
                     continue;
                 }
                 const int xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
@@ -320,85 +403,14 @@ void resolveSlurs(BuildCtx& ctx)
             continue;   // negative span: always drop
         }
         if (endTick == ps.startTick) {
-            // Zero span: SLURSTART at grace tick == parent cumTick. Build grace-to-main slur with explicit elements.
-            Segment* gSeg = score->tick2segment(ps.startTick, true,
-                                                SegmentType::ChordRest);
-            if (gSeg) {
-                const track_idx_t graceTrack = resolveChordTrack(
-                    score, ps.startTick, ps.staffIdx, ps.track);
-                EngravingItem* el = gSeg->element(graceTrack);
-                if (el && el->isChord()) {
-                    const std::vector<Chord*> graces = toChord(el)->graceNotesBefore();
-                    if (!graces.empty()) {
-                        Slur* gSlur = Factory::createSlur(score->dummy());
-                        gSlur->setTrack(graceTrack);
-                        gSlur->setTrack2(graceTrack);
-                        gSlur->setTick(ps.startTick);
-                        // tick2 == tick signals graceToMain=true to the post-pass, preventing computeEndElement()
-                        // from replacing the explicit end element with an end-of-measure chord.
-                        gSlur->setTick2(ps.startTick);
-                        gSlur->setStartElement(graces.front());
-                        gSlur->setEndElement(el);
-                        // addSpanner(false): skip computeStartElement/computeEndElement so explicit grace element is preserved.
-                        score->addSpanner(gSlur, false);
-                    }
-                }
-            }
+            createGraceToMainSlur(ps, score, ps.startTick);
             continue;   // handled as grace-to-main or dropped (no grace notes)
         }
         const track_idx_t endTrack = resolveChordTrack(score, endTick, ps.staffIdx, startTrack);
-
-        Slur* slur = Factory::createSlur(score->dummy());
-        slur->setTrack(startTrack);
-        slur->setTrack2(endTrack);
-        slur->setTick(ps.startTick);
-        slur->setTick2(endTick);
-        // If the chord at/after startTick has grace notes, SLURSTART was co-located with the grace in Encore; anchor to it.
-        // tick2rightSegment handles grace-note tick stealing (startTick may be slightly before cumTick).
-        {
-            Segment* rSeg = score->tick2rightSegment(ps.startTick, false,
-                                                     SegmentType::ChordRest);
-            if (rSeg) {
-                EngravingItem* rEl = rSeg->element(startTrack);
-                if (rEl && rEl->isChord()) {
-                    const std::vector<Chord*> graces = toChord(rEl)->graceNotesBefore();
-                    if (!graces.empty()) {
-                        slur->setStartElement(graces.front());
-                    }
-                }
-            }
-        }
-        score->addElement(slur);
+        createNormalSlur(ps, startTrack, endTrack, endTick, score);
     }
 
     // Remove slurs with missing start/end note (corrupted files cause NaN in Bezier layout).
-    {
-        std::vector<Spanner*> toRemove;
-        for (auto& [tick, spanner] : score->spannerMap().map()) {
-            if (spanner->isSlur()) {
-                // Grace start: computeStartElement() uses tick2segment(), which returns the regular chord,
-                // not the grace sub-chord. Skip it when start element was set explicitly.
-                const bool graceStart = spanner->startElement()
-                                        && spanner->startElement()->isChord()
-                                        && toChord(spanner->startElement())->isGrace();
-                if (!graceStart) {
-                    spanner->computeStartElement();
-                }
-                // Grace-to-main (tick == tick2): computeEndElement() fails because no segment
-                // exists at the same tick through the spanner tick lookup. Grace-to-later works normally.
-                const bool graceToMain = graceStart
-                                         && (spanner->tick() == spanner->tick2());
-                if (!graceToMain) {
-                    spanner->computeEndElement();
-                }
-                if (!spanner->startElement() || !spanner->endElement()) {
-                    toRemove.push_back(spanner);
-                }
-            }
-        }
-        for (Spanner* sp : toRemove) {
-            score->removeElement(sp);
-        }
-    }
+    removeOrphanSlurs(score);
 }
 } // namespace mu::iex::enc
