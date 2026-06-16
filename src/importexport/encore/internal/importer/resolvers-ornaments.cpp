@@ -42,17 +42,14 @@
 using namespace mu::engraving;
 
 namespace mu::iex::enc {
-void resolveOrnaments(BuildCtx& ctx)
-{
-    MasterScore* score = ctx.score;
 
-    // Arpeggios: ORN precedes chord in MEAS, so deferred to resolve phase.
-    for (const PendingArpeggio& pa : ctx.pendingArpeggios) {
+static void resolveArpeggios(MasterScore* score,
+                              const std::vector<PendingArpeggio>& pendingArpeggios)
+{
+    // ORN precedes chord in MEAS order, so deferred to resolve phase.
+    for (const PendingArpeggio& pa : pendingArpeggios) {
         Chord* c = findChordAt(score, pa.tick, pa.track);
-        if (!c) {
-            continue;
-        }
-        if (c->arpeggio()) {
+        if (!c || c->arpeggio()) {
             continue;
         }
         Arpeggio* arp = Factory::createArpeggio(c);
@@ -60,12 +57,15 @@ void resolveOrnaments(BuildCtx& ctx)
         arp->setArpeggioType(ArpeggioType::NORMAL);
         c->add(arp);
     }
+}
 
-    // Single-chord tremolos (0xAF/0xEF). See ENCORE_FORMAT.md §Ornament element.
-    // Encore may place ORN at durTicks or in voice 0 even when the note is in another voice.
-    for (const PendingOrnTremolo& pt : ctx.pendingOrnTremolos) {
+static void resolveSingleChordTremolos(MasterScore* score,
+                                        const std::vector<PendingOrnTremolo>& pendingOrnTremolos)
+{
+    // See ENCORE_FORMAT.md §Ornament element.
+    // ORN may land at durTicks or in voice 0 even when the note is in another voice.
+    for (const PendingOrnTremolo& pt : pendingOrnTremolos) {
         const track_idx_t trTrack = static_cast<track_idx_t>(pt.staffIdx * VOICES + pt.msVoice);
-        // Try exact tick match first.
         Measure* m = score->tick2measure(pt.tick);
         if (!m) {
             m = score->tick2measure(pt.measTick);
@@ -114,8 +114,7 @@ void resolveOrnaments(BuildCtx& ctx)
             continue;
         }
         Chord* c = toChord(el);
-        // Encore places the tremolo ORN after the tied-from note, so tick lands on the
-        // continuation chord; walk back to the tie start where the tremolo belongs.
+        // Encore places the tremolo ORN after the tied-from note; walk back to tie start.
         if (!c->notes().empty() && c->notes().front()->tieBack()) {
             Chord* prev = c->notes().front()->tieBack()->startNote()->chord();
             if (prev) {
@@ -129,9 +128,12 @@ void resolveOrnaments(BuildCtx& ctx)
         trem->setTremoloType(pt.tremType);
         c->add(trem);
     }
+}
 
-    // Resolve SEGNO / CODA section markers on their measures.
-    for (const PendingMarker& pm : ctx.pendingMarkers) {
+static void resolveMarkers(MasterScore* score,
+                            const std::vector<PendingMarker>& pendingMarkers)
+{
+    for (const PendingMarker& pm : pendingMarkers) {
         Measure* m = score->tick2measure(pm.tick);
         if (!m) {
             continue;
@@ -141,9 +143,12 @@ void resolveOrnaments(BuildCtx& ctx)
         mk->setTrack(0);
         m->add(mk);
     }
+}
 
-    // Fermatas (0xCC/0xCD): attach to segment, not chord.
-    for (const PendingFermata& pf : ctx.pendingFermatas) {
+static void resolveFermatas(MasterScore* score,
+                             const std::vector<PendingFermata>& pendingFermatas)
+{
+    for (const PendingFermata& pf : pendingFermatas) {
         Chord* c = findChordAt(score, pf.tick, pf.track);
         if (!c) {
             continue;
@@ -169,9 +174,13 @@ void resolveOrnaments(BuildCtx& ctx)
         fermata->setPropertyFlags(Pid::PLACEMENT, PropertyFlags::UNSTYLED);
         seg->add(fermata);
     }
+}
 
-    // Staccatos: deduplicate (artic byte 0x1D produces the same glyph).
-    for (const PendingStaccato& ps : ctx.pendingStaccatos) {
+static void resolveStaccatos(MasterScore* score,
+                              const std::vector<PendingStaccato>& pendingStaccatos)
+{
+    // Dedup: artic byte 0x1D produces the same glyph.
+    for (const PendingStaccato& ps : pendingStaccatos) {
         Chord* c = findChordAt(score, ps.tick, ps.track);
         if (!c) {
             continue;
@@ -192,9 +201,17 @@ void resolveOrnaments(BuildCtx& ctx)
         art->setSymId(SymId::articStaccatoAbove);
         c->add(art);
     }
+}
 
-    // Trills: create a Trill spanner when TRILL_END exists or alMezuro>0; else Ornament glyph.
-    for (const PendingTrill& pt : ctx.pendingTrills) {
+static void resolveTrillsWithSpans(MasterScore* score,
+                                    const std::vector<PendingTrill>& pendingTrills,
+                                    std::map<track_idx_t, std::vector<Fraction>>& pendingTrillEnds,
+                                    const std::vector<Measure*>& measuresByIdx)
+{
+    // (A) TRILL_ALT within a prior TRILL_START span: Ornament glyph only.
+    // (B) TRILL_ALT standalone: spanner on note duration.
+    // (C) TRILL_START: spanner when endpoint found; glyph otherwise.
+    for (const PendingTrill& pt : pendingTrills) {
         Fraction trillTick = pt.tick;
         Chord* trillChord = findChordAt(score, trillTick, pt.track);
         if (!trillChord) {
@@ -221,11 +238,8 @@ void resolveOrnaments(BuildCtx& ctx)
             }
         }
 
-        // (A) TRILL_ALT within a TRILL_START span: Ornament glyph only.
-        // (B) TRILL_ALT standalone: spanner on note duration.
-        // (C) TRILL_START: spanner when endpoint found; glyph otherwise.
         const bool altWithinSpan = pt.isAlt && [&]() {
-            for (const PendingTrill& other : ctx.pendingTrills) {
+            for (const PendingTrill& other : pendingTrills) {
                 if (!other.isAlt && other.track == pt.track && other.tick < pt.tick) {
                     return true;
                 }
@@ -239,8 +253,8 @@ void resolveOrnaments(BuildCtx& ctx)
 
         if (hasSpan) {
             hasSpan = false;
-            auto it = ctx.pendingTrillEnds.find(pt.track);
-            if (it != ctx.pendingTrillEnds.end()) {
+            auto it = pendingTrillEnds.find(pt.track);
+            if (it != pendingTrillEnds.end()) {
                 auto& endVec = it->second;
                 for (auto eit = endVec.begin(); eit != endVec.end(); ++eit) {
                     if (*eit > trillTick) {
@@ -251,12 +265,11 @@ void resolveOrnaments(BuildCtx& ctx)
                     }
                 }
             }
-
             // Cross-measure span via alMezuro field.
             if (!hasSpan && pt.alMezuro > 0) {
                 const size_t endMeasIdx = pt.measIdx + static_cast<size_t>(pt.alMezuro);
-                if (endMeasIdx < ctx.measuresByIdx.size()) {
-                    Measure* endMeas = ctx.measuresByIdx[endMeasIdx];
+                if (endMeasIdx < measuresByIdx.size()) {
+                    Measure* endMeas = measuresByIdx[endMeasIdx];
                     if (endMeas) {
                         endTick = endMeas->endTick();
                         hasSpan = true;
@@ -265,7 +278,6 @@ void resolveOrnaments(BuildCtx& ctx)
             }
         }
 
-        // TRILL_SIMPLE: glyph only. Standalone TRILL_ALT: span note duration.
         if (pt.isSimple) {
             hasSpan = false;
         } else if (standaloneAlt && (!hasSpan || endTick <= trillTick)) {
@@ -286,7 +298,6 @@ void resolveOrnaments(BuildCtx& ctx)
             score->addElement(trill);
         } else {
             const SymId sid = pt.isSimple ? pt.simpleSymId : SymId::ornamentTrill;
-            // Dedup: secondary wavy-line markers can snap to the same chord as the primary.
             bool alreadyHas = false;
             for (Articulation* a : trillChord->articulations()) {
                 if (a && a->isOrnament() && toOrnament(a)->symId() == sid) {
@@ -302,9 +313,13 @@ void resolveOrnaments(BuildCtx& ctx)
             }
         }
     }
+}
 
-    // Unconsumed TRILL_END entries: create a Trill spanner covering the note's duration.
-    for (auto& [trTrack, endTicks] : ctx.pendingTrillEnds) {
+static void resolveUnconsumedTrillEnds(MasterScore* score,
+                                        std::map<track_idx_t, std::vector<Fraction>>& pendingTrillEnds)
+{
+    // TRILL_END markers not consumed by TRILL_START: create a spanner on the note's duration.
+    for (auto& [trTrack, endTicks] : pendingTrillEnds) {
         for (const Fraction& eTick : endTicks) {
             Chord* c = findChordAt(score, eTick, trTrack);
             if (!c) {
@@ -323,11 +338,15 @@ void resolveOrnaments(BuildCtx& ctx)
             score->addElement(trill);
         }
     }
-    ctx.pendingTrillEnds.clear();
+    pendingTrillEnds.clear();
+}
 
-    // Breaths/caesuras (0xA7/0xA8): pb.tick is the following note; attach after the
-    // preceding chord. If pb.tick is at a measure boundary, that chord is in the prior measure.
-    for (const PendingBreath& pb : ctx.pendingBreaths) {
+static void resolveBreaths(MasterScore* score,
+                            const std::vector<PendingBreath>& pendingBreaths)
+{
+    // pb.tick is the following note; attach after the preceding chord.
+    // If pb.tick is at a measure boundary, that chord is in the prior measure.
+    for (const PendingBreath& pb : pendingBreaths) {
         Measure* m = score->tick2measure(pb.tick);
         if (m && m->tick() == pb.tick) {
             MeasureBase* prevBase = m->prev();
@@ -367,9 +386,13 @@ void resolveOrnaments(BuildCtx& ctx)
         breath->setPropertyFlags(Pid::PLACEMENT, PropertyFlags::UNSTYLED);
         seg->add(breath);
     }
+}
 
-    // Measure repeats (0xA3): replace measure content with "%" symbol.
-    for (const PendingMeasureRepeat& pmr : ctx.pendingMeasureRepeats) {
+static void resolveMeasureRepeats(MasterScore* score,
+                                   const std::vector<PendingMeasureRepeat>& pendingMeasureRepeats)
+{
+    // Replace measure content with "%" symbol.
+    for (const PendingMeasureRepeat& pmr : pendingMeasureRepeats) {
         Measure* m = score->tick2measure(pmr.measTick);
         if (!m) {
             continue;
@@ -388,4 +411,19 @@ void resolveOrnaments(BuildCtx& ctx)
         m->setMeasureRepeatCount(1, static_cast<staff_idx_t>(pmr.staffIdx));
     }
 }
+
+void resolveOrnaments(BuildCtx& ctx)
+{
+    MasterScore* score = ctx.score;
+    resolveArpeggios(score, ctx.pendingArpeggios);
+    resolveSingleChordTremolos(score, ctx.pendingOrnTremolos);
+    resolveMarkers(score, ctx.pendingMarkers);
+    resolveFermatas(score, ctx.pendingFermatas);
+    resolveStaccatos(score, ctx.pendingStaccatos);
+    resolveTrillsWithSpans(score, ctx.pendingTrills, ctx.pendingTrillEnds, ctx.measuresByIdx);
+    resolveUnconsumedTrillEnds(score, ctx.pendingTrillEnds);
+    resolveBreaths(score, ctx.pendingBreaths);
+    resolveMeasureRepeats(score, ctx.pendingMeasureRepeats);
+}
+
 } // namespace mu::iex::enc
