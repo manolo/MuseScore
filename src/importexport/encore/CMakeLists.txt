@@ -60,6 +60,10 @@ target_sources(iex_encore PRIVATE
     internal/importer/noteloop-note.cpp
     internal/importer/noteloop-rest.cpp
     internal/importer/noteloop-orn.cpp
+    internal/importer/noteloop-chords.cpp
+    internal/importer/noteloop-lyrics.cpp
+    internal/importer/noteloop-tempo.cpp
+    internal/importer/noteloop-fill.cpp
     internal/importer/noteloop.cpp
     internal/importer/resolvers.h
     internal/importer/resolvers.cpp
