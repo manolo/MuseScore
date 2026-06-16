@@ -509,6 +509,84 @@ static Fraction computeElementTick(
     return elemTick;
 }
 
+static void initLineStaffMappings(
+    const EncRoot& enc,
+    int nLineStaves,
+    std::vector<int>& lineStaffInstrIdx,
+    std::vector<int>& lineStaffWithin,
+    std::array<int, 256>& lineSlotByRawByte)
+{
+    lineStaffInstrIdx.assign(nLineStaves, -1);
+    lineStaffWithin.assign(nLineStaves, 0);
+    for (int s = 0; s < nLineStaves; ++s) {
+        lineStaffInstrIdx[s] = static_cast<int>(enc.lines[0].staffData[s].instrumentIndex());
+        lineStaffWithin[s]   = static_cast<int>(enc.lines[0].staffData[s].staffIndex());
+    }
+
+    // Raw staff byte carries (staffWithin<<6)|instrIdx (same as instrStaffIdx in LINE blocks).
+    // Reverse map translates it to a LINE slot before voice routing.
+    // Needed for multi-instrument files where earlier instruments have >1 staff (e.g. piano+organ: organ instrIdx=1 but LINE slot 2).
+    lineSlotByRawByte.fill(-1);
+    for (int s = 0; s < nLineStaves; ++s) {
+        const quint8 key = enc.lines[0].staffData[s].instrStaffIdx;
+        lineSlotByRawByte[static_cast<unsigned char>(key)] = s;
+    }
+}
+
+static void fillExpandedMrestMeasure(Measure* vm, int totalStaves)
+{
+    const Fraction vmTick = vm->tick();
+    const Fraction vmLen  = vm->ticks();
+    for (int si = 0; si < totalStaves; ++si) {
+        const track_idx_t tr = static_cast<track_idx_t>(si) * VOICES;
+        Segment* seg = vm->getSegment(SegmentType::ChordRest, vmTick);
+        Rest* r = Factory::createRest(seg, TDuration(DurationType::V_MEASURE));
+        r->setTicks(vmLen);
+        r->setTrack(tr);
+        seg->add(r);
+    }
+}
+
+static void coalesceVolta(BuildCtx& ctx, Measure* measure,
+                          const EncMeasure& encMeas, Fraction measTick)
+{
+    if (encMeas.repeatAlternative != 0) {
+        if (ctx.activeVolta && ctx.activeVoltaBits == encMeas.repeatAlternative) {
+            ctx.activeVolta->setTick2(measTick + measure->ticks());
+        } else {
+            Volta* volta = Factory::createVolta(ctx.score->dummy());
+            volta->setVoltaType(Volta::Type::CLOSED);
+            volta->setTrack(0);
+            volta->setTrack2(0);
+            volta->setTick(measTick);
+            volta->setTick2(measTick + measure->ticks());
+            std::vector<int> endings;
+            for (int b = 0; b < 8; ++b) {
+                if (encMeas.repeatAlternative & (1 << b)) {
+                    endings.push_back(b + 1);
+                }
+            }
+            volta->setEndings(endings);
+            // setText required: setEndings alone leaves the bracket blank.
+            String voltaText;
+            for (int number : endings) {
+                if (!voltaText.empty()) {
+                    voltaText += u", ";
+                }
+                voltaText += String::number(number);
+            }
+            voltaText += u".";
+            volta->setText(voltaText);
+            ctx.score->addElement(volta);
+            ctx.activeVolta = volta;
+            ctx.activeVoltaBits = encMeas.repeatAlternative;
+        }
+    } else {
+        ctx.activeVolta = nullptr;
+        ctx.activeVoltaBits = 0;
+    }
+}
+
 static void handleKeyChange(BuildCtx& ctx, const NoteLoopMeasCtx& mc,
                             const NoteElemCtx& ec, const EncMeasureElem* e,
                             std::vector<DeferredKeySig>& pendingKeySigs)
@@ -548,22 +626,10 @@ void buildNoteLoop(BuildCtx& ctx)
 
     const int nLineStaves = (!enc.lines.empty())
                             ? static_cast<int>(enc.lines[0].staffData.size()) : 0;
-    std::vector<int> lineStaffInstrIdx(nLineStaves, -1);
-    std::vector<int> lineStaffWithin(nLineStaves, 0);
-    for (int s = 0; s < nLineStaves; ++s) {
-        lineStaffInstrIdx[s] = static_cast<int>(enc.lines[0].staffData[s].instrumentIndex());
-        lineStaffWithin[s]   = static_cast<int>(enc.lines[0].staffData[s].staffIndex());
-    }
-
-    // Raw staff byte carries (staffWithin<<6)|instrIdx (same as instrStaffIdx in LINE blocks).
-    // Reverse map translates it to a LINE slot before voice routing.
-    // Needed for multi-instrument files where earlier instruments have >1 staff (e.g. piano+organ: organ instrIdx=1 but LINE slot 2).
+    std::vector<int> lineStaffInstrIdx;
+    std::vector<int> lineStaffWithin;
     std::array<int, 256> lineSlotByRawByte;
-    lineSlotByRawByte.fill(-1);
-    for (int s = 0; s < nLineStaves; ++s) {
-        const quint8 key = enc.lines[0].staffData[s].instrStaffIdx;
-        lineSlotByRawByte[static_cast<unsigned char>(key)] = s;
-    }
+    initLineStaffMappings(enc, nLineStaves, lineStaffInstrIdx, lineStaffWithin, lineSlotByRawByte);
 
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
         if (mb->isMeasure()) {
@@ -588,18 +654,7 @@ void buildNoteLoop(BuildCtx& ctx)
         if (measSkip > 0) {
             --measSkip;
             ++msIdxCounter;
-            // Fill expanded virtual measure so sanity check passes.
-            Measure* vm = toMeasure(mb);
-            const Fraction vmTick = vm->tick();
-            const Fraction vmLen  = vm->ticks();
-            for (int si = 0; si < ctx.totalStaves; ++si) {
-                const track_idx_t tr = static_cast<track_idx_t>(si) * VOICES;
-                Segment* seg = vm->getSegment(SegmentType::ChordRest, vmTick);
-                Rest* r = Factory::createRest(seg, TDuration(DurationType::V_MEASURE));
-                r->setTicks(vmLen);
-                r->setTrack(tr);
-                seg->add(r);
-            }
+            fillExpandedMrestMeasure(toMeasure(mb), ctx.totalStaves);
             continue;
         }
 
@@ -654,41 +709,7 @@ void buildNoteLoop(BuildCtx& ctx)
         }
 
         // Consecutive measures with equal repeatAlternative bitmask coalesce into one Volta.
-        if (encMeas.repeatAlternative != 0) {
-            if (ctx.activeVolta && ctx.activeVoltaBits == encMeas.repeatAlternative) {
-                ctx.activeVolta->setTick2(measTick + measure->ticks());
-            } else {
-                Volta* volta = Factory::createVolta(score->dummy());
-                volta->setVoltaType(Volta::Type::CLOSED);
-                volta->setTrack(0);
-                volta->setTrack2(0);
-                volta->setTick(measTick);
-                volta->setTick2(measTick + measure->ticks());
-                std::vector<int> endings;
-                for (int b = 0; b < 8; ++b) {
-                    if (encMeas.repeatAlternative & (1 << b)) {
-                        endings.push_back(b + 1);
-                    }
-                }
-                volta->setEndings(endings);
-                // setText required: setEndings alone leaves the bracket blank.
-                String voltaText;
-                for (int number : endings) {
-                    if (!voltaText.empty()) {
-                        voltaText += u", ";
-                    }
-                    voltaText += String::number(number);
-                }
-                voltaText += u".";
-                volta->setText(voltaText);
-                score->addElement(volta);
-                ctx.activeVolta = volta;
-                ctx.activeVoltaBits = encMeas.repeatAlternative;
-            }
-        } else {
-            ctx.activeVolta = nullptr;
-            ctx.activeVoltaBits = 0;
-        }
+        coalesceVolta(ctx, measure, encMeas, measTick);
 
         if (!pendingKeySigs.empty() && hasPitchedNotes(encMeas)) {
             for (const DeferredKeySig& dks : pendingKeySigs) {
