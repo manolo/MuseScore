@@ -46,7 +46,6 @@
 using namespace mu::engraving;
 
 namespace mu::iex::encore {
-// Pending intents collected during note-import, resolved in resolveAll().
 struct PendingSlur {
     Fraction startTick;
     track_idx_t track;
@@ -59,29 +58,25 @@ struct PendingSlur {
     int encVoice;
 };
 
-// Hairpin intents resolved after the measure pass so each hairpin ends
-// at the next Dynamic on the same track, not at the barline.
-// (Encore chains like `mf<f>mf` terminate at the next dynamic glyph.)
+// Hairpin end resolved in post-pass to the next Dynamic on the same track (not the barline).
 struct PendingHairpin {
     Fraction startTick;
     Fraction maxEndTick;     // end of alMezuro target measure (upper bound)
     track_idx_t track;
     HairpinType type;
-    int endMeasIdx;          // alMezuro target measure index
-    int hairpinXoffset2;     // xoffset2 in target measure layout
+    int endMeasIdx;
+    int hairpinXoffset2;
     int staffIdx;
     int encVoice;
 };
 
-// Arpeggio intents deferred: ORN comes before chord notes in MEAS order,
-// so the chord does not exist yet at parse time.
+// Deferred: ORN precedes chord notes in MEAS order, so the chord does not exist at parse time.
 struct PendingArpeggio {
     Fraction tick;
     track_idx_t track;
 };
 
-// Single-chord tremolo intents (tipo 0xAF/0xEF), deferred like ARPEGGIO.
-// Post-pass falls back to latest chord before the stored tick.
+// Single-chord tremolo (tipo 0xAF/0xEF), deferred like ARPEGGIO. Post-pass falls back to latest chord before the tick.
 struct PendingOrnTremolo {
     Fraction tick;
     Fraction measTick;
@@ -94,55 +89,53 @@ struct PendingOrnTremolo {
 struct PendingTrill {
     Fraction tick;
     track_idx_t track;
-    int alMezuro { 0 };           // measures forward to the trill end (0 = same measure)
-    size_t measIdx  { 0 };        // index into ctx.measuresByIdx for the start measure
-    int xoffset2 { 0 };           // end x-position hint (for same-measure endpoint detection)
-    bool isAlt    { false };        // TRILL_ALT (0x37): secondary mark, always Ornament glyph
-    bool isSimple { false };        // TRILL_SIMPLE/TRILL_TR: standalone glyph only, never a spanner
-    mu::engraving::SymId simpleSymId { mu::engraving::SymId::ornamentTrill }; // symId when isSimple=true
+    int alMezuro { 0 };           // forward measure count to trill end (0 = same measure)
+    size_t measIdx  { 0 };
+    int xoffset2 { 0 };           // end x-position hint for same-measure endpoint detection
+    bool isAlt    { false };      // TRILL_ALT (0x37): secondary mark, always Ornament glyph
+    bool isSimple { false };      // TRILL_TR/TRILL_SHORT: standalone glyph, never a spanner
+    mu::engraving::SymId simpleSymId { mu::engraving::SymId::ornamentTrill };
 };
 
-// Staccato intents (tipo 0xC9), deferred for the same reason as ARPEGGIO.
+// Staccato (tipo 0xC9), deferred like ARPEGGIO.
 struct PendingStaccato {
     Fraction tick;
     track_idx_t track;
 };
 
-// Fermata intents (tipo 0xCC/0xCD), deferred for the same reason as ARPEGGIO.
+// Fermata (tipo 0xCC/0xCD), deferred like ARPEGGIO.
 struct PendingFermata {
     Fraction tick;
     track_idx_t track;
     mu::engraving::SymId symId;
 };
 
-// Breath / caesura intents (tipo 0xA7/0xA8), attached to the chord segment.
+// Breath / caesura (tipo 0xA7/0xA8).
 struct PendingBreath {
     Fraction tick;
     track_idx_t track;
     mu::engraving::SymId symId;
 };
 
-// Measure repeat intents (tipo 0xA3): replace measure content with a "%" symbol.
+// Measure repeat (tipo 0xA3).
 struct PendingMeasureRepeat {
     Fraction measTick;
     int staffIdx;
 };
 
-// Bowing/stroke intents (tipo 0xC4, 0xC5), deferred like ARPEGGIO.
+// Bowing/stroke (tipo 0xC4/0xC5), deferred like ARPEGGIO.
 // v0xC4: 0xC4=stringsUpBow, 0xC5=stringsDownBow; v0xC2: 0xC4=articAccentAbove.
 struct PendingBowing {
     Fraction tick;
     track_idx_t track;
     mu::engraving::SymId symId;
-    int measIdx = -1;       // source measure index
-    bool crossMeasure = false;  // no voice=0 note at same raw Encore tick; belongs to next measure
-    // Used for xoffset-cluster tick correction (see resolveFingeringAndBowing).
-    int ornXoffset = 0;     // raw ORN.xoffset byte — absolute horizontal position in the measure
-    int encTickRaw = 0;     // raw Encore tick of the ORN element
+    int measIdx = -1;
+    bool crossMeasure = false;  // no voice=0 note at same enc tick; belongs to next measure
+    int ornXoffset = 0;         // absolute horizontal pixel position (for xoffset-cluster correction)
+    int encTickRaw = 0;
 };
 
-// Fingering number intents from stand-alone ORN elements (tipo 0xB9..0xBD),
-// deferred because the chord segment is not built yet at ORN parse time.
+// Fingering from stand-alone ORN elements (tipo 0xB9..0xBD), deferred like ARPEGGIO.
 struct PendingOrnFingering {
     Fraction tick;
     track_idx_t track;
@@ -152,19 +145,19 @@ struct PendingOrnFingering {
     bool preferSibling = false;  // more ORNs than v0 notes at tick: belongs to 2nd-staff chord
 };
 
-// Segno/Coda markers (tipo 0xA2/0xA6), attached to the measure, not a chord.
+// Segno/Coda markers (tipo 0xA2/0xA6).
 struct PendingMarker {
     Fraction tick;
     MarkerType type;
 };
 
-// Lyric syllables queued for attachment. Tick stored so we can find the
-// closest chord at measure end (queue index shifts with ORN elements).
+// Lyric syllables queued for attachment. encTick lets us find the correct chord even
+// when queue index shifts due to ORN elements.
 struct PendingLyric {
-    int encTick;        // raw Encore tick within the current measure
-    String text;        // the syllable text (separators are pre-filtered)
-    bool hyphenBefore;  // a "-" LYRIC element preceded this syllable
-    bool hyphenAfter;   // a "-" LYRIC element follows this syllable
+    int encTick;
+    String text;
+    bool hyphenBefore;
+    bool hyphenAfter;
 };
 
 struct BuildCtx
@@ -173,8 +166,7 @@ struct BuildCtx
     const EncRoot& enc;
     const EncFormatReader* fmt { nullptr };    // set in buildScore(), non-owning
 
-    // Format capability flags, set from fmt in buildScore() so that importer
-    // phases do not need to query the reader directly.
+    // Format capability flags set from fmt in buildScore().
     bool impliedTuplets      { false };  // v0xC2: tuplet membership by rdur/faceValue mismatch
     bool g1LowTieSender      { false };  // v0xC2: grace1 low nibble encodes tie-sender indicator
     bool alMezuroIsReliable  { true };   // v0xC2=false: alMezuro byte has no valid measure-count semantics
@@ -185,43 +177,35 @@ struct BuildCtx
     std::vector<ClefType> staffTemplateConcertClef {};
     std::vector<ClefType> staffTemplateTransposingClef {};
 
-    // Populated by buildMeasures(): nominal time sig of the score (differs from
-    // measures[0] when the first measure is a pickup / anacrusis).
+    // Nominal time sig of the score (differs from measures[0] when the first measure is a pickup).
     Fraction nominalTimeSig { 4, 4 };
     TimeSigType nominalTimeSigType { TimeSigType::NORMAL };
 
-    // Populated by buildMeasures(): tick (in engraving ticks) → TimeSigType for
-    // measures whose glyph encodes a non-numeric display (e.g. common time "C").
+    // Tick → TimeSigType for measures with non-numeric display (e.g. common time "C").
     std::map<int, TimeSigType> measTickToTimeSigType {};
 
-    // Populated by buildMeasures(): encToMsIdx[i] = MuseScore measure index of the
-    // first measure produced from enc.measures[i].  Accounts for single-block
-    // multi-measure rest expansion (mrestCount > 1).
+    // encToMsIdx[i] = MuseScore measure index of the first measure from enc.measures[i].
+    // Accounts for multi-measure rest expansion (mrestCount > 1).
     std::vector<size_t> encToMsIdx {};
 
-    // Populated by buildNoteLoop():
     std::vector<Measure*> measuresByIdx {};
     std::vector<PendingHairpin> pendingHairpins {};
     std::vector<PendingSlur> pendingSlurs {};
     std::vector<PendingArpeggio> pendingArpeggios {};
     std::vector<PendingOrnTremolo> pendingOrnTremolos {};
     std::vector<PendingTrill> pendingTrills {};
-    // TRILL_END (0x35) ticks by track; consumed by resolveOrnaments() to compute span endpoints.
+    // TRILL_END ticks by track; consumed by resolveOrnaments() to compute span endpoints.
     std::map<track_idx_t, std::vector<mu::engraving::Fraction> > pendingTrillEnds {};
     std::vector<PendingStaccato> pendingStaccatos {};
     std::vector<PendingFermata> pendingFermatas {};
     std::vector<PendingBreath> pendingBreaths {};
     std::vector<PendingMeasureRepeat> pendingMeasureRepeats {};
     std::vector<PendingBowing> pendingBowings {};
-    // Note xoffsets for bowing-mark xoffset clustering: (measIdx, staffIdx) →
-    // list of (enc_tick, note.xoffset). Populated during buildNoteLoop().
+    // (measIdx, staffIdx) → list of (enc_tick, note.xoffset) for bowing xoffset clustering.
     std::map<std::pair<int,int>, std::vector<std::pair<int,int>>> noteXoffByMeasStaff {};
     std::vector<PendingOrnFingering> pendingOrnFingerings {};
     std::vector<PendingMarker> pendingMarkers {};
     std::map<track_idx_t, std::vector<PendingLyric> > pendingLyrics {};
-
-    // Per-measure note loop state (keyed by (staffIdx, msVoice) unless noted).
-    // All start empty; BuildCtx is constructed fresh for every import.
 
     // Volta being coalesced: equal-bitmask runs collapse into one Volta.
     Volta* activeVolta { nullptr };
@@ -229,35 +213,26 @@ struct BuildCtx
 
     std::map<std::pair<int, int>, TupletTracker> tuplets {};
 
-    // Pending tie-start notes: key=(staffIdx, voice, pitch), value=Note* to tie FROM.
-    // Persists across measures for ties across barlines.
+    // Pending tie-start notes, persists across measures. key=(staffIdx, voice, pitch).
     std::map<std::tuple<int, int, int>, Note*> pendingTieNote {};
 
     // Accumulated written position per (staffIdx, msVoice).
     std::map<std::pair<int, int>, Fraction> cumTick {};
-    // Last MIDI tick placed (chord detection — same MIDI tick = same chord).
+    // Last MIDI tick placed; same tick = same chord.
     std::map<std::pair<int, int>, int> prevMidiTick {};
-    // Encore voice of last note placed. Prevents chord-extension misdetection.
+    // Encore voice of last note placed; guards against chord-extension misdetection.
     std::map<std::pair<int, int>, int> prevEncVoice {};
-    // MuseScore tick of last chord root.
     std::map<std::pair<int, int>, Fraction> lastChordPos {};
-    // Last Encore tick at which a REST was placed, per (staffIdx, msVoice).
-    // Used to absorb duplicate rests that arrive when multiple Encore voices
-    // (e.g. voice=5 and voice=6) both route to the same MuseScore voice: the
-    // second REST at the same enc tick is a chord-extension for rests.
+    // Last enc tick at which a REST was placed; absorbs duplicate rests when multiple
+    // Encore voices route to the same MuseScore voice.
     std::map<std::pair<int, int>, int> prevRestTick {};
 
     // Grace chords held detached; attached to the next normal chord.
     std::map<std::pair<int, int>, std::vector<Chord*> > pendingGraces {};
-
-    // Ticks borrowed by grace notes from the following note; used to suppress
-    // spurious gap-snap rests after a grace group. Cleared each measure.
+    // Ticks borrowed by grace notes; suppresses spurious gap-snap rests after a grace group.
     std::map<std::pair<int, int>, int> graceStolenTicks {};
-
-    // Inner (nested) TupletTrackers: active only when a note is inside a nested group.
-    // Keyed by the same trackKey as ctx.tuplets.  Cleared each measure alongside tuplets.
+    // Inner (nested) TupletTrackers; cleared each measure alongside tuplets.
     std::map<std::pair<int, int>, TupletTracker> innerTuplets {};
-
     // True when the next syllable follows a hyphen; reset at measure boundary.
     std::map<track_idx_t, bool> nextLyricHyphenBefore {};
 };

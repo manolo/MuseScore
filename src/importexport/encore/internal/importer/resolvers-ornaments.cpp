@@ -46,7 +46,7 @@ void resolveOrnaments(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
 
-    // Resolve arpeggio intents: ORN written before chord in MEAS, so attach now.
+    // Arpeggios: ORN precedes chord in MEAS, so deferred to resolve phase.
     for (const PendingArpeggio& pa : ctx.pendingArpeggios) {
         Chord* c = findChordAt(score, pa.tick, pa.track);
         if (!c) {
@@ -114,9 +114,8 @@ void resolveOrnaments(BuildCtx& ctx)
             continue;
         }
         Chord* c = toChord(el);
-        // If the resolved chord is the tied-to continuation, walk back to the tie start.
-        // Encore places the tremolo ORN after the tied-from note in the stream, so the
-        // ORN tick lands on the continuation chord; the tremolo belongs on the first note.
+        // Encore places the tremolo ORN after the tied-from note, so tick lands on the
+        // continuation chord; walk back to the tie start where the tremolo belongs.
         if (!c->notes().empty() && c->notes().front()->tieBack()) {
             Chord* prev = c->notes().front()->tieBack()->startNote()->chord();
             if (prev) {
@@ -143,7 +142,7 @@ void resolveOrnaments(BuildCtx& ctx)
         m->add(mk);
     }
 
-    // Standalone fermata ORNs (tipo 0xCC/0xCD); attach to segment, not chord.
+    // Fermatas (0xCC/0xCD): attach to segment, not chord.
     for (const PendingFermata& pf : ctx.pendingFermatas) {
         Chord* c = findChordAt(score, pf.tick, pf.track);
         if (!c) {
@@ -171,7 +170,7 @@ void resolveOrnaments(BuildCtx& ctx)
         seg->add(fermata);
     }
 
-    // Add staccato unless already present (artic byte 0x1D produces the same glyph).
+    // Staccatos: deduplicate (artic byte 0x1D produces the same glyph).
     for (const PendingStaccato& ps : ctx.pendingStaccatos) {
         Chord* c = findChordAt(score, ps.tick, ps.track);
         if (!c) {
@@ -194,15 +193,12 @@ void resolveOrnaments(BuildCtx& ctx)
         c->add(art);
     }
 
-    // Resolve trill intents.
-    // When Encore marks a trill span (TRILL_END in the same measure, or alMezuro>0),
-    // create a Trill spanner (tr + wavy line). Otherwise create only the Ornament glyph.
+    // Trills: create a Trill spanner when TRILL_END exists or alMezuro>0; else Ornament glyph.
     for (const PendingTrill& pt : ctx.pendingTrills) {
         Fraction trillTick = pt.tick;
         Chord* trillChord = findChordAt(score, trillTick, pt.track);
         if (!trillChord) {
-            // Fallback for ornaments placed on rest ticks (e.g. TRILL_SIMPLE at a rest position):
-            // snap forward to the next chord in the same measure and update the tick.
+            // TRILL_SIMPLE may land on a rest tick; snap forward to next chord in measure.
             if (pt.isAlt) {
                 Measure* m = score->tick2measure(pt.tick);
                 if (m) {
@@ -225,10 +221,9 @@ void resolveOrnaments(BuildCtx& ctx)
             }
         }
 
-        // Three cases:
-        //  (A) TRILL_ALT within a TRILL_START span: secondary marker → Ornament glyph always.
-        //  (B) TRILL_ALT standalone (no prior START on same track): spanner on note duration.
-        //  (C) TRILL_START: spanner when explicit endpoint found; glyph if no endpoint.
+        // (A) TRILL_ALT within a TRILL_START span: Ornament glyph only.
+        // (B) TRILL_ALT standalone: spanner on note duration.
+        // (C) TRILL_START: spanner when endpoint found; glyph otherwise.
         const bool altWithinSpan = pt.isAlt && [&]() {
             for (const PendingTrill& other : ctx.pendingTrills) {
                 if (!other.isAlt && other.track == pt.track && other.tick < pt.tick) {
@@ -240,11 +235,10 @@ void resolveOrnaments(BuildCtx& ctx)
         const bool standaloneAlt = pt.isAlt && !altWithinSpan;
 
         Fraction endTick;
-        bool hasSpan = !altWithinSpan;  // case A: never try to build a span
+        bool hasSpan = !altWithinSpan;
 
         if (hasSpan) {
             hasSpan = false;
-            // Check for a TRILL_END marker on this track; erase consumed entry.
             auto it = ctx.pendingTrillEnds.find(pt.track);
             if (it != ctx.pendingTrillEnds.end()) {
                 auto& endVec = it->second;
@@ -258,7 +252,7 @@ void resolveOrnaments(BuildCtx& ctx)
                 }
             }
 
-            // Cross-measure span via alMezuro
+            // Cross-measure span via alMezuro field.
             if (!hasSpan && pt.alMezuro > 0) {
                 const size_t endMeasIdx = pt.measIdx + static_cast<size_t>(pt.alMezuro);
                 if (endMeasIdx < ctx.measuresByIdx.size()) {
@@ -271,8 +265,7 @@ void resolveOrnaments(BuildCtx& ctx)
             }
         }
 
-        // Case B: standalone TRILL_ALT with no explicit endpoint → span the note's duration.
-        // TRILL_SIMPLE always places a glyph only (never a spanner).
+        // TRILL_SIMPLE: glyph only. Standalone TRILL_ALT: span note duration.
         if (pt.isSimple) {
             hasSpan = false;
         } else if (standaloneAlt && (!hasSpan || endTick <= trillTick)) {
@@ -293,8 +286,7 @@ void resolveOrnaments(BuildCtx& ctx)
             score->addElement(trill);
         } else {
             const SymId sid = pt.isSimple ? pt.simpleSymId : SymId::ornamentTrill;
-            // Dedup: secondary 16-byte markers (e.g. trill wavy-line extent) can snap to
-            // the same chord as the primary glyph — only add if not already present.
+            // Dedup: secondary wavy-line markers can snap to the same chord as the primary.
             bool alreadyHas = false;
             for (Articulation* a : trillChord->articulations()) {
                 if (a && a->isOrnament() && toOrnament(a)->symId() == sid) {
@@ -311,8 +303,7 @@ void resolveOrnaments(BuildCtx& ctx)
         }
     }
 
-    // Standalone TRILL_END entries (not consumed by any TRILL_START):
-    // Create a Trill spanner covering the note's duration.
+    // Unconsumed TRILL_END entries: create a Trill spanner covering the note's duration.
     for (auto& [trTrack, endTicks] : ctx.pendingTrillEnds) {
         for (const Fraction& eTick : endTicks) {
             Chord* c = findChordAt(score, eTick, trTrack);
@@ -334,12 +325,9 @@ void resolveOrnaments(BuildCtx& ctx)
     }
     ctx.pendingTrillEnds.clear();
 
-    // Breath marks and caesuras (tipo 0xA7/0xA8).
-    // pb.tick is the tick of the note the breath precedes. The breath must be attached
-    // after the preceding chord, so we search backward from pb.tick to find it.
+    // Breaths/caesuras (0xA7/0xA8): pb.tick is the following note; attach after the
+    // preceding chord. If pb.tick is at a measure boundary, that chord is in the prior measure.
     for (const PendingBreath& pb : ctx.pendingBreaths) {
-        // If pb.tick is exactly at a measure boundary, the preceding chord is in the
-        // previous measure; otherwise it is in the measure containing pb.tick.
         Measure* m = score->tick2measure(pb.tick);
         if (m && m->tick() == pb.tick) {
             MeasureBase* prevBase = m->prev();
@@ -353,7 +341,6 @@ void resolveOrnaments(BuildCtx& ctx)
         if (!m) {
             continue;
         }
-        // Find the last chord on this track whose endpoint is at or before pb.tick.
         Chord* prevChord = nullptr;
         for (Segment* s = m->first(SegmentType::ChordRest); s;
              s = s->next(SegmentType::ChordRest)) {
@@ -365,7 +352,6 @@ void resolveOrnaments(BuildCtx& ctx)
                 }
             }
         }
-        // Fall back to pb.tick if no preceding chord found (e.g. breath before first note).
         const Fraction breathTick = prevChord
                                     ? prevChord->tick() + prevChord->actualTicks()
                                     : pb.tick;
@@ -382,7 +368,7 @@ void resolveOrnaments(BuildCtx& ctx)
         seg->add(breath);
     }
 
-    // Measure repeats (tipo 0xA3): replace measure content with "%" symbol.
+    // Measure repeats (0xA3): replace measure content with "%" symbol.
     for (const PendingMeasureRepeat& pmr : ctx.pendingMeasureRepeats) {
         Measure* m = score->tick2measure(pmr.measTick);
         if (!m) {

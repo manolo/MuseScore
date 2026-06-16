@@ -76,8 +76,8 @@
 using namespace mu::engraving;
 
 namespace mu::iex::encore {
-// True if every element in the measure is a REST element with mrestCount > 1.
-// Multi-staff files emit one REST per staff, so the measure can have N > 1 elements.
+// True if every element in the measure is a REST with mrestCount > 1.
+// Multi-staff files emit one REST per staff, so there can be N > 1 elements.
 static bool encMeasHasMultiRest(const EncMeasure& m)
 {
     if (m.elements.empty()) {
@@ -92,12 +92,9 @@ static bool encMeasHasMultiRest(const EncMeasure& m)
 }
 
 // Returns the number of MuseScore measures to create for a single EncMeasure.
-// Normally 1:1, but Encore stores "N consecutive empty display measures" as a single MEAS
-// block whose REST elements have mrestCount == N (byte +15 of the REST element data).
-// Multi-staff files emit one REST element per staff inside the block; the count is read
-// from the first element (all staves store the same count).
-// Expansion is suppressed when the predecessor is itself a multi-measure REST block
-// (prevents cascading in the rare case Encore writes consecutive mrest blocks).
+// Encore stores N consecutive empty measures as one MEAS block with mrestCount==N
+// (byte +15 of REST element data). Expansion is suppressed when the predecessor is
+// already an mrest block, preventing cascades from consecutive mrest blocks.
 static int encMeasDisplayCount(const EncMeasure& m, const EncMeasure* prev)
 {
     if (m.elements.empty()) {
@@ -118,9 +115,7 @@ static int encMeasDisplayCount(const EncMeasure& m, const EncMeasure* prev)
     return cnt;
 }
 
-// Map an Encore time-signature glyph byte to the MuseScore TimeSigType.
-// Encore encodes common time as 0x43 ('C') or 0x63 ('c') depending on version.
-// Glyph 0x00 means normal numeric display.
+// Encore encodes common time as 0x43 ('C') or 0x63 ('c'); 0x00 means normal numeric.
 static TimeSigType encGlyphToTimeSigType(quint8 glyph, Fraction ts)
 {
     if ((glyph == 0x43 || glyph == 0x63) && ts == Fraction(4, 4)) {
@@ -134,7 +129,7 @@ void buildMeasures(BuildCtx& ctx)
     MasterScore* score = ctx.score;
     const EncRoot& enc = ctx.enc;
 
-    // Pickup measure detection: measure 0 holds the short duration, measure 1 the real sig.
+    // Pickup measure: measure 0 holds the short duration, measure 1 the real sig.
     {
         int n0 = !enc.measures.empty() && enc.measures[0].timeSigNum > 0
                  ? enc.measures[0].timeSigNum : 4;
@@ -151,9 +146,8 @@ void buildMeasures(BuildCtx& ctx)
         }
     }
 
-    // Nominal time sig type (common time "C" or normal numeric display).
+    // Nominal time sig type; use measure [1] when [0] is a pickup.
     {
-        // The nominal measure is [1] when [0] is a pickup with a different fraction.
         const size_t nomIdx = (enc.measures.size() >= 2
                                && ctx.nominalTimeSig != Fraction(
                                    enc.measures[0].timeSigNum > 0 ? enc.measures[0].timeSigNum : 4,
@@ -185,10 +179,8 @@ void buildMeasures(BuildCtx& ctx)
             Measure* measure = Factory::createMeasure(score->dummy()->system());
             measure->setTick(Fraction::fromTicks(currentTick));
 
-            // Case A: timeSig[0] != timeSig[1] — Encore stored a shorter time signature
-            // for the pickup measure. Shorten the measure immediately.
-            // Case B (same timesig, partial content): detected after the note loop in
-            // noteloop.cpp using the actual cumTick across all staves.
+            // Case A: timeSig[0] != timeSig[1] — pickup with explicit shorter sig; shorten now.
+            // Case B (same sig, partial content): detected post-noteloop via actual cumTick.
             const bool isPickupA = firstMeasure && di == 0 && ts != ctx.nominalTimeSig;
             measure->setTimesig(isPickupA ? ctx.nominalTimeSig : ts);
             measure->setTicks(ts);
@@ -241,9 +233,7 @@ void buildInitialSignatures(BuildCtx& ctx)
                                    ? ctx.staffTemplateTransposingClef[si] : ClefType::INVALID;
             const int keyOffset = si < static_cast<int>(ctx.staffPitchOffset.size())
                                   ? ctx.staffPitchOffset[si] : 0;
-            // If the staff's instrument carries a drumset (assigned via PERC clef or GM
-            // percussion range), use PERC clef regardless of the LINE block's enc clef.
-            // Without this, C3L/C4L/F clefs from the LINE block override the drumset clef.
+            // Drumset instruments always use PERC clef; LINE block clefs must not override it.
             const Staff* st = score->staff(static_cast<staff_idx_t>(si));
             const bool hasDrumset = st && st->part() && st->part()->instrument()
                                     && st->part()->instrument()->drumset();
@@ -253,18 +243,14 @@ void buildInitialSignatures(BuildCtx& ctx)
         }
     }
 
-    // Emit TimeSig elements at change points (buildMeasures sets per-measure properties only).
-    // Use identical() rather than operator== to distinguish time signatures whose fractions
-    // are mathematically equal but musically distinct: Fraction(6,8) == Fraction(3,4) via
-    // cross-multiplication (6×4 == 3×8 = 24), so operator== silently suppresses 6/8 → 3/4
-    // and 3/4 → 6/8 changes.  identical() compares numerator and denominator directly.
+    // Emit TimeSig elements at change points. Use identical() not operator==: Fraction(6,8)
+    // == Fraction(3,4) via cross-multiplication, so operator== would miss 6/8 ↔ 3/4 changes.
     Fraction prevTs = ctx.nominalTimeSig;
     for (const Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
         Fraction mTs = m->timesig();
         if (mTs.identical(prevTs)) {
             continue;
         }
-        // Time sig changed — add a TimeSig element on every staff at this measure.
         Fraction mTick = m->tick();
         auto tsTypeIt = ctx.measTickToTimeSigType.find(mTick.ticks());
         TimeSigType tsType = (tsTypeIt != ctx.measTickToTimeSigType.end())

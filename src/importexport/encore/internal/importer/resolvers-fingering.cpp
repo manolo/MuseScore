@@ -37,9 +37,8 @@
 using namespace mu::engraving;
 
 namespace mu::iex::encore {
-// Helper: scan `m` for the first ChordRest segment that has a chord on
-// `preferTrack`; also accept `fallbackTrack` if preferred is not found.
-// Sets *outTrack to the track actually used; returns nullptr if none found.
+// Scan `m` for the first chord on preferTrack, falling back to fallbackTrack.
+// Sets *outTrack to the track used; returns nullptr if neither is found.
 static Chord* findFirstChordInMeasure(Measure* m, track_idx_t preferTrack,
                                       track_idx_t fallbackTrack,
                                       track_idx_t* outTrack)
@@ -82,19 +81,15 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
 
-    // Xoffset-cluster tick correction for bowing marks.
-    // Encore sometimes stores an ORN with enc tick=0 even though it visually
-    // appears at a later beat (e.g. beat 4). Other ORNs in the same measure on
-    // different staves target the same beat and carry matching ornXoffsets; if
-    // any of them has a reliable enc tick (> 0), the cluster inherits it.
-    // Fallback: when no anchor exists, find the note whose xoffset is closest
-    // to the ORN's ornXoffset using per-measure note xoffset data.
-    static constexpr int BOW_XOFF_CLUSTER = 6;   // ornXoffsets within ±6 → same beat
+    // Bowing tick correction: Encore sometimes stores ORN enc tick=0 even when the mark
+    // visually falls on a later beat. Phase 1: adopt the tick from a same-measure ORN with a
+    // matching ornXoffset (±BOW_XOFF_CLUSTER). Phase 2: match via per-measure note xoffset data.
+    static constexpr int BOW_XOFF_CLUSTER = 6;
     for (PendingBowing& pb : ctx.pendingBowings) {
         if (pb.crossMeasure || pb.encTickRaw > 0) {
-            continue;   // reliable tick or cross-measure → no correction needed
+            continue;
         }
-        // Phase 1: find an anchor in the same measure with a similar xoffset.
+        // Phase 1: anchor from same-measure ORN with matching xoffset.
         bool fixed = false;
         for (const PendingBowing& anchor : ctx.pendingBowings) {
             if (&anchor == &pb || anchor.measIdx != pb.measIdx || anchor.encTickRaw == 0) {
@@ -109,8 +104,7 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
         if (fixed) {
             continue;
         }
-        // Phase 2: no anchor — use the note on the same staff whose xoffset is
-        // closest (smallest non-negative ornXoffset – note.xoffset).
+        // Phase 2: match via closest note xoffset on the same staff.
         const int staffIdx = static_cast<int>(pb.track / VOICES);
         auto it = ctx.noteXoffByMeasStaff.find({ pb.measIdx, staffIdx });
         if (it == ctx.noteXoffByMeasStaff.end()) {
@@ -126,9 +120,7 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
             }
         }
         if (bestTick >= 0) {
-            // Compute wholeTicks from the measure's time signature.
-            // buildNoteLoop always uses 960 ticks per whole note.
-            static constexpr int wholeTicks = 960;
+            static constexpr int wholeTicks = 960;  // buildNoteLoop uses 960 ticks/whole
             const Measure* m = (pb.measIdx >= 0 && pb.measIdx < static_cast<int>(ctx.measuresByIdx.size()))
                                ? ctx.measuresByIdx[pb.measIdx] : nullptr;
             if (m) {
@@ -137,8 +129,7 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
         }
     }
 
-    // Resolve bowing marks from stand-alone ORN elements.
-    // crossMeasure=true: ORN misplaced by Encore; belongs to the next measure's first chord on the sibling staff.
+    // Bowing marks: crossMeasure means Encore misplaced the ORN in the previous measure.
     for (const PendingBowing& pb : ctx.pendingBowings) {
         track_idx_t useTrack = pb.track;
         Chord* c = nullptr;
@@ -154,9 +145,7 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
             if (m) {
                 Segment* seg = m->findSegment(SegmentType::ChordRest, pb.tick);
                 if (seg) {
-                    // The ORN voice is always 0; scan all voices of the ORN's own staff
-                    // before falling back to the sibling staff. This handles the common
-                    // case where notes are in voice=1+ and the ORN is stored at voice=0.
+                    // ORN is always voice 0; scan all voices of own staff before sibling.
                     const track_idx_t staffBase = (pb.track / VOICES) * VOICES;
                     for (track_idx_t v = 0; v < VOICES && !c; ++v) {
                         EngravingItem* el = seg->element(staffBase + v);
@@ -166,7 +155,6 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
                         }
                     }
                     if (!c) {
-                        // Sibling-staff fallback: same search across the adjacent staff.
                         const track_idx_t sibBase = staffBase + VOICES;
                         for (track_idx_t v = 0; v < VOICES && !c; ++v) {
                             EngravingItem* el = seg->element(sibBase + v);
@@ -189,8 +177,8 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
         c->add(art);
     }
 
-    // Resolve fingering ORNs (0xB9..0xBD). Multiple ORNs at the same tick attach to successive notes low-to-high; fingeringCount tracks the index.
-    // crossMeasure: next-measure sibling-staff chord. preferSibling: 2nd-staff chord at same tick.
+    // Fingering ORNs (0xB9..0xBD): multiple ORNs at the same tick attach low-to-high.
+    // crossMeasure: next-measure sibling chord. preferSibling: 2nd-staff chord at same tick.
     std::map<Chord*, int> fingeringCount;
     for (const PendingOrnFingering& pf : ctx.pendingOrnFingerings) {
         track_idx_t useTrack = pf.track;
@@ -209,7 +197,6 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
                 if (seg) {
                     track_idx_t sibTrack = pf.track + VOICES;
                     if (pf.preferSibling) {
-                        // Pattern B: 2nd-staff chord takes priority.
                         EngravingItem* el = seg->element(sibTrack);
                         if (el && el->isChord()) {
                             c = toChord(el);
@@ -254,14 +241,11 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
         n->add(f);
     }
 
-    // Lock each Encore system so it always contains exactly the measures specified in
-    // the LINE block, regardless of spatium. SystemLocks replace LayoutBreak::LINE because
-    // they are hard constraints — the layout engine compresses note spacing within the
-    // locked system rather than redistributing measures. This preserves Encore's line
-    // layout without needing to reduce the staff space to unreadable sizes.
+    // SystemLocks enforce Encore's line layout as hard constraints so the engine compresses
+    // spacing within the system rather than redistributing measures across lines.
     {
         const auto& lines  = ctx.enc.lines;
-        const auto& enc2ms = ctx.encToMsIdx;   // MEAS-block index → first MuseScore measure index
+        const auto& enc2ms = ctx.encToMsIdx;
         const int totalMeas = static_cast<int>(ctx.measuresByIdx.size());
 
         for (const auto& line : lines) {
@@ -281,6 +265,7 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
             // Last MuseScore measure = first of the last MEAS block's range, plus however
             // many MuseScore measures that block produces (gap to next block, or to end).
             const int lastBlockMs = static_cast<int>(enc2ms[static_cast<size_t>(lastBlock)]);
+            // Last MS measure = first MS index of last block's range plus the block's span.
             const int nextBlockMs = (lastBlock + 1 < static_cast<int>(enc2ms.size()))
                                     ? static_cast<int>(enc2ms[static_cast<size_t>(lastBlock + 1)])
                                     : totalMeas;
