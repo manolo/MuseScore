@@ -20,30 +20,13 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "reader.h"
-#include "reader-v0xa6.h"
-#include "reader-v0xc2.h"
-#include "reader-v0xc4.h"
+#pragma once
 
-#include "log.h"
+#include <memory>
+#include "reader.h"
 
 namespace mu::iex::encore {
 
-// Maps magic byte to format reader; add new format cases here.
-std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 magic)
-{
-    switch (magic) {
-    case 0xA6:
-        return std::make_unique<EncFormatReader_V0xA6>();
-    case 0xC2:
-        return makeFormatReader_V0xC2();
-    case 0xC4:
-        return makeFormatReader_V0xC4();
-    default:
-        LOGW() << QString("Encore: unsupported format version 0x%1 - import may fail")
-                      .arg(magic, 2, 16, QChar('0'));
-        return makeFormatReader_V0xC4();
-    }
-}
+std::unique_ptr<EncFormatReader> makeFormatReader_V0xC2();
 
 } // namespace mu::iex::encore

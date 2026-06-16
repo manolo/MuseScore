@@ -28,10 +28,9 @@
 
 namespace mu::iex::encore {
 
-// Factory helpers — called from EncFormatReader::create().
-// Full class definitions are in enc-reader-v0xc4.cpp.
+// Factory helper -- called from EncFormatReader::create().
+// Full class definition is in reader-v0xc4.cpp.
 std::unique_ptr<EncFormatReader> makeFormatReader_V0xC4();
-std::unique_ptr<EncFormatReader> makeFormatReader_V0xC2();
 
 } // namespace mu::iex::encore
 
