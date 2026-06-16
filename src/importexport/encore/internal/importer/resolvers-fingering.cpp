@@ -77,6 +77,95 @@ static Chord* findFirstChordInMeasure(Measure* m, track_idx_t preferTrack,
     return nullptr;
 }
 
+static void correctBowingTickFromXoffset(
+    PendingBowing& pb,
+    const std::vector<PendingBowing>& allBowings,
+    const BuildCtx& ctx)
+{
+    // Phase 1: anchor from same-measure ORN with matching xoffset.
+    static constexpr int BOW_XOFF_CLUSTER = 6;
+    bool fixed = false;
+    for (const PendingBowing& anchor : allBowings) {
+        if (&anchor == &pb || anchor.measIdx != pb.measIdx || anchor.encTickRaw == 0) {
+            continue;
+        }
+        if (std::abs(anchor.ornXoffset - pb.ornXoffset) <= BOW_XOFF_CLUSTER) {
+            pb.tick = anchor.tick;
+            fixed = true;
+            break;
+        }
+    }
+    if (fixed) {
+        return;
+    }
+    // Phase 2: match via closest note xoffset on the same staff.
+    const int staffIdx = static_cast<int>(pb.track / VOICES);
+    auto it = ctx.noteXoffByMeasStaff.find({ pb.measIdx, staffIdx });
+    if (it == ctx.noteXoffByMeasStaff.end()) {
+        return;
+    }
+    int bestTick = -1;
+    int bestDiff = INT_MAX;
+    for (const auto& p : it->second) {   // p = { enc_tick, note.xoffset }
+        const int diff = pb.ornXoffset - p.second;
+        if (diff >= 0 && diff < bestDiff) {
+            bestDiff = diff;
+            bestTick = p.first;
+        }
+    }
+    if (bestTick >= 0) {
+        static constexpr int wholeTicks = 960;  // buildNoteLoop uses 960 ticks/whole
+        const Measure* m = (pb.measIdx >= 0 && pb.measIdx < static_cast<int>(ctx.measuresByIdx.size()))
+                           ? ctx.measuresByIdx[pb.measIdx] : nullptr;
+        if (m) {
+            pb.tick = m->tick() + Fraction(bestTick, wholeTicks);
+        }
+    }
+}
+
+static void applySystemLocksFromLines(BuildCtx& ctx)
+{
+    const auto& lines  = ctx.enc.lines;
+    const auto& enc2ms = ctx.encToMsIdx;
+    const int totalMeas = static_cast<int>(ctx.measuresByIdx.size());
+
+    for (const auto& line : lines) {
+        if (line.measureCount <= 0) {
+            continue;
+        }
+        const int firstBlock = static_cast<int>(line.start);
+        const int lastBlock  = firstBlock + static_cast<int>(line.measureCount) - 1;
+
+        if (firstBlock < 0 || lastBlock < firstBlock
+            || firstBlock >= static_cast<int>(enc2ms.size())
+            || lastBlock >= static_cast<int>(enc2ms.size())) {
+            continue;
+        }
+
+        const int firstMsIdx = static_cast<int>(enc2ms[static_cast<size_t>(firstBlock)]);
+        // Last MuseScore measure = first of the last MEAS block's range, plus however
+        // many MuseScore measures that block produces (gap to next block, or to end).
+        const int lastBlockMs = static_cast<int>(enc2ms[static_cast<size_t>(lastBlock)]);
+        // Last MS measure = first MS index of last block's range plus the block's span.
+        const int nextBlockMs = (lastBlock + 1 < static_cast<int>(enc2ms.size()))
+                                ? static_cast<int>(enc2ms[static_cast<size_t>(lastBlock + 1)])
+                                : totalMeas;
+        const int lastMsIdx = nextBlockMs - 1;
+
+        if (firstMsIdx < 0 || lastMsIdx < firstMsIdx
+            || firstMsIdx >= totalMeas || lastMsIdx >= totalMeas) {
+            continue;
+        }
+
+        Measure* firstM = ctx.measuresByIdx[static_cast<size_t>(firstMsIdx)];
+        Measure* lastM  = ctx.measuresByIdx[static_cast<size_t>(lastMsIdx)];
+        if (!firstM || !lastM) {
+            continue;
+        }
+        ctx.score->addSystemLock(new SystemLock(firstM, lastM));
+    }
+}
+
 void resolveFingeringAndBowing(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
@@ -84,49 +173,11 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
     // Bowing tick correction: Encore sometimes stores ORN enc tick=0 even when the mark
     // visually falls on a later beat. Phase 1: adopt the tick from a same-measure ORN with a
     // matching ornXoffset (±BOW_XOFF_CLUSTER). Phase 2: match via per-measure note xoffset data.
-    static constexpr int BOW_XOFF_CLUSTER = 6;
     for (PendingBowing& pb : ctx.pendingBowings) {
         if (pb.crossMeasure || pb.encTickRaw > 0) {
             continue;
         }
-        // Phase 1: anchor from same-measure ORN with matching xoffset.
-        bool fixed = false;
-        for (const PendingBowing& anchor : ctx.pendingBowings) {
-            if (&anchor == &pb || anchor.measIdx != pb.measIdx || anchor.encTickRaw == 0) {
-                continue;
-            }
-            if (std::abs(anchor.ornXoffset - pb.ornXoffset) <= BOW_XOFF_CLUSTER) {
-                pb.tick = anchor.tick;
-                fixed = true;
-                break;
-            }
-        }
-        if (fixed) {
-            continue;
-        }
-        // Phase 2: match via closest note xoffset on the same staff.
-        const int staffIdx = static_cast<int>(pb.track / VOICES);
-        auto it = ctx.noteXoffByMeasStaff.find({ pb.measIdx, staffIdx });
-        if (it == ctx.noteXoffByMeasStaff.end()) {
-            continue;
-        }
-        int bestTick = -1;
-        int bestDiff = INT_MAX;
-        for (const auto& p : it->second) {   // p = { enc_tick, note.xoffset }
-            const int diff = pb.ornXoffset - p.second;
-            if (diff >= 0 && diff < bestDiff) {
-                bestDiff = diff;
-                bestTick = p.first;
-            }
-        }
-        if (bestTick >= 0) {
-            static constexpr int wholeTicks = 960;  // buildNoteLoop uses 960 ticks/whole
-            const Measure* m = (pb.measIdx >= 0 && pb.measIdx < static_cast<int>(ctx.measuresByIdx.size()))
-                               ? ctx.measuresByIdx[pb.measIdx] : nullptr;
-            if (m) {
-                pb.tick = m->tick() + Fraction(bestTick, wholeTicks);
-            }
-        }
+        correctBowingTickFromXoffset(pb, ctx.pendingBowings, ctx);
     }
 
     // Bowing marks: crossMeasure means Encore misplaced the ORN in the previous measure.
@@ -243,46 +294,6 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
 
     // SystemLocks enforce Encore's line layout as hard constraints so the engine compresses
     // spacing within the system rather than redistributing measures across lines.
-    {
-        const auto& lines  = ctx.enc.lines;
-        const auto& enc2ms = ctx.encToMsIdx;
-        const int totalMeas = static_cast<int>(ctx.measuresByIdx.size());
-
-        for (const auto& line : lines) {
-            if (line.measureCount <= 0) {
-                continue;
-            }
-            const int firstBlock = static_cast<int>(line.start);
-            const int lastBlock  = firstBlock + static_cast<int>(line.measureCount) - 1;
-
-            if (firstBlock < 0 || lastBlock < firstBlock
-                || firstBlock >= static_cast<int>(enc2ms.size())
-                || lastBlock >= static_cast<int>(enc2ms.size())) {
-                continue;
-            }
-
-            const int firstMsIdx = static_cast<int>(enc2ms[static_cast<size_t>(firstBlock)]);
-            // Last MuseScore measure = first of the last MEAS block's range, plus however
-            // many MuseScore measures that block produces (gap to next block, or to end).
-            const int lastBlockMs = static_cast<int>(enc2ms[static_cast<size_t>(lastBlock)]);
-            // Last MS measure = first MS index of last block's range plus the block's span.
-            const int nextBlockMs = (lastBlock + 1 < static_cast<int>(enc2ms.size()))
-                                    ? static_cast<int>(enc2ms[static_cast<size_t>(lastBlock + 1)])
-                                    : totalMeas;
-            const int lastMsIdx = nextBlockMs - 1;
-
-            if (firstMsIdx < 0 || lastMsIdx < firstMsIdx
-                || firstMsIdx >= totalMeas || lastMsIdx >= totalMeas) {
-                continue;
-            }
-
-            Measure* firstM = ctx.measuresByIdx[static_cast<size_t>(firstMsIdx)];
-            Measure* lastM  = ctx.measuresByIdx[static_cast<size_t>(lastMsIdx)];
-            if (!firstM || !lastM) {
-                continue;
-            }
-            ctx.score->addSystemLock(new SystemLock(firstM, lastM));
-        }
-    }
+    applySystemLocksFromLines(ctx);
 }
 } // namespace mu::iex::enc
