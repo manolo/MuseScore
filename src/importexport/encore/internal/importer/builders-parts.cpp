@@ -76,7 +76,6 @@
 using namespace mu::engraving;
 
 namespace mu::iex::encore {
-// Apply the best matching MuseScore template to `part`; return it for per-staff clef info.
 static const InstrumentTemplate* applyBestInstrument(Part* part,
                                                      const EncInstrument& instr,
                                                      bool isPercByClef,
@@ -89,7 +88,7 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
     const InstrumentTemplate* tmpl = nullptr;
     int matchStep = 0;
 
-    // Step 1: PERC clef → drumset (language-agnostic binary signal)
+    // Step 1: PERC clef → drumset
     if (isPercByClef) {
         tmpl = searchTemplate(String(u"drumset"));
         if (tmpl) {
@@ -97,11 +96,9 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         }
     }
 
-    // Step 1b: GM Percussive range (programs 113–128, 1-indexed: Agogo, Steel Drums,
-    // Woodblock, Taiko, Melodic Tom, Synth Drum…).  Instruments in this range cannot
-    // be matched by name — Encore files often use performer credits or catalog numbers
-    // instead of instrument names — so detect percussion from the MIDI program alone.
-    static constexpr int GM_PERC_FIRST = 113;   // 1-indexed, matches GM "Percussive" section
+    // Step 1b: GM Percussive range (113–128 1-indexed). Encore files often use performer
+    // credits instead of instrument names, so match percussion from MIDI program alone.
+    static constexpr int GM_PERC_FIRST = 113;
     if (!tmpl && instr.midiProgram >= GM_PERC_FIRST) {
         tmpl = searchTemplate(String(u"drumset"));
         if (tmpl) {
@@ -109,8 +106,8 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         }
     }
 
-    // Step 2: name + MIDI scoring with transposition filter — rejects templates whose non-octave transposition
-    // conflicts with encKey; C/octave templates always qualify (octave handling via pickStaffClef).
+    // Step 2: name+MIDI score with transposition filter — rejects non-octave mismatches;
+    // C/octave templates always qualify (octave handling via pickStaffClef).
     if (!tmpl) {
         tmpl = findEncoreInstrumentTemplate(instr.name, encMidi, encKey);
         if (tmpl) {
@@ -126,7 +123,7 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         }
     }
 
-    // Step 3: name scoring over drumset templates (localized names)
+    // Step 3: name scoring over drumset templates (handles localized names)
     if (!tmpl && !nameTooShort) {
         tmpl = findDrumsetTemplate(instr.name);
         if (tmpl) {
@@ -134,8 +131,7 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         }
     }
 
-    // Step 4: generic percussion keywords (last resort for labels too generic
-    // to match a specific template name: "Percusión", "Drums", "Batería"…)
+    // Step 4: generic percussion keywords ("Percusión", "Drums", "Batería"…)
     if (!tmpl && !nameTooShort) {
         const QString lname = instr.name.toLower();
         if (lname.contains(QStringLiteral("perc"))
@@ -148,7 +144,7 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         }
     }
 
-    // Step 4a: RHYTHM staff — fall back to snare-drum (neutral 1-line perc); skip MIDI so program 0 (piano) doesn't override.
+    // Step 4a: RHYTHM staff → snare-drum; skip MIDI to avoid program-0 piano override.
     if (!tmpl && isRhythm) {
         tmpl = searchTemplate(String(u"snare-drum"));
         if (tmpl) {
@@ -156,8 +152,7 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         }
     }
 
-    // Step 5: MIDI program lookup (skip for RHYTHM staves — program 0 would select Grand Piano).
-    // Accept any MIDI match as better than Grand Piano fallback; log when transposition differs.
+    // Step 5: MIDI program lookup (skipped for RHYTHM staves).
     if (!tmpl && !isRhythm && instr.midiProgram > 0) {
         const InstrumentTemplate* midiTmpl = findTemplateByMidi(instr.midiProgram - 1);
         if (midiTmpl) {
@@ -193,7 +188,7 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         instrument.instrumentLabel().setAllowGroupName(false);
         part->setInstrument(instrument);
     } else {
-        // Grand Piano fallback — user can reassign from the instrument browser.
+        // Grand Piano fallback.
         const InstrumentTemplate* pianoTmpl = searchTemplateForMidiProgram(0, 0, false);
         if (pianoTmpl) {
             LOGD() << "  instrument \"" << instr.name.toStdString()
@@ -223,8 +218,6 @@ void buildParts(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
     const EncRoot& enc = ctx.enc;
-    // staffPitchOffset: Encore stores written pitch; add Key field (chromatic semitones) to each note pitch for correct playback.
-    // staffTemplateConcertClef/TransposingClef: template clefs for octave instruments (e.g. bass guitar). INVALID if no template.
     int cumStaffIdx = 0;  // running index into enc.lines[0].staffData
     for (const auto& instr : enc.instruments) {
         int ns = instr.nstaves > 0 ? instr.nstaves : 1;
@@ -238,7 +231,6 @@ void buildParts(BuildCtx& ctx)
                               && enc.lines[0].staffData[cumStaffIdx].staffType == EncStaffType::RHYTHM;
         const InstrumentTemplate* tmpl = applyBestInstrument(part, instr, isPercByClef, isRhythm);
 
-        // Apply Encore's staff visibility flag (showByte at +19 in EncLineStaffData).
         const bool showFromLine = enc.lines.empty()
                                   || cumStaffIdx >= static_cast<int>(enc.lines[0].staffData.size())
                                   || enc.lines[0].staffData[cumStaffIdx].showStaff;
@@ -247,7 +239,7 @@ void buildParts(BuildCtx& ctx)
         }
 
         const int pitchOffset = static_cast<int>(instr.keyTransposeSemitones);
-        // Non-octave transposition: set on the instrument so display shows written pitch (Encore's stored pitch).
+        // Non-octave transposition: set on instrument so display shows written (Encore-stored) pitch.
         // Octave offsets are handled by pickStaffClef() and the template's own transposition.
         Instrument* instrument = part->instrument();
         if (instrument) {
@@ -262,13 +254,10 @@ void buildParts(BuildCtx& ctx)
                        << "\": transposition in " << keyNames[keyIdx]
                        << " (chromatic=" << iv.chromatic << " diatonic=" << iv.diatonic << ")";
             } else if (pitchOffset == 0) {
-                // encKey=0: Encore's Key field is not set, meaning "sounds as written"
-                // (ENCORE_FORMAT.md: 0 = sounds as written). Zero out ANY transposition
-                // that the selected template may carry — including octave ones (±12, ±24).
-                // A double-bass template has transposeChromatic=-12; if the enc file stores
-                // the notes at written pitch with Key=0, keeping the -12 would shift the
-                // written display up one octave. Notes are placed at semiTonePitch + 0, so
-                // the display must also apply no shift.
+                // encKey=0 means "sounds as written" (ENCORE_FORMAT.md). Zero out any
+                // transposition the template carries, including octave offsets (±12, ±24):
+                // a double-bass template has chromatic=-12, but notes are already stored at
+                // written pitch, so keeping it would shift the display up one octave.
                 const Interval tmplT = instrument->transpose();
                 if (!tmplT.isZero()) {
                     instrument->setTranspose(Interval(0, 0));

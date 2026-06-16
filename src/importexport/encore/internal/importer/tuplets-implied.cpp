@@ -43,8 +43,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
 {
     std::set<const EncMeasureElem*> result;
 
-    // Group elements by (staffIdx, voice) in tick order, collapsing same-tick notes
-    // into chord groups (each chord group = one "beat" in the tuplet run).
+    // Group by (staffIdx, voice): collapse same-tick notes into chord groups.
     std::map<std::pair<int, int>, std::vector<std::vector<const EncMeasureElem*> > > voiceChords;
     for (const EncMeasureElem* e : sortedElems) {
         EncElemType et = static_cast<EncElemType>(e->type);
@@ -68,7 +67,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
         }
     }
 
-    // Helper: get the explicit tuplet ratio from the tup byte of a chord group's first elem.
+    // Explicit tuplet ratio from the tup byte (high nibble = actual, low nibble = normal).
     auto getExplicit = [](const std::vector<const EncMeasureElem*>& grp,
                           int& outActual, int& outNormal) {
         outActual = 0;
@@ -91,7 +90,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
         }
     };
 
-    // Helper: get implied ratio for the first element of a chord group.
+    // Implied tuplet ratio from realDuration vs faceValue (v0xC2 files).
     auto getImplied = [](const std::vector<const EncMeasureElem*>& grp,
                          int& outActual, int& outNormal) {
         outActual = 0;
@@ -115,7 +114,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
         }
     };
 
-    // Helper: face value (as Fraction) for first element of a chord group.
+    // Face value as Fraction for the first element of a chord group.
     auto getFaceValue = [](const std::vector<const EncMeasureElem*>& grp) -> Fraction {
         if (grp.empty()) {
             return Fraction(0, 1);
@@ -135,19 +134,9 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
     for (auto& [key, chords] : voiceChords) {
         int n = static_cast<int>(chords.size());
 
-        // Segment-override pre-pass: find contiguous runs of notes with the same
-        // explicit tup=an:nn byte where N is not a clean multiple of an (so the run
-        // doesn't form a whole number of standard groups). Compute m from the space
-        // available after accounting for any notes before or after the segment, then
-        // reinterpret as [N:m].  Works at any position in the measure.
-        //
-        // Formula: available = durTicks - leading_dur - trailing_dur
-        //          m = round(available / fv_ticks)
-        //
-        // Examples:
-        //   M7 (15 tup=9:5, no tail):   available=960, m=960/120=8  → [15:8] ✓
-        //   M7 (12 tup=9:5 + 2 plain):  available=720, m=720/120=6  → [12:6] ✓
-        //   Mid-measure (2 plain + 12):  available=720, m=6          → [12:6] ✓
+        // Segment-override pre-pass: when N notes share a tup byte but N is not a multiple of actualN,
+        // reinterpret as [N:m] where m = round(available / fv_ticks).
+        // available = durTicks - leading_dur - trailing_dur.
         if (overrideRatios && n >= 2 && encMeas.durTicks > 0) {
             // Helper: actual Encore-tick duration of chord at index k.
             // = fv_ticks × (nn/an) for explicit tup, = fv_ticks for plain note.
@@ -195,12 +184,12 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                 }
                 int N = j - segStart;
 
-                // Must exceed one complete group AND not be a clean multiple.
+                // Override only when N exceeds one group and is not a clean multiple.
                 if (N <= a0 || (N % a0) == 0) {
                     continue;
                 }
 
-                // All notes in segment must share the same face value and be NOTEs.
+                // Require uniform face value and NOTE type throughout the segment.
                 const Fraction fv0 = getFaceValue(chords[segStart]);
                 if (fv0 <= Fraction(0, 1)) {
                     continue;
@@ -216,7 +205,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     continue;
                 }
 
-                // Compute leading and trailing actual durations.
+                // Leading/trailing durations to compute available space for the segment.
                 int leadingDur = 0;
                 for (int k = 0; k < segStart; ++k) {
                     leadingDur += actualDurEnc(k);
@@ -231,22 +220,20 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     continue;
                 }
 
-                // fv_ticks in Encore: face value as a fraction of durTicks.
-                // fv0 is in "whole note = 1" units; durTicks covers one measure.
-                // fv_enc = fv0 × durTicks (= baseLen in Encore ticks).
+                // fv_enc = fv0 × durTicks (fv0 is whole-note-relative; durTicks spans one measure).
                 const int fvEnc = static_cast<int>(
                     static_cast<long long>(fv0.numerator()) * encMeas.durTicks / fv0.denominator());
                 if (fvEnc <= 0) {
                     continue;
                 }
 
-                // m = round(available / fvEnc).
+                // m = round(available / fvEnc)
                 const int m = (available + fvEnc / 2) / fvEnc;
                 if (m <= 0) {
                     continue;
                 }
 
-                // Tolerance: |m × fvEnc - available| < 10% of available.
+                // Tolerance: error must be < 10% of available.
                 if (std::abs(m * fvEnc - available) * 10 > available) {
                     continue;
                 }
@@ -256,13 +243,8 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     continue;
                 }
 
-                // Only override when the NON-override interpretation overflows the measure.
-                // Non-override total for the segment: complete groups + orphan plain notes.
-                //   = floor(N/a0) × (fvEnc × n0) + (N%a0) × fvEnc
-                // If this fits within available space (no overflow without override), the
-                // regular explicit-group logic handles it correctly and we must not override.
-                // Example: 4 notes tup=3:2 + 1 plain Q: non-override = 480+240=720, trailing=240,
-                //   total=960 ≤ 960 → leave alone (note 4 is a legit isolated tup note).
+                // Skip override when the non-override interpretation (complete groups + orphan plain notes) fits the measure.
+                // Example: 4 notes tup=3:2 + 1 plain Q: non-override total=960 ≤ 960 → leave alone.
                 {
                     const int completeTicks = (N / a0) * (fvEnc * n0);
                     const int orphanTicks   = (N % a0) * fvEnc;
@@ -272,7 +254,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     }
                 }
 
-                // Valid segment override: mark notes and record override ratio.
+                // Mark segment and record override ratio.
                 for (int k = segStart; k < j; ++k) {
                     for (const EncMeasureElem* e2 : chords[k]) {
                         result.insert(e2);
@@ -284,14 +266,14 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
 
         int i = 0;
         while (i < n) {
-            // Skip chords already handled by the segment-override pre-pass.
+            // Already handled by segment-override pre-pass.
             if (overrideRatios && !chords[i].empty()
                 && overrideRatios->count(chords[i][0])) {
                 ++i;
                 continue;
             }
 
-            // Try explicit tuplet first, then implied.
+            // Try explicit tup byte first, then implied.
             int actualN = 0, normalN = 0;
             bool isExplicit = false;
             getExplicit(chords[i], actualN, normalN);
@@ -306,16 +288,9 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
             }
 
             if (isExplicit) {
-                // Explicit: group by face-value sum using a no-downdate baseLen rule.
-                // baseLen starts as the first note's face value and only updates to a
-                // smaller value when the current faceSum still fits within the new
-                // (lower) threshold. This correctly handles mixed-duration brackets:
-                //   {Q,E}/3:2: baseLen=Q, threshold=3Q. Before E: faceSum=Q<=3E → update
-                //              baseLen=E, threshold=3E. faceSum(Q+E)=3E → close. ✓
-                //   {Q,Q,8,8}/3:2: before 8th: faceSum=2Q>3/8 → no update. threshold stays
-                //              3Q. faceSum(Q+Q+8+8)=3Q → close after 4. ✓
-                //   {Q,Q,Q,Q}/4:3: uniform Q, threshold=4Q. Closes after 4. ✓
-                //   {Q,Q}/4:3 partial: faceSum(2Q)<4Q → continues. ✓
+                // Explicit: accumulate faceSum; close when faceSum >= threshold.
+                // No-downdate rule: baseLen only shrinks when faceSum still fits the new threshold,
+                // allowing mixed-duration brackets like {Q,E}/3:2 or {Q,Q,8,8}/3:2.
                 Fraction baseLen = getFaceValue(chords[i]);
                 if (baseLen <= Fraction(0, 1)) {
                     ++i;
@@ -332,11 +307,8 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     int a2 = 0, n2 = 0;
                     getExplicit(chords[i], a2, n2);
                     if (a2 != actualN || n2 != normalN) {
-                        // Sandwich heuristic: include a note with a missing tup byte when
-                        // it is sandwiched between two notes with the same explicit ratio
-                        // and lies at the expected triplet-advance tick position.
-                        // Real-world trigger: live-recorded v0xC4 files occasionally omit
-                        // the tup byte on one note in the middle of a triplet run.
+                        // Sandwich heuristic: include a note with missing tup byte when bracketed by matching
+                        // ratios and at the expected advance tick (v0xC4 live-recorded files occasionally omit the byte).
                         bool includeOrphan = false;
                         if (faceSum > Fraction(0, 1) && i + 1 < n
                             && !chords[i].empty() && !chords[i - 1].empty()) {
@@ -362,8 +334,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                             break;
                         }
                     }
-                    // No-downdate: update baseLen only when the NEW smaller face value
-                    // still fits within the new threshold given the CURRENT faceSum.
+                    // No-downdate: shrink baseLen only when faceSum still fits the new (smaller) threshold.
                     const Fraction fv_i = getFaceValue(chords[i]);
                     if (fv_i > Fraction(0, 1) && fv_i < baseLen) {
                         const Fraction newThreshold = fv_i * actualN;
@@ -380,24 +351,19 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     if (faceSum < threshold) {
                         continue;
                     }
-                    // Complete group: mark all in [groupStart, i-1]
+                    // Complete group: mark [groupStart, i-1]
                     for (int j = groupStart; j < i; ++j) {
                         for (const EncMeasureElem* e : chords[j]) {
                             result.insert(e);
                         }
                     }
 
-                    // Nested-tuplet detection: when the group closed via a no-downdate
-                    // baseLen reduction AND the downdating note + the next (actualN-1)
-                    // notes in the following group all share the same smaller face value,
-                    // they form a complete inner triplet. Record a NestedTupletInfo for
-                    // the noteloop to use when building nested Tuplet objects.
+                    // Nested-tuplet: group closed via no-downdate reduction, and the next (actualN-1)
+                    // notes also share innerBaseLen → record NestedTupletInfo for the noteloop.
                     if (nestedInfos && innerGroupStartIdx >= 0
                         && innerBaseLen > Fraction(0, 1)
                         && innerBaseLen < originalBaseLen) {
-                        // Peek ahead: do the next (actualN-1) notes of the next group
-                        // share innerBaseLen and the same ratio, completing an inner group?
-                        int peekAhead = actualN - (i - innerGroupStartIdx);  // remaining inner notes needed
+                        int peekAhead = actualN - (i - innerGroupStartIdx);  // remaining notes needed to complete inner group
                         bool innerOk = (peekAhead >= 0);
                         int innerEndIdx = i - 1;  // last note of inner group so far (= end of current group)
                         if (innerOk && peekAhead > 0) {
@@ -435,7 +401,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                             }
                             if (ni.innerFirst && ni.innerLast) {
                                 nestedInfos->push_back(ni);
-                                // Mark the peeked-ahead notes as group members too.
+                                // Include peeked-ahead notes in result.
                                 for (int p = 0; p < peekAhead; ++p) {
                                     for (const EncMeasureElem* e2 : chords[i + p]) {
                                         result.insert(e2);
@@ -451,15 +417,14 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     innerGroupStartIdx = -1;
                     innerBaseLen       = Fraction(0, 1);
                     seenCompleteGroup  = true;
-                    // Reset baseLen for the next group (may start with a different face value)
+                    // Reset for next group.
                     if (i < n) {
                         baseLen         = getFaceValue(chords[i]);
                         threshold       = baseLen * actualN;
                         originalBaseLen = baseLen;
                     }
                 }
-                // Mark a partial end group only when rdur fills to exact measure end AND face-value sum would overflow without tuplet scaling.
-                // Condition (b) prevents false-positives where plain advances already fill the measure (e.g. {Q,8,8} triplet at tick=0).
+                // Partial end group: rdur fills to measure end AND face-value sum overflows without tuplet scaling.
                 if (i > groupStart) {
                     int startTick = 0;
                     if (!chords[groupStart].empty()) {
@@ -485,17 +450,8 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                                                   && (startTick + rdurSum == static_cast<int>(encMeas.durTicks));
                     const bool faceWouldOverflow = (startTick + faceTickSum
                                                     > static_cast<int>(encMeas.durTicks));
-                    // Extra guard: verify the TUPLET ADVANCE for these n notes approximately
-                    // fills the remaining measure. Without this, notes whose rdur sums happen
-                    // to reach durTicks (e.g. tail MIDI notes after a complete group) would be
-                    // incorrectly treated as a partial group.
-                    // tupletAdvance = sum(faceValue_ticks × normalN) / actualN
-                    // expectedRemaining = durTicks - startTick
-                    // Only mark a partial group when no complete group of this ratio was
-                    // already found in this measure. Without this guard, tail MIDI notes after
-                    // a complete group (e.g. notes 10-15 after a full [9:5] group) can have
-                    // rdur values that happen to sum to measure end, falsely triggering a
-                    // second partial group.
+                    // Guard: skip when a complete group was already found (tail MIDI notes after
+                    // a full group can accidentally satisfy rdurFillsMeasure).
                     if (rdurFillsMeasure && faceWouldOverflow && !seenCompleteGroup) {
                         for (int j = groupStart; j < i; ++j) {
                             for (const EncMeasureElem* e2 : chords[j]) {
@@ -508,7 +464,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     }
                 }
             } else {
-                // Implied tuplets (v0xC2): check for exactly actualN consecutive groups.
+                // Implied (v0xC2): require exactly actualN consecutive matching groups.
                 if (i + actualN > n) {
                     ++i;
                     continue;

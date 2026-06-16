@@ -205,14 +205,8 @@ bool isStandardExplicitTuplet(int actualN, int normalN)
         || (actualN == 6 && normalN == 4)) {
         return true;
     }
-    // Safety constraint: Tuplet.ticks = normalN × baseLen must be a TDuration-aligned
-    // fraction to avoid MuseScore layout assertions.  For standard power-of-2 base notes,
-    // normalN × 1/(2^k) is TDuration-aligned only when normalN is in {1,2,3,4,6,7,8,...}.
-    // normalN=5 always gives 5/(2^k) which is not representable as a standard note value.
-    // Reject any normalN that is a multiple of 5 but not also a multiple of a power of 2
-    // sufficient to cancel the 5.  In practice: reject normalN == 5 or 10 (or 15, 20...).
-    // 7 is safe: 7/(2^k) = double-dotted note.
-    // normalN=10, 15, 20 have no practical musical use.
+    // normalN must yield a TDuration-aligned fraction (normalN × baseLen).
+    // normalN=5,10,15,20 give 5/(2^k), which is not representable; 7 is safe (double-dotted).
     if (normalN == 10 || normalN == 15 || normalN == 20) {
         return false;
     }
@@ -241,19 +235,12 @@ bool isStandardExplicitTuplet(int actualN, int normalN)
     if (actualN == 8 && (normalN == 4 || normalN == 6)) {
         return true;
     }
-    // Segment-override groups: produced by the segment-override detector.
-    // normalN must yield a standard TDuration when multiplied by a common baseLen:
-    //   normalN=4: 4×1/8=1/2 (half) ✓, 4×1/16=1/4 (quarter) ✓
-    //   normalN=6: 6×1/8=3/4 (dotted half) ✓, 6×1/16=3/8 (dotted quarter) ✓
-    //   normalN=8: 8×1/8=1 (whole) ✓
-    // Allow any actualN in a reasonable range for these safe denominators.
+    // Segment-override groups: normalN in {4,6,8} always yields a standard TDuration.
     if ((normalN == 4 || normalN == 6 || normalN == 8)
         && actualN >= 2 && actualN <= 64) {
         return true;
     }
-    // Nontuplets: 9:4, 9:5, 9:6, 9:8
-    // 9:5 produces Tuplet.ticks=5/8 (non-TDuration-aligned), but startTuplet skips setTicks
-    // for it and closeTuplet sets it after notes are placed -- same path as sanitizeTuplet().
+    // 9:5 is non-TDuration-aligned but closeTuplet sets ticks after placement (same as sanitizeTuplet).
     if (actualN == 9 && (normalN == 4 || normalN == 5 || normalN == 6 || normalN == 8)) {
         return true;
     }
