@@ -34,7 +34,7 @@ class QDataStream;
 namespace mu::iex::encore {
 struct EncMeasureElem;
 struct EncInstrument;
-struct EncFile;
+struct EncRoot;
 
 // EncFormatReader: per-format binary parsing strategy. Register a new version in EncFormatReader::create().
 struct EncFormatReader
@@ -80,7 +80,7 @@ struct EncFormatReader
     // Read MIDI program, Key, and name metadata stored outside TK blocks.
     virtual bool readInstrumentMeta(std::vector<EncInstrument>& instruments,
                                     QDataStream& ds,
-                                    const EncFile& file) const
+                                    const EncRoot& file) const
     {
         (void)instruments;
         (void)ds;

@@ -34,7 +34,7 @@ namespace mu::iex::encore {
 void resolveHairpins(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
-    const EncFile& enc = ctx.enc;
+    const EncRoot& enc = ctx.enc;
 
     // Resolve hairpin endpoints: min(next-dynamic tick, xoffset2 snap to note).
     // xoffset2 encodes the visual tip position; snap to the last note/rest whose xoffset <= xoff2.

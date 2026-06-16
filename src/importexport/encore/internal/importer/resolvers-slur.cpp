@@ -54,7 +54,7 @@ static track_idx_t resolveChordTrack(MasterScore* score, Fraction tick, int staf
 void resolveSlurs(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
-    const EncFile& enc = ctx.enc;
+    const EncRoot& enc = ctx.enc;
 
     // Build compact-rawStaff → LINE-slot lookup (same logic as noteloop.cpp).
     // Note elements use (staffWithin<<6)|instrIdx as the raw staff byte; ps.staffIdx

@@ -102,7 +102,7 @@ void applyConcertPitch(Note* n, int semitone)
     n->setTpcFromPitch();
 }
 
-static void logEncFileInfo(const EncFile& enc)
+static void logEncRootInfo(const EncRoot& enc)
 {
     const EncHeader& h = enc.header;
     const char* fmtName = enc.fmt ? enc.fmt->formatName() : "unknown";
@@ -200,7 +200,7 @@ static void logEncFileInfo(const EncFile& enc)
 
 // Map Encore score-size (1–4) to MuseScore Staff Properties → Scale (Pid::MAG).
 // 1=60%, 2=70%, 3=75%, 4=100%.  Global spatium is not changed.
-static void applyStaffScale(MasterScore* score, const EncFile& enc)
+static void applyStaffScale(MasterScore* score, const EncRoot& enc)
 {
     static const double kScaleBySize[4] = { 0.60, 0.70, 0.75, 1.00 };
     const int sz = std::clamp(static_cast<int>(enc.header.scoreSize), 1, 4);
@@ -250,7 +250,7 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
     score->style().set(Sid::pageEvenBottomMargin, bottomIn);
 }
 
-static void buildScore(MasterScore* score, const EncFile& enc)
+static void buildScore(MasterScore* score, const EncRoot& enc)
 {
     score->style().set(Sid::chordsXmlFile, true);
     score->chordList()->read(u"chords.xml");
@@ -323,7 +323,7 @@ Err importEncore(MasterScore* score, const QString& path)
     QDataStream ds(&file);
     ds.setByteOrder(QDataStream::LittleEndian);
 
-    EncFile enc;
+    EncRoot enc;
     if (!enc.read(ds)) {
         return Err::FileBadFormat;
     }
@@ -332,7 +332,7 @@ Err importEncore(MasterScore* score, const QString& path)
         return Err::FileBadFormat;
     }
 
-    logEncFileInfo(enc);
+    logEncRootInfo(enc);
     buildScore(score, enc);
 
     muse::Ret integrity = score->sanityCheck();
