@@ -23,6 +23,7 @@
 #include "elements.h"
 
 #include "reader.h"
+#include "ticks.h"
 
 namespace mu::iex::encore {
 // ---------------------------------------------------------------------------
