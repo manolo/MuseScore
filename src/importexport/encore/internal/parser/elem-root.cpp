@@ -126,8 +126,7 @@ bool EncRoot::read(QDataStream& ds)
             meas.read(ds, varSize, *fmt);
             meas.calculateRealDurations(fmt->hasGraceTimeBorrowing(),
                                     fmt->supportsImpliedTuplets());
-            // header.measureCount says how many MEAS blocks Encore shows.
-            // Extra "ghost" measures from old edits; skip them.
+            // Skip extra "ghost" MEAS blocks beyond the declared measureCount.
             if (header.measureCount > 0
                 && static_cast<int>(measures.size()) >= header.measureCount) {
                 continue;
@@ -161,12 +160,10 @@ bool EncRoot::read(QDataStream& ds)
         } else if (isInstrumentMagic(nextId)) {
             EncInstrument instr;
             instr.contentFilePos = ds.device()->pos();
-            // v0xA6 TK block: Key transposition at content+42 (signed semitones).
-            // Read before EncInstrument::read, then restore stream position.
-            // v0xC4 reads Key from outside TK block, done in readInstrumentMeta.
+            // v0xA6: Key transposition is at content+42; read before EncInstrument::read.
+            // v0xC4 reads Key from outside the TK block in readInstrumentMeta instead.
             fmt->readKeyFromTKBlock(instr, ds, ds.device()->pos());
-            // v0xC4: Encore 5.0.2 uses UTF-16 LE names even when offset ≤ 250.
-            // Older v0xC4 files use ONE_BYTE. Probe tells which encoding.
+            // v0xC4: Encore 5.0.2 may use UTF-16 LE names; probe determines the encoding.
             instr.read(ds, varSize, fmt->probeInstrumentEncoding());
             charsize = instr.charSize();
             instruments.push_back(std::move(instr));
@@ -176,31 +173,27 @@ bool EncRoot::read(QDataStream& ds)
     }
 
     if (instruments.empty()) {
-        // Leave names empty so readInstrumentMeta can recover them from fixed-offset tables.
-        // "Part N" fallback is applied below only for instruments that are still nameless.
+        // No TK blocks found; seed empty entries so readInstrumentMeta can recover names.
         for (int i = 0; i < header.instrumentCount; ++i) {
             instruments.emplace_back();
         }
     }
 
-    // Some v0xC4 files have fewer TK blocks than instrumentCount.
-    // Pad with empty entries so all instruments in LINE data are represented.
+    // Pad to instrumentCount: some v0xC4 files have fewer TK blocks than declared.
     while (static_cast<int>(instruments.size()) < header.instrumentCount) {
         instruments.emplace_back();
     }
 
-    // Format-specific instrument metadata (name recovery, MIDI programs, Key transposition).
     fmt->readInstrumentMeta(instruments, ds, *this);
 
-    // Apply "Part N" fallback for any instrument whose name is still empty after recovery.
+    // "Part N" fallback for any instrument whose name is still empty after recovery.
     for (int i = 0; i < static_cast<int>(instruments.size()); ++i) {
         if (instruments[i].name.isEmpty()) {
             instruments[i].name = QString("Part %1").arg(i + 1);
         }
     }
 
-    // Derive per-instrument staff count from LINE block; grand-staff instruments
-    // have two entries with the same instrumentIndex() but staffIndex() 0 and 1.
+    // Grand-staff instruments have two LINE entries with same instrumentIndex(), staffIndex() 0 and 1.
     if (!lines.empty()) {
         for (const auto& lsd : lines[0].staffData) {
             const int ii = static_cast<int>(lsd.instrumentIndex());

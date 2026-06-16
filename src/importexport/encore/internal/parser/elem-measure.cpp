@@ -190,11 +190,10 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, bool fixDott
         });
         for (size_t i = 0; i < elems.size(); ++i) {
             size_t j = i + 1;
-            // Skip same-tick elements (exact chord; existing behavior)
+            // Skip same-tick chord members, then near-simultaneous cluster notes.
             while (j < elems.size() && elems[j]->tick == elems[i]->tick) {
                 ++j;
             }
-            // Skip near-simultaneous notes within cluster threshold for realistic rdur.
             while (j < elems.size()
                    && elems[j]->tick - elems[i]->tick < CHORD_CLUSTER_THRESHOLD) {
                 ++j;
@@ -227,12 +226,8 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, bool fixDott
             }
         }
 
-        // v0xA6 inner-grace marking. Group structure in a typical pattern:
-        //   leading grace  — graceType != NORMAL (APPOGGIATURA, grace1&0x30 > 0x10)
-        //   inner grace(s) — graceType == NORMAL, grace1&0x30 == 0x10, fv > leading fv
-        //   main note      — graceType == NORMAL, fv <= leading fv (ends the group)
-        // isInnerGrace tells the noteloop to route the note through the grace path
-        // instead of producing a spurious regular chord before the leading grace.
+        // v0xA6 inner-grace marking: NORMAL notes with grace1&0x30==0x10 and fv > leading grace fv
+        // are inner graces; isInnerGrace routes them through the grace path in the noteloop.
         if (hasGraceTimeBorrowing) {
             quint8 leadingFv = 0;
             for (EncMeasureElem* e : elems) {
@@ -242,13 +237,11 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, bool fixDott
                     continue;
                 }
                 if (en->graceType() != EncGraceType::NORMAL) {
-                    // Leading grace (APPOGGIATURA/ACCIACCATURA): record its fv.
                     if (leadingFv == 0) {
                         leadingFv = en->faceValue & 0x0F;
                     }
                     continue;
                 }
-                // NORMAL-classified note: check for inner-grace indicator.
                 if ((en->grace1 & 0x30) == 0x10 && leadingFv != 0) {
                     const quint8 fv = en->faceValue & 0x0F;
                     if (fv > leadingFv) {
@@ -262,14 +255,11 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, bool fixDott
         }
     }
 
-    // v0xC2: Encore stores the sixteenth in a dotted-eighth+sixteenth group at
-    // tick + faceValue_ticks(eighth) = tick + 120, NOT at tick + 180 (the true
-    // dotted duration). This makes realDuration=120 for the dotted eighth,
-    // indistinguishable from a plain eighth by calcDotsSnap. The dotControl byte
-    // (typically 0x60) has bit 0 = 0, so the existing bit-0 fallback in
-    // computeDotCount does not fire. Detect the pattern by looking for an eighth
-    // (fv=4, rdur=120) followed by a sixteenth (fv=5, rdur=60) exactly 120 ticks
-    // later in the same voice, then signal the dot by setting dotControl bit 0.
+    // v0xC2: Encore places the sixteenth of a dotted-eighth+sixteenth group at tick+120
+    // (the undotted gap), not tick+180, so realDuration=120 is indistinguishable from a
+    // plain eighth. dotControl bit 0 is also 0, so the bit-0 fallback in computeDotCount
+    // does not fire. Fix: detect fv=4/rdur=120 followed by fv=5/rdur=60 exactly 120 ticks
+    // later in the same voice, then set dotControl bit 0 to force the dot.
     if (fixDottedEighth) {
         for (auto& [key, elems] : groups) {
             for (size_t i = 0; i < elems.size(); ++i) {
