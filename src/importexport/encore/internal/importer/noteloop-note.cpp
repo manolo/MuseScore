@@ -174,6 +174,294 @@ static void registerTieStartIfApplicable(BuildCtx& ctx,
     }
 }
 
+// Returns V_INVALID if rdur does not match the beat-relative pattern.
+static DurationType resolveBeatRelativeFaceValue(
+    const EncNote* en,
+    const EncMeasure* encMeas,
+    int preACheck,
+    int preNCheck)
+{
+    if (en->realDuration == 0 || preACheck <= 0 || preNCheck <= 0
+        || !encMeas || encMeas->beatTicks == 0) {
+        return DurationType::V_INVALID;
+    }
+    const int bt = static_cast<int>(encMeas->beatTicks);
+    const int expectedBeatAdv = (bt * preNCheck + preACheck / 2) / preACheck;
+    if (static_cast<int>(en->realDuration) != expectedBeatAdv) {
+        return DurationType::V_INVALID;
+    }
+    // Beat-relative fv (e.g. 8/8 where fv=Q means one beat): derive written note from rdur × ratio.
+    const int faceTicks = (static_cast<int>(en->realDuration) * preACheck
+                           + preNCheck / 2) / preNCheck;
+    // Choose fv to avoid the "realDur < faceValue2ticks(fv)" fallback in realDuration2DurationType.
+    static constexpr int kFaceTicks[] = { 0, 960, 480, 240, 120, 60, 30, 15, 7 };
+    quint8 computedFv = en->faceValue;
+    for (int f = 1; f <= 8; ++f) {
+        if (kFaceTicks[f] <= faceTicks) {
+            computedFv = static_cast<quint8>(f);
+            break;
+        }
+    }
+    return realDuration2DurationType(static_cast<qint16>(faceTicks), computedFv);
+}
+
+static void attachChordToTuplet(
+    BuildCtx& ctx,
+    NoteLoopMeasCtx& mc,
+    const NoteElemCtx& ec,
+    const EncNote* en,
+    Chord* chord,
+    DurationType& dt,
+    int& dots,
+    DurationType dtFace,
+    int preACheck,
+    int preNCheck,
+    bool isInnerMember,
+    bool isInnerFirst,
+    bool isInnerLast)
+{
+    Measure* measure = mc.measure;
+    const std::set<const EncMeasureElem*>& validTupletGroupMember = mc.validTupletGroupMember;
+    const std::set<const EncMeasureElem*>& partialEndGroup = mc.partialEndGroup;
+    const std::set<const EncMeasureElem*>& impliedGroupMember = mc.validTupletGroupMember;
+    const EncMeasureElem* e = ec.e;
+    const auto& trackKey = ec.trackKey;
+    track_idx_t track = ec.track;
+    Fraction elemTick = ec.elemTick;
+    bool isStandardExplicit = isStandardExplicitTuplet(preACheck, preNCheck);
+    auto closeTupletWithFill = [&](TupletTracker& tt, std::pair<int, int> key) {
+        mc.closeTupletWithFill(ctx, tt, key);
+    };
+
+    auto& tt = ctx.tuplets[trackKey];
+    int actualN = isStandardExplicit ? preACheck : 0;
+    int normalN = isStandardExplicit ? preNCheck : 0;
+    // Implied tuplet (v0xC2 only, pre-validated). !tt.groupFull() prevents a post-group note from opening a new unvalidated group.
+    if (actualN == 0 && ctx.impliedTuplets && (en->faceValue & 0x0F) >= 4
+        && ((tt.inTuplet() && !tt.groupFull()) || impliedGroupMember.count(e))) {
+        actualN = detectImpliedTuplet(en->realDuration, en->faceValue, normalN);
+    }
+    // Sandwich orphan (tup=0 surrounded by tup=N:M notes): use active ratio to stay in bracket.
+    if (actualN == 0 && tt.inTuplet() && !tt.groupFull() && validTupletGroupMember.count(e)) {
+        actualN = tt.actualN;
+        normalN = tt.normalN;
+    }
+
+    if (actualN > 0 && normalN > 0) {
+        // Close full group before starting a new one.
+        if (tt.groupFull()) {
+            closeTupletWithFill(tt, trackKey);
+        }
+        if (!tt.inTuplet()) {
+            if (isStandardExplicit && !validTupletGroupMember.count(e)) {
+                // Isolated explicit note: start partial tuplet only when it exactly fills remaining space.
+                Fraction tupAdv = TDuration(dtFace).fraction()
+                                  * Fraction(normalN, actualN);
+                Fraction remaining = measure->ticks() - ctx.cumTick[trackKey];
+                if (tupAdv == remaining) {
+                    dt   = dtFace;
+                    dots = 0;
+                    TDuration faceD(dtFace);
+                    chord->setDurationType(faceD);
+                    chord->setTicks(faceD.fraction());
+                    chord->setDots(0);
+                    tt.startTuplet(measure, elemTick, actualN, normalN, dt, track);
+                } else {
+                    actualN = 0;
+                    normalN = 0;           // treat as plain note
+                }
+            } else {
+                // Partial measure-end groups: derive baseLen from remaining/normalN (e.g. rem=1/8, normalN=2 -> baseLen=1/16).
+                DurationType baseLenDt = dt;
+                if (partialEndGroup.count(e)) {
+                    Fraction rem3 = measure->ticks() - ctx.cumTick[trackKey];
+                    Fraction fullAdv = TDuration(dt).fraction() * Fraction(normalN, 1);
+                    if (fullAdv > rem3 && rem3 > Fraction(0, 1)) {
+                        Fraction baseFrac = Fraction(rem3.numerator(),
+                                                     rem3.denominator() * normalN).reduced();
+                        TDuration baseLenDur(baseFrac, true /*truncate*/);
+                        if (baseLenDur.isValid() && baseLenDur.fraction() == baseFrac) {
+                            baseLenDt = baseLenDur.type();
+                        }
+                    }
+                }
+                tt.startTuplet(measure, elemTick, actualN, normalN, baseLenDt, track);
+            }
+        }
+    }
+    if (actualN > 0 && normalN > 0) {
+        // Nested-tuplet: inner notes go into innerTt; outer advances via cumTick (doubly-nested block below).
+        auto& innerTt = ctx.innerTuplets[trackKey];
+        if (isInnerMember) {
+            if (isInnerFirst) {
+                const NestedTupletInfo& ni = *mc.nestedByInnerFirst.at(e);
+                innerTt.closeTuplet();
+                innerTt.startTuplet(measure, elemTick, ni.innerActualN, ni.innerNormalN, dt, track);
+                if (tt.inTuplet() && tt.currentTuplet && innerTt.currentTuplet) {
+                    innerTt.currentTuplet->setTuplet(tt.currentTuplet);
+                    tt.currentTuplet->add(innerTt.currentTuplet);
+                }
+            }
+            if (innerTt.inTuplet()) {
+                chord->setTuplet(innerTt.currentTuplet);
+                innerTt.currentTuplet->add(chord);
+                innerTt.faceTicks += TDuration(dt).fraction();
+            }
+            if (isInnerLast && innerTt.inTuplet()) {
+                innerTt.closeTuplet();
+                // Credit outer TupletTracker with one outer-slot face value.
+                if (tt.inTuplet() && tt.currentTuplet) {
+                    tt.faceTicks += TDuration(tt.currentTuplet->baseLen()).fraction();
+                }
+            }
+        } else {
+            chord->setTuplet(tt.currentTuplet);
+            tt.currentTuplet->add(chord);
+
+            // No-downdate: only lower fullFaceSum when smaller fv arrives and current tally still fits the new threshold.
+            // {Q,E}/3:2: before E, faceTicks=Q≤3E → update; {Q,Q,8,8}/3:2: faceTicks=2Q>3E → skip.
+            if (tt.actualN > 0 && tt.fullFaceSum > Fraction(0, 1)) {
+                const Fraction thisFace = TDuration(dt).fraction();
+                const Fraction currentBaseLen = tt.fullFaceSum / tt.actualN;
+                if (thisFace > Fraction(0, 1) && thisFace < currentBaseLen) {
+                    const Fraction newThreshold = thisFace * tt.actualN;
+                    if (tt.faceTicks <= newThreshold) {
+                        tt.fullFaceSum = newThreshold;
+                    }
+                }
+            }
+            tt.faceTicks += TDuration(dt).fraction();
+        }
+    } else {
+        auto& innerTt2 = ctx.innerTuplets[trackKey];
+        if (innerTt2.inTuplet()) {
+            innerTt2.closeTuplet();
+        }
+        if (tt.groupFull()) {
+            closeTupletWithFill(tt, trackKey);
+        }
+        if (tt.inTuplet()) {
+            closeTupletWithFill(tt, trackKey); // non-tuplet note exits group
+        }
+    }
+}
+
+// Returns false if chord was discarded (zero-tick residual).
+static bool advanceCumulativeTick(
+    BuildCtx& ctx,
+    const NoteElemCtx& ec,
+    const NoteLoopMeasCtx& mc,
+    Chord*& chord,
+    DurationType& dt,
+    int& dots,
+    bool isInnerMember,
+    int preACheck,
+    int preNCheck)
+{
+    Measure* measure = mc.measure;
+    const auto& trackKey = ec.trackKey;
+    int savedPrevMidiTick = ec.savedPrevMidiTick;
+
+    auto& tt = ctx.tuplets[trackKey];
+    auto& innerTtAdv = ctx.innerTuplets[trackKey];
+
+    // Doubly-nested advance: apply both inner and outer ratios so cumTick over the inner group equals one outer slot.
+    // Without this, 3 inner 16ths at 1/24 each = 1/8 > 1/12 (one 3:2 outer slot).
+    Fraction advance;
+    if (isInnerMember) {
+        // Apply inner ratio AND outer ratio. Use saved NI ratios when innerLast has already closed the group.
+        const NestedTupletInfo* niAdv = nullptr;
+        if (mc.nestedByInnerFirst.count(ec.e)) {
+            niAdv = mc.nestedByInnerFirst.at(ec.e);
+        } else if (mc.nestedByInnerLast.count(ec.e)) {
+            niAdv = mc.nestedByInnerLast.at(ec.e);
+        } else if (!mc.nestedInfos.empty()) {
+            niAdv = &mc.nestedInfos.front();  // middle inner note; only one nested group per measure in known files
+        }
+        const int innerAN = niAdv ? niAdv->innerActualN : (innerTtAdv.inTuplet() ? innerTtAdv.actualN : preACheck);
+        const int innerNN = niAdv ? niAdv->innerNormalN : (innerTtAdv.inTuplet() ? innerTtAdv.normalN : preNCheck);
+        Fraction innerAdv = TDuration(dt).fraction()
+                            * Fraction(innerNN, innerAN);
+        if (tt.inTuplet()) {
+            advance = innerAdv * Fraction(tt.normalN, tt.actualN);
+        } else {
+            advance = innerAdv;
+        }
+    } else if (tt.inTuplet()) {
+        advance = TDuration(dt).fraction() * Fraction(tt.normalN, tt.actualN);
+    } else {
+        advance = dottedAdvance(dt, dots);
+    }
+
+    // Tuplet-remaining cap: fv > baseLen (e.g. 8th inside 3:2 with baseLen=16th) would produce non-TDuration-aligned Tuplet.ticks and crash layout.
+    if (tt.inTuplet() && chord) {
+        const Fraction tupExpected = TDuration(tt.currentTuplet->baseLen()).fraction()
+                                     * tt.normalN;
+        const Fraction tupRemaining = tupExpected - tt.placedTicks;
+        if (tupRemaining > Fraction(0, 1) && advance > tupRemaining) {
+            const Fraction neededFace = tupRemaining * Fraction(tt.actualN, tt.normalN);
+            TDuration cappedFace(neededFace, true /*truncate*/);
+            if (cappedFace.isValid() && cappedFace.fraction().numerator() > 0) {
+                advance = cappedFace.fraction() * Fraction(tt.normalN, tt.actualN);
+                chord->setDurationType(cappedFace);
+                chord->setTicks(cappedFace.fraction());
+                chord->setDots(0);
+                // Re-sync faceTicks: the original dt may have been larger.
+                tt.faceTicks -= TDuration(dt).fraction();
+                tt.faceTicks += cappedFace.fraction();
+            }
+        }
+    }
+
+    // Cap advance to remaining space; remove tuplet membership to avoid sanityCheck overshoot.
+    Fraction remaining = measure->ticks() - ctx.cumTick[trackKey];
+    if (advance > remaining && remaining > Fraction(0, 1)) {
+        advance = TDuration(remaining, true).fraction();
+        if (advance.numerator() == 0) {
+            // Remaining smaller than any standard duration; chord would become zero-tick. Remove it.
+            if (chord->tuplet()) {
+                Tuplet* t = chord->tuplet();
+                chord->setTuplet(nullptr);
+                t->remove(chord);
+                tt.faceTicks -= chord->ticks();
+            }
+            chord->segment()->remove(chord);
+            delete chord;
+            chord = nullptr;
+            if (savedPrevMidiTick >= 0) {
+                ctx.prevMidiTick[trackKey] = savedPrevMidiTick;
+            } else {
+                ctx.prevMidiTick.erase(trackKey);
+            }
+            return false;
+        }
+        if (chord) {
+            if (chord->tuplet()) {
+                Tuplet* t = chord->tuplet();
+                chord->setTuplet(nullptr);
+                t->remove(chord);
+                tt.faceTicks -= chord->ticks();
+            }
+            TDuration cappedDur(advance);
+            chord->setDurationType(cappedDur);
+            chord->setTicks(cappedDur.fraction());
+            chord->setDots(0);
+        }
+    }
+    ctx.cumTick[trackKey] += advance;
+    if (tt.inTuplet()) {
+        tt.placedTicks += advance;
+    }
+    // Inner-group notes: advance innerTt.placedTicks by the singly-nested advance so closeTuplet() sees the correct inner span.
+    auto& innerTtFin = ctx.innerTuplets[trackKey];
+    if (isInnerMember && innerTtFin.inTuplet()) {
+        const Fraction innerOnlyAdv = TDuration(dt).fraction()
+                                      * Fraction(innerTtFin.normalN, innerTtFin.actualN);
+        innerTtFin.placedTicks += innerOnlyAdv;
+    }
+    return true;
+}
+
 void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
 {
     MasterScore* score = ctx.score;
@@ -197,9 +485,6 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     bool hadLastChordPos = ec.hadLastChordPos;
     Fraction savedLastChordPos = ec.savedLastChordPos;
     auto isTieStart = [&](int si, int v, int t, int pos = -1) { return mc.isTieStartAt(si, v, t, pos); };
-    auto closeTupletWithFill = [&](TupletTracker& tt, std::pair<int, int> key) {
-        mc.closeTupletWithFill(ctx, tt, key);
-    };
 
     const EncNote* en = static_cast<const EncNote*>(e);
 
@@ -256,28 +541,10 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         // This distinguishes beat-relative face values (rdur=beatTicks×ratio) from
         // truncated rdur (last note in a measure, rdur shortened by a following rest).
         dt = faceValue2DurationType(en->faceValue);
-        if (en->realDuration > 0 && preACheck > 0 && preNCheck > 0
-            && mc.encMeas && mc.encMeas->beatTicks > 0) {
-            const int bt = static_cast<int>(mc.encMeas->beatTicks);
-            const int expectedBeatAdv = (bt * preNCheck + preACheck / 2) / preACheck;
-            if (static_cast<int>(en->realDuration) == expectedBeatAdv) {
-                // Beat-relative fv (e.g. 8/8 where fv=Q means one beat): derive written note from rdur × ratio.
-                const int faceTicks = (static_cast<int>(en->realDuration) * preACheck
-                                       + preNCheck / 2) / preNCheck;
-                // Choose fv to avoid the "realDur < faceValue2ticks(fv)" fallback in realDuration2DurationType.
-                static constexpr int kFaceTicks[] = { 0, 960, 480, 240, 120, 60, 30, 15, 7 };
-                quint8 computedFv = en->faceValue;
-                for (int f = 1; f <= 8; ++f) {
-                    if (kFaceTicks[f] <= faceTicks) {
-                        computedFv = static_cast<quint8>(f);
-                        break;
-                    }
-                }
-                const DurationType dtRdur = realDuration2DurationType(
-                    static_cast<qint16>(faceTicks), computedFv);
-                if (dtRdur != DurationType::V_INVALID) {
-                    dt = dtRdur;
-                }
+        {
+            const DurationType dtBeat = resolveBeatRelativeFaceValue(en, mc.encMeas, preACheck, preNCheck);
+            if (dtBeat != DurationType::V_INVALID) {
+                dt = dtBeat;
             }
         }
         dots = 0;
@@ -374,215 +641,13 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         chord->setDots(dots);
         seg->add(chord);
 
-        auto& tt = ctx.tuplets[trackKey];
-        int actualN = isStandardExplicit ? preACheck : 0;
-        int normalN = isStandardExplicit ? preNCheck : 0;
-        // Implied tuplet (v0xC2 only, pre-validated). !tt.groupFull() prevents a post-group note from opening a new unvalidated group.
-        if (actualN == 0 && ctx.impliedTuplets && (en->faceValue & 0x0F) >= 4
-            && ((tt.inTuplet() && !tt.groupFull()) || impliedGroupMember.count(e))) {
-            actualN = detectImpliedTuplet(en->realDuration, en->faceValue, normalN);
-        }
-        // Sandwich orphan (tup=0 surrounded by tup=N:M notes): use active ratio to stay in bracket.
-        if (actualN == 0 && tt.inTuplet() && !tt.groupFull() && validTupletGroupMember.count(e)) {
-            actualN = tt.actualN;
-            normalN = tt.normalN;
-        }
+        attachChordToTuplet(ctx, mc, ec, en, chord, dt, dots, dtFace,
+                            preACheck, preNCheck,
+                            isInnerMember, isInnerFirst, isInnerLast);
 
-        if (actualN > 0 && normalN > 0) {
-            // Close full group before starting a new one.
-            if (tt.groupFull()) {
-                closeTupletWithFill(tt, trackKey);
-            }
-            if (!tt.inTuplet()) {
-                if (isStandardExplicit && !validTupletGroupMember.count(e)) {
-                    // Isolated explicit note: start partial tuplet only when it exactly fills remaining space.
-                    Fraction tupAdv = TDuration(dtFace).fraction()
-                                      * Fraction(normalN, actualN);
-                    Fraction remaining = measure->ticks() - ctx.cumTick[trackKey];
-                    if (tupAdv == remaining) {
-                        dt   = dtFace;
-                        dots = 0;
-                        TDuration faceD(dtFace);
-                        chord->setDurationType(faceD);
-                        chord->setTicks(faceD.fraction());
-                        chord->setDots(0);
-                        tt.startTuplet(measure, elemTick, actualN, normalN, dt, track);
-                    } else {
-                        actualN = 0;
-                        normalN = 0;           // treat as plain note
-                    }
-                } else {
-                    // Partial measure-end groups: derive baseLen from remaining/normalN (e.g. rem=1/8, normalN=2 -> baseLen=1/16).
-                    DurationType baseLenDt = dt;
-                    if (partialEndGroup.count(e)) {
-                        Fraction rem3 = measure->ticks() - ctx.cumTick[trackKey];
-                        Fraction fullAdv = TDuration(dt).fraction() * Fraction(normalN, 1);
-                        if (fullAdv > rem3 && rem3 > Fraction(0, 1)) {
-                            Fraction baseFrac = Fraction(rem3.numerator(),
-                                                         rem3.denominator() * normalN).reduced();
-                            TDuration baseLenDur(baseFrac, true /*truncate*/);
-                            if (baseLenDur.isValid() && baseLenDur.fraction() == baseFrac) {
-                                baseLenDt = baseLenDur.type();
-                            }
-                        }
-                    }
-                    tt.startTuplet(measure, elemTick, actualN, normalN, baseLenDt, track);
-                }
-            }
-        }
-        if (actualN > 0 && normalN > 0) {
-            // Nested-tuplet: inner notes go into innerTt; outer advances via cumTick (doubly-nested block below).
-            auto& innerTt = ctx.innerTuplets[trackKey];
-            if (isInnerMember) {
-                if (isInnerFirst) {
-                    const NestedTupletInfo& ni = *mc.nestedByInnerFirst.at(e);
-                    innerTt.closeTuplet();
-                    innerTt.startTuplet(measure, elemTick, ni.innerActualN, ni.innerNormalN, dt, track);
-                    if (tt.inTuplet() && tt.currentTuplet && innerTt.currentTuplet) {
-                        innerTt.currentTuplet->setTuplet(tt.currentTuplet);
-                        tt.currentTuplet->add(innerTt.currentTuplet);
-                    }
-                }
-                if (innerTt.inTuplet()) {
-                    chord->setTuplet(innerTt.currentTuplet);
-                    innerTt.currentTuplet->add(chord);
-                    innerTt.faceTicks += TDuration(dt).fraction();
-                }
-                if (isInnerLast && innerTt.inTuplet()) {
-                    innerTt.closeTuplet();
-                    // Credit outer TupletTracker with one outer-slot face value.
-                    if (tt.inTuplet() && tt.currentTuplet) {
-                        tt.faceTicks += TDuration(tt.currentTuplet->baseLen()).fraction();
-                    }
-                }
-            } else {
-                chord->setTuplet(tt.currentTuplet);
-                tt.currentTuplet->add(chord);
-
-                // No-downdate: only lower fullFaceSum when smaller fv arrives and current tally still fits the new threshold.
-                // {Q,E}/3:2: before E, faceTicks=Q≤3E → update; {Q,Q,8,8}/3:2: faceTicks=2Q>3E → skip.
-                if (tt.actualN > 0 && tt.fullFaceSum > Fraction(0, 1)) {
-                    const Fraction thisFace = TDuration(dt).fraction();
-                    const Fraction currentBaseLen = tt.fullFaceSum / tt.actualN;
-                    if (thisFace > Fraction(0, 1) && thisFace < currentBaseLen) {
-                        const Fraction newThreshold = thisFace * tt.actualN;
-                        if (tt.faceTicks <= newThreshold) {
-                            tt.fullFaceSum = newThreshold;
-                        }
-                    }
-                }
-                tt.faceTicks += TDuration(dt).fraction();
-            }
-        } else {
-            auto& innerTt2 = ctx.innerTuplets[trackKey];
-            if (innerTt2.inTuplet()) {
-                innerTt2.closeTuplet();
-            }
-            if (tt.groupFull()) {
-                closeTupletWithFill(tt, trackKey);
-            }
-            if (tt.inTuplet()) {
-                closeTupletWithFill(tt, trackKey); // non-tuplet note exits group
-            }
-        }
-
-        // Advance cumulative position.
-        {
-            // Doubly-nested advance: apply both inner and outer ratios so cumTick over the inner group equals one outer slot.
-            // Without this, 3 inner 16ths at 1/24 each = 1/8 > 1/12 (one 3:2 outer slot).
-            auto& innerTtAdv = ctx.innerTuplets[trackKey];
-            Fraction advance;
-            if (isInnerMember) {
-                // Apply inner ratio AND outer ratio. Use saved NI ratios when innerLast has already closed the group.
-                const NestedTupletInfo* niAdv = nullptr;
-                if (mc.nestedByInnerFirst.count(e)) {
-                    niAdv = mc.nestedByInnerFirst.at(e);
-                } else if (mc.nestedByInnerLast.count(e)) {
-                    niAdv = mc.nestedByInnerLast.at(e);
-                } else if (!mc.nestedInfos.empty()) {
-                    niAdv = &mc.nestedInfos.front();  // middle inner note; only one nested group per measure in known files
-                }
-                const int innerAN = niAdv ? niAdv->innerActualN : (innerTtAdv.inTuplet() ? innerTtAdv.actualN : preACheck);
-                const int innerNN = niAdv ? niAdv->innerNormalN : (innerTtAdv.inTuplet() ? innerTtAdv.normalN : preNCheck);
-                Fraction innerAdv = TDuration(dt).fraction()
-                                    * Fraction(innerNN, innerAN);
-                if (tt.inTuplet()) {
-                    advance = innerAdv * Fraction(tt.normalN, tt.actualN);
-                } else {
-                    advance = innerAdv;
-                }
-            } else if (tt.inTuplet()) {
-                advance = TDuration(dt).fraction() * Fraction(tt.normalN, tt.actualN);
-            } else {
-                advance = dottedAdvance(dt, dots);
-            }
-
-            // Tuplet-remaining cap: fv > baseLen (e.g. 8th inside 3:2 with baseLen=16th) would produce non-TDuration-aligned Tuplet.ticks and crash layout.
-            if (tt.inTuplet() && chord) {
-                const Fraction tupExpected = TDuration(tt.currentTuplet->baseLen()).fraction()
-                                             * tt.normalN;
-                const Fraction tupRemaining = tupExpected - tt.placedTicks;
-                if (tupRemaining > Fraction(0, 1) && advance > tupRemaining) {
-                    const Fraction neededFace = tupRemaining * Fraction(tt.actualN, tt.normalN);
-                    TDuration cappedFace(neededFace, true /*truncate*/);
-                    if (cappedFace.isValid() && cappedFace.fraction().numerator() > 0) {
-                        advance = cappedFace.fraction() * Fraction(tt.normalN, tt.actualN);
-                        chord->setDurationType(cappedFace);
-                        chord->setTicks(cappedFace.fraction());
-                        chord->setDots(0);
-                        // Re-sync faceTicks: the original dt may have been larger.
-                        tt.faceTicks -= TDuration(dt).fraction();
-                        tt.faceTicks += cappedFace.fraction();
-                    }
-                }
-            }
-
-            // Cap advance to remaining space; remove tuplet membership to avoid sanityCheck overshoot.
-            Fraction remaining = measure->ticks() - ctx.cumTick[trackKey];
-            if (advance > remaining && remaining > Fraction(0, 1)) {
-                advance = TDuration(remaining, true).fraction();
-                if (advance.numerator() == 0) {
-                    // Remaining smaller than any standard duration; chord would become zero-tick. Remove it.
-                    if (chord->tuplet()) {
-                        Tuplet* t = chord->tuplet();
-                        chord->setTuplet(nullptr);
-                        t->remove(chord);
-                        tt.faceTicks -= chord->ticks();
-                    }
-                    seg->remove(chord);
-                    delete chord;
-                    chord = nullptr;
-                    if (savedPrevMidiTick >= 0) {
-                        ctx.prevMidiTick[trackKey] = savedPrevMidiTick;
-                    } else {
-                        ctx.prevMidiTick.erase(trackKey);
-                    }
-                    return;
-                }
-                if (chord) {
-                    if (chord->tuplet()) {
-                        Tuplet* t = chord->tuplet();
-                        chord->setTuplet(nullptr);
-                        t->remove(chord);
-                        tt.faceTicks -= chord->ticks();
-                    }
-                    TDuration cappedDur(advance);
-                    chord->setDurationType(cappedDur);
-                    chord->setTicks(cappedDur.fraction());
-                    chord->setDots(0);
-                }
-            }
-            ctx.cumTick[trackKey] += advance;
-            if (tt.inTuplet()) {
-                tt.placedTicks += advance;
-            }
-            // Inner-group notes: advance innerTt.placedTicks by the singly-nested advance so closeTuplet() sees the correct inner span.
-            auto& innerTtFin = ctx.innerTuplets[trackKey];
-            if (isInnerMember && innerTtFin.inTuplet()) {
-                const Fraction innerOnlyAdv = TDuration(dt).fraction()
-                                              * Fraction(innerTtFin.normalN, innerTtFin.actualN);
-                innerTtFin.placedTicks += innerOnlyAdv;
-            }
+        if (!advanceCumulativeTick(ctx, ec, mc, chord, dt, dots,
+                                   isInnerMember, preACheck, preNCheck)) {
+            return;
         }
     }
 
