@@ -37,6 +37,295 @@
 namespace mu::iex::enc {
 using namespace mu::engraving;
 
+// Snap a dynamic/ORN tick to the chord-rest whose xoffset matches its drawn position.
+// ORN xoffset < chord xoffset means the glyph belongs to the preceding chord.
+// Scans all voices so ORNs on staves whose notes are in voice=1+ are placed correctly.
+static Fraction snapTickByXoffset(Fraction defaultTick, int dynEncTick,
+                                  const EncMeasure& encMeas, int staffIdx,
+                                  const EncOrnament* eo, Fraction measTick)
+{
+    if (encMeas.beatTicks == 0 || encMeas.timeSigDen == 0) {
+        return defaultTick;
+    }
+    const int wholeTicks2 = encMeas.beatTicks * encMeas.timeSigDen;
+    const Fraction relTick = defaultTick - measTick;
+    const int defaultEncTick = (relTick.numerator() * wholeTicks2)
+                               / std::max(1, relTick.denominator());
+    const int ornXoff = static_cast<int>(eo->xoffset);
+
+    // Find the note/rest at defaultEncTick on the same staff (any voice).
+    int defaultCrXoff = -1;
+    for (const auto& elem : encMeas.elements) {
+        const EncMeasureElem* em = elem.get();
+        if (em->type != static_cast<quint8>(EncElemType::NOTE)
+            && em->type != static_cast<quint8>(EncElemType::REST)) {
+            continue;
+        }
+        if (static_cast<int>(em->staffIdx) != staffIdx) {
+            continue;
+        }
+        if (static_cast<int>(em->tick) != defaultEncTick) {
+            continue;
+        }
+        if (em->type == static_cast<quint8>(EncElemType::NOTE)) {
+            defaultCrXoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
+        } else {
+            defaultCrXoff = static_cast<int>(static_cast<const EncRest*>(em)->xoffset);
+        }
+        break;
+    }
+    if (defaultCrXoff >= 0 && ornXoff >= defaultCrXoff) {
+        return defaultTick;
+    }
+    // Find the latest note/rest before defaultEncTick on the same staff (any voice)
+    // whose xoffset <= ornXoff. Also handles WEDGESTART at durTicks (no CR at default tick).
+    int bestTick = -1;
+    for (const auto& elem : encMeas.elements) {
+        const EncMeasureElem* em = elem.get();
+        if (em->type != static_cast<quint8>(EncElemType::NOTE)
+            && em->type != static_cast<quint8>(EncElemType::REST)) {
+            continue;
+        }
+        if (static_cast<int>(em->staffIdx) != staffIdx) {
+            continue;
+        }
+        if (static_cast<int>(em->tick) >= defaultEncTick) {
+            continue;
+        }
+        int xoff = 0;
+        if (em->type == static_cast<quint8>(EncElemType::NOTE)) {
+            xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
+        } else {
+            xoff = static_cast<int>(static_cast<const EncRest*>(em)->xoffset);
+        }
+        if (xoff > ornXoff) {
+            continue;
+        }
+        if (static_cast<int>(em->tick) > bestTick) {
+            bestTick = static_cast<int>(em->tick);
+        }
+    }
+    if (bestTick < 0) {
+        return defaultTick;
+    }
+    return measTick + Fraction(bestTick, wholeTicks2);
+}
+
+static void handleDynamicOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc,
+                                  NoteElemCtx& ec, const EncOrnament* eo,
+                                  Measure* measure, MasterScore* score)
+{
+    static constexpr int kWholeTicks = 960;
+    const EncMeasure& encMeas = *mc.encMeas;
+    const Fraction measTick = mc.measTick;
+    const EncMeasureElem* e = ec.e;
+    int& staffIdx = ec.staffIdx;
+    int msVoice = ec.msVoice;
+    track_idx_t& track = ec.track;
+
+    // Size-16 ORN: only the tipo byte is reliable.
+    // yoffset > 0 means the user dragged it onto the staff above; reroute to staffIdx-1.
+    if (eo->yoffset > 0 && staffIdx > 0) {
+        staffIdx -= 1;
+        track = static_cast<track_idx_t>(staffIdx * VOICES + msVoice);
+    }
+    DynamicType dt = DynamicType::OTHER;
+    switch (eo->ornType()) {
+    case EncOrnamentType::DYN_PPP:  dt = DynamicType::PPP;  break;
+    case EncOrnamentType::DYN_PP:   dt = DynamicType::PP;   break;
+    case EncOrnamentType::DYN_P:    dt = DynamicType::P;    break;
+    case EncOrnamentType::DYN_MP:   dt = DynamicType::MP;   break;
+    case EncOrnamentType::DYN_MF:   dt = DynamicType::MF;   break;
+    case EncOrnamentType::DYN_F:    dt = DynamicType::F;    break;
+    case EncOrnamentType::DYN_FF:   dt = DynamicType::FF;   break;
+    case EncOrnamentType::DYN_FFF:  dt = DynamicType::FFF;  break;
+    case EncOrnamentType::DYN_SFZ:  dt = DynamicType::SFZ;  break;
+    case EncOrnamentType::DYN_SFFZ: dt = DynamicType::SFFZ; break;
+    case EncOrnamentType::DYN_FP:   dt = DynamicType::FP;   break;
+    case EncOrnamentType::DYN_FZ:   dt = DynamicType::FZ;   break;
+    case EncOrnamentType::DYN_SF:   dt = DynamicType::SF;   break;
+    default: break;
+    }
+    // Use enc tick as the base: cumTick for voice=0 may be 0 when notes are in other voices.
+    const Fraction dynBase = measTick + Fraction(static_cast<int>(e->tick), kWholeTicks);
+    Fraction placeTick = snapTickByXoffset(dynBase, static_cast<int>(e->tick),
+                                           encMeas, staffIdx, eo, measTick);
+    // Section-end dynamics are stored at measureDurTicks; clamp back to the last ChordRest.
+    if (placeTick >= measTick + measure->ticks()) {
+        Segment* last = measure->last(SegmentType::ChordRest);
+        placeTick = last ? last->tick() : measTick;
+    }
+    Segment* seg = measure->getSegment(SegmentType::ChordRest, placeTick);
+    if (!seg) {
+        seg = measure->getSegment(SegmentType::ChordRest, measTick);
+    }
+    // Skip duplicate dynamics at the same tick (Encore can emit e.g. two MF ORNs).
+    bool dupDyn = false;
+    for (EngravingItem* ann : seg->annotations()) {
+        if (!ann || !ann->isDynamic() || ann->track() != track) {
+            continue;
+        }
+        if (toDynamic(ann)->dynamicType() == dt) {
+            dupDyn = true;
+            break;
+        }
+    }
+    if (dupDyn) {
+        return;
+    }
+    Dynamic* dyn = Factory::createDynamic(seg);
+    dyn->setTrack(track);
+    dyn->setDynamicType(dt);
+    dyn->setXmlText(Dynamic::dynamicText(dt));
+    if (eo->yoffset < 0) {
+        dyn->setPlacement(mu::engraving::PlacementV::BELOW);
+        dyn->setPropertyFlags(mu::engraving::Pid::PLACEMENT, mu::engraving::PropertyFlags::UNSTYLED);
+    }
+    seg->add(dyn);
+}
+
+static void handleStaffTextOrnament(BuildCtx& ctx, const NoteLoopMeasCtx& mc,
+                                    const NoteElemCtx& ec, const EncOrnament* eo,
+                                    Measure* measure, MasterScore* score)
+{
+    const EncRoot& enc = ctx.enc;
+    const Fraction measTick = mc.measTick;
+    const Fraction elemTick = ec.elemTick;
+    const track_idx_t track = ec.track;
+
+    // Text content lives in enc.textBlock.entries[eo->tind].
+    const int textIdx = static_cast<int>(eo->tind);
+    if (textIdx < 0
+        || textIdx >= static_cast<int>(enc.textBlock.entries.size())) {
+        return;
+    }
+    QString text = enc.textBlock.entries[textIdx];
+    if (text.isEmpty()) {
+        return;
+    }
+    Fraction placeTick = elemTick;
+    if (placeTick >= measTick + measure->ticks()) {
+        Segment* last = measure->last(SegmentType::ChordRest);
+        placeTick = last ? last->tick() : measTick;
+    }
+    Segment* seg = measure->getSegment(SegmentType::ChordRest, placeTick);
+    if (!seg) {
+        seg = measure->getSegment(SegmentType::ChordRest, measTick);
+    }
+    // Encore y-offset is Cartesian (positive = up); negative maps to PlacementV::BELOW.
+    const bool placeBelow = (eo->yoffset < 0);
+
+    // Promote Italian tempo terms to TempoText so MuseScore tracks them in the tempo map.
+    const double tempoBps = encTextToTempoBps(text);
+    if (tempoBps >= 0.0) {
+        TempoText* tt2 = Factory::createTempoText(seg);
+        tt2->setTrack(track);
+        tt2->setXmlText(String(text));
+        if (tempoBps > 0.0) {
+            tt2->setTempo(BeatsPerSecond(tempoBps));
+            tt2->setFollowText(true);
+            score->setTempo(elemTick, BeatsPerSecond(tempoBps));
+        }
+        if (placeBelow) {
+            tt2->setPlacement(mu::engraving::PlacementV::BELOW);
+            tt2->setPropertyFlags(mu::engraving::Pid::PLACEMENT, mu::engraving::PropertyFlags::UNSTYLED);
+        }
+        seg->add(tt2);
+        return;
+    }
+
+    StaffText* st = Factory::createStaffText(seg);
+    st->setTrack(track);
+    st->setXmlText(String(text));
+    if (placeBelow) {
+        st->setPlacement(mu::engraving::PlacementV::BELOW);
+        st->setPropertyFlags(mu::engraving::Pid::PLACEMENT, mu::engraving::PropertyFlags::UNSTYLED);
+    }
+    seg->add(st);
+}
+
+static void handleTempoOrnament(BuildCtx& ctx, const NoteLoopMeasCtx& mc,
+                                const NoteElemCtx& ec, const EncOrnament* eo,
+                                MasterScore* score)
+{
+    const EncMeasure& encMeas = *mc.encMeas;
+    const Fraction measTick = mc.measTick;
+    const Fraction elemTick = ec.elemTick;
+    const track_idx_t track = ec.track;
+    Measure* measure = mc.measure;
+
+    if (eo->tempo > 0) {
+        // Skip ORN TEMPO when it conflicts with the measure's header BPM. Encore stores tempo marks
+        // in the last measure of a system when the mark is visually at the next system start;
+        // the MEAS header BPM is authoritative in that case.
+        if (encMeas.bpm != 0 && static_cast<quint16>(eo->tempo) != encMeas.bpm) {
+            return;
+        }
+        Segment* seg = measure->getSegment(SegmentType::ChordRest, elemTick);
+        if (!seg) {
+            seg = measure->getSegment(SegmentType::ChordRest, measTick);
+        }
+        TempoText* tt2 = Factory::createTempoText(seg);
+        tt2->setTrack(track);
+        // Detect dotted-quarter beat: beatTicks=360 covers 3/8 feel; the compound sig check
+        // (den=8, num%3==0, num>3) catches 6/8 when old fixtures stored beatTicks=240.
+        const quint16 rawBeatTicks = encMeas.beatTicks;
+        // Use nominal timesig so a pickup measure inherits the main sig's classification.
+        const Fraction mts = measure->timesig();
+        const bool cmpd = (rawBeatTicks == 360)
+                          || (mts.denominator() == 8
+                              && mts.numerator() % 3 == 0
+                              && mts.numerator() > 3);
+        const double bps = cmpd ? eo->tempo * 1.5 / 60.0 : eo->tempo / 60.0;
+        tt2->setTempo(BeatsPerSecond(bps));
+        tt2->setXmlText(tempoXmlText(static_cast<int>(eo->tempo), cmpd ? 360 : 240));
+        tt2->setFollowText(true);
+        seg->add(tt2);
+        score->setTempo(elemTick, BeatsPerSecond(bps));
+    }
+}
+
+static void handleWedgeStart(BuildCtx& ctx, const NoteLoopMeasCtx& mc,
+                             const NoteElemCtx& ec, const EncOrnament* eo)
+{
+    const EncMeasure& encMeas = *mc.encMeas;
+    const Fraction measTick = mc.measTick;
+    const Fraction elemTick = ec.elemTick;
+    const int staffIdx = ec.staffIdx;
+    const track_idx_t track = ec.track;
+    const int voice = ec.voice;
+    const int measIdx = mc.measIdx;
+    const EncMeasureElem* e = ec.e;
+
+    // No WEDGESTOP in .enc; alMezuro = forward measure count (upper bound). Precise tick2 resolved in post-pass.
+    int endIdx = measIdx + static_cast<int>(eo->alMezuro);
+    if (endIdx < 0 || endIdx >= static_cast<int>(ctx.measuresByIdx.size())) {
+        endIdx = measIdx;
+    }
+    Measure* endMeas = ctx.measuresByIdx[endIdx];
+    Fraction maxEnd = endMeas->tick() + endMeas->ticks();
+    const Fraction snappedStart = snapTickByXoffset(elemTick, static_cast<int>(e->tick),
+                                                    encMeas, staffIdx, eo, measTick);
+    if (maxEnd <= snappedStart) {
+        return;
+    }
+    // Encore 5 sets bit 1 too (0x02=cresc, 0x03=dim); test bit 0 only.
+    const HairpinType hpType
+        = ((eo->speguleco & 0x01) == 0)
+          ? HairpinType::CRESC_HAIRPIN
+          : HairpinType::DIM_HAIRPIN;
+    PendingHairpin ph;
+    ph.startTick = snappedStart;
+    ph.maxEndTick = maxEnd;
+    ph.track = track;
+    ph.type = hpType;
+    ph.endMeasIdx = endIdx;
+    ph.hairpinXoffset2 = static_cast<int>(eo->xoffset2);
+    ph.staffIdx = staffIdx;
+    ph.encVoice = voice;
+    ctx.pendingHairpins.push_back(ph);
+}
+
 void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
 {
     MasterScore* score = ctx.score;
@@ -58,79 +347,6 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     Fraction elemTick = ec.elemTick;
 
     const EncOrnament* eo = static_cast<const EncOrnament*>(e);
-
-    static constexpr int kWholeTicks = 960;
-
-    // Snap a dynamic/ORN tick to the chord-rest whose xoffset matches its drawn position.
-    // ORN xoffset < chord xoffset means the glyph belongs to the preceding chord.
-    // Scans all voices so ORNs on staves whose notes are in voice=1+ are placed correctly.
-    auto snapTickByXoffset = [&](Fraction defaultTick, int dynEncTick) -> Fraction {
-        if (encMeas.beatTicks == 0 || encMeas.timeSigDen == 0) {
-            return defaultTick;
-        }
-        const int wholeTicks2 = encMeas.beatTicks * encMeas.timeSigDen;
-        const Fraction relTick = defaultTick - measTick;
-        const int defaultEncTick = (relTick.numerator() * wholeTicks2)
-                                   / std::max(1, relTick.denominator());
-        const int ornXoff = static_cast<int>(eo->xoffset);
-
-        // Find the note/rest at defaultEncTick on the same staff (any voice).
-        int defaultCrXoff = -1;
-        for (const auto& elem : encMeas.elements) {
-            const EncMeasureElem* em = elem.get();
-            if (em->type != static_cast<quint8>(EncElemType::NOTE)
-                && em->type != static_cast<quint8>(EncElemType::REST)) {
-                continue;
-            }
-            if (static_cast<int>(em->staffIdx) != staffIdx) {
-                continue;
-            }
-            if (static_cast<int>(em->tick) != defaultEncTick) {
-                continue;
-            }
-            if (em->type == static_cast<quint8>(EncElemType::NOTE)) {
-                defaultCrXoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
-            } else {
-                defaultCrXoff = static_cast<int>(static_cast<const EncRest*>(em)->xoffset);
-            }
-            break;
-        }
-        if (defaultCrXoff >= 0 && ornXoff >= defaultCrXoff) {
-            return defaultTick;
-        }
-        // Find the latest note/rest before defaultEncTick on the same staff (any voice)
-        // whose xoffset <= ornXoff. Also handles WEDGESTART at durTicks (no CR at default tick).
-        int bestTick = -1;
-        for (const auto& elem : encMeas.elements) {
-            const EncMeasureElem* em = elem.get();
-            if (em->type != static_cast<quint8>(EncElemType::NOTE)
-                && em->type != static_cast<quint8>(EncElemType::REST)) {
-                continue;
-            }
-            if (static_cast<int>(em->staffIdx) != staffIdx) {
-                continue;
-            }
-            if (static_cast<int>(em->tick) >= defaultEncTick) {
-                continue;
-            }
-            int xoff = 0;
-            if (em->type == static_cast<quint8>(EncElemType::NOTE)) {
-                xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
-            } else {
-                xoff = static_cast<int>(static_cast<const EncRest*>(em)->xoffset);
-            }
-            if (xoff > ornXoff) {
-                continue;
-            }
-            if (static_cast<int>(em->tick) > bestTick) {
-                bestTick = static_cast<int>(em->tick);
-            }
-        }
-        if (bestTick < 0) {
-            return defaultTick;
-        }
-        return measTick + Fraction(bestTick, wholeTicks2);
-    };
 
     switch (eo->ornType()) {
     case EncOrnamentType::SLURSTART: {
@@ -169,69 +385,14 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     }
     case EncOrnamentType::SLURSTOP:
         break;
-    case EncOrnamentType::WEDGESTART: {
-        // No WEDGESTOP in .enc; alMezuro = forward measure count (upper bound). Precise tick2 resolved in post-pass.
-        int endIdx = measIdx + static_cast<int>(eo->alMezuro);
-        if (endIdx < 0 || endIdx >= static_cast<int>(ctx.measuresByIdx.size())) {
-            endIdx = measIdx;
-        }
-        Measure* endMeas = ctx.measuresByIdx[endIdx];
-        Fraction maxEnd = endMeas->tick() + endMeas->ticks();
-        const Fraction snappedStart = snapTickByXoffset(elemTick, static_cast<int>(e->tick));
-        if (maxEnd <= snappedStart) {
-            break;
-        }
-        // Encore 5 sets bit 1 too (0x02=cresc, 0x03=dim); test bit 0 only.
-        const HairpinType hpType
-            = ((eo->speguleco & 0x01) == 0)
-              ? HairpinType::CRESC_HAIRPIN
-              : HairpinType::DIM_HAIRPIN;
-        PendingHairpin ph;
-        ph.startTick = snappedStart;
-        ph.maxEndTick = maxEnd;
-        ph.track = track;
-        ph.type = hpType;
-        ph.endMeasIdx = endIdx;
-        ph.hairpinXoffset2 = static_cast<int>(eo->xoffset2);
-        ph.staffIdx = staffIdx;
-        ph.encVoice = voice;
-        ctx.pendingHairpins.push_back(ph);
+    case EncOrnamentType::WEDGESTART:
+        handleWedgeStart(ctx, mc, ec, eo);
         break;
-    }
     case EncOrnamentType::WEDGESTOP:
         break;
-    case EncOrnamentType::TEMPO: {
-        if (eo->tempo > 0) {
-            // Skip ORN TEMPO when it conflicts with the measure's header BPM. Encore stores tempo marks
-            // in the last measure of a system when the mark is visually at the next system start;
-            // the MEAS header BPM is authoritative in that case.
-            if (encMeas.bpm != 0 && static_cast<quint16>(eo->tempo) != encMeas.bpm) {
-                break;
-            }
-            Segment* seg = measure->getSegment(SegmentType::ChordRest, elemTick);
-            if (!seg) {
-                seg = measure->getSegment(SegmentType::ChordRest, measTick);
-            }
-            TempoText* tt2 = Factory::createTempoText(seg);
-            tt2->setTrack(track);
-            // Detect dotted-quarter beat: beatTicks=360 covers 3/8 feel; the compound sig check
-            // (den=8, num%3==0, num>3) catches 6/8 when old fixtures stored beatTicks=240.
-            const quint16 rawBeatTicks = encMeas.beatTicks;
-            // Use nominal timesig so a pickup measure inherits the main sig's classification.
-            const Fraction mts = measure->timesig();
-            const bool cmpd = (rawBeatTicks == 360)
-                              || (mts.denominator() == 8
-                                  && mts.numerator() % 3 == 0
-                                  && mts.numerator() > 3);
-            const double bps = cmpd ? eo->tempo * 1.5 / 60.0 : eo->tempo / 60.0;
-            tt2->setTempo(BeatsPerSecond(bps));
-            tt2->setXmlText(tempoXmlText(static_cast<int>(eo->tempo), cmpd ? 360 : 240));
-            tt2->setFollowText(true);
-            seg->add(tt2);
-            score->setTempo(elemTick, BeatsPerSecond(bps));
-        }
+    case EncOrnamentType::TEMPO:
+        handleTempoOrnament(ctx, mc, ec, eo, score);
         break;
-    }
     case EncOrnamentType::ARPEGGIO: {
         ctx.pendingArpeggios.push_back({ elemTick, track });
         break;
@@ -280,7 +441,8 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
             }
             constexpr int TRILL_SNAP_THRESHOLD = 20;
             if (crXoffAtTick >= 0 && ornXoff < crXoffAtTick - TRILL_SNAP_THRESHOLD) {
-                pt.tick = snapTickByXoffset(elemTick, static_cast<int>(e->tick));
+                pt.tick = snapTickByXoffset(elemTick, static_cast<int>(e->tick),
+                                            encMeas, staffIdx, eo, measTick);
             } else {
                 pt.tick = elemTick;
             }
@@ -403,132 +565,12 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     case EncOrnamentType::DYN_SFFZ:
     case EncOrnamentType::DYN_FP:
     case EncOrnamentType::DYN_FZ:
-    case EncOrnamentType::DYN_SF: {
-        // Size-16 ORN: only the tipo byte is reliable.
-        // yoffset > 0 means the user dragged it onto the staff above; reroute to staffIdx-1.
-        if (eo->yoffset > 0 && staffIdx > 0) {
-            staffIdx -= 1;
-            track = static_cast<track_idx_t>(staffIdx * VOICES + msVoice);
-        }
-        DynamicType dt = DynamicType::OTHER;
-        switch (eo->ornType()) {
-        case EncOrnamentType::DYN_PPP:  dt = DynamicType::PPP;
-            break;
-        case EncOrnamentType::DYN_PP:   dt = DynamicType::PP;
-            break;
-        case EncOrnamentType::DYN_P:    dt = DynamicType::P;
-            break;
-        case EncOrnamentType::DYN_MP:   dt = DynamicType::MP;
-            break;
-        case EncOrnamentType::DYN_MF:   dt = DynamicType::MF;
-            break;
-        case EncOrnamentType::DYN_F:    dt = DynamicType::F;
-            break;
-        case EncOrnamentType::DYN_FF:   dt = DynamicType::FF;
-            break;
-        case EncOrnamentType::DYN_FFF:  dt = DynamicType::FFF;
-            break;
-        case EncOrnamentType::DYN_SFZ:  dt = DynamicType::SFZ;
-            break;
-        case EncOrnamentType::DYN_SFFZ: dt = DynamicType::SFFZ;
-            break;
-        case EncOrnamentType::DYN_FP:   dt = DynamicType::FP;
-            break;
-        case EncOrnamentType::DYN_FZ:   dt = DynamicType::FZ;
-            break;
-        case EncOrnamentType::DYN_SF:   dt = DynamicType::SF;
-            break;
-        default: break;
-        }
-        // Use enc tick as the base: cumTick for voice=0 may be 0 when notes are in other voices.
-        const Fraction dynBase = measTick + Fraction(static_cast<int>(e->tick), kWholeTicks);
-        Fraction placeTick = snapTickByXoffset(dynBase, static_cast<int>(e->tick));
-        // Section-end dynamics are stored at measureDurTicks; clamp back to the last ChordRest.
-        if (placeTick >= measTick + measure->ticks()) {
-            Segment* last = measure->last(SegmentType::ChordRest);
-            placeTick = last ? last->tick() : measTick;
-        }
-        Segment* seg = measure->getSegment(SegmentType::ChordRest, placeTick);
-        if (!seg) {
-            seg = measure->getSegment(SegmentType::ChordRest, measTick);
-        }
-        // Skip duplicate dynamics at the same tick (Encore can emit e.g. two MF ORNs).
-        bool dupDyn = false;
-        for (EngravingItem* ann : seg->annotations()) {
-            if (!ann || !ann->isDynamic() || ann->track() != track) {
-                continue;
-            }
-            if (toDynamic(ann)->dynamicType() == dt) {
-                dupDyn = true;
-                break;
-            }
-        }
-        if (dupDyn) {
-            break;
-        }
-        Dynamic* dyn = Factory::createDynamic(seg);
-        dyn->setTrack(track);
-        dyn->setDynamicType(dt);
-        dyn->setXmlText(Dynamic::dynamicText(dt));
-        if (eo->yoffset < 0) {
-            dyn->setPlacement(mu::engraving::PlacementV::BELOW);
-            dyn->setPropertyFlags(mu::engraving::Pid::PLACEMENT, mu::engraving::PropertyFlags::UNSTYLED);
-        }
-        seg->add(dyn);
+    case EncOrnamentType::DYN_SF:
+        handleDynamicOrnament(ctx, mc, ec, eo, measure, score);
         break;
-    }
-    case EncOrnamentType::STAFFTEXT: {
-        // Text content lives in enc.textBlock.entries[eo->tind].
-        const int textIdx = static_cast<int>(eo->tind);
-        if (textIdx < 0
-            || textIdx >= static_cast<int>(enc.textBlock.entries.size())) {
-            break;
-        }
-        QString text = enc.textBlock.entries[textIdx];
-        if (text.isEmpty()) {
-            break;
-        }
-        Fraction placeTick = elemTick;
-        if (placeTick >= measTick + measure->ticks()) {
-            Segment* last = measure->last(SegmentType::ChordRest);
-            placeTick = last ? last->tick() : measTick;
-        }
-        Segment* seg = measure->getSegment(SegmentType::ChordRest, placeTick);
-        if (!seg) {
-            seg = measure->getSegment(SegmentType::ChordRest, measTick);
-        }
-        // Encore y-offset is Cartesian (positive = up); negative maps to PlacementV::BELOW.
-        const bool placeBelow = (eo->yoffset < 0);
-
-        // Promote Italian tempo terms to TempoText so MuseScore tracks them in the tempo map.
-        const double tempoBps = encTextToTempoBps(text);
-        if (tempoBps >= 0.0) {
-            TempoText* tt2 = Factory::createTempoText(seg);
-            tt2->setTrack(track);
-            tt2->setXmlText(String(text));
-            if (tempoBps > 0.0) {
-                tt2->setTempo(BeatsPerSecond(tempoBps));
-                tt2->setFollowText(true);
-                score->setTempo(elemTick, BeatsPerSecond(tempoBps));
-            }
-            if (placeBelow) {
-                tt2->setPlacement(mu::engraving::PlacementV::BELOW);
-                tt2->setPropertyFlags(mu::engraving::Pid::PLACEMENT, mu::engraving::PropertyFlags::UNSTYLED);
-            }
-            seg->add(tt2);
-            break;
-        }
-
-        StaffText* st = Factory::createStaffText(seg);
-        st->setTrack(track);
-        st->setXmlText(String(text));
-        if (placeBelow) {
-            st->setPlacement(mu::engraving::PlacementV::BELOW);
-            st->setPropertyFlags(mu::engraving::Pid::PLACEMENT, mu::engraving::PropertyFlags::UNSTYLED);
-        }
-        seg->add(st);
+    case EncOrnamentType::STAFFTEXT:
+        handleStaffTextOrnament(ctx, mc, ec, eo, measure, score);
         break;
-    }
     default:
         LOGW() << QString("Encore: unknown ornament type 0x%1 at measure %2 staff %3 tick %4")
                       .arg(eo->tipo, 2, 16, QChar('0'))
