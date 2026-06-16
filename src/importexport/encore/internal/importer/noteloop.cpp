@@ -156,6 +156,196 @@ void NoteLoopMeasCtx::closeTupletWithFill(BuildCtx& ctx, TupletTracker& tt,
     tt.closeTuplet();
 }
 
+struct DeferredKeySig {
+    Key writtenKey;
+    Key concertKey;
+    int staffIdx { 0 };
+};
+
+static bool hasPitchedNotes(const EncMeasure& m)
+{
+    for (const auto& elem : m.elements) {
+        if (static_cast<EncElemType>(elem->type) == EncElemType::NOTE) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool hasMultiRest(const EncMeasure& m)
+{
+    if (m.elements.empty()) {
+        return false;
+    }
+    for (const auto& ep : m.elements) {
+        if (static_cast<EncElemType>(ep->type) != EncElemType::REST) {
+            return false;
+        }
+    }
+    return static_cast<const EncRest*>(m.elements[0].get())->mrestCount > 1;
+}
+
+static int measDisplayCount(const EncMeasure& m, const EncMeasure* prev)
+{
+    if (m.elements.empty()) {
+        return 1;
+    }
+    for (const auto& ep : m.elements) {
+        if (static_cast<EncElemType>(ep->type) != EncElemType::REST) {
+            return 1;
+        }
+    }
+    const int cnt = static_cast<int>(static_cast<const EncRest*>(m.elements[0].get())->mrestCount);
+    if (cnt <= 1) {
+        return 1;
+    }
+    if (prev && hasMultiRest(*prev)) {
+        return 1;
+    }
+    return cnt;
+}
+
+static void sortMeasureElements(const EncMeasure& encMeas, MeasureElemRefVec& sortedElems)
+{
+    sortedElems.reserve(encMeas.elements.size());
+    for (const auto& elem : encMeas.elements) {
+        sortedElems.push_back(elem.get());
+    }
+    std::stable_sort(sortedElems.begin(), sortedElems.end(),
+                     [](const EncMeasureElem* a, const EncMeasureElem* b) {
+        if (a->tick != b->tick) {
+            return a->tick < b->tick;
+        }
+        bool aIsNote = (static_cast<EncElemType>(a->type) == EncElemType::NOTE
+                        || static_cast<EncElemType>(a->type) == EncElemType::REST);
+        bool bIsNote = (static_cast<EncElemType>(b->type) == EncElemType::NOTE
+                        || static_cast<EncElemType>(b->type) == EncElemType::REST);
+        if (aIsNote != bIsNote) {
+            return !aIsNote;  // non-notes before notes
+        }
+        if (!aIsNote) {
+            return false;     // both non-notes: preserve stable order
+        }
+        // Among notes at same tick: tuplet notes before non-tuplet notes
+        bool aTuplet = a->tupletByte() != 0;
+        bool bTuplet = b->tupletByte() != 0;
+        if (aTuplet != bTuplet) {
+            return aTuplet;   // tuplet note first
+        }
+        // Shortest faceValue first: chord root drives cumTick by minimum step.
+        const quint8 aFv = static_cast<EncElemType>(a->type) == EncElemType::NOTE
+                           ? (static_cast<const EncNote*>(a)->faceValue & 0x0F)
+                           : (static_cast<const EncRest*>(a)->faceValue & 0x0F);
+        const quint8 bFv = static_cast<EncElemType>(b->type) == EncElemType::NOTE
+                           ? (static_cast<const EncNote*>(b)->faceValue & 0x0F)
+                           : (static_cast<const EncRest*>(b)->faceValue & 0x0F);
+        if (aFv != bFv) {
+            return aFv > bFv;  // higher number = shorter duration = comes first
+        }
+        return false;         // stable for equal keys
+    });
+}
+
+static void collectTieStartPositions(const MeasureElemRefVec& sortedElems,
+                                     const std::array<int, 256>& lineSlotByRawByte,
+                                     int totalStaves, NoteLoopMeasCtx& mc)
+{
+    for (const EncMeasureElem* e : sortedElems) {
+        if (static_cast<EncElemType>(e->type) == EncElemType::TIE) {
+            const EncTie* et = static_cast<const EncTie*>(e);
+            if (et->isTieStart) {
+                int si = static_cast<int>(e->staffIdx);
+                int v  = static_cast<int>(e->voice);
+                const quint8 tiRawByte = (static_cast<quint8>(e->staffWithin) << 6)
+                                         | static_cast<quint8>(e->staffIdx);
+                const int tiOrigSW = static_cast<int>(e->staffWithin);
+                bool tiResolved = false;
+                if (lineSlotByRawByte[tiRawByte] >= 0) {
+                    si = lineSlotByRawByte[tiRawByte];
+                    tiResolved = true;
+                    if (tiOrigSW > 0 && v < static_cast<int>(VOICES)) {
+                        const int vBase = tiOrigSW * (static_cast<int>(VOICES) / 2);
+                        if (v >= vBase) {
+                            v -= vBase;
+                        }
+                    }
+                }
+                if (v >= static_cast<int>(VOICES)) {
+                    v = 0;
+                } else if (!tiResolved && tiOrigSW > 0) {
+                    const int sw = tiOrigSW;
+                    const int vBase = sw * (static_cast<int>(VOICES) / 2);
+                    if (v >= vBase && si + sw < totalStaves) {
+                        si += sw;
+                        v  -= vBase;
+                    }
+                }
+                mc.tieStartSet.insert({ { si, v, (int)e->tick }, et->sourcePosition });
+            }
+        }
+    }
+}
+
+static void scanMeasureMetadata(const MeasureElemRefVec& sortedElems, NoteLoopMeasCtx& mc)
+{
+    for (const EncMeasureElem* em : sortedElems) {
+        const EncElemType et2 = static_cast<EncElemType>(em->type);
+        if (et2 == EncElemType::NOTE) {
+            mc.noteTicks.insert(static_cast<int>(em->tick));
+            if (em->voice >= static_cast<int>(VOICES)) {
+                mc.voice4NoteTicks.insert(static_cast<int>(em->tick));
+            } else {
+                mc.v0NoteCountAtTick[static_cast<int>(em->tick)]++;
+                mc.maxVoice0Tick = std::max(mc.maxVoice0Tick, static_cast<int>(em->tick));
+            }
+            // Detect scale string number anchors (au in 0x39..0x40)
+            const EncNote* enPre = static_cast<const EncNote*>(em);
+            if (encArticByteToScaleStringNumber(enPre->articulationUp) > 0
+                || encArticByteToScaleStringNumber(enPre->articulationDown) > 0) {
+                mc.hasScaleStringAnchors = true;
+            }
+        } else if (et2 == EncElemType::ORNAMENT) {
+            const EncOrnament* eo2 = static_cast<const EncOrnament*>(em);
+            const EncOrnamentType ot2 = eo2->ornType();
+            if (ot2 >= EncOrnamentType::FINGER_1 && ot2 <= EncOrnamentType::FINGER_5) {
+                mc.ornFingCountAtTick[static_cast<int>(em->tick)]++;
+            }
+        }
+    }
+}
+
+static void handleKeyChange(BuildCtx& ctx, const NoteLoopMeasCtx& mc,
+                            const NoteElemCtx& ec, const EncMeasureElem* e,
+                            std::vector<DeferredKeySig>& pendingKeySigs)
+{
+    MasterScore* score = ctx.score;
+    const EncKeyChange* ekc = static_cast<const EncKeyChange*>(e);
+    Staff* staff = score->staff(ec.staffIdx);
+    if (!staff) {
+        return;
+    }
+    Key writtenKey = Key(encKeyToFifths(ekc->tipo));
+    Interval v = Interval(ctx.staffPitchOffset[ec.staffIdx]);
+    Key concertKey = v.isZero() ? writtenKey : Transpose::transposeKey(writtenKey, v);
+
+    if (!hasPitchedNotes(*mc.encMeas)) {
+        // Placing a KeySig in a rest-only measure breaks MuseScore's MMRest
+        // condensation.  Defer to the next measure that contains notes.
+        pendingKeySigs.push_back({ writtenKey, concertKey, ec.staffIdx });
+        return;
+    }
+
+    KeySigEvent ke;
+    ke.setConcertKey(concertKey);
+    ke.setKey(writtenKey);
+    staff->setKey(ec.elemTick, ke);
+    Segment* seg = mc.measure->getSegment(SegmentType::KeySig, ec.elemTick);
+    KeySig* ks = Factory::createKeySig(seg);
+    ks->setTrack(ec.track);
+    ks->setKey(concertKey, writtenKey);
+    seg->add(ks);
+}
+
 void buildNoteLoop(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
@@ -188,54 +378,7 @@ void buildNoteLoop(BuildCtx& ctx)
 
     // Slurs resolved after the pass: .enc has no SLURSTOP; end anchored at last ChordRest in the alMezuro target measure.
 
-    // Key sig in a rest-only measure breaks MMRest condensation; defer to the first subsequent measure with pitched notes.
-    auto hasPitchedNotes = [](const EncMeasure& m) {
-        for (const auto& elem : m.elements) {
-            if (static_cast<EncElemType>(elem->type) == EncElemType::NOTE) {
-                return true;
-            }
-        }
-        return false;
-    };
-
-    struct DeferredKeySig {
-        Key writtenKey;
-        Key concertKey;
-        int staffIdx { 0 };
-    };
     std::vector<DeferredKeySig> pendingKeySigs;
-
-    auto hasMultiRest = [](const EncMeasure& m) -> bool {
-        if (m.elements.empty()) {
-            return false;
-        }
-        for (const auto& ep : m.elements) {
-            if (static_cast<EncElemType>(ep->type) != EncElemType::REST) {
-                return false;
-            }
-        }
-        return static_cast<const EncRest*>(m.elements[0].get())->mrestCount > 1;
-    };
-
-    auto measDisplayCount = [&hasMultiRest](
-        const EncMeasure& m, const EncMeasure* prev) -> int {
-        if (m.elements.empty()) {
-            return 1;
-        }
-        for (const auto& ep : m.elements) {
-            if (static_cast<EncElemType>(ep->type) != EncElemType::REST) {
-                return 1;
-            }
-        }
-        const int cnt = static_cast<int>(static_cast<const EncRest*>(m.elements[0].get())->mrestCount);
-        if (cnt <= 1) {
-            return 1;
-        }
-        if (prev && hasMultiRest(*prev)) {
-            return 1;
-        }
-        return cnt;
-    };
 
     // measSkip tracks the expansion of multi-measure rests (1 enc MEAS → N MuseScore measures).
     int measSkip = 0;
@@ -373,79 +516,10 @@ void buildNoteLoop(BuildCtx& ctx)
 
         // Sort: tick asc, ORNs before notes, tuplet notes before non-tuplet (ensures tup note sets duration at shared tick).
         MeasureElemRefVec sortedElems;
-        sortedElems.reserve(encMeas.elements.size());
-        for (const auto& elem : encMeas.elements) {
-            sortedElems.push_back(elem.get());
-        }
-        std::stable_sort(sortedElems.begin(), sortedElems.end(),
-                         [](const EncMeasureElem* a, const EncMeasureElem* b) {
-            if (a->tick != b->tick) {
-                return a->tick < b->tick;
-            }
-            bool aIsNote = (static_cast<EncElemType>(a->type) == EncElemType::NOTE
-                            || static_cast<EncElemType>(a->type) == EncElemType::REST);
-            bool bIsNote = (static_cast<EncElemType>(b->type) == EncElemType::NOTE
-                            || static_cast<EncElemType>(b->type) == EncElemType::REST);
-            if (aIsNote != bIsNote) {
-                return !aIsNote;  // non-notes before notes
-            }
-            if (!aIsNote) {
-                return false;     // both non-notes: preserve stable order
-            }
-            // Among notes at same tick: tuplet notes before non-tuplet notes
-            bool aTuplet = a->tupletByte() != 0;
-            bool bTuplet = b->tupletByte() != 0;
-            if (aTuplet != bTuplet) {
-                return aTuplet;   // tuplet note first
-            }
-            // Shortest faceValue first: chord root drives cumTick by minimum step.
-            const quint8 aFv = static_cast<EncElemType>(a->type) == EncElemType::NOTE
-                               ? (static_cast<const EncNote*>(a)->faceValue & 0x0F)
-                               : (static_cast<const EncRest*>(a)->faceValue & 0x0F);
-            const quint8 bFv = static_cast<EncElemType>(b->type) == EncElemType::NOTE
-                               ? (static_cast<const EncNote*>(b)->faceValue & 0x0F)
-                               : (static_cast<const EncRest*>(b)->faceValue & 0x0F);
-            if (aFv != bFv) {
-                return aFv > bFv;  // higher number = shorter duration = comes first
-            }
-            return false;         // stable for equal keys
-        });
+        sortMeasureElements(encMeas, sortedElems);
 
         // Collect TIE-START positions using routed (staffIdx, voice) so bit6-encoded second-staff notes resolve correctly.
-        for (const EncMeasureElem* e : sortedElems) {
-            if (static_cast<EncElemType>(e->type) == EncElemType::TIE) {
-                const EncTie* et = static_cast<const EncTie*>(e);
-                if (et->isTieStart) {
-                    int si = static_cast<int>(e->staffIdx);
-                    int v  = static_cast<int>(e->voice);
-                    const quint8 tiRawByte = (static_cast<quint8>(e->staffWithin) << 6)
-                                             | static_cast<quint8>(e->staffIdx);
-                    const int tiOrigSW = static_cast<int>(e->staffWithin);
-                    bool tiResolved = false;
-                    if (lineSlotByRawByte[tiRawByte] >= 0) {
-                        si = lineSlotByRawByte[tiRawByte];
-                        tiResolved = true;
-                        if (tiOrigSW > 0 && v < static_cast<int>(VOICES)) {
-                            const int vBase = tiOrigSW * (static_cast<int>(VOICES) / 2);
-                            if (v >= vBase) {
-                                v -= vBase;
-                            }
-                        }
-                    }
-                    if (v >= static_cast<int>(VOICES)) {
-                        v = 0;
-                    } else if (!tiResolved && tiOrigSW > 0) {
-                        const int sw = tiOrigSW;
-                        const int vBase = sw * (static_cast<int>(VOICES) / 2);
-                        if (v >= vBase && si + sw < ctx.totalStaves) {
-                            si += sw;
-                            v  -= vBase;
-                        }
-                    }
-                    mc.tieStartSet.insert({ { si, v, (int)e->tick }, et->sourcePosition });
-                }
-            }
-        }
+        collectTieStartPositions(sortedElems, lineSlotByRawByte, ctx.totalStaves, mc);
 
         mc.overrideGroupRatios.clear();
         mc.validTupletGroupMember
@@ -479,30 +553,7 @@ void buildNoteLoop(BuildCtx& ctx)
             }
         }
 
-        for (const EncMeasureElem* em : sortedElems) {
-            const EncElemType et2 = static_cast<EncElemType>(em->type);
-            if (et2 == EncElemType::NOTE) {
-                mc.noteTicks.insert(static_cast<int>(em->tick));
-                if (em->voice >= static_cast<int>(VOICES)) {
-                    mc.voice4NoteTicks.insert(static_cast<int>(em->tick));
-                } else {
-                    mc.v0NoteCountAtTick[static_cast<int>(em->tick)]++;
-                    mc.maxVoice0Tick = std::max(mc.maxVoice0Tick, static_cast<int>(em->tick));
-                }
-                // Detect scale string number anchors (au in 0x39..0x40)
-                const EncNote* enPre = static_cast<const EncNote*>(em);
-                if (encArticByteToScaleStringNumber(enPre->articulationUp) > 0
-                    || encArticByteToScaleStringNumber(enPre->articulationDown) > 0) {
-                    mc.hasScaleStringAnchors = true;
-                }
-            } else if (et2 == EncElemType::ORNAMENT) {
-                const EncOrnament* eo2 = static_cast<const EncOrnament*>(em);
-                const EncOrnamentType ot2 = eo2->ornType();
-                if (ot2 >= EncOrnamentType::FINGER_1 && ot2 <= EncOrnamentType::FINGER_5) {
-                    mc.ornFingCountAtTick[static_cast<int>(em->tick)]++;
-                }
-            }
-        }
+        scanMeasureMetadata(sortedElems, mc);
 
         for (const EncMeasureElem* e : sortedElems) {
             EncElemType et = static_cast<EncElemType>(e->type);
@@ -700,34 +751,6 @@ void buildNoteLoop(BuildCtx& ctx)
             ec.hadLastChordPos = hadLastChordPos;
             ec.savedLastChordPos = savedLastChordPos;
 
-            auto handleKeyChange = [&]() {
-                const EncKeyChange* ekc = static_cast<const EncKeyChange*>(e);
-                Staff* staff = score->staff(staffIdx);
-                if (!staff) {
-                    return;
-                }
-                Key writtenKey = Key(encKeyToFifths(ekc->tipo));
-                Interval v = Interval(ctx.staffPitchOffset[staffIdx]);
-                Key concertKey = v.isZero() ? writtenKey : Transpose::transposeKey(writtenKey, v);
-
-                if (!hasPitchedNotes(encMeas)) {
-                    // Placing a KeySig in a rest-only measure breaks MuseScore's MMRest
-                    // condensation.  Defer to the next measure that contains notes.
-                    pendingKeySigs.push_back({ writtenKey, concertKey, staffIdx });
-                    return;
-                }
-
-                KeySigEvent ke;
-                ke.setConcertKey(concertKey);
-                ke.setKey(writtenKey);
-                staff->setKey(elemTick, ke);
-                Segment* seg = measure->getSegment(SegmentType::KeySig, elemTick);
-                KeySig* ks = Factory::createKeySig(seg);
-                ks->setTrack(track);
-                ks->setKey(concertKey, writtenKey);
-                seg->add(ks);
-            };
-
             switch (static_cast<EncElemType>(e->type)) {
             case EncElemType::NOTE:      handleNote(ctx, mc, ec);
                 break;
@@ -739,7 +762,7 @@ void buildNoteLoop(BuildCtx& ctx)
                 break;
             case EncElemType::ORNAMENT:  handleOrnament(ctx, mc, ec);
                 break;
-            case EncElemType::KEYCHANGE: handleKeyChange();
+            case EncElemType::KEYCHANGE: handleKeyChange(ctx, mc, ec, e, pendingKeySigs);
                 break;
             default: break;
             }

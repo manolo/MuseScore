@@ -43,6 +43,137 @@
 namespace mu::iex::enc {
 using namespace mu::engraving;
 
+// Returns true if the note is a short MIDI artifact that should be skipped.
+static bool isMidiArtifact(const EncNote* en,
+                            const NoteElemCtx& ec,
+                            const NoteLoopMeasCtx& mc,
+                            std::set<std::tuple<int, int, int> >& filteredSenders,
+                            int savedPrevMidiTick,
+                            bool isChordExt)
+{
+    if (en->realDuration == 0 || en->realDuration >= 15) {
+        return false;
+    }
+    const quint8 safeFv = en->faceValue & 0x0F;
+    int fvBase = faceValue2ticks(safeFv);
+    if (fvBase <= 15) {
+        bool bypass = mc.isTieStartAt(ec.staffIdx, ec.voice, (int)ec.e->tick)
+                      || isChordExt;
+        if (!bypass) {
+            if ((en->grace1 & 0x0F) == 1) {
+                filteredSenders.insert({ ec.staffIdx, ec.voice, (int)en->semiTonePitch });
+            }
+            return true;
+        }
+    } else {
+        if (en->realDuration > CHORD_CLUSTER_THRESHOLD
+            && !mc.validTupletGroupMember.count(ec.e)
+            && !isChordExt
+            && savedPrevMidiTick >= 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Returns true if this note is a cascade-filtered tie-receiver and should be skipped.
+static bool isCascadeFilteredTieReceiver(const EncNote* en,
+                                          const NoteElemCtx& ec,
+                                          std::set<std::tuple<int, int, int> >& filteredSenders)
+{
+    if ((en->grace1 & 0x0F) != 2) {
+        return false;
+    }
+    auto cascKey = std::make_tuple(ec.staffIdx, ec.voice, (int)en->semiTonePitch);
+    if (filteredSenders.count(cascKey)) {
+        filteredSenders.erase(cascKey);
+        return true;
+    }
+    return false;
+}
+
+// Attaches any pending grace notes for trackKey to chord.
+static void attachPendingGracesToChord(BuildCtx& ctx,
+                                        const std::pair<int, int>& trackKey,
+                                        Chord* chord)
+{
+    auto& pg = ctx.pendingGraces[trackKey];
+    for (Chord* gc : pg) {
+        gc->setGraceIndex(chord->graceNotes().size());
+        chord->add(gc);
+    }
+    pg.clear();
+    // DO NOT erase ctx.graceStolenTicks yet: the snap guard
+    // for the NEXT regular note needs to read it.
+}
+
+// Creates Fingering/string-number elements from articulationUp/articulationDown bytes.
+static void applyFingeringsFromArtic(const NoteElemCtx& ec,
+                                      Note* note,
+                                      const EncNote* en)
+{
+    track_idx_t track = ec.track;
+    for (quint8 ab : { en->articulationUp, en->articulationDown }) {
+        int n = encArticByteToFingerNumber(ab);
+        if (n > 0) {
+            Fingering* fg = Factory::createFingering(note);
+            fg->setTrack(track);
+            fg->setXmlText(String::number(n));
+            note->add(fg);
+            break;
+        }
+        if (encArticByteIsOpenString(ab)) {
+            Fingering* fg = Factory::createFingering(note);  // "0" not circled STRING_NUMBER
+            fg->setTrack(track);
+            fg->setXmlText(u"0");
+            note->add(fg);
+            break;
+        }
+        const int sn = encArticByteToStringNumber(ab);
+        if (sn > 0) {
+            Fingering* fg = Factory::createFingering(
+                note, mu::engraving::TextStyleType::STRING_NUMBER);
+            fg->setTrack(track);
+            fg->setXmlText(String::number(sn));
+            note->add(fg);
+            break;
+        }
+    }
+}
+
+// Completes a pending tie from a previous note to this note.
+static void completePendingTie(BuildCtx& ctx,
+                                const NoteElemCtx& ec,
+                                const EncNote* en,
+                                Note* note)
+{
+    auto tieKey = std::make_tuple(ec.staffIdx, ec.voice, (int)en->semiTonePitch);
+    auto it = ctx.pendingTieNote.find(tieKey);
+    if (it != ctx.pendingTieNote.end()) {
+        Note* startNote = it->second;
+        Tie* tie = Factory::createTie(startNote);
+        tie->setStartNote(startNote);
+        tie->setEndNote(note);
+        tie->setTrack(startNote->track());
+        startNote->add(tie);
+        ctx.pendingTieNote.erase(it);
+    }
+}
+
+// Registers this note as a tie-start if applicable.
+static void registerTieStartIfApplicable(BuildCtx& ctx,
+                                          const NoteElemCtx& ec,
+                                          const NoteLoopMeasCtx& mc,
+                                          const EncNote* en,
+                                          Note* note)
+{
+    bool hasTieStart = mc.isTieStartAt(ec.staffIdx, ec.voice, (int)ec.e->tick, (int)en->position)
+                       || (ctx.g1LowTieSender && (en->grace1 & 0x0F) == 1);
+    if (hasTieStart) {
+        ctx.pendingTieNote[{ ec.staffIdx, ec.voice, (int)en->semiTonePitch }] = note;
+    }
+}
+
 void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
 {
     MasterScore* score = ctx.score;
@@ -79,40 +210,16 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     if (!isValidFaceValue(en->faceValue)) {
         return;
     }
-    const quint8 safeFv = en->faceValue & 0x0F;
+
     // Skip MIDI tie-continuation artifacts (realDuration < 15) unless tie-start or chord extension.
     // Use pre-computed isChordExt: after prevMidiTick update delta=0 and would falsely bypass.
-    if (en->realDuration > 0 && en->realDuration < 15) {
-        int fvBase = faceValue2ticks(safeFv);
-        if (fvBase <= 15) {
-            bool bypass = isTieStart(staffIdx, voice, (int)e->tick)
-                          || isChordExt;
-            if (!bypass) {
-                // Record tie-senders so their continuation note is also filtered.
-                if ((en->grace1 & 0x0F) == 1) {
-                    filteredTieSenderPitches.insert(
-                        { staffIdx, voice, (int)en->semiTonePitch });
-                }
-                return;
-            }
-        } else {
-            // For 8th+ notes: bypass tuplet members (measure-boundary truncation), chord extensions, and first note on staff (no artifact context).
-            if (en->realDuration > CHORD_CLUSTER_THRESHOLD
-                && !validTupletGroupMember.count(e)
-                && !isChordExt
-                && savedPrevMidiTick >= 0) {
-                return;
-            }
-        }
+    if (isMidiArtifact(en, ec, mc, filteredTieSenderPitches, savedPrevMidiTick, isChordExt)) {
+        return;
     }
 
     // Cascade-filter: tie-receiver of a filtered artifact is also filtered.
-    if ((en->grace1 & 0x0F) == 2) {
-        auto cascKey = std::make_tuple(staffIdx, voice, (int)en->semiTonePitch);
-        if (filteredTieSenderPitches.count(cascKey)) {
-            filteredTieSenderPitches.erase(cascKey);
-            return;
-        }
+    if (isCascadeFilteredTieReceiver(en, ec, filteredTieSenderPitches)) {
+        return;
     }
 
     // Explicit tuplet notes: faceValue drives dt (rdur may be truncated by the next MIDI event).
@@ -479,17 +586,8 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         }
     }
 
-    {
-        auto& pg = ctx.pendingGraces[trackKey];
-        for (Chord* gc : pg) {
-            // Insert at END to preserve ascending-tick order (default graceIndex=0 prepends, reversing the group).
-            gc->setGraceIndex(chord->graceNotes().size());
-            chord->add(gc);
-        }
-        pg.clear();
-        // DO NOT erase ctx.graceStolenTicks yet: the snap guard
-        // for the NEXT regular note needs to read it.
-    }
+    // Insert at END to preserve ascending-tick order (default graceIndex=0 prepends, reversing the group).
+    attachPendingGracesToChord(ctx, trackKey, chord);
 
     const int concertPitch = en->semiTonePitch + ctx.staffPitchOffset[staffIdx];
     if (chord->findNote(concertPitch)) {
@@ -540,58 +638,14 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     }
 
     // Fingerings 1..5 (0x0D..0x11) and open-string 0x46 are packed in the artic byte.
-    for (quint8 ab : { en->articulationUp, en->articulationDown }) {
-        int n = encArticByteToFingerNumber(ab);
-        if (n > 0) {
-            Fingering* fg = Factory::createFingering(note);
-            fg->setTrack(track);
-            fg->setXmlText(String::number(n));
-            note->add(fg);
-            break;
-        }
-        if (encArticByteIsOpenString(ab)) {
-            Fingering* fg = Factory::createFingering(note);  // "0" not circled STRING_NUMBER
-            fg->setTrack(track);
-            fg->setXmlText(u"0");
-            note->add(fg);
-            break;
-        }
-        const int sn = encArticByteToStringNumber(ab);
-        if (sn > 0) {
-            Fingering* fg = Factory::createFingering(
-                note, mu::engraving::TextStyleType::STRING_NUMBER);
-            fg->setTrack(track);
-            fg->setXmlText(String::number(sn));
-            note->add(fg);
-            break;
-        }
-    }
+    applyFingeringsFromArtic(ec, note, en);
 
     // Complete pending tie from same (staffIdx, voice, pitch).
-    {
-        auto tieKey = std::make_tuple(staffIdx, voice, (int)en->semiTonePitch);
-        auto it = ctx.pendingTieNote.find(tieKey);
-        if (it != ctx.pendingTieNote.end()) {
-            Note* startNote = it->second;
-            Tie* tie = Factory::createTie(startNote);
-            tie->setStartNote(startNote);
-            tie->setEndNote(note);
-            tie->setTrack(startNote->track());
-            startNote->add(tie);
-            ctx.pendingTieNote.erase(it);
-        }
-    }
+    completePendingTie(ctx, ec, en, note);
 
     applyNoteArticulations(note, chord, en, track, mc);
 
     // Register tie-start (TIE element or grace1 low==1 for chord members outside the ±3-tick window).
-    {
-        bool hasTieStart = isTieStart(staffIdx, voice, (int)e->tick, (int)en->position)
-                           || (ctx.g1LowTieSender
-                               && (en->grace1 & 0x0F) == 1);
-        if (hasTieStart) {
-            ctx.pendingTieNote[{ staffIdx, voice, (int)en->semiTonePitch }] = note;
-        }
-    }
+    registerTieStartIfApplicable(ctx, ec, mc, en, note);
 }
 } // namespace mu::iex::enc
