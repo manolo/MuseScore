@@ -53,6 +53,7 @@ target_sources(iex_encore PRIVATE
     internal/parser/ticks.cpp
     internal/parser/ticks.h
     internal/importer/tuplets.cpp
+    internal/importer/tuplets-implied.cpp
     internal/importer/tuplets.h
     internal/notationencreader.cpp
     internal/notationencreader.h
