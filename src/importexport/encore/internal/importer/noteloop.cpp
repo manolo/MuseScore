@@ -587,6 +587,69 @@ static void coalesceVolta(BuildCtx& ctx, Measure* measure,
     }
 }
 
+static void resetPerMeasureState(BuildCtx& ctx, int measIdx)
+{
+    for (auto& [key, tt] : ctx.tuplets) {
+        if (tt.inTuplet()) {
+            tt.closeTuplet();
+        }
+    }
+    ctx.tuplets.clear();
+    for (auto& [key, tt] : ctx.innerTuplets) {
+        if (tt.inTuplet()) {
+            tt.closeTuplet();
+        }
+    }
+    ctx.innerTuplets.clear();
+    ctx.cumTick.clear();
+    ctx.prevMidiTick.clear();
+    ctx.prevEncVoice.clear();
+    ctx.lastChordPos.clear();
+    ctx.prevRestTick.clear();
+    ctx.graceStolenTicks.clear();
+
+    // Unattached grace chords are not in the score tree and need explicit deletion.
+    for (auto& [key, vec] : ctx.pendingGraces) {
+        for (Chord* gc : vec) {
+            LOGW() << "Encore import: discarding dangling grace chord at measure " << measIdx
+                   << " (staff " << key.first << ", voice " << key.second << ")";
+            delete gc;
+        }
+    }
+    ctx.pendingGraces.clear();
+}
+
+static void buildNestedTupletMaps(NoteLoopMeasCtx& mc,
+                                  const MeasureElemRefVec& sortedElems)
+{
+    mc.nestedByInnerFirst.clear();
+    mc.nestedByInnerLast.clear();
+    mc.innerGroupMembers.clear();
+    for (const NestedTupletInfo& ni : mc.nestedInfos) {
+        if (ni.innerFirst) {
+            mc.nestedByInnerFirst[ni.innerFirst] = &ni;
+        }
+        if (ni.innerLast) {
+            mc.nestedByInnerLast[ni.innerLast] = &ni;
+        }
+        // Collect all sorted elements between innerFirst and innerLast (inclusive).
+        if (ni.innerFirst && ni.innerLast) {
+            bool inInner = false;
+            for (const EncMeasureElem* em2 : sortedElems) {
+                if (em2 == ni.innerFirst) {
+                    inInner = true;
+                }
+                if (inInner) {
+                    mc.innerGroupMembers.insert(em2);
+                }
+                if (em2 == ni.innerLast) {
+                    break;
+                }
+            }
+        }
+    }
+}
+
 static void handleKeyChange(BuildCtx& ctx, const NoteLoopMeasCtx& mc,
                             const NoteElemCtx& ec, const EncMeasureElem* e,
                             std::vector<DeferredKeySig>& pendingKeySigs)
@@ -674,34 +737,7 @@ void buildNoteLoop(BuildCtx& ctx)
         mc.lineStaffInstrIdx = &lineStaffInstrIdx;
         mc.lineStaffWithin = &lineStaffWithin;
 
-        for (auto& [key, tt] : ctx.tuplets) {
-            if (tt.inTuplet()) {
-                tt.closeTuplet();
-            }
-        }
-        ctx.tuplets.clear();
-        for (auto& [key, tt] : ctx.innerTuplets) {
-            if (tt.inTuplet()) {
-                tt.closeTuplet();
-            }
-        }
-        ctx.innerTuplets.clear();
-        ctx.cumTick.clear();
-        ctx.prevMidiTick.clear();
-        ctx.prevEncVoice.clear();
-        ctx.lastChordPos.clear();
-        ctx.prevRestTick.clear();
-        ctx.graceStolenTicks.clear();
-
-        // Unattached grace chords are not in the score tree and need explicit deletion.
-        for (auto& [key, vec] : ctx.pendingGraces) {
-            for (Chord* gc : vec) {
-                LOGW() << "Encore import: discarding dangling grace chord at measure " << measIdx
-                       << " (staff " << key.first << ", voice " << key.second << ")";
-                delete gc;
-            }
-        }
-        ctx.pendingGraces.clear();
+        resetPerMeasureState(ctx, measIdx);
 
         EncRepeatType rt = encMeas.repeatMark();
         if (rt != EncRepeatType::NONE) {
@@ -742,32 +778,7 @@ void buildNoteLoop(BuildCtx& ctx)
             = computeImpliedTupletMembers(sortedElems, encMeas, ctx.totalStaves,
                                           &mc.partialEndGroup, &mc.nestedInfos,
                                           &mc.overrideGroupRatios);
-        mc.nestedByInnerFirst.clear();
-        mc.nestedByInnerLast.clear();
-        mc.innerGroupMembers.clear();
-        for (const NestedTupletInfo& ni : mc.nestedInfos) {
-            if (ni.innerFirst) {
-                mc.nestedByInnerFirst[ni.innerFirst] = &ni;
-            }
-            if (ni.innerLast) {
-                mc.nestedByInnerLast[ni.innerLast] = &ni;
-            }
-            // Collect all sorted elements between innerFirst and innerLast (inclusive).
-            if (ni.innerFirst && ni.innerLast) {
-                bool inInner = false;
-                for (const EncMeasureElem* em2 : sortedElems) {
-                    if (em2 == ni.innerFirst) {
-                        inInner = true;
-                    }
-                    if (inInner) {
-                        mc.innerGroupMembers.insert(em2);
-                    }
-                    if (em2 == ni.innerLast) {
-                        break;
-                    }
-                }
-            }
-        }
+        buildNestedTupletMaps(mc, sortedElems);
 
         scanMeasureMetadata(sortedElems, mc);
 
