@@ -314,6 +314,201 @@ static void scanMeasureMetadata(const MeasureElemRefVec& sortedElems, NoteLoopMe
     }
 }
 
+// Returns false if the element should be skipped entirely (tick out of range).
+static bool shouldIncludeElement(const EncMeasureElem* e, const EncMeasure& encMeas)
+{
+    const EncElemType et = static_cast<EncElemType>(e->type);
+    // Notes/rests at or beyond measure end are dropped; ORNs at durTicks are end-of-measure markers
+    // (e.g. hairpin on barline) and must not be dropped.
+    if ((et == EncElemType::NOTE || et == EncElemType::REST)
+        && e->tick >= encMeas.durTicks) {
+        return false;
+    }
+    if (et == EncElemType::ORNAMENT && e->tick > encMeas.durTicks) {
+        // Past-durTicks dynamics/STAFFTEXT: let through and clamp to the last segment.
+        const EncOrnament* eoFilt = static_cast<const EncOrnament*>(e);
+        const EncOrnamentType ot = eoFilt->ornType();
+        const bool isDyn = (ot >= EncOrnamentType::DYN_PPP
+                            && ot <= EncOrnamentType::DYN_FP)
+                           || ot == EncOrnamentType::DYN_FZ
+                           || ot == EncOrnamentType::DYN_SF;
+        const bool isText = (ot == EncOrnamentType::STAFFTEXT);
+        if (!isDyn && !isText) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Returns false if the element should be skipped (staffIdx out of range or voice invalid).
+// On success, fills staffIdx, voice, msVoice, track, trackKey, encVoiceKey.
+static bool routeElementStaffVoice(
+    const EncMeasureElem* e,
+    bool isNoteOrRest,
+    const std::array<int, 256>& lineSlotByRawByte,
+    const NoteLoopMeasCtx& mc,
+    const BuildCtx& ctx,
+    int& staffIdx,
+    int& voice,
+    int& msVoice,
+    track_idx_t& track,
+    std::pair<int, int>& trackKey,
+    std::pair<int, int>& encVoiceKey)
+{
+    const EncRoot& enc = ctx.enc;
+    const int nLineStaves = mc.nLineStaves;
+    const std::vector<int>& lineStaffInstrIdx = *mc.lineStaffInstrIdx;
+    const std::vector<int>& lineStaffWithin   = *mc.lineStaffWithin;
+
+    staffIdx = static_cast<int>(e->staffIdx);
+    voice    = static_cast<int>(e->voice);
+
+    // Translate rawStaff byte (staffWithin<<6)|instrIdx to LINE slot; apply case-B voice remap when origStaffWithin > 0.
+    const quint8 rawNoteStaff = (static_cast<quint8>(e->staffWithin) << 6)
+                                | static_cast<quint8>(e->staffIdx);
+    const int origStaffWithin  = static_cast<int>(e->staffWithin);
+    bool rawByteResolved = false;
+    if (lineSlotByRawByte[rawNoteStaff] >= 0) {
+        staffIdx = lineSlotByRawByte[rawNoteStaff];
+        rawByteResolved = true;
+        if (isNoteOrRest && origStaffWithin > 0 && voice < static_cast<int>(VOICES)) {
+            const int vBase = origStaffWithin * (static_cast<int>(VOICES) / 2);
+            if (voice >= vBase) {
+                voice -= vBase;
+            }
+        }
+    }
+
+    if (staffIdx >= ctx.totalStaves) {
+        return false;
+    }
+    // Multi-staff routing:
+    // (A) voice >= VOICES: route to staffIdx+1, voice=0.
+    // (B) staffWithin > 0: route to staffIdx+sw, remap voice down by sw*(VOICES/2).
+    if (voice >= static_cast<int>(VOICES)) {
+        if (staffIdx < nLineStaves) {
+            const int instrIdx = lineStaffInstrIdx[staffIdx];
+            if (instrIdx >= 0
+                && instrIdx < static_cast<int>(enc.instruments.size())
+                && enc.instruments[instrIdx].nstaves > 1
+                && lineStaffWithin[staffIdx] + 1 < enc.instruments[instrIdx].nstaves
+                && staffIdx + 1 < ctx.totalStaves) {
+                staffIdx += 1;
+            }
+        }
+        voice = 0;
+    } else if (!rawByteResolved && origStaffWithin > 0) {
+        // Standalone ORNs always have voice=0 and route by staffWithin alone.
+        const int sw    = origStaffWithin;
+        const int vBase = sw * (static_cast<int>(VOICES) / 2);
+        const bool voiceInRange = !isNoteOrRest || voice >= vBase;
+        if (voiceInRange && staffIdx < nLineStaves) {
+            const int instrIdx = lineStaffInstrIdx[staffIdx];
+            if (instrIdx >= 0
+                && instrIdx < static_cast<int>(enc.instruments.size())
+                && enc.instruments[instrIdx].nstaves > sw
+                && staffIdx + sw < ctx.totalStaves) {
+                staffIdx += sw;
+                if (isNoteOrRest) {
+                    voice -= vBase;
+                }
+            }
+        }
+    }
+
+    encVoiceKey = std::make_pair(staffIdx, voice);
+    msVoice = voice;
+    if (msVoice >= static_cast<int>(VOICES)) {
+        return false;  // voice out of range
+    }
+    track    = static_cast<track_idx_t>(staffIdx * VOICES + msVoice);
+    trackKey = std::make_pair(staffIdx, msVoice);
+    return true;
+}
+
+// Returns the MuseScore tick where this element should be placed.
+// Has side effects on ctx: updates prevMidiTick, lastChordPos, prevRestTick, noteXoffByMeasStaff.
+static Fraction computeElementTick(
+    const EncMeasureElem* e,
+    bool isNoteOrRest,
+    bool isChordExt,
+    int voice,
+    int staffIdx,
+    std::pair<int, int> trackKey,
+    const Measure* measure,
+    Fraction measTick,
+    BuildCtx& ctx,
+    const NoteLoopMeasCtx& mc)
+{
+    constexpr int CHORD_MIDI_THRESHOLD = 2 * CHORD_CLUSTER_THRESHOLD;  // = 8
+    const EncElemType et = static_cast<EncElemType>(e->type);
+    if (isChordExt) {
+        return ctx.lastChordPos.count(trackKey) ? ctx.lastChordPos.at(trackKey) : measTick;
+    }
+
+    // Gap-snap: when binary tick is on the face grid and gap > CHORD_MIDI_THRESHOLD, advance cumTick
+    // to reveal implicit rests. Live-recorded ticks (sub-grid values) never trigger the snap,
+    // preserving multi-stream placement.
+    if (isNoteOrRest) {
+        quint8 elemFv = 0;
+        if (et == EncElemType::NOTE) {
+            elemFv = static_cast<const EncNote*>(e)->faceValue;
+        } else if (et == EncElemType::REST) {
+            elemFv = static_cast<const EncRest*>(e)->faceValue;
+        }
+        const int faceTicks = faceValue2ticks(elemFv);
+        const bool onFaceGrid = faceTicks > 0
+                                && ((int)e->tick % faceTicks) == 0;
+        // Suppress gap-snap: (a) grace pending (v0xA6 ticks on face grid but no real time),
+        // (b) inside active tuplet (apparent gap is tuplet-internal timing artifact),
+        // (c) gap equals stolen grace ticks (grace-displaced note must not fire spurious rest).
+        const bool gracePending = !ctx.pendingGraces[trackKey].empty();
+        const bool inActiveTuplet = ctx.tuplets.count(trackKey)
+                                    && ctx.tuplets.at(trackKey).inTuplet();
+        const int stolenTicks = ctx.graceStolenTicks.count(trackKey)
+                                ? ctx.graceStolenTicks.at(trackKey) : 0;
+        if (onFaceGrid && !gracePending && !inActiveTuplet) {
+            // Hardcode 960 ticks/whole: the beatTicks*timeSigDen formula breaks for
+            // non-standard beatTicks (e.g. 2/2 with beatTicks=240 gives 480).
+            static constexpr int wholeTicks = 960;
+            const Fraction encTickFrac((int)e->tick, wholeTicks);
+            if (encTickFrac > ctx.cumTick[trackKey]) {
+                const Fraction gap = encTickFrac - ctx.cumTick[trackKey];
+                const int gapEncTicks
+                    = (gap.numerator() * wholeTicks)
+                      / std::max(1, gap.denominator());
+                const bool gapIsGraceArtifact
+                    = (stolenTicks > 0 && gapEncTicks <= stolenTicks);
+                if (gapEncTicks > CHORD_MIDI_THRESHOLD && !gapIsGraceArtifact
+                    && encTickFrac < measure->ticks()) {
+                    ctx.cumTick[trackKey] = encTickFrac;
+                }
+            }
+        }
+    }
+
+    const Fraction elemTick = measTick + ctx.cumTick[trackKey];
+    if (isNoteOrRest) {
+        ctx.lastChordPos[trackKey] = elemTick;
+    }
+    // Rests don't set prevMidiTick: a note after a rest is a fresh cluster.
+    if (et == EncElemType::NOTE) {
+        ctx.prevMidiTick[trackKey] = e->tick;
+        ctx.prevEncVoice[trackKey] = voice;
+        // Record note xoffset for bowing-mark cluster resolution.
+        const auto* en = static_cast<const EncNote*>(e);
+        auto& vec = ctx.noteXoffByMeasStaff[{ mc.measIdx, staffIdx }];
+        const int encTick = static_cast<int>(e->tick);
+        const int xoff = static_cast<int>(en->xoffset);
+        bool already = false;
+        for (const auto& p : vec) { if (p.first == encTick) { already = true; break; } }
+        if (!already) { vec.push_back({ encTick, xoff }); }
+    } else if (et == EncElemType::REST) {
+        ctx.prevRestTick[trackKey] = static_cast<int>(e->tick);
+    }
+    return elemTick;
+}
+
 static void handleKeyChange(BuildCtx& ctx, const NoteLoopMeasCtx& mc,
                             const NoteElemCtx& ec, const EncMeasureElem* e,
                             std::vector<DeferredKeySig>& pendingKeySigs)
@@ -557,99 +752,28 @@ void buildNoteLoop(BuildCtx& ctx)
 
         for (const EncMeasureElem* e : sortedElems) {
             EncElemType et = static_cast<EncElemType>(e->type);
-
-            // Notes/rests at or beyond measure end are dropped; ORNs at durTicks are end-of-measure markers (e.g. hairpin on barline) and must not be dropped.
-            if ((et == EncElemType::NOTE || et == EncElemType::REST)
-                && e->tick >= encMeas.durTicks) {
-                continue;
-            }
-            if (et == EncElemType::ORNAMENT && e->tick > encMeas.durTicks) {
-                // Past-durTicks dynamics/STAFFTEXT: let through and clamp to the last segment.
-                const EncOrnament* eoFilt = static_cast<const EncOrnament*>(e);
-                const EncOrnamentType ot = eoFilt->ornType();
-                const bool isDyn = (ot >= EncOrnamentType::DYN_PPP
-                                    && ot <= EncOrnamentType::DYN_FP)
-                                   || ot == EncOrnamentType::DYN_FZ
-                                   || ot == EncOrnamentType::DYN_SF;
-                const bool isText = (ot == EncOrnamentType::STAFFTEXT);
-                if (!isDyn && !isText) {
-                    continue;
-                }
-            }
-
-            int staffIdx = static_cast<int>(e->staffIdx);
-            int voice    = static_cast<int>(e->voice);
             const bool isNoteOrRest = (et == EncElemType::NOTE || et == EncElemType::REST);
 
-            // Translate rawStaff byte (staffWithin<<6)|instrIdx to LINE slot; apply case-B voice remap when origStaffWithin > 0.
-            const quint8 rawNoteStaff = (static_cast<quint8>(e->staffWithin) << 6)
-                                        | static_cast<quint8>(e->staffIdx);
-            const int origStaffWithin  = static_cast<int>(e->staffWithin);
-            bool rawByteResolved = false;
-            if (lineSlotByRawByte[rawNoteStaff] >= 0) {
-                staffIdx = lineSlotByRawByte[rawNoteStaff];
-                rawByteResolved = true;
-                if (isNoteOrRest && origStaffWithin > 0 && voice < static_cast<int>(VOICES)) {
-                    const int vBase = origStaffWithin * (static_cast<int>(VOICES) / 2);
-                    if (voice >= vBase) {
-                        voice -= vBase;
-                    }
-                }
-            }
-
-            if (staffIdx >= ctx.totalStaves) {
+            if (!shouldIncludeElement(e, encMeas)) {
                 continue;
             }
-            // Multi-staff routing:
-            // (A) voice >= VOICES: route to staffIdx+1, voice=0.
-            // (B) staffWithin > 0: route to staffIdx+sw, remap voice down by sw*(VOICES/2).
-            if (voice >= static_cast<int>(VOICES)) {
-                if (staffIdx < nLineStaves) {
-                    const int instrIdx = lineStaffInstrIdx[staffIdx];
-                    if (instrIdx >= 0
-                        && instrIdx < static_cast<int>(enc.instruments.size())
-                        && enc.instruments[instrIdx].nstaves > 1
-                        && lineStaffWithin[staffIdx] + 1 < enc.instruments[instrIdx].nstaves
-                        && staffIdx + 1 < ctx.totalStaves) {
-                        staffIdx += 1;
-                    }
-                }
-                voice = 0;
-            } else if (!rawByteResolved && origStaffWithin > 0) {
-                // Standalone ORNs always have voice=0 and route by staffWithin alone.
-                const int sw    = origStaffWithin;
-                const int vBase = sw * (static_cast<int>(VOICES) / 2);
-                const bool voiceInRange = !isNoteOrRest || voice >= vBase;
-                if (voiceInRange && staffIdx < nLineStaves) {
-                    const int instrIdx = lineStaffInstrIdx[staffIdx];
-                    if (instrIdx >= 0
-                        && instrIdx < static_cast<int>(enc.instruments.size())
-                        && enc.instruments[instrIdx].nstaves > sw
-                        && staffIdx + sw < ctx.totalStaves) {
-                        staffIdx += sw;
-                        if (isNoteOrRest) {
-                            voice -= vBase;
-                        }
-                    }
-                }
-            }
 
-            auto encVoiceKey = std::make_pair(staffIdx, voice);
-            int msVoice = voice;
-            if (msVoice >= static_cast<int>(VOICES)) {
-                continue;  // voice out of range
+            int staffIdx = 0, voice = 0, msVoice = 0;
+            track_idx_t track = 0;
+            std::pair<int, int> trackKey, encVoiceKey;
+            if (!routeElementStaffVoice(e, isNoteOrRest, lineSlotByRawByte, mc, ctx,
+                                        staffIdx, voice, msVoice, track, trackKey, encVoiceKey)) {
+                continue;
             }
-            track_idx_t track = static_cast<track_idx_t>(staffIdx * VOICES + msVoice);
-            auto trackKey = std::make_pair(staffIdx, msVoice);
 
             // Near-simultaneous notes (< CHORD_MIDI_THRESHOLD) extend the chord; same Encore voice required.
             constexpr int CHORD_MIDI_THRESHOLD = 2 * CHORD_CLUSTER_THRESHOLD;  // = 8
-            bool isChordExt   = isNoteOrRest && ctx.prevMidiTick.count(trackKey)
-                                && ctx.prevEncVoice.count(trackKey)
-                                && ctx.prevEncVoice.at(trackKey) == voice
-                                && (int)e->tick - (int)ctx.prevMidiTick.at(trackKey) >= 0
-                                && (int)e->tick - (int)ctx.prevMidiTick.at(trackKey)
-                                < CHORD_MIDI_THRESHOLD;
+            bool isChordExt = isNoteOrRest && ctx.prevMidiTick.count(trackKey)
+                              && ctx.prevEncVoice.count(trackKey)
+                              && ctx.prevEncVoice.at(trackKey) == voice
+                              && (int)e->tick - (int)ctx.prevMidiTick.at(trackKey) >= 0
+                              && (int)e->tick - (int)ctx.prevMidiTick.at(trackKey)
+                              < CHORD_MIDI_THRESHOLD;
             // REST-REST dedup: two Encore voices routing to the same MuseScore voice at the same tick; second REST would double-advance cumTick.
             if (!isChordExt && et == EncElemType::REST
                 && ctx.prevRestTick.count(trackKey)
@@ -668,72 +792,9 @@ void buildNoteLoop(BuildCtx& ctx)
             const Fraction savedLastChordPos = hadLastChordPos
                                                ? ctx.lastChordPos.at(trackKey) : Fraction(-1, 1);
 
-            Fraction elemTick;
-            {
-                if (isChordExt) {
-                    elemTick = ctx.lastChordPos.count(trackKey) ? ctx.lastChordPos.at(trackKey)
-                               : measTick;
-                } else {
-                    // Gap-snap: when binary tick is on the face grid and gap > CHORD_MIDI_THRESHOLD, advance cumTick to reveal implicit rests.
-                    // Live-recorded ticks (sub-grid values) never trigger the snap, preserving multi-stream placement.
-                    if (isNoteOrRest) {
-                        quint8 elemFv = 0;
-                        if (et == EncElemType::NOTE) {
-                            elemFv = static_cast<const EncNote*>(e)->faceValue;
-                        } else if (et == EncElemType::REST) {
-                            elemFv = static_cast<const EncRest*>(e)->faceValue;
-                        }
-                        const int faceTicks = faceValue2ticks(elemFv);
-                        const bool onFaceGrid = faceTicks > 0
-                                                && ((int)e->tick % faceTicks) == 0;
-                        // Suppress gap-snap: (a) grace pending (v0xA6 ticks on face grid but no real time),
-                        // (b) inside active tuplet (apparent gap is tuplet-internal timing artifact),
-                        // (c) gap equals stolen grace ticks (grace-displaced note must not fire spurious rest).
-                        const bool gracePending = !ctx.pendingGraces[trackKey].empty();
-                        const bool inActiveTuplet = ctx.tuplets.count(trackKey)
-                                                    && ctx.tuplets.at(trackKey).inTuplet();
-                        const int stolenTicks = ctx.graceStolenTicks.count(trackKey)
-                                                ? ctx.graceStolenTicks.at(trackKey) : 0;
-                        if (onFaceGrid && !gracePending && !inActiveTuplet) {
-                            // Hardcode 960 ticks/whole: the beatTicks*timeSigDen formula breaks for
-                            // non-standard beatTicks (e.g. 2/2 with beatTicks=240 gives 480).
-                            static constexpr int wholeTicks = 960;
-                            const Fraction encTickFrac((int)e->tick, wholeTicks);
-                            if (encTickFrac > ctx.cumTick[trackKey]) {
-                                const Fraction gap = encTickFrac - ctx.cumTick[trackKey];
-                                const int gapEncTicks
-                                    = (gap.numerator() * wholeTicks)
-                                      / std::max(1, gap.denominator());
-                                        const bool gapIsGraceArtifact
-                                    = (stolenTicks > 0 && gapEncTicks <= stolenTicks);
-                                if (gapEncTicks > CHORD_MIDI_THRESHOLD && !gapIsGraceArtifact
-                                    && encTickFrac < measure->ticks()) {
-                                    ctx.cumTick[trackKey] = encTickFrac;
-                                }
-                            }
-                        }
-                    }
-                    elemTick = measTick + ctx.cumTick[trackKey];
-                    if (isNoteOrRest) {
-                        ctx.lastChordPos[trackKey] = elemTick;
-                    }
-                    // Rests don't set prevMidiTick: a note after a rest is a fresh cluster.
-                    if (et == EncElemType::NOTE) {
-                        ctx.prevMidiTick[trackKey] = e->tick;
-                        ctx.prevEncVoice[trackKey] = voice;
-                        // Record note xoffset for bowing-mark cluster resolution.
-                        const auto* en = static_cast<const EncNote*>(e);
-                        auto& vec = ctx.noteXoffByMeasStaff[{ mc.measIdx, staffIdx }];
-                        const int encTick = static_cast<int>(e->tick);
-                        const int xoff = static_cast<int>(en->xoffset);
-                        bool already = false;
-                        for (const auto& p : vec) { if (p.first == encTick) { already = true; break; } }
-                        if (!already) { vec.push_back({ encTick, xoff }); }
-                    } else if (et == EncElemType::REST) {
-                        ctx.prevRestTick[trackKey] = static_cast<int>(e->tick);
-                    }
-                }
-            }
+            const Fraction elemTick = computeElementTick(e, isNoteOrRest, isChordExt, voice,
+                                                         staffIdx, trackKey, measure, measTick,
+                                                         ctx, mc);
 
             NoteElemCtx ec;
             ec.e = e;
