@@ -42,7 +42,7 @@ using namespace mu;
 using namespace muse::io;
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 extern Err importEncore(MasterScore* score, const QString& name);
 }
 

@@ -23,7 +23,7 @@
 #include "elements.h"
 #include "reader.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 // ---------------------------------------------------------------------------
 // EncHeader
 // ---------------------------------------------------------------------------
@@ -136,4 +136,4 @@ bool EncTextBlock::read(QDataStream& ds, quint32 varSize)
     }
     return true;
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

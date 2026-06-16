@@ -24,7 +24,7 @@
 
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
 {
     using mu::engraving::SymId;
@@ -135,4 +135,4 @@ mu::engraving::OrnamentInterval encArticByteToTrillInterval(quint8 articByte)
     default:   return {};   // AUTO (default)
     }
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

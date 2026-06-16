@@ -576,7 +576,7 @@ TEST_F(Tst_Text, staff_text_placement_from_yoffset)
 // ===========================================================================
 TEST(Tst_TempoXmlText, simple_meter_quarter_sym)
 {
-    using namespace mu::iex::encore;
+    using namespace mu::iex::enc;
     // beatTicks=240 (quarter beat): quarter sym
     EXPECT_EQ(tempoXmlText(120, 240),
               String(u"<sym>metNoteQuarterUp</sym> = 120"));
@@ -588,7 +588,7 @@ TEST(Tst_TempoXmlText, simple_meter_quarter_sym)
 
 TEST(Tst_TempoXmlText, dotted_quarter_beat_sym)
 {
-    using namespace mu::iex::encore;
+    using namespace mu::iex::enc;
     // beatTicks=360 (dotted-quarter beat): dotted-quarter sym; displayBpm is already the beat-unit value.
     // (For MEAS BPM the caller converts QPM to displayBpm via bpm*2/3 before calling tempoXmlText.)
     EXPECT_EQ(tempoXmlText(80, 360),
@@ -600,7 +600,7 @@ TEST(Tst_TempoXmlText, dotted_quarter_beat_sym)
 
 TEST(Tst_TempoXmlText, non_dotted_eighth_denominators_use_quarter_sym)
 {
-    using namespace mu::iex::encore;
+    using namespace mu::iex::enc;
     // beatTicks=120 (eighth-note beat, e.g. 7/8 with eighth as beat unit): quarter sym
     EXPECT_EQ(tempoXmlText(156, 120),
               String(u"<sym>metNoteQuarterUp</sym> = 156"));

@@ -75,7 +75,7 @@
 #include "engraving/engravingerrors.h"
 #include "log.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 bool NoteLoopMeasCtx::isTieStartAt(int si, int v, int tick, int notePosition) const
 {
     auto checkAt = [&](int t) {
@@ -780,4 +780,4 @@ void buildNoteLoop(BuildCtx& ctx)
     }
     ctx.pendingGraces.clear();
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

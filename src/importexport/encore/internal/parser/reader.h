@@ -31,7 +31,7 @@
 
 class QDataStream;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 struct EncMeasureElem;
 struct EncInstrument;
 struct EncRoot;
@@ -113,6 +113,6 @@ struct EncFormatReader
     // Factory: returns the reader for the given magic byte (chuMagio).
     static std::unique_ptr<EncFormatReader> create(quint8 magic);
 };
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc
 
 #endif // MU_IMPORTEXPORT_ENC_PARSER_READER_H

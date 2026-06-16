@@ -23,7 +23,7 @@
 #include "elements-text.h"
 #include "encoding.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 // Chord quality suffixes indexed by toniko value (0-62).
 // Derived from Enc2MusicXML's tnk[] table (textfile.cpp).
@@ -167,4 +167,4 @@ QString EncChordSym::chordName() const
     return name;
 }
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

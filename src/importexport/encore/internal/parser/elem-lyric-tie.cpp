@@ -23,7 +23,7 @@
 #include "elements-text.h"
 #include "encoding.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 bool EncLyric::read(QDataStream& ds)
 {
@@ -101,4 +101,4 @@ bool EncTie::read(QDataStream& ds)
     return true;
 }
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

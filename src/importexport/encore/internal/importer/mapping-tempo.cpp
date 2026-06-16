@@ -24,7 +24,7 @@
 
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 double encTextToTempoBps(const QString& text)
 {
     const QString t = text.trimmed().toLower();
@@ -70,4 +70,4 @@ double encTextToTempoBps(const QString& text)
     }
     return -1.0;
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

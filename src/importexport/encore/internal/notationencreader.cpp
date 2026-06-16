@@ -25,7 +25,7 @@
 
 #include "engraving/engravingerrors.h"
 
-using namespace mu::iex::encore;
+using namespace mu::iex::enc;
 using namespace mu::engraving;
 
 muse::Ret NotationEncoreReader::read(MasterScore* score, const muse::io::path_t& path, const Options&)

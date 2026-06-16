@@ -344,7 +344,7 @@ TEST_F(Tst_Instruments, transposition_filter_prefers_compatible_key)
     ASSERT_NE(score, nullptr);
     delete score;
 
-    using namespace mu::iex::encore;
+    using namespace mu::iex::enc;
 
     // encKey=0, only Castilian Dulzaina template exists (chromatic=6, no C-Dulzaina).
     // Filter prefers a compatible match; since none exists it falls back to best name match.

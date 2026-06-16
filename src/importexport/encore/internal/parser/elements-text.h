@@ -26,7 +26,7 @@
 
 #include "elements-note.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 struct EncChordSym : EncMeasureElem {
     quint8 toniko { 0 };
@@ -63,4 +63,4 @@ struct EncTie : EncMeasureElem {
     bool read(QDataStream& ds) override;
 };
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

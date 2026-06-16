@@ -27,7 +27,7 @@
 
 #include "engraving/dom/durationtype.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 int faceValue2ticks(quint8 fv);
 mu::engraving::DurationType faceValue2DurationType(quint8 fv);
 mu::engraving::DurationType realDuration2DurationType(qint16 realDur, quint8 fv);
@@ -43,6 +43,6 @@ int computeDotCount(quint8 dotControl, qint16 realDuration, quint8 faceValue, bo
 // Standard Encore tuplet ratios (3:2, 4:3, 5:4, 6:4).
 // Other actualN:normalN pairs are MIDI timing noise; caller should zero them.
 bool isStandardExplicitTuplet(int actualN, int normalN);
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc
 
 #endif // MU_IMPORTEXPORT_ENC_PARSER_TICKS_H

@@ -87,7 +87,7 @@
 
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 // faceValue low nibble: 1=whole, 2=half ... 8=256th; 0 and 9..15 are invalid.
 // High nibble carries unrelated flags.
 bool isValidFaceValue(quint8 faceValue)
@@ -342,4 +342,4 @@ Err importEncore(MasterScore* score, const QString& path)
 
     return Err::NoError;
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

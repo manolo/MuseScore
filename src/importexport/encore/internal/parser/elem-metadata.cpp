@@ -24,7 +24,7 @@
 
 #include "encoding.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 // ---------------------------------------------------------------------------
 // EncInstrument
 // ---------------------------------------------------------------------------
@@ -219,4 +219,4 @@ bool EncTitle::read(QDataStream& ds, quint32 vs, EncCharSize cs)
     ds.skipRawData(cs == EncCharSize::ONE_BYTE ? 504 : 120);
     return true;
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

@@ -24,7 +24,7 @@
 
 #include <QtGlobal>
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 enum class EncCharSize : char {
     ONE_BYTE,
@@ -163,4 +163,4 @@ enum class EncTextAlign : quint8 {
     RIGHT  = 0x02
 };
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

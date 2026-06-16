@@ -27,7 +27,7 @@
 #include "elements-note.h"   // MeasureElemVec, EncMeasureElem
 #include "elements-enums.h"  // EncBarlineType, EncRepeatType
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 struct EncFormatReader;   // defined in reader.h
 
@@ -63,4 +63,4 @@ struct EncMeasure {
                                 bool fixDottedEighth = false);
 };
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

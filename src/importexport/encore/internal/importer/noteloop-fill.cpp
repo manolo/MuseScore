@@ -31,7 +31,7 @@
 #include "engraving/dom/segment.h"
 #include "engraving/dom/tuplet.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 // Case B pickup adjustment: if measure 0 has the same timesig as measure 1 but
 // the note loop placed less content than the full measure, shorten it to the
@@ -212,4 +212,4 @@ void capMeasureLength(Measure* measure, int totalStaves)
     }
 }
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

@@ -75,7 +75,7 @@
 
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 static const InstrumentTemplate* applyBestInstrument(Part* part,
                                                      const EncInstrument& instr,
                                                      bool isPercByClef,
@@ -296,4 +296,4 @@ void buildParts(BuildCtx& ctx)
         ctx.totalStaves = 1;
     }
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

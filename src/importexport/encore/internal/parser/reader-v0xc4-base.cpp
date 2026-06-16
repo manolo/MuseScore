@@ -27,7 +27,7 @@
 #include "elements.h"
 #include "encoding.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 namespace {
 
 void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& ds)
@@ -340,4 +340,4 @@ bool EncFormatReader_V0xC4Base::readInstrumentMeta(std::vector<EncInstrument>& i
     return true;
 }
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc
