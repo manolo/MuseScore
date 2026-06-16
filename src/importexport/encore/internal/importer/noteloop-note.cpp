@@ -462,6 +462,166 @@ static bool advanceCumulativeTick(
     return true;
 }
 
+// Returns false if the note should be skipped (implied-tuplet or zero-tick residual).
+// Otherwise sets dt, dots, and dtFace (dt before capping, for isolated-explicit fill check).
+static bool resolveNoteDuration(
+    BuildCtx& ctx,
+    const NoteElemCtx& ec,
+    const NoteLoopMeasCtx& mc,
+    const EncNote* en,
+    bool isStandardExplicit,
+    int preACheck,
+    int preNCheck,
+    bool isChordExt,
+    int savedPrevMidiTick,
+    DurationType& dt,
+    int& dots,
+    DurationType& dtFace)
+{
+    Measure* measure = mc.measure;
+    const std::set<const EncMeasureElem*>& validTupletGroupMember = mc.validTupletGroupMember;
+    const std::set<const EncMeasureElem*>& partialEndGroup = mc.partialEndGroup;
+    const std::set<const EncMeasureElem*>& impliedGroupMember = mc.validTupletGroupMember;
+    const EncMeasureElem* e = ec.e;
+    const auto& trackKey = ec.trackKey;
+
+    if (isStandardExplicit) {
+        // In files where the face-value byte encodes "beats" rather than absolute note
+        // values (e.g. 8/8 where fv=Q means one eighth beat), rdur equals exactly
+        // beatTicks x (normalN/actualN). Use rdur in that case; otherwise trust fv.
+        // This distinguishes beat-relative face values (rdur=beatTicks x ratio) from
+        // truncated rdur (last note in a measure, rdur shortened by a following rest).
+        dt = faceValue2DurationType(en->faceValue);
+        {
+            const DurationType dtBeat = resolveBeatRelativeFaceValue(en, mc.encMeas, preACheck, preNCheck);
+            if (dtBeat != DurationType::V_INVALID) {
+                dt = dtBeat;
+            }
+        }
+        dots = 0;
+        // Partial measure-end groups: reduce dt when the tuplet advance overshoots remaining space.
+        if (partialEndGroup.count(e)) {
+            const auto& ttX = ctx.tuplets[trackKey];
+            if (ttX.inTuplet() && dt != DurationType::V_INVALID) {
+                Fraction adv = TDuration(dt).fraction()
+                               * Fraction(ttX.normalN, ttX.actualN);
+                Fraction rem = measure->ticks() - ctx.cumTick[trackKey];
+                while (adv > rem && rem > Fraction(0, 1)
+                       && dt < DurationType::V_128TH) {
+                    dt  = static_cast<DurationType>(static_cast<int>(dt) + 1);
+                    adv = TDuration(dt).fraction()
+                          * Fraction(ttX.normalN, ttX.actualN);
+                }
+            }
+        }
+    } else {
+        dt   = realDuration2DurationType(en->realDuration, en->faceValue);
+        // dotControl bit 0 = dotted flag; computeDotCount tries tick-value interpretation first, falls back to bit 0 on MIDI drift.
+        if (en->dotControl > 0) {
+            dots = computeDotCount(en->dotControl, en->realDuration, en->faceValue,
+                                   true /*useBit0Fallback*/);
+        } else {
+            dots = calcDotsSnap(en->realDuration, en->faceValue);
+        }
+    }
+    dtFace = dt;  // before capping; used for isolated-explicit fill check
+
+    {
+        const auto& ttPre = ctx.tuplets[trackKey];
+        int preA = isStandardExplicit ? preACheck : 0;
+        int preN = isStandardExplicit ? preNCheck : 0;
+        if (!isStandardExplicit) {
+            if (ctx.impliedTuplets && (en->faceValue & 0x0F) >= 4
+                && ((ttPre.inTuplet() && !ttPre.groupFull()) || impliedGroupMember.count(e))) {
+                preA = detectImpliedTuplet(en->realDuration, en->faceValue, preN);
+            }
+        }
+
+        // Implied-tuplet guard: skip if full group advance doesn't fit (partial triplet leaves 1/3072 residual).
+        if (!isStandardExplicit && !ttPre.inTuplet()
+            && !isChordExt && preA > 0 && preN > 0) {
+            Fraction singleAdv = TDuration(faceValue2DurationType(en->faceValue & 0x0F)).fraction()
+                                 * Fraction(preN, preA);
+            Fraction fullGroupAdv = singleAdv * Fraction(preA, 1);
+            Fraction mRemaining = measure->ticks() - ctx.cumTick[trackKey];
+            if (fullGroupAdv > mRemaining) {
+                if (savedPrevMidiTick >= 0) {
+                    ctx.prevMidiTick[trackKey] = savedPrevMidiTick;
+                } else {
+                    ctx.prevMidiTick.erase(trackKey);
+                }
+                return false;
+            }
+        }
+
+        bool willBeExplicit = isStandardExplicit && validTupletGroupMember.count(e);
+        bool willBeTuplet = (preA > 0 && preN > 0 && (willBeExplicit || !isStandardExplicit))
+                            || (ttPre.inTuplet() && !ttPre.groupFull());
+        if (!willBeTuplet) {
+            Fraction remaining = measure->ticks() - ctx.cumTick[trackKey];
+            TDuration fullDur(dt);  // must include dots; TDuration(dt) alone misses the dotted extension
+            fullDur.setDots(dots);
+            if (remaining > Fraction(0, 1) && fullDur.fraction() > remaining) {
+                TDuration capped(remaining, true);
+                // 1/3072-type residual: no valid TDuration; zero-tick chord breaks sanityCheck.
+                if (capped.fraction().numerator() == 0) {
+                    if (savedPrevMidiTick >= 0) {
+                        ctx.prevMidiTick[trackKey] = savedPrevMidiTick;
+                    } else {
+                        ctx.prevMidiTick.erase(trackKey);
+                    }
+                    return false;
+                }
+                dt   = capped.type();
+                dots = capped.dots();
+            }
+        }
+    }
+    return true;
+}
+
+static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
+{
+    // faceValue high nibble=3: square notehead (Encore bass drum notation).
+    if ((en->faceValue >> 4) == 3) {
+        note->setHeadGroup(NoteHeadGroup::HEAD_CUSTOM);
+        Drumset* ds = note->part()->instrument()->drumset();
+        if (ds && !ds->isValid(note->pitch())) {
+            DrumInstrument di;
+            di.name = u"drum";
+            di.notehead = NoteHeadGroup::HEAD_CUSTOM;
+            // Half/whole durations use the open (hollow) square;
+            // quarter and shorter use the filled square.
+            di.noteheads[int(NoteHeadType::HEAD_WHOLE)]   = SymId::noteheadSquareWhite;
+            di.noteheads[int(NoteHeadType::HEAD_HALF)]    = SymId::noteheadSquareWhite;
+            di.noteheads[int(NoteHeadType::HEAD_QUARTER)] = SymId::noteheadSquareBlack;
+            di.noteheads[int(NoteHeadType::HEAD_BREVIS)]  = SymId::noteheadSquareBlack;
+            di.line = 7;
+            di.stemDirection = DirectionV::DOWN;
+            ds->setDrum(note->pitch(), di);
+        }
+    } else {
+        // 5-line PERC staff: line derived from Encore position byte (diatonic steps from C4; higher position = smaller MuseScore line).
+        // faceValue high nibble 5 = cross notehead (cymbal/triangle).
+        Drumset* ds = note->part()->instrument()->drumset();
+        if (ds) {
+            if (!ds->isValid(note->pitch())) {
+                DrumInstrument di;
+                di.name = String::number(note->pitch());
+                di.line = std::max(-4, 10 - static_cast<int>(en->position));
+                di.stemDirection = DirectionV::UP;
+                ds->setDrum(note->pitch(), di);
+            }
+            // Override drumset default (e.g. MIDI Electric Snare defaults to HEAD_SLASH).
+            const NoteHeadGroup nhg = ((en->faceValue >> 4) == 5)
+                                      ? NoteHeadGroup::HEAD_CROSS
+                                      : NoteHeadGroup::HEAD_NORMAL;
+            ds->drum(note->pitch()).notehead = nhg;
+            note->setHeadGroup(nhg);
+        }
+    }
+}
+
 void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
 {
     MasterScore* score = ctx.score;
@@ -534,97 +694,11 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
 
     DurationType dt;
     int dots;
-    if (isStandardExplicit) {
-        // In files where the face-value byte encodes "beats" rather than absolute note
-        // values (e.g. 8/8 where fv=Q means one eighth beat), rdur equals exactly
-        // beatTicks × (normalN/actualN). Use rdur in that case; otherwise trust fv.
-        // This distinguishes beat-relative face values (rdur=beatTicks×ratio) from
-        // truncated rdur (last note in a measure, rdur shortened by a following rest).
-        dt = faceValue2DurationType(en->faceValue);
-        {
-            const DurationType dtBeat = resolveBeatRelativeFaceValue(en, mc.encMeas, preACheck, preNCheck);
-            if (dtBeat != DurationType::V_INVALID) {
-                dt = dtBeat;
-            }
-        }
-        dots = 0;
-        // Partial measure-end groups: reduce dt when the tuplet advance overshoots remaining space.
-        if (partialEndGroup.count(e)) {
-            const auto& ttX = ctx.tuplets[trackKey];
-            if (ttX.inTuplet() && dt != DurationType::V_INVALID) {
-                Fraction adv = TDuration(dt).fraction()
-                               * Fraction(ttX.normalN, ttX.actualN);
-                Fraction rem = measure->ticks() - ctx.cumTick[trackKey];
-                while (adv > rem && rem > Fraction(0, 1)
-                       && dt < DurationType::V_128TH) {
-                    dt  = static_cast<DurationType>(static_cast<int>(dt) + 1);
-                    adv = TDuration(dt).fraction()
-                          * Fraction(ttX.normalN, ttX.actualN);
-                }
-            }
-        }
-    } else {
-        dt   = realDuration2DurationType(en->realDuration, en->faceValue);
-        // dotControl bit 0 = dotted flag; computeDotCount tries tick-value interpretation first, falls back to bit 0 on MIDI drift.
-        if (en->dotControl > 0) {
-            dots = computeDotCount(en->dotControl, en->realDuration, en->faceValue,
-                                   true /*useBit0Fallback*/);
-        } else {
-            dots = calcDotsSnap(en->realDuration, en->faceValue);
-        }
-    }
-    const DurationType dtFace = dt;  // before capping; used for isolated-explicit fill check
-
-    {
-        const auto& ttPre = ctx.tuplets[trackKey];
-        int preA = isStandardExplicit ? preACheck : 0;
-        int preN = isStandardExplicit ? preNCheck : 0;
-        if (!isStandardExplicit) {
-            if (ctx.impliedTuplets && (en->faceValue & 0x0F) >= 4
-                && ((ttPre.inTuplet() && !ttPre.groupFull()) || impliedGroupMember.count(e))) {
-                preA = detectImpliedTuplet(en->realDuration, en->faceValue, preN);
-            }
-        }
-
-        // Implied-tuplet guard: skip if full group advance doesn't fit (partial triplet leaves 1/3072 residual).
-        if (!isStandardExplicit && !ttPre.inTuplet()
-            && !isChordExt && preA > 0 && preN > 0) {
-            Fraction singleAdv = TDuration(faceValue2DurationType(en->faceValue & 0x0F)).fraction()
-                                 * Fraction(preN, preA);
-            Fraction fullGroupAdv = singleAdv * Fraction(preA, 1);
-            Fraction mRemaining = measure->ticks() - ctx.cumTick[trackKey];
-            if (fullGroupAdv > mRemaining) {
-                if (savedPrevMidiTick >= 0) {
-                    ctx.prevMidiTick[trackKey] = savedPrevMidiTick;
-                } else {
-                    ctx.prevMidiTick.erase(trackKey);
-                }
-                return; // Skip this note; don't place, don't advance ctx.cumTick
-            }
-        }
-
-        bool willBeExplicit = isStandardExplicit && validTupletGroupMember.count(e);
-        bool willBeTuplet = (preA > 0 && preN > 0 && (willBeExplicit || !isStandardExplicit))
-                            || (ttPre.inTuplet() && !ttPre.groupFull());
-        if (!willBeTuplet) {
-            Fraction remaining = measure->ticks() - ctx.cumTick[trackKey];
-            TDuration fullDur(dt);  // must include dots; TDuration(dt) alone misses the dotted extension
-            fullDur.setDots(dots);
-            if (remaining > Fraction(0, 1) && fullDur.fraction() > remaining) {
-                TDuration capped(remaining, true);
-                // 1/3072-type residual: no valid TDuration; zero-tick chord breaks sanityCheck.
-                if (capped.fraction().numerator() == 0) {
-                    if (savedPrevMidiTick >= 0) {
-                        ctx.prevMidiTick[trackKey] = savedPrevMidiTick;
-                    } else {
-                        ctx.prevMidiTick.erase(trackKey);
-                    }
-                    return;
-                }
-                dt   = capped.type();
-                dots = capped.dots();
-            }
-        }
+    DurationType dtFace;
+    if (!resolveNoteDuration(ctx, ec, mc, en, isStandardExplicit,
+                             preACheck, preNCheck, isChordExt, savedPrevMidiTick,
+                             dt, dots, dtFace)) {
+        return;
     }
 
     Segment* seg = measure->getSegment(SegmentType::ChordRest, elemTick);
@@ -663,44 +737,7 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     applyConcertPitch(note, concertPitch);
     chord->add(note);
 
-    // faceValue high nibble=3: square notehead (Encore bass drum notation).
-    if ((en->faceValue >> 4) == 3) {
-        note->setHeadGroup(NoteHeadGroup::HEAD_CUSTOM);
-        Drumset* ds = note->part()->instrument()->drumset();
-        if (ds && !ds->isValid(note->pitch())) {
-            DrumInstrument di;
-            di.name = u"drum";
-            di.notehead = NoteHeadGroup::HEAD_CUSTOM;
-            // Half/whole durations use the open (hollow) square;
-            // quarter and shorter use the filled square.
-            di.noteheads[int(NoteHeadType::HEAD_WHOLE)]   = SymId::noteheadSquareWhite;
-            di.noteheads[int(NoteHeadType::HEAD_HALF)]    = SymId::noteheadSquareWhite;
-            di.noteheads[int(NoteHeadType::HEAD_QUARTER)] = SymId::noteheadSquareBlack;
-            di.noteheads[int(NoteHeadType::HEAD_BREVIS)]  = SymId::noteheadSquareBlack;
-            di.line = 7;
-            di.stemDirection = DirectionV::DOWN;
-            ds->setDrum(note->pitch(), di);
-        }
-    } else {
-        // 5-line PERC staff: line derived from Encore position byte (diatonic steps from C4; higher position = smaller MuseScore line).
-        // faceValue high nibble 5 = cross notehead (cymbal/triangle).
-        Drumset* ds = note->part()->instrument()->drumset();
-        if (ds) {
-            if (!ds->isValid(note->pitch())) {
-                DrumInstrument di;
-                di.name = String::number(note->pitch());
-                di.line = std::max(-4, 10 - static_cast<int>(en->position));
-                di.stemDirection = DirectionV::UP;
-                ds->setDrum(note->pitch(), di);
-            }
-            // Override drumset default (e.g. MIDI Electric Snare defaults to HEAD_SLASH).
-            const NoteHeadGroup nhg = ((en->faceValue >> 4) == 5)
-                                      ? NoteHeadGroup::HEAD_CROSS
-                                      : NoteHeadGroup::HEAD_NORMAL;
-            ds->drum(note->pitch()).notehead = nhg;
-            note->setHeadGroup(nhg);
-        }
-    }
+    configureNoteHeadForDrumset(note, en);
 
     // Fingerings 1..5 (0x0D..0x11) and open-string 0x46 are packed in the artic byte.
     applyFingeringsFromArtic(ec, note, en);
