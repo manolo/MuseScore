@@ -41,7 +41,7 @@
 
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 void resolveOrnaments(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
@@ -388,4 +388,4 @@ void resolveOrnaments(BuildCtx& ctx)
         m->setMeasureRepeatCount(1, static_cast<staff_idx_t>(pmr.staffIdx));
     }
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

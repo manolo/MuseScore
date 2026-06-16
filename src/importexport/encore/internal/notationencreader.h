@@ -24,12 +24,12 @@
 
 #include "project/inotationreader.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 class NotationEncoreReader : public project::INotationReader
 {
 public:
     muse::Ret read(mu::engraving::MasterScore* score, const muse::io::path_t& path, const Options& options = Options()) override;
 };
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc
 
 #endif // MU_IMPORTEXPORT_NOTATIONENCOREREADER_H

@@ -29,7 +29,7 @@
 #include "log.h"
 
 using namespace muse::modularity;
-using namespace mu::iex::encore;
+using namespace mu::iex::enc;
 using namespace mu::project;
 
 std::string EncoreModule::moduleName() const

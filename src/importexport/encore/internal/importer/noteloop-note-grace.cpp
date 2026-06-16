@@ -29,7 +29,7 @@
 #include "engraving/dom/note.h"
 #include "engraving/dom/segment.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 using namespace mu::engraving;
 
 // Create a detached grace Chord for the given EncNote and queue or attach it.
@@ -113,4 +113,4 @@ bool tryHandleGraceNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec,
     return true;
 }
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

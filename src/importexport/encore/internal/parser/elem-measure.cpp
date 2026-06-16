@@ -26,7 +26,7 @@
 #include "ticks.h"
 #include "log.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 // ---------------------------------------------------------------------------
 // EncMeasure
 // ---------------------------------------------------------------------------
@@ -286,4 +286,4 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, bool fixDott
         }
     }
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

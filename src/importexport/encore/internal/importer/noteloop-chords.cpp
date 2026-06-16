@@ -28,7 +28,7 @@
 #include "engraving/dom/measure.h"
 #include "engraving/dom/segment.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 // Create a Harmony (chord symbol) for an EncChordSym element and attach it to the
 // measure. CHD elements often carry a MIDI timing offset from the note they annotate.
@@ -81,4 +81,4 @@ void handleChordSym(BuildCtx& ctx, const NoteLoopMeasCtx& mc, const NoteElemCtx&
     seg->add(h);
 }
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

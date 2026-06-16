@@ -24,13 +24,13 @@
 
 #include "modularity/imodulesetup.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 class EncoreModule : public muse::modularity::IModuleSetup
 {
 public:
     std::string moduleName() const override;
     void resolveImports() override;
 };
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc
 
 #endif // MU_IMPORTEXPORT_ENC_MODULE_H

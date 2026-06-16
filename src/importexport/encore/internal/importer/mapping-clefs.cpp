@@ -36,7 +36,7 @@
 
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 ClefType encClef2MuseScore(EncClefType ct)
 {
     switch (ct) {
@@ -216,4 +216,4 @@ void addInitialClef(MasterScore* score, int staffIdx, ClefType ct)
     clef->setClefType(ct);
     seg->add(clef);
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

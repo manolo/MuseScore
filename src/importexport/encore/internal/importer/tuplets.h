@@ -36,7 +36,7 @@ class Measure;
 class Tuplet;
 }
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 // Tuplet state per staff+voice. Group closes when face-value sum reaches actualN * baseLen.
 // This handles mixed-duration brackets (e.g. 3:2 triplet with 8th+8th+16th+16th).
 struct TupletTracker {
@@ -86,6 +86,6 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
     std::set<const EncMeasureElem*>* partialEndGroup = nullptr,
     std::vector<NestedTupletInfo>* nestedInfos = nullptr,
     std::map<const EncMeasureElem*, std::pair<int,int>>* overrideRatios = nullptr);
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc
 
 #endif // MU_IMPORTEXPORT_ENC_IMPORT_TUPLETS_H

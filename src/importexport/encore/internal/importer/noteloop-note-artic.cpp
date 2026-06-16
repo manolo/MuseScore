@@ -31,7 +31,7 @@
 #include "engraving/dom/ornament.h"
 #include "engraving/dom/tremolosinglechord.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 using namespace mu::engraving;
 
 // Apply articulations, ornaments, fermatas, tremolos, and string numbers to a
@@ -171,4 +171,4 @@ void applyNoteArticulations(Note* note, Chord* chord, const EncNote* en,
     }
 }
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

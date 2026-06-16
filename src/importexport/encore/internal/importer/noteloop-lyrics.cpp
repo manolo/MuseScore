@@ -28,7 +28,7 @@
 #include "engraving/dom/measure.h"
 #include "engraving/dom/segment.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 // Queue a LYRIC element. Hyphen separators ("-") update the hyphen flags on the
 // preceding syllable and set a carry-forward flag for the next one.
@@ -136,4 +136,4 @@ void attachPendingLyrics(BuildCtx& ctx, Measure* measure,
     // carries into the next measure's first syllable.
 }
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

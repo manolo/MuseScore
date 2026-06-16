@@ -25,8 +25,8 @@
 #include <memory>
 #include "reader.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 std::unique_ptr<EncFormatReader> makeFormatReader_V0xC2();
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

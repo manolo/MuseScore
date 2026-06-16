@@ -29,7 +29,7 @@
 
 #include "elements-enums.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 // Notes within this many Encore ticks treated as simultaneous (MIDI timing drift).
 inline constexpr int CHORD_CLUSTER_THRESHOLD = 4;   // Encore ticks (~8ms at 120bpm)
@@ -124,4 +124,4 @@ struct EncGenericElem : EncMeasureElem {
 using MeasureElemVec    = std::vector<std::unique_ptr<EncMeasureElem> >;
 using MeasureElemRefVec = std::vector<const EncMeasureElem*>;
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

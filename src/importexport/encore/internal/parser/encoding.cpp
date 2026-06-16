@@ -22,7 +22,7 @@
 
 #include "encoding.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 bool probeUtf16LE(quint8 b0, quint8 b1)
 {
@@ -119,4 +119,4 @@ QString readEncodedStringFixed(QDataStream& ds, int fixedLen)
     return result;
 }
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

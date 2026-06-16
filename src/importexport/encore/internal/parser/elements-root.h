@@ -32,7 +32,7 @@
 #include "elements-measure.h"  // EncMeasure (used in EncRoot::measures)
 #include "elements-text.h"     // EncLyric, EncTie, EncChordSym
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 struct EncFormatReader;   // defined in reader.h
 
@@ -165,4 +165,4 @@ struct EncRoot {
     bool read(QDataStream& ds);
 };
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

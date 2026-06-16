@@ -27,7 +27,7 @@
 
 #include "elements.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 // Encore 5.x (v0xC4) format reader.
 // All defaults inherited from EncFormatReader_V0xC4Base are correct for v0xC4.
@@ -57,4 +57,4 @@ std::unique_ptr<EncFormatReader> makeFormatReader_V0xC4()
     return std::make_unique<EncFormatReader_V0xC4>();
 }
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

@@ -45,7 +45,7 @@
 
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 struct PendingSlur {
     Fraction startTick;
     track_idx_t track;
@@ -236,6 +236,6 @@ struct BuildCtx
     // True when the next syllable follows a hyphen; reset at measure boundary.
     std::map<track_idx_t, bool> nextLyricHyphenBefore {};
 };
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc
 
 #endif // MU_IMPORTEXPORT_ENC_IMPORT_CTX_H

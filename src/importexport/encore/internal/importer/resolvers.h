@@ -29,7 +29,7 @@
 #include "engraving/dom/measure.h"
 #include "engraving/dom/segment.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 void resolveAll(BuildCtx& ctx);
 void resolveSlurs(BuildCtx& ctx);
 void resolveHairpins(BuildCtx& ctx);
@@ -56,6 +56,6 @@ inline mu::engraving::Chord* findChordAt(mu::engraving::MasterScore* score,
     }
     return toChord(el);
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc
 
 #endif // MU_IMPORTEXPORT_ENC_IMPORT_RESOLVERS_H

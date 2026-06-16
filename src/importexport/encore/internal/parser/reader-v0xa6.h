@@ -25,7 +25,7 @@
 
 #include "reader.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 // Encore 2.x (v0xA6) format reader. See ENCORE_FORMAT.md §Known quirks.
 struct EncFormatReader_V0xA6 final : EncFormatReader
 {
@@ -48,6 +48,6 @@ struct EncFormatReader_V0xA6 final : EncFormatReader
     bool hasGraceTimeBorrowing() const override { return true; }
     const char* formatName() const override { return "v0xA6"; }
 };
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc
 
 #endif // MU_IMPORTEXPORT_ENC_PARSER_READER_V0XA6_H

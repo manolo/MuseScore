@@ -35,7 +35,7 @@
 
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 // Translate Encore page tokens (#P, #D, #T) to MuseScore macros ($P, $D, $m).
 static String translateHeaderFooterTokens(const String& s)
 {
@@ -250,4 +250,4 @@ void addRepeatMark(Score* /*score*/, Measure* measure, EncRepeatType rt)
         break;
     }
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

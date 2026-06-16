@@ -28,7 +28,7 @@
 #include "engraving/dom/segment.h"
 #include "engraving/dom/tuplet.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 using namespace mu::engraving;
 
 void handleRest(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
@@ -172,4 +172,4 @@ void handleRest(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         }
     }
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

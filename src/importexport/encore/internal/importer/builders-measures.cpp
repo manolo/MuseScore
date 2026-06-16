@@ -75,7 +75,7 @@
 
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 // True if every element in the measure is a REST with mrestCount > 1.
 // Multi-staff files emit one REST per staff, so there can be N > 1 elements.
 static bool encMeasHasMultiRest(const EncMeasure& m)
@@ -265,4 +265,4 @@ void buildInitialSignatures(BuildCtx& ctx)
         prevTs = mTs;
     }
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

@@ -32,7 +32,7 @@
 
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 // Find the actual chord track at tick: SLURSTART is parsed before the note, so ps.track may be stale after stream-overflow voice reassignment.
 static track_idx_t resolveChordTrack(MasterScore* score, Fraction tick, int staffIdx, track_idx_t fallback)
 {
@@ -401,4 +401,4 @@ void resolveSlurs(BuildCtx& ctx)
         }
     }
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

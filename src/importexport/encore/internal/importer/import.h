@@ -34,8 +34,8 @@ namespace mu::engraving {
 class MasterScore;
 }
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 mu::engraving::Err importEncore(mu::engraving::MasterScore* score, const QString& path);
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc
 
 #endif // MU_IMPORTEXPORT_ENC_IMPORT_IMPORT_H

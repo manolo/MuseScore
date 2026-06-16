@@ -25,7 +25,7 @@
 #include <QDataStream>
 #include <QString>
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 // Returns true if b0/b1 look like the first two bytes of a UTF-16 LE string:
 // b0 is a printable ASCII byte and b1 is zero (BMP character in 0x0020..0x007E range).
 bool probeUtf16LE(quint8 b0, quint8 b1);
@@ -39,4 +39,4 @@ QString readEncodedStringRemaining(QDataStream& ds, int& remaining);
 // returns the decoded string up to the first null character.  All fixedLen bytes are
 // consumed regardless of where the null terminator falls.
 QString readEncodedStringFixed(QDataStream& ds, int fixedLen);
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

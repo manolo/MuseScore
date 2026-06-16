@@ -27,7 +27,7 @@
 
 #include "elements.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 // Encore 3.x / 4.x (v0xC2) format reader.
 // Differences from v0xC4:
@@ -86,4 +86,4 @@ std::unique_ptr<EncFormatReader> makeFormatReader_V0xC2()
     return std::make_unique<EncFormatReader_V0xC2>();
 }
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

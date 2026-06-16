@@ -24,7 +24,7 @@
 
 #include "reader.h"
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 
 // Shared base for v0xC2 and v0xC4 format readers.
 // Provides the element block offset, instrument encoding probe, and the full
@@ -40,4 +40,4 @@ struct EncFormatReader_V0xC4Base : EncFormatReader
                             const EncRoot& file) const override;
 };
 
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc

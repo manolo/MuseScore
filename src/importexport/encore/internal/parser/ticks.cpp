@@ -26,7 +26,7 @@
 
 using namespace mu::engraving;
 
-namespace mu::iex::encore {
+namespace mu::iex::enc {
 int faceValue2ticks(quint8 fv)
 {
     switch (fv & 0x0F) {
@@ -254,4 +254,4 @@ bool isStandardExplicitTuplet(int actualN, int normalN)
     }
     return false;
 }
-} // namespace mu::iex::encore
+} // namespace mu::iex::enc
