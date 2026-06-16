@@ -37,7 +37,7 @@ struct EncFormatReader_V0xC4Base : EncFormatReader
 
     bool readInstrumentMeta(std::vector<EncInstrument>& instruments,
                             QDataStream& ds,
-                            const EncFile& file) const override;
+                            const EncRoot& file) const override;
 };
 
 } // namespace mu::iex::encore

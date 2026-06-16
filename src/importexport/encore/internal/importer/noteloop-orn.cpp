@@ -40,7 +40,7 @@ using namespace mu::engraving;
 void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
 {
     MasterScore* score = ctx.score;
-    const EncFile& enc = ctx.enc;
+    const EncRoot& enc = ctx.enc;
     Measure* measure = mc.measure;
     const EncMeasure& encMeas = *mc.encMeas;
     const Fraction measTick = mc.measTick;

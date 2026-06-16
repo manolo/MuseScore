@@ -29,7 +29,7 @@
 
 #include "elements-enums.h"
 #include "elements-note.h"     // MeasureElemVec, EncMeasureElem
-#include "elements-measure.h"  // EncMeasure (used in EncFile::measures)
+#include "elements-measure.h"  // EncMeasure (used in EncRoot::measures)
 #include "elements-text.h"     // EncLyric, EncTie, EncChordSym
 
 namespace mu::iex::encore {
@@ -128,7 +128,7 @@ struct EncHeader {
 };
 
 // ---------------------------------------------------------------------------
-// EncFile - top-level container
+// EncRoot - top-level container
 // ---------------------------------------------------------------------------
 
 bool isInstrumentMagic(const QString& magic);
@@ -152,7 +152,7 @@ struct EncPageSetup {
     qint32 rightEdge  { 0 };   // pageWidth_pts  - rightMargin_pts
 };
 
-struct EncFile {
+struct EncRoot {
     EncHeader header;
     std::vector<EncInstrument> instruments;
     std::vector<EncLine> lines;

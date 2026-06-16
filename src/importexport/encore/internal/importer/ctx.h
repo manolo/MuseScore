@@ -170,7 +170,7 @@ struct PendingLyric {
 struct BuildCtx
 {
     mu::engraving::MasterScore* score;
-    const EncFile& enc;
+    const EncRoot& enc;
     const EncFormatReader* fmt { nullptr };    // set in buildScore(), non-owning
 
     // Format capability flags, set from fmt in buildScore() so that importer

@@ -26,7 +26,7 @@
 
 namespace mu::iex::encore {
 // ---------------------------------------------------------------------------
-// EncFile - top-level container
+// EncRoot - top-level container
 // ---------------------------------------------------------------------------
 
 bool isInstrumentMagic(const QString& magic)
@@ -98,7 +98,7 @@ void addSpannerEnds(std::vector<EncMeasure>& measures)
     }
 }
 
-bool EncFile::read(QDataStream& ds)
+bool EncRoot::read(QDataStream& ds)
 {
     if (!header.readMagicAndVersion(ds)) {
         return false;

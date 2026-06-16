@@ -74,7 +74,7 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
     // v0xC2 has no TK-based MIDI/key meta tables; only recover instrument names.
     bool readInstrumentMeta(std::vector<EncInstrument>& instruments,
                             QDataStream& ds,
-                            const EncFile& file) const override
+                            const EncRoot& file) const override
     {
         // Delegate to base only for name recovery (the base would also read MIDI/key,
         // which do not exist in v0xC2 files). Call the simpler path directly via the
