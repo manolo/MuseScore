@@ -73,6 +73,9 @@ struct NestedTupletInfo {
     int outerNormalN { 0 };
 };
 
+// True when a Fraction fits exactly in a TDuration (power-of-two, up to 4 dots).
+bool fitsTDuration(const mu::engraving::Fraction& f);
+
 // Find all elements belonging to complete tuplet groups (implied v0xC2 or explicit). Isolated notes with matching rdur are MIDI swing drift.
 // partialEndGroup: if non-null, receives measure-end partial groups (rdur fills measure AND face-value would overflow without scaling).
 // nestedInfos: if non-null, receives nested-tuplet annotations for detected inner groups.
