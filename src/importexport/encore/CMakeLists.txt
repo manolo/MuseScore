@@ -60,7 +60,8 @@ target_sources(iex_encore PRIVATE
     internal/importer/import.cpp
     internal/importer/ctx.h
     internal/importer/builders.h
-    internal/importer/builders.cpp
+    internal/importer/builders-parts.cpp
+    internal/importer/builders-measures.cpp
     internal/importer/noteloop-internal.h
     internal/importer/noteloop-note.cpp
     internal/importer/noteloop-note-grace.cpp
