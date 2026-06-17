@@ -45,7 +45,7 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x2E: return { SymId::ornamentTurnInverted };  // inverted turn
     case 0x12: return { SymId::articAccentAbove };
     case 0x13: return { SymId::articMarcatoAbove };
-    case 0x14: return { SymId::articAccentAbove, SymId::articTenutoAbove };  // accent + tenuto
+    case 0x14: return { SymId::articStaccatoAbove, SymId::articMarcatoBelow };  // staccato + heavy accent (∨)
     case 0x15: return { SymId::articMarcatoAbove, SymId::articStaccatoAbove };
     case 0x16: return { SymId::articAccentAbove, SymId::articStaccatissimoAbove };
     case 0x17: return { SymId::articAccentAbove, SymId::articStaccatoAbove };
@@ -60,13 +60,13 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x23: return { SymId::articAccentAbove, SymId::articTenutoAbove };
     case 0x24: return { SymId::articTenutoAbove, SymId::articStaccatoAbove };
     case 0x25: return { SymId::articMarcatoAbove, SymId::articTenutoAbove };
-    case 0x26: return { SymId::articMarcatoAbove };  // heavy accent = marcato only (Encore shows ONE symbol)
+    case 0x26: return { SymId::articTenutoAbove, SymId::articMarcatoBelow };  // tenuto + heavy accent (∨)
     case 0x27: return { SymId::articMarcatoAbove, SymId::articTenutoAbove };
     case 0x28:
     case 0x29: return { SymId::articStaccatissimoAbove };
-    case 0x2A: return { SymId::articStaccatissimoAbove, SymId::articStaccatoAbove };
+    case 0x2A: return { SymId::articStaccatissimoAbove, SymId::articAccentAbove };  // staccatissimo + accent
     case 0x2B: return { SymId::articAccentAbove, SymId::articStaccatissimoAbove };
-    case 0x2C: return { SymId::articStaccatissimoAbove };
+    case 0x2C: return { SymId::articTenutoAbove, SymId::articStaccatissimoAbove };  // tenuto + staccatissimo
     case 0x2D: return { SymId::articTenutoAbove, SymId::articStaccatissimoAbove };
     case 0x1B: return { SymId::brassMuteClosed };        // technical/stopped (+)
     case 0x30: return { SymId::brassMuteHalfClosed };   // technical/stopped (tick/half stopped)
