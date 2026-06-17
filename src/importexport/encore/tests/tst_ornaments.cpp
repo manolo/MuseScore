@@ -195,7 +195,7 @@ TEST_F(Tst_Ornaments, articulation_combos_expand_to_two_glyphs)
     };
     // m1: 0x24 ten+stacc, 0x17 acc+stacc, 0x27 marc+ten, 0x15 marc+stacc;
     // m2: 0x23 acc+ten, 0x2D ten+stiss, 0x2B acc+stiss, 0x24 ten+stacc.
-    // m3: 0x14 acc+ten (FIXED from wrong marc+stacc), 0x26 marc-only (FIXED from marc+stiss).
+    // m3: 0x14 stacc+heavy-accent(∨), 0x26 ten+heavy-accent(∨).
     const std::vector<std::set<K> > expected = {
         { K::Tenuto, K::Staccato },
         { K::Accent, K::Staccato },
@@ -205,8 +205,8 @@ TEST_F(Tst_Ornaments, articulation_combos_expand_to_two_glyphs)
         { K::Tenuto, K::Staccatissimo },
         { K::Accent, K::Staccatissimo },
         { K::Tenuto, K::Staccato },
-        { K::Accent, K::Tenuto },    // 0x14: accent + tenuto (was wrong: marcato + staccato)
-        { K::Marcato },              // 0x26: heavy accent = marcato only (was wrong: + staccatissimo)
+        { K::Staccato, K::Marcato },   // 0x14: staccato + heavy accent (∨)
+        { K::Tenuto,   K::Marcato },   // 0x26: tenuto + heavy accent (∨)
     };
     std::vector<std::set<K> > seen;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
