@@ -30,14 +30,15 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     using mu::engraving::SymId;
     // Byte encodes one or two glyphs (e.g. 0x24=tenuto+staccato). See ENCORE_FORMAT.md §Articulation bytes.
     switch (articByte) {
-    // Trill/mordent: 0x04..0x07=trill, 0x08=turn, 0x09=wave, 0x0A=inv-mordent(short),
+    // Trill/mordent: 0x04..0x07=trill, 0x08=turn, 0x09=wave(no MS equivalent),
+    // 0x0A=inv-mordent(short),
     // 0x0C=inv-mordent(long/double)=tremblement, 0x0B=mordent(simple), 0x2F=mordent(double/long)=prallMordent.
     case 0x04:
     case 0x05:
     case 0x06:
     case 0x07: return { SymId::ornamentTrill };
     case 0x08: return { SymId::ornamentTurn };
-    case 0x09: return { SymId::ornamentTrill };
+    case 0x09: return {};  // wave mark — no MuseScore equivalent, skip
     case 0x0A: return { SymId::ornamentShortTrill };    // <inverted-mordent>
     case 0x0C: return { SymId::ornamentTremblement };   // <inverted-mordent long="yes">
     case 0x0B: return { SymId::ornamentMordent };       // simple lower mordent
