@@ -734,3 +734,40 @@ TEST_F(Tst_OrnamentsSlurs, v0c4_grace_after_main_slur_arc_starts_at_grace_not_re
 
     delete score;
 }
+
+// ===========================================================================
+// REGRESSION: Cross-measure slur (alMezuro=2) endpoint resolved via Fallback 1
+// (xoffset2 direct comparison against note xoffsets in target measure).
+// The slur must land on D4 (pitch=62, xoff=15), NOT on F4 (last note, xoff=35).
+// Without Fallback 1, the "last ChordRest" fallback would select F4 instead.
+// Fixture: M0 SLURSTART(alMezuro=2, xoffset2=15); M2 has 4 notes with
+// xoffsets 5/15/25/35 (C4/D4/E4/F4). slurXoffset2=15 → D4 (pitch=62).
+// ===========================================================================
+TEST_F(Tst_OrnamentsSlurs, cross_measure_slur_endpoint_precision)
+{
+    MasterScore* score = readEncoreScore("ornaments_cross_measure_slur_precision.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    const Spanner* crossSlur = nullptr;
+    const Fraction firstMeasTick = score->firstMeasure()->tick();
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (!sp->isSlur()) {
+            continue;
+        }
+        if (sp->tick() == firstMeasTick && sp->tick2() > sp->tick()) {
+            crossSlur = sp;
+            break;
+        }
+    }
+    ASSERT_NE(crossSlur, nullptr) << "Cross-measure slur must be created";
+    ASSERT_NE(crossSlur->endElement(), nullptr) << "Slur must have a resolved end element";
+    ASSERT_TRUE(crossSlur->endElement()->isChord()) << "Slur end element must be a Chord";
+
+    const int endPitch = toChord(crossSlur->endElement())->notes().back()->pitch();
+    EXPECT_EQ(endPitch, 62)
+        << "slurXoffset2=15 must select D4 (pitch=62, xoff=15), not F4 (last note, xoff=35)";
+
+    delete score;
+}

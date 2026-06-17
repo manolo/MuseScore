@@ -535,7 +535,10 @@ Notes with xoffset == 0 are ignored in steps 2-3 (synthetic fixture guard).
 
 **Slur endpoint (pixel-span heuristic).** `slurXoffset2 - slurXoffset` equals `endNote.xoffset - firstNote.xoffset`.
 Recover end tick via `target = firstNote.xoffset + (slurXoffset2 - slurXoffset)` and snap to the nearest note.
-Only applies when alMezuro == 0; cross-measure slurs fall back to the last ChordRest in the target measure.
+Only applies when alMezuro == 0 (same-measure slurs). For cross-measure slurs (alMezuro > 0),
+the importer uses xoffset2 directly: each note in the target measure is compared against
+slurXoffset2 and the closest match is selected. The last-ChordRest fallback only fires when
+no note in the target measure can be found (e.g. all notes have xoffset=0).
 
 `xoffset` is stored as `qint8` but must be treated as `quint8` (unsigned) for the pixel-span computation:
 values > 127 are stored negative (e.g. 0x8A = -118 signed = 138 unsigned). Using signed arithmetic
