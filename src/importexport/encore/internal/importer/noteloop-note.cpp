@@ -646,9 +646,23 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
                 di.stemDirection = DirectionV::UP;
                 ds->setDrum(note->pitch(), di);
             }
-            // Override drumset default (e.g. MIDI Electric Snare defaults to HEAD_SLASH).
+            // Set the drumset default notehead (used when the note is not fixed).
             ds->drum(note->pitch()).notehead = nhg;
             note->setHeadGroup(nhg);
+        }
+        // For non-default noteheads: mark the note as "fixed" so segmentlayout's
+        // layoutDrumset() does not override HEAD_GROUP from the drumset entry.
+        // This is necessary when multiple notes share the same pitch but need
+        // distinct notehead shapes (e.g. Encore's rhythm-notation files).
+        if (nibble != 0) {
+            // Mark the note as fixed so segmentlayout's layoutDrumset() does not
+            // override HEAD_GROUP from the drumset entry (which is shared per pitch).
+            // For fixed notes, line() returns m_fixedLine, so set that explicitly.
+            int drumLine = (ds && ds->isValid(note->pitch()))
+                           ? ds->line(note->pitch())
+                           : std::max(-4, 10 - static_cast<int>(en->position));
+            note->setFixed(true);
+            note->setFixedLine(drumLine);
         }
         // nibble=9: "sin_cabeza" (no notehead) — make note invisible.
         if (nibble == 9) {
