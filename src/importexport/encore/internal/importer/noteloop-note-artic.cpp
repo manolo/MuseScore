@@ -56,6 +56,27 @@ void applyNoteArticulations(Note* note, Chord* chord, const EncNote* en,
                || s == SymId::fermataLongBelow;
     };
 
+    // Artic bytes that Encore uses for marks with no MuseScore equivalent.
+    // Emit a warning so the user knows they are silently dropped.
+    static const std::map<quint8, const char*> WARN_BYTES = {
+        { 0x01, "flat mark"      }, { 0x02, "sharp/natural mark" },
+        { 0x09, "wave mark"      },
+        { 0x47, "stick technique" },
+        { 0x48, "brush"          }, { 0x49, "soft mallet" }, { 0x4A, "hard mallet" },
+    };
+    for (int slot = 0; slot < 2; ++slot) {
+        const quint8 check = slot == 0 ? en->articulationUp : en->articulationDown;
+        auto it = WARN_BYTES.find(check);
+        if (it != WARN_BYTES.end()) {
+            LOGW() << QString("Encore: artic byte 0x%1 (%2) not imported"
+                              " (measure %3 staff %4 tick %5)")
+                          .arg(check, 2, 16, QChar('0'))
+                          .arg(it->second)
+                          .arg(mc.measIdx).arg(static_cast<int>(en->staffIdx))
+                          .arg(static_cast<int>(en->tick));
+        }
+    }
+
     Segment* chordSeg = chord->segment();
     for (int slot = 0; slot < 2; ++slot) {
         const quint8 ab = slot == 0 ? en->articulationUp : en->articulationDown;

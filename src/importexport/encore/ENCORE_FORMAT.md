@@ -881,7 +881,9 @@ Where MuseScore has a single combined SMuFL glyph, the importer uses it. Where n
 | 0x06         | trill to augmented second (sharp) | `ornamentTrill` + `intervalAbove=AUGMENTED` |
 | 0x07         | trill to major second (natural) | `ornamentTrill` + `intervalAbove=MAJOR` |
 | 0x08         | turn | `ornamentTurn` |
-| 0x09         | wave mark | skipped (no MuseScore equivalent) |
+| 0x01         | flat mark (b) | skipped with LOGW (accidental display, not an articulation) |
+| 0x02         | sharp/natural mark (#/♮) | skipped with LOGW |
+| 0x09         | wave mark | skipped with LOGW (no MuseScore equivalent) |
 | 0x0A         | inverted-mordent (short) | `ornamentShortTrill` |
 | 0x0C         | inverted-mordent (long) | `ornamentTremblement` |
 | 0x0B         | mordent (simple lower) | `ornamentMordent` |
@@ -919,7 +921,10 @@ Where MuseScore has a single combined SMuFL glyph, the importer uses it. Where n
 | 0x1E, 0x1F   | harmonic (see above)                                           |
 | 0x44, 0x45   | thumb-position                                                 |
 | 0x46         | open-string (plain Fingering "0", not circled)                |
-| 0x47         | "stick" technique; no standard SMuFL equivalent (not imported) |
+| 0x47         | "stick" drumstick technique; no SMuFL equivalent — skipped with LOGW |
+| 0x48         | brush; no SMuFL equivalent — skipped with LOGW |
+| 0x49         | soft mallet; no SMuFL equivalent — skipped with LOGW |
+| 0x4A         | hard mallet; no SMuFL equivalent — skipped with LOGW |
 | 0x39–0x40    | scale string numbers 1–8 (byte `0x38 + N` = string N); when at least one such byte appears in a measure, all notes in that measure with options bit 0 set also display their scale-degree position as a circled string number |
 
 ### Single-note tremolos (articulation slots)
