@@ -1609,7 +1609,8 @@ TEST_F(Tst_Importer, encore_symbols_full_coverage)
                     break;
                 case SymId::ornamentShortTrill:    // <inverted-mordent>
                 case SymId::ornamentTremblement:   // <inverted-mordent long="yes">
-                case SymId::ornamentMordent:
+                case SymId::ornamentMordent:       // simple lower mordent (0x0B)
+                case SymId::ornamentPrallMordent:  // double lower mordent (0x2F)
                     ++mordents;
                     break;
                 default: break;

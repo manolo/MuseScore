@@ -30,7 +30,8 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     using mu::engraving::SymId;
     // Byte encodes one or two glyphs (e.g. 0x24=tenuto+staccato). See ENCORE_FORMAT.md §Articulation bytes.
     switch (articByte) {
-    // Trill/mordent from m16-m17: 0x04..0x07=trill, 0x08=turn, 0x09=wave, 0x0A/0x0C=inv-mordent, 0x0B/0x2F=mordent.
+    // Trill/mordent: 0x04..0x07=trill, 0x08=turn, 0x09=wave, 0x0A=inv-mordent(short),
+    // 0x0C=inv-mordent(long/double)=tremblement, 0x0B=mordent(simple), 0x2F=mordent(double/long)=prallMordent.
     case 0x04:
     case 0x05:
     case 0x06:
@@ -39,8 +40,8 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x09: return { SymId::ornamentTrill };
     case 0x0A: return { SymId::ornamentShortTrill };    // <inverted-mordent>
     case 0x0C: return { SymId::ornamentTremblement };   // <inverted-mordent long="yes">
-    case 0x0B:
-    case 0x2F: return { SymId::ornamentMordent };
+    case 0x0B: return { SymId::ornamentMordent };       // simple lower mordent
+    case 0x2F: return { SymId::ornamentPrallMordent };  // double/long lower mordent (parallel to 0x0C = ornamentTremblement for inverted)
     case 0x2E: return { SymId::ornamentTurnInverted };  // inverted turn
     case 0x12: return { SymId::articAccentAbove };
     case 0x13: return { SymId::articMarcatoAbove };
