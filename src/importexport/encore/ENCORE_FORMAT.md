@@ -504,7 +504,7 @@ Type 5. Variable size. Offsets from element start:
 | 0x2A  | GUITAR_PREBEND | Guitar prebend (size=28 spanner); not yet imported — skip with LOGW |
 | 0x2B  | GUITAR_PREBEND_RELEASE | Guitar prebend-release (size=28 spanner); not yet imported — skip with LOGW |
 | 0x30  | GUITAR_BEND_V | Guitar V-shape bend (size=28 spanner); not yet imported — skip with LOGW |
-| 0xB8  | DOUBLE_MORDENT | `ornamentMordent` (3-wave long mordent, placed below) |
+| 0xB8  | DOUBLE_MORDENT | `ornamentPrallMordent` (double lower mordent; MuseScore palette: "Prall Mordent") |
 | 0xBF  | MARCATO | `articMarcatoAbove` (^, vertex up; standard marcato) |
 | 0xC0  | MARCATO_STACCATO_BELOW | `articMarcatoStaccatoBelow` (heavy accent ∨ + staccato dot) |
 | 0xC6  | MARCATO_BELOW | `articMarcatoBelow` (heavy accent ∨, inverted marcato, vertex down) |

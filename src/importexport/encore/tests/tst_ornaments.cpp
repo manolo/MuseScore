@@ -1723,7 +1723,7 @@ TEST_F(Tst_Ornaments, new_artic_types_from_orns)
         if (s == SymId::articMarcatoAbove || s == SymId::articMarcatoBelow) { return K::Marcato; }
         if (s == SymId::articMarcatoStaccatoAbove || s == SymId::articMarcatoStaccatoBelow) { return K::MarcatoStaccato; }
         if (s == SymId::articTenutoAbove || s == SymId::articTenutoBelow) { return K::Tenuto; }
-        if (s == SymId::ornamentMordent) { return K::Mordent; }
+        if (s == SymId::ornamentMordent || s == SymId::ornamentPrallMordent) { return K::Mordent; }
         return K::Other;
     };
 
