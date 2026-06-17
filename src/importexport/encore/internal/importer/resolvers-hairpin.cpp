@@ -21,7 +21,7 @@
  */
 
 #include "resolvers.h"
-#include "../parser/elements.h"
+#include "../parser/elem.h"
 #include "engraving/dom/hairpin.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/masterscore.h"
@@ -122,7 +122,7 @@ void resolveHairpins(BuildCtx& ctx)
         }
 
         // (2) xoffset2 snap: find the last note/rest in the target measure with xoffset <= xoff2.
-        // Mirrors the start-snap logic in snapTickByXoffset (noteloop-orn.cpp).
+        // Mirrors the start-snap logic in snapTickByXoffset (emitters-orn.cpp).
         // Only when no Dynamic found in step (1) and xoff2 is meaningful (> 0).
         if (!foundNextDynamic
             && ph.hairpinXoffset2 > 0

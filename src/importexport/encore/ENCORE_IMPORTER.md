@@ -659,7 +659,7 @@ are not accidentally routed to a second instrument staff.
 ## Chord symbol (harmony) import
 
 Encore stores chord symbols as CHORD elements (type 7) in the measure element stream.
-The importer (`handleChordSym` in `noteloop.cpp`) creates a `Harmony` element and calls
+The importer (`handleChordSym` in `emitters.cpp`) creates a `Harmony` element and calls
 `setHarmony()` for each one.
 
 ### Two encoding modes
@@ -715,7 +715,7 @@ This guard is scoped to `grace1 & 0x40` to avoid false positives on v0xC2 chord 
 where the `semiTonePitch` field holds an unreliable value before the v0xA6 pitch fix and
 multiple cluster notes can share the same raw byte value.
 
-**Source:** `handleNote` in `noteloop-note.cpp` (~line 490).
+**Source:** `handleNote` in `emitters-note.cpp` (~line 490).
 
 ### Tests
 
@@ -907,7 +907,7 @@ now checks whether the staff carries a drumset and, if so, forces
 
 ## MIDI artifact filter bypass for chord roots and chord extensions
 
-The MIDI artifact filter (lines 152–174 in `noteloop-note.cpp`) drops notes
+The MIDI artifact filter (lines 152–174 in `emitters-note.cpp`) drops notes
 whose `realDuration` falls in the range 5–14 ticks when the face value is an
 eighth note or longer.  Two valid cases were incorrectly caught:
 
@@ -1031,7 +1031,7 @@ Exercised by `Tst_Notes.notes_v0c2_size24_semitone_pitch`.
 
 A single MEAS block whose lone REST element has `mrestCount > 1` is
 expanded to that many MuseScore measures (`buildMeasures` and the
-noteloop's `measDisplayCount` lambda both track this).
+emitters's `measDisplayCount` lambda both track this).
 
 The original code guarded expansion with two conditions:
 
@@ -1044,9 +1044,9 @@ after a 3-measure multi-measure rest). The successor content is
 irrelevant — Encore's `mrestCount` byte is authoritative.
 
 The fix removes condition 2 from `encMeasDisplayCount` (builders.cpp)
-and from the identical `measDisplayCount` lambda in noteloop.cpp. Both
+and from the identical `measDisplayCount` lambda in emitters.cpp. Both
 must agree or `buildMeasures` creates the right number of MuseScore
-measures but the noteloop places notes in the wrong ones.
+measures but the emitters places notes in the wrong ones.
 
 Exercised by `Tst_Importer.mrest_single_block_expands_when_successor_is_rest`.
 
@@ -1172,7 +1172,7 @@ default tick, finding the latest note/rest in the source measure with
 2. **`xoffset2` note snap** (fallback when no Dynamic): scan the target
    measure for the last NOTE/REST with `xoffset <= xoffset2`. End the
    hairpin at that note's tick. Mirrors the `snapTickByXoffset` start-snap
-   logic in `noteloop-orn.cpp`.
+   logic in `emitters-orn.cpp`.
 
 3. **Bar-line clamp** (when no note found in step 2): if `xoffset2`
    precedes all notes with positive xoffsets in the target measure, clamp

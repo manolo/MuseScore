@@ -21,7 +21,7 @@
  */
 
 #include "resolvers.h"
-#include "../parser/elements.h"
+#include "../parser/elem.h"
 #include "engraving/dom/arpeggio.h"
 #include "engraving/dom/tremolosinglechord.h"
 #include "engraving/dom/ornament.h"

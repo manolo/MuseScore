@@ -23,10 +23,10 @@
 #include "builders.h"
 #include "ctx.h"
 #include "import.h"
-#include "../parser/elements.h"
-#include "mapping.h"
+#include "../parser/elem.h"
+#include "mappers.h"
 #include "../parser/ticks.h"
-#include "tuplets.h"
+#include "emitters-tuplets.h"
 #include <algorithm>
 #include <memory>
 #include <map>
@@ -120,7 +120,7 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
 {
     const int encMidi = instr.midiProgram > 0 ? instr.midiProgram - 1 : -1;
     const int encKey  = static_cast<int>(instr.keyTransposeSemitones);
-    const bool nameTooShort = instr.name.trimmed().size() < 4;  // see kMinInstrNameLen in mapping-instruments.cpp
+    const bool nameTooShort = instr.name.trimmed().size() < 4;  // see kMinInstrNameLen in mappers-instruments.cpp
 
     const InstrumentTemplate* tmpl = nullptr;
     int matchStep = 0;

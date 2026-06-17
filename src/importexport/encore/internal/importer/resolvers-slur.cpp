@@ -21,7 +21,7 @@
  */
 
 #include "resolvers.h"
-#include "../parser/elements.h"
+#include "../parser/elem.h"
 #include "../parser/ticks.h"
 #include <optional>
 #include "engraving/dom/slur.h"
@@ -188,7 +188,7 @@ void resolveSlurs(BuildCtx& ctx)
     MasterScore* score = ctx.score;
     const EncRoot& enc = ctx.enc;
 
-    // Build compact-rawStaff → LINE-slot lookup (same logic as noteloop.cpp).
+    // Build compact-rawStaff → LINE-slot lookup (same logic as emitters.cpp).
     // (staffWithin<<6)|instrIdx is the raw staff byte; without this, comparisons mismatch beyond the first instrument.
     std::array<int, 256> lineSlotByRawByte;
     lineSlotByRawByte.fill(-1);
