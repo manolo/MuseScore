@@ -485,6 +485,16 @@ static bool resolveNoteDuration(
     const EncMeasureElem* e = ec.e;
     const auto& trackKey = ec.trackKey;
 
+    // Undo prevMidiTick change and return false to skip this note (MIDI artifact or residual).
+    auto bailOut = [&]() -> bool {
+        if (savedPrevMidiTick >= 0) {
+            ctx.prevMidiTick[trackKey] = savedPrevMidiTick;
+        } else {
+            ctx.prevMidiTick.erase(trackKey);
+        }
+        return false;
+    };
+
     if (isStandardExplicit) {
         // In files where the face-value byte encodes "beats" rather than absolute note
         // values (e.g. 8/8 where fv=Q means one eighth beat), rdur equals exactly
@@ -545,12 +555,7 @@ static bool resolveNoteDuration(
             Fraction fullGroupAdv = singleAdv * Fraction(preA, 1);
             Fraction mRemaining = measure->ticks() - ctx.cumTick[trackKey];
             if (fullGroupAdv > mRemaining) {
-                if (savedPrevMidiTick >= 0) {
-                    ctx.prevMidiTick[trackKey] = savedPrevMidiTick;
-                } else {
-                    ctx.prevMidiTick.erase(trackKey);
-                }
-                return false;
+                return bailOut();
             }
         }
 
@@ -564,14 +569,7 @@ static bool resolveNoteDuration(
             if (remaining > Fraction(0, 1) && fullDur.fraction() > remaining) {
                 TDuration capped(remaining, true);
                 // 1/3072-type residual: no valid TDuration; zero-tick chord breaks sanityCheck.
-                if (capped.fraction().numerator() == 0) {
-                    if (savedPrevMidiTick >= 0) {
-                        ctx.prevMidiTick[trackKey] = savedPrevMidiTick;
-                    } else {
-                        ctx.prevMidiTick.erase(trackKey);
-                    }
-                    return false;
-                }
+                if (capped.fraction().numerator() == 0) { return bailOut(); }
                 dt   = capped.type();
                 dots = capped.dots();
             }
