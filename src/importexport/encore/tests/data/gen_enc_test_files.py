@@ -1084,6 +1084,22 @@ def gen_v0c4_perc_notehead_all_nibbles():
     return set_staff_clef(result, staff_idx=0, clef=7)   # PERC clef = 7
 
 
+def gen_v0c4_perc_shared_pitch_nibbles():
+    # Regression: when two PERC notes share the same pitch but have different
+    # faceValue high nibbles, layoutDrumset() must not override the earlier note's
+    # headGroup (because the shared drumset entry is updated by the later note).
+    # Fix: all non-normal nibbles call setFixed(true) so the headGroup is immune.
+    #
+    # Two notes with pitch=60, same voice, consecutive beats:
+    #   beat 0: nibble=7 (slash)      → must remain HEAD_SLASH
+    #   beat 1: nibble=8 (large-diam) → must remain HEAD_LARGE_DIAMOND
+    PITCH = 60
+    e  = note_v0c4_perc(0,   0, 0, fv=0x73, pitch=PITCH, position=5)  # nibble=7 slash
+    e += note_v0c4_perc(240, 0, 0, fv=0x83, pitch=PITCH, position=5)  # nibble=8 large-diamond
+    e += end_marker()
+    result = assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+    return set_staff_clef(result, staff_idx=0, clef=7)
+
 def gen_v0c4_perc_standard_drumset_notehead():
     e  = note_v0c4_perc(0, 0, 0, fv=0x03, pitch=40, position=7)
     e += end_marker()
@@ -7501,6 +7517,7 @@ if __name__=='__main__':
     write("notes_capped_tuplet_note.enc",    gen_v0c4_capped_tuplet_note())
     write("notes_perc_clef_positions.enc",   gen_v0c4_perc_clef_positions())
     write("notes_perc_notehead_all_nibbles.enc", gen_v0c4_perc_notehead_all_nibbles())
+    write("notes_perc_shared_pitch_nibbles.enc", gen_v0c4_perc_shared_pitch_nibbles())
     write("notes_perc_clef_standard_drumset_notehead.enc", gen_v0c4_perc_standard_drumset_notehead())
     write("notes_mixed_duration_tuplet_boundary_fill.enc", gen_v0c4_mixed_duration_tuplet_boundary_fill())
     write("notes_mixed_duration_triplet.enc",   gen_v0c4_mixed_duration_triplet())
