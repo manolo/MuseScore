@@ -56,8 +56,8 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x1D: return { SymId::articStaccatoAbove };
     case 0x20:
     case 0x21: return { SymId::fermataAbove };
-    case 0x22: return { SymId::articTenutoAccentAbove };      // tenuto + accent as single glyph
-    case 0x23: return { SymId::articTenutoAccentAbove };
+    case 0x22: return { SymId::articTenutoStaccatoAbove };     // tenuto + staccato (portato) as single glyph
+    case 0x23: return { SymId::articTenutoStaccatoAbove };
     case 0x24: return { SymId::articTenutoStaccatoAbove };    // tenuto + staccato (portato) as single glyph
     case 0x25: return { SymId::articMarcatoTenutoAbove };     // marcato + tenuto as single glyph
     case 0x26: return { SymId::articMarcatoTenutoBelow };     // tenuto + heavy accent (∨) as single glyph

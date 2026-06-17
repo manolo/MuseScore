@@ -197,7 +197,7 @@ TEST_F(Tst_Ornaments, articulation_combos_expand_to_two_glyphs)
         }
     };
     // m1: 0x24 TenutoStaccato, 0x17 AccentStaccato, 0x27 MarcatoTenuto, 0x15 MarcatoStaccato.
-    // m2: 0x23 TenutoAccent, 0x2D Tenuto+Staccatissimo, 0x2B Accent+Staccatissimo, 0x24 TenutoStaccato.
+    // m2: 0x23 TenutoStaccato (portato), 0x2D Tenuto+Staccatissimo, 0x2B Accent+Staccatissimo, 0x24 TenutoStaccato.
     // m3: 0x14 MarcatoStaccatoBelow, 0x26 MarcatoTenutoBelow.
     // m4: 0x25 MarcatoTenuto, 0x2A Staccatissimo+Accent, 0x2C Tenuto+Staccatissimo.
     const std::vector<std::set<K> > expected = {
@@ -205,7 +205,7 @@ TEST_F(Tst_Ornaments, articulation_combos_expand_to_two_glyphs)
         { K::AccentStaccato },           // 0x17 → articAccentStaccatoAbove
         { K::MarcatoTenuto },            // 0x27 → articMarcatoTenutoAbove
         { K::MarcatoStaccato },          // 0x15 → articMarcatoStaccatoAbove
-        { K::TenutoAccent },             // 0x23 → articTenutoAccentAbove
+        { K::TenutoStaccato },           // 0x23 → articTenutoStaccatoAbove (portato, same as 0x22)
         { K::Tenuto, K::Staccatissimo }, // 0x2D (no single glyph)
         { K::Accent, K::Staccatissimo }, // 0x2B (no single glyph)
         { K::TenutoStaccato },           // 0x24 again
