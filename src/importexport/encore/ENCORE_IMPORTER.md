@@ -1220,6 +1220,63 @@ last note in the alMezuro target measure, which on real legacy
 files (e.g. a 3-note slur in instrument 2 of a Spanish plectro
 score) grew to cover every remaining note in the bar.
 
+## Grace-to-main and grace-to-later slurs
+
+When a SLURSTART (tipo 0x21) is co-located with an appoggiatura (same Encore tick),
+the pixel-span heuristic fails because grace notes and their parent chord share the
+same written tick — there is no note at the proportional written tick derived from
+the slur's xoffset2. Two resolution cases:
+
+**Grace-to-main** (`startTick == endTick` after snapping): create the slur with
+`startElement = graceChord` and `endElement = mainChord`. Skip both
+`computeStartElement()` and `computeEndElement()` so neither auto-resolver overrides
+the explicitly-set elements.
+
+**Grace-to-later** (`startTick < endTick`): find the chord AT or AFTER `startTick`,
+read its `graceNotesBefore()`, set `startElement = graceChord`. Skip only
+`computeStartElement()`; let `computeEndElement()` run normally.
+
+**Co-located grace+regular notes (both orderings):**
+
+When a grace and its principal note share the same Encore tick, three additional rules apply:
+
+1. **firstNoteXoff = grace xoffset.** Use the GRACE note's xoffset as the reference for
+   `targetEndXoff = startXoff + pixelSpan`. The co-located regular note has a larger
+   xoffset; using it inflates the target and selects a later note as endpoint. Stop the
+   iteration at `startTick` as soon as a grace note is found (v0xC4 serialises regular-first
+   at the same tick, so continue past regular notes until hitting the grace).
+
+2. **Integrated shortcut.** After scanning, if the co-located regular note matches
+   `targetEndXoff` better than any later note (`regularDist < bestDist`), resolve
+   grace-to-main. If a later note matches better, use the heuristic endpoint (grace-to-later).
+
+3. **Zero-span invariant.** If no endpoint note is found, set `tick2 = tick` (same as start).
+   A post-pass detects this condition and treats the slur as grace-to-main, skipping the
+   general end-element resolver. Without this, the resolver finds a rest or next-measure note.
+
+**Attaching grace-to-main slurs.** Use `addSpanner(slur, /*computeStartElement=*/false)`.
+The `computeStartElement()` call in the regular path would replace the explicitly-set grace
+with the main chord.
+
+**v0xC4 binary ordering.** Encore 5 serialises the MAIN note BEFORE its ACCIACCATURA
+grace at the same beat — opposite of v0xC2 (grace first). When the main note arrives first
+and a grace follows at the same tick (`tick − prevTick < 8`), it is a retroactive
+chord-extension of the already-placed main chord. Attach it directly to that chord instead
+of queuing it as a prefix for the next note.
+
+**Regression fixtures:**
+
+| Fixture | Format | Pattern |
+|---------|--------|---------|
+| `ornaments_v0c2_grace_slur_to_main_coloc.enc` | v0xC2 | Grace before main; note@600 "bait" |
+| `ornaments_v0c4_grace_slur_to_main_coloc.enc` | v0xC4 | Grace before main (coloc) |
+| `ornaments_v0c4_grace_after_main_in_binary.enc` | v0xC4 | Regular FIRST, grace SECOND at tick=0 |
+| `ornaments_v0c4_grace_after_main_grace_to_later.enc` | v0xC4 | Regular FIRST at tick=240; note@480 |
+| `ornaments_v0c4_grace_after_main_preceding_notes.enc` | v0xC4 | Preceding quarter + regular@240 + grace@240 |
+| `ornaments_v0c4_grace_after_main_slur_to_main.enc` | v0xC4 | Regular xoff=20, grace xoff=10; slur at grace |
+
+---
+
 ## Snap-back-by-xoffset for attached ornaments
 
 Encore tags an attached ornament (dynamic or hairpin start) at the
