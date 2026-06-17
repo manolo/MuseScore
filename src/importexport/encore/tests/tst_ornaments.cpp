@@ -1696,3 +1696,182 @@ TEST_F(Tst_Ornaments, accent_orn_does_not_spill_to_sibling_staff)
     delete score;
 }
 
+// ===========================================================================
+// FEATURE: Newly decoded single-SymId articulation ORN tipos:
+//   0xBF MARCATO (^)               -> articMarcato* family
+//   0xC6 MARCATO_BELOW (v)         -> articMarcato* family
+//   0xC0 MARCATO_STACCATO_BELOW    -> articMarcatoStaccato* family
+//   0xC8 TENUTO (-)                -> articTenuto* family
+//   0x30 THICK_STOPPED             -> brassMuteClosed
+//   0xB8 DOUBLE_MORDENT            -> ornamentMordent
+// MuseScore auto-adjusts Above/Below based on note stem direction, so we test
+// by family (canonicalized via subtype()) rather than exact symId.
+// ===========================================================================
+TEST_F(Tst_Ornaments, new_artic_types_from_orns)
+{
+    MasterScore* score = readEncoreScore("ornaments_new_artic_types.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    enum class K { Marcato, MarcatoStaccato, Tenuto, BrassMute, Mordent, Other };
+    auto kindOf = [](Articulation* a) -> K {
+        SymId s = SymId(a->subtype());
+        if (s == SymId::articMarcatoAbove || s == SymId::articMarcatoBelow) { return K::Marcato; }
+        if (s == SymId::articMarcatoStaccatoAbove || s == SymId::articMarcatoStaccatoBelow) { return K::MarcatoStaccato; }
+        if (s == SymId::articTenutoAbove || s == SymId::articTenutoBelow) { return K::Tenuto; }
+        if (s == SymId::brassMuteClosed) { return K::BrassMute; }
+        if (s == SymId::ornamentMordent) { return K::Mordent; }
+        return K::Other;
+    };
+
+    std::vector<K> found;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Articulation* a : toChord(el)->articulations()) {
+                found.push_back(kindOf(a));
+            }
+        }
+    }
+    // 6 chords, one ORN each: two marcato (0xBF and 0xC6), one marcatoStaccato (0xC0),
+    // one tenuto (0xC8), one brass mute (0x30), one mordent (0xB8).
+    const std::vector<K> expected = {
+        K::Marcato, K::Marcato, K::MarcatoStaccato, K::Tenuto, K::BrassMute, K::Mordent
+    };
+    EXPECT_EQ(found, expected);
+    EXPECT_EQ(found.size(), 6u) << "Each of the 6 chords must have exactly one articulation";
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Staccatissimo standalone ORN tipos (0x28..0x2B) produce the
+// correct per-chord articulation families:
+//   0x28 -> { Staccatissimo }
+//   0x29 -> { Tenuto, Staccatissimo }
+//   0x2A -> { Tenuto, Staccatissimo }  (same as 0x29)
+//   0x2B -> { Marcato, Staccatissimo }
+// ===========================================================================
+TEST_F(Tst_Ornaments, staccatissimo_orns_combos)
+{
+    MasterScore* score = readEncoreScore("ornaments_staccatissimo_orns.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    enum class K { Marcato, Tenuto, Staccatissimo, Other };
+    auto kindOf = [](Articulation* a) -> K {
+        SymId s = SymId(a->subtype());
+        if (s == SymId::articMarcatoAbove || s == SymId::articMarcatoBelow) { return K::Marcato; }
+        if (s == SymId::articTenutoAbove   || s == SymId::articTenutoBelow)  { return K::Tenuto; }
+        if (s == SymId::articStaccatissimoAbove || s == SymId::articStaccatissimoBelow) { return K::Staccatissimo; }
+        return K::Other;
+    };
+
+    using SK = std::set<K>;
+    std::vector<SK> found;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            SK chordKinds;
+            for (Articulation* a : toChord(el)->articulations()) {
+                chordKinds.insert(kindOf(a));
+            }
+            if (!chordKinds.empty()) {
+                found.push_back(chordKinds);
+            }
+        }
+    }
+    const std::vector<SK> expected = {
+        { K::Staccatissimo },
+        { K::Tenuto, K::Staccatissimo },
+        { K::Tenuto, K::Staccatissimo },
+        { K::Marcato, K::Staccatissimo },
+    };
+    EXPECT_EQ(found, expected);
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: Newly decoded tremolo ORN tipos produce the correct TremoloType:
+//   0xE6 TREMOLO_8  -> R8  (1 slash)
+//   0xEE TREMOLO_16 -> R16 (2 slashes)
+//   0xE9 TREMOLO_64 -> R64 (4 slashes)
+// Fixture: 3 quarter notes in 4/4, each with a different ORN tremolo.
+// ===========================================================================
+TEST_F(Tst_Ornaments, tremolo_orn_r8_r16_r64)
+{
+    MasterScore* score = readEncoreScore("ornaments_tremolo_r8_r16_r64.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<TremoloType> found;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            TremoloSingleChord* t = toChord(el)->tremoloSingleChord();
+            if (t) {
+                found.push_back(t->tremoloType());
+            }
+        }
+    }
+    const std::vector<TremoloType> expected = {
+        TremoloType::R8,
+        TremoloType::R16,
+        TremoloType::R64,
+    };
+    EXPECT_EQ(found, expected);
+    delete score;
+}
+
+// ===========================================================================
+// FEATURE: ORN tipo 0x1C (GRAPHIC_LINE, user-drawn line) is silently skipped.
+// No articulation is added to the chord; score loads and passes sanity check.
+// ===========================================================================
+TEST_F(Tst_Ornaments, graphic_line_orn_silently_skipped)
+{
+    MasterScore* score = readEncoreScore("ornaments_graphic_line_skipped.enc");
+    ASSERT_NE(score, nullptr) << "File must load without crash";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int articCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            articCount += static_cast<int>(toChord(el)->articulations().size());
+        }
+    }
+    EXPECT_EQ(articCount, 0) << "GRAPHIC_LINE ORN must not add any articulation to the chord";
+    delete score;
+}
+

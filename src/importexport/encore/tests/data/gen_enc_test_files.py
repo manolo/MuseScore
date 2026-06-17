@@ -7187,6 +7187,95 @@ def gen_v0c4_timesig_change_6_8_to_3_4():
     return assemble(0xC4, measures, fill_ts=(6, 8))
 
 
+# ===========================================================================
+# ornaments_new_artic_types.enc
+# Six newly-decoded standalone ORN tipos, one per beat across two measures:
+#   M1 beats 1-4: MARCATO(0xBF), MARCATO_BELOW(0xC6), MARCATO_STACCATO_BELOW(0xC0), TENUTO(0xC8)
+#   M2 beats 1-2: THICK_STOPPED(0x30), DOUBLE_MORDENT(0xB8)
+# ===========================================================================
+def gen_v0c4_new_artic_types():
+    e1  = orn16_v0c4(  0, 0, 0, tipo=0xBF)   # MARCATO ^
+    e1 += note_v0c4(   0, 0, 0, fv=3, pitch=60)
+    e1 += orn16_v0c4(240, 0, 0, tipo=0xC6)   # MARCATO_BELOW v
+    e1 += note_v0c4( 240, 0, 0, fv=3, pitch=62)
+    e1 += orn16_v0c4(480, 0, 0, tipo=0xC0)   # MARCATO_STACCATO_BELOW (v with dot)
+    e1 += note_v0c4( 480, 0, 0, fv=3, pitch=64)
+    e1 += orn16_v0c4(720, 0, 0, tipo=0xC8)   # TENUTO -
+    e1 += note_v0c4( 720, 0, 0, fv=3, pitch=65)
+    e1 += end_marker()
+    e2  = orn16_v0c4(  0, 0, 0, tipo=0x30)   # THICK_STOPPED + bold
+    e2 += note_v0c4(   0, 0, 0, fv=3, pitch=60)
+    e2 += orn16_v0c4(240, 0, 0, tipo=0xB8)   # DOUBLE_MORDENT (3-wave mordent)
+    e2 += note_v0c4( 240, 0, 0, fv=3, pitch=62)
+    e2 += note_v0c4( 480, 0, 0, fv=2, pitch=60)  # half to fill measure
+    e2 += end_marker()
+    custom = [(meas_hdr(4, 4), e1), (meas_hdr(4, 4), e2)]
+    return assemble(0xC4, custom, fill_ts=(4, 4))
+
+
+# ===========================================================================
+# ornaments_staccatissimo_orns.enc
+# Four standalone staccatissimo ORN tipos, one per beat in a 4/4 measure.
+#   Beat 1: 0x28 STACCATISSIMO  -> articStaccatissimoAbove (1 symid)
+#   Beat 2: 0x29 TENUTO_STACCATISSIMO -> articTenutoAbove + articStaccatissimoAbove (2 symids)
+#   Beat 3: 0x2A TENUTO_STACCATISSIMO_2 -> same 2 symids
+#   Beat 4: 0x2B MARCATO_STACCATISSIMO -> articMarcatoBelow + articStaccatissimoAbove (2 symids)
+# ===========================================================================
+def gen_v0c4_staccatissimo_orns():
+    e  = orn16_v0c4(  0, 0, 0, tipo=0x28)
+    e += note_v0c4(   0, 0, 0, fv=3, pitch=60)
+    e += orn16_v0c4(240, 0, 0, tipo=0x29)
+    e += note_v0c4( 240, 0, 0, fv=3, pitch=62)
+    e += orn16_v0c4(480, 0, 0, tipo=0x2A)
+    e += note_v0c4( 480, 0, 0, fv=3, pitch=64)
+    e += orn16_v0c4(720, 0, 0, tipo=0x2B)
+    e += note_v0c4( 720, 0, 0, fv=3, pitch=65)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+# ===========================================================================
+# ornaments_tremolo_r8_r16_r64.enc
+# Three newly-decoded tremolo ORN tipos:
+#   Beat 1: 0xE6 TREMOLO_8  -> TremoloType::R8  (1 slash)
+#   Beat 2: 0xEE TREMOLO_16 -> TremoloType::R16 (2 slashes)
+#   Beat 3: 0xE9 TREMOLO_64 -> TremoloType::R64 (4 slashes)
+#   Beat 4: rest
+# ===========================================================================
+def gen_v0c4_tremolo_r8_r16_r64():
+    e  = orn16_v0c4(  0, 0, 0, tipo=0xE6)
+    e += note_v0c4(   0, 0, 0, fv=3, pitch=60)
+    e += orn16_v0c4(240, 0, 0, tipo=0xEE)
+    e += note_v0c4( 240, 0, 0, fv=3, pitch=62)
+    e += orn16_v0c4(480, 0, 0, tipo=0xE9)
+    e += note_v0c4( 480, 0, 0, fv=3, pitch=64)
+    e += rest_v0c4( 720, 0, 0, fv=3)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+# ===========================================================================
+# ornaments_graphic_line_skipped.enc
+# ORN tipo 0x1C (GRAPHIC_LINE, Encore Graphics palette) is a 28-byte spanner-
+# shaped element with no musical meaning. The importer must skip it silently
+# without crashing and without adding any articulation to the chord.
+# ===========================================================================
+def gen_v0c4_graphic_line_skipped():
+    # 28-byte 0x1C element: tick(2)+typeVoice(1)+size(1)+staff(1)+tipo(1)+22 zeros
+    d = bytearray(28)
+    struct.pack_into('<H', d, 0, 0)        # tick=0
+    d[2] = (5 << 4) | 0                   # type=5 (ORN), voice=0
+    d[3] = 28                              # size=28
+    d[4] = 0                               # staffIdx=0
+    d[5] = 0x1C                            # GRAPHIC_LINE tipo
+    graphic_line = bytes(d)
+    e  = graphic_line
+    e += note_v0c4(0, 0, 0, fv=2, pitch=60)   # half note on beat 1
+    e += note_v0c4(480, 0, 0, fv=2, pitch=62) # half note on beat 3
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
 def write(name,data):
     path=os.path.join(OUT_DIR,name)
     with open(path,'wb') as f: f.write(data)
@@ -7417,5 +7506,9 @@ if __name__=='__main__':
     write("ornaments_accent_nonzero_voice.enc",             gen_v0c4_accent_nonzero_voice())
     write("ornaments_accent_offset_tick_nonzero_voice.enc", gen_v0c4_accent_offset_tick_nonzero_voice())
     write("notes_dual_rests_same_tick_routing.enc",         gen_v0c4_dual_rests_same_tick_routing())
+    write("ornaments_new_artic_types.enc",                 gen_v0c4_new_artic_types())
+    write("ornaments_staccatissimo_orns.enc",              gen_v0c4_staccatissimo_orns())
+    write("ornaments_tremolo_r8_r16_r64.enc",              gen_v0c4_tremolo_r8_r16_r64())
+    write("ornaments_graphic_line_skipped.enc",            gen_v0c4_graphic_line_skipped())
     print("Done.")
 

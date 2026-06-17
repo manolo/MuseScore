@@ -494,13 +494,23 @@ Type 5. Variable size. Offsets from element start:
 | 0xA8    | BREATH_COMMA  | comma breath mark placed after preceding note (size-16 ORN)                     |
 | 0xBE    | ACCENT        | standalone accent above (>) in v0xC4 as size-16 ORN; maps to articAccentAbove. In v0xC2, accent is instead ORN tipo=0xC4. **Two implementation rules:** (1) **Voice scan** — the ORN's `voice` byte is always 0 regardless of which voice the annotated note is in; the resolver must scan all four voices of the ORN's own staff before falling back to the sibling staff, otherwise an accent on a staff whose notes are all in voice 1+ is silently dropped or mis-routed. (2) **Tick derivation** — the target tick must be `measTick + Fraction(e->tick, 960)` (from the ORN's raw Encore tick), NOT `elemTick` (cumTick-based). When voice=0 has no notes on that staff, cumTick[(staff, 0)] = 0 throughout the measure, so elemTick = measTick regardless of the ORN's beat position; using encTick directly always gives the correct beat. Same rules apply to DOWNBOW (0xC5) and UPBOW (0xC4 in v0xC4). |
 
-**Undecoded subtypes.** Silently ignored; observed in corpus:
+**Previously undecoded subtypes, now decoded** (confirmed by opening files in Encore 5):
 
-| Tipo  | Count | Files | Hypothesis |
-|-------|------:|-------|------------|
-| 0xC0  |   3   | Boda-LA, Beethoven | unknown |
-| 0xB0  |  11   | TieYellow | decoded as TRILL_TR (standalone ornamentTrill glyph) |
-| 0xC6, 0xC8, 0xEE | rare | various | unknown |
+| Tipo  | Name | MuseScore mapping |
+|-------|------|-------------------|
+| 0x1C  | GRAPHIC_LINE | User-drawn graphic line (Encore Graphics palette); no musical meaning; skip silently |
+| 0x28  | STACCATISSIMO | `articStaccatissimoAbove` |
+| 0x29, 0x2A | TENUTO_STACCATISSIMO | `articTenutoAbove` + `articStaccatissimoAbove` |
+| 0x2B  | MARCATO_STACCATISSIMO | `articMarcatoBelow` + `articStaccatissimoAbove` |
+| 0x30  | THICK_STOPPED | `brassMuteClosed` (thick stopped "+" mark) |
+| 0xB8  | DOUBLE_MORDENT | `ornamentMordent` (3-wave long mordent, placed below) |
+| 0xBF  | MARCATO | `articMarcatoAbove` (^, vertex up; standard marcato) |
+| 0xC0  | MARCATO_STACCATO_BELOW | `articMarcatoStaccatoBelow` (heavy accent ∨ + staccato dot) |
+| 0xC6  | MARCATO_BELOW | `articMarcatoBelow` (heavy accent ∨, inverted marcato, vertex down) |
+| 0xC8  | TENUTO | `articTenutoAbove` (tenuto dash —) |
+| 0xE6, 0xE7 | TREMOLO_8 | `TremoloType::R8` (1-slash tremolo) |
+| 0xEE  | TREMOLO_16 | `TremoloType::R16` (2-slash tremolo; confirmed in plectrum corpus) |
+| 0xE9, 0xEA | TREMOLO_64 | `TremoloType::R64` (4-slash tremolo) |
 
 ### Hairpin direction (speguleco bit 0)
 

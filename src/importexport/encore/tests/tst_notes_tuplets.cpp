@@ -1018,7 +1018,7 @@ TEST_F(Tst_NotesTuplets, no_spurious_rests_inside_active_tuplet_gapsnap_suppress
         << "No visible rests must appear inside the tuplet bracket (gap-snap suppressed)";
 
     delete score;
-} TEST_F(Tst_Notes, chord_symbol_snaps_to_beat1_despite_midi_offset)
+}
 
 TEST_F(Tst_NotesTuplets, segment_override_15notes_becomes_15_8)
 {

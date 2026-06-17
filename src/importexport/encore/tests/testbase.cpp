@@ -54,7 +54,7 @@ MasterScore* MTest::readEncoreScore(const QString& name)
     score->setFileInfoProvider(std::make_shared<LocalFileInfoProvider>(path));
 
     ScoreLoad sl;
-    Err rv = iex::encore::importEncore(score, path);
+    Err rv = iex::enc::importEncore(score, path);
 
     if (rv != Err::NoError) {
         LOGE() << "cannot load file at " << path;

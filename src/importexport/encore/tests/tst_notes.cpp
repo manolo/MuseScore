@@ -1457,6 +1457,7 @@ TEST_F(Tst_Notes, voice_overflow_notes_dropped_not_routed_to_voice2)
     delete score;
 }
 
+TEST_F(Tst_Notes, chord_symbol_snaps_to_beat1_despite_midi_offset)
 {
     // Fixture: quarter note at tick=0, chord symbol CHD at tick=6 (6/960 offset),
     // quarter note at tick=240. CHD must attach to the beat-1 segment.

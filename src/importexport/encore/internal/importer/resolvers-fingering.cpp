@@ -82,6 +82,11 @@ static void correctBowingTickFromXoffset(
     const std::vector<PendingBowing>& allBowings,
     const BuildCtx& ctx)
 {
+    // When xoffset == 0 the ornament has no visual displacement data — it is
+    // already tagged at its correct note tick, so no correction is needed.
+    if (pb.ornXoffset == 0) {
+        return;
+    }
     // Phase 1: anchor from same-measure ORN with matching xoffset.
     static constexpr int BOW_XOFF_CLUSTER = 6;
     bool fixed = false;
