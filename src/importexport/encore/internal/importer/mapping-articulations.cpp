@@ -59,7 +59,7 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x23: return { SymId::articAccentAbove, SymId::articTenutoAbove };
     case 0x24: return { SymId::articTenutoAbove, SymId::articStaccatoAbove };
     case 0x25: return { SymId::articMarcatoAbove, SymId::articTenutoAbove };
-    case 0x26: return { SymId::articMarcatoAbove, SymId::articStaccatissimoAbove };
+    case 0x26: return { SymId::articMarcatoAbove };  // heavy accent = marcato only (Encore shows ONE symbol)
     case 0x27: return { SymId::articMarcatoAbove, SymId::articTenutoAbove };
     case 0x28:
     case 0x29: return { SymId::articStaccatissimoAbove };

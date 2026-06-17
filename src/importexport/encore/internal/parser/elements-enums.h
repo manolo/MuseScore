@@ -137,15 +137,19 @@ enum class EncOrnamentType : quint8 {
     MARCATO_BELOW = 0xC6,
     // 0xC8: tenuto (—) as standalone ORN → articTenutoAbove.
     TENUTO = 0xC8,
-    // Tremolo ladder: 0xE6/0xE7=R8 (1 slash), 0xEE=R16 (2), 0xAF/0xEF=R32 (3), 0xE9/0xEA=R64 (4).
-    TREMOLO_8   = 0xE6,
-    TREMOLO_8B  = 0xE7,
+    // Standalone string-number ORNs (circled number above note).
+    // Per-note artic bytes cover strings 1 (0x39), 7 (0x3F), 8 (0x40).
+    // Standalone ORNs (size=16) cover strings 2-6:
+    STRING_NUMBER_2 = 0xE6,
+    STRING_NUMBER_3 = 0xE7,
+    STRING_NUMBER_4 = 0xE8,
+    STRING_NUMBER_5 = 0xE9,
+    STRING_NUMBER_6 = 0xEA,
+    // Tremolo ladder: 0xEE=R16 (2 slashes), 0xAF/0xEF=R32 (3 slashes).
     TREMOLO_16  = 0xEE,
     // 0xAF standard, 0xEF alternate (half notes at tick >= durTicks).
     TREMOLO_32 = 0xAF,
     TREMOLO_32B = 0xEF,
-    TREMOLO_64  = 0xE9,
-    TREMOLO_64B = 0xEA,
     SLURSTOP   = 0x41,
     WEDGESTOP  = 0x4D,
     DYN_PPP    = 0x80,
