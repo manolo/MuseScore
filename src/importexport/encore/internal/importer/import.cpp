@@ -102,72 +102,78 @@ void applyConcertPitch(Note* n, int semitone)
     n->setTpcFromPitch();
 }
 
+// Derive display size (1-4) for a given instrument staff index.
+// Encore 5.x: header byte 0x52 is the authoritative size (1-4 direct index).
+// Encore 4.x: 0x52 stores an unrelated field; size comes from LINE staff entry byte[13]
+//   (0-indexed: 0=Size1/60%, 1=Size2/70%, 2=Size3/75%, 3=Size4/100%).
+static int staffDisplaySize(const EncRoot& enc, int instrIdx)
+{
+    const bool isEncore4x = (enc.header.chuVersio < 1000);
+    if (isEncore4x && !enc.lines.empty()) {
+        for (const EncLineStaffData& lsd : enc.lines[0].staffData) {
+            if (static_cast<int>(lsd.instrumentIndex()) == instrIdx) {
+                return std::clamp(static_cast<int>(lsd.staffSizeHint) + 1, 1, 4);
+            }
+        }
+    }
+    return std::clamp(static_cast<int>(enc.header.scoreSize), 1, 4);
+}
+
 static void logEncRootInfo(const EncRoot& enc)
 {
     const EncHeader& h = enc.header;
     const char* fmtName = enc.fmt ? enc.fmt->formatName() : "unknown";
 
+    const char* encVer = (h.chuVersio >= 1000) ? "Encore 5.x"
+                        : (h.chuVersio >= 700)  ? "Encore 4.x"
+                        : (h.chuVersio >= 580)  ? "Encore 4.0"
+                        :                         "Encore 3.x or older";
+
     LOGD() << "---- Encore file info ----";
-    LOGD() << "  Magic:          " << h.magic.toStdString();
-    LOGD() << "  Format:         0x" << QString::number(h.chuMagio, 16).toUpper().toStdString()
-           << " (" << fmtName << ")  version=" << h.chuVersio;
+    LOGD() << "  Magic:" << h.magic.toStdString()
+           << "  Format:0x" << QString::number(h.chuMagio, 16).toUpper().toStdString()
+           << "(" << fmtName << ")  version=" << h.chuVersio << "(" << encVer << ")";
     LOGD() << "  Lines:" << h.lineCount
            << "  Pages:" << h.pageCount
            << "  Instruments:" << h.instrumentCount
            << "  Staves/sys:" << h.staffPerSystem
-           << "  Measures:" << h.measureCount
-           << "  Size:" << static_cast<int>(h.scoreSize);
+           << "  Measures:" << h.measureCount;
 
     LOGD() << "---- Titles ----";
     if (!enc.titleBlock.title.isEmpty()) {
         LOGD() << "  Title:    " << enc.titleBlock.title.toStdString();
     }
-    for (const QString& s : enc.titleBlock.subtitle) {
-        if (!s.isEmpty()) {
-            LOGD() << "  Subtitle: " << s.toStdString();
-        }
+    if (!enc.titleBlock.subtitle.empty() && !enc.titleBlock.subtitle[0].isEmpty()) {
+        LOGD() << "  Subtitle: " << enc.titleBlock.subtitle[0].toStdString();
     }
-    for (const QString& s : enc.titleBlock.author) {
-        if (!s.isEmpty()) {
-            LOGD() << "  Author:   " << s.toStdString();
-        }
+    if (!enc.titleBlock.author.empty() && !enc.titleBlock.author[0].isEmpty()) {
+        LOGD() << "  Author:   " << enc.titleBlock.author[0].toStdString();
     }
-    for (const QString& s : enc.titleBlock.instruction) {
-        if (!s.isEmpty()) {
-            LOGD() << "  Instr:    " << s.toStdString();
-        }
-    }
-    for (const QString& s : enc.titleBlock.copyright) {
-        if (!s.isEmpty()) {
-            LOGD() << "  Copyrt:   " << s.toStdString();
-        }
+    if (!enc.titleBlock.copyright.empty() && !enc.titleBlock.copyright[0].isEmpty()) {
+        LOGD() << "  Copyrt:   " << enc.titleBlock.copyright[0].toStdString();
     }
 
-    LOGD() << "---- Texts ----";
-    LOGD() << "  Entries: " << enc.textBlock.entries.size();
-    for (size_t i = 0; i < enc.textBlock.entries.size(); ++i) {
-        const QString& e = enc.textBlock.entries[i];
-        const QString preview = e.length() > 60 ? e.left(57) + "..." : e;
-        LOGD() << "  [" << i << "] \"" << preview.toStdString() << "\"";
-    }
+    static const char* kSizeLabel[4] = { "60%", "70%", "75%", "100%" };
 
     LOGD() << "---- Instruments ----";
     for (size_t i = 0; i < enc.instruments.size(); ++i) {
         const EncInstrument& ins = enc.instruments[i];
+        const int sz = staffDisplaySize(enc, static_cast<int>(i));
         LOGD() << "  [" << i << "] \"" << ins.name.toStdString() << "\""
                << "  midi=" << ins.midiProgram
                << "  staves=" << ins.nstaves
                << "  key=" << ins.keyTransposeSemitones
+               << "  size=" << sz << "(" << kSizeLabel[sz - 1] << ")"
                << (ins.showStaff ? "" : "  hidden");
     }
 
-    LOGD() << "---- Lines ----";
+    LOGD() << "---- Systems ----";
     for (size_t i = 0; i < enc.lines.size(); ++i) {
         const EncLine& ln = enc.lines[i];
         LOGD() << "  [" << i << "] start=" << ln.start << "  count=" << (int)ln.measureCount;
     }
 
-    LOGD() << "---- Measures ----";
+    LOGD() << "---- Tempos ----";
     LOGD() << "  Total: " << enc.measures.size();
     quint8 lastNum = 0, lastDen = 0;
     quint16 lastBpm = 0;
@@ -203,13 +209,14 @@ static void logEncRootInfo(const EncRoot& enc)
 static void applyStaffScale(MasterScore* score, const EncRoot& enc)
 {
     static const double kScaleBySize[4] = { 0.60, 0.70, 0.75, 1.00 };
-    const int sz = std::clamp(static_cast<int>(enc.header.scoreSize), 1, 4);
-    const double scale = kScaleBySize[sz - 1];
-
-    LOGD("enc importer: scoreSize=%d → staff scale=%.0f%%", sz, scale * 100.0);
-
-    for (Staff* staff : score->staves()) {
-        staff->setProperty(Pid::MAG, PropertyValue(scale));
+    staff_idx_t msStaffIdx = 0;
+    for (size_t instrIdx = 0; instrIdx < enc.instruments.size(); ++instrIdx) {
+        const int sz = staffDisplaySize(enc, static_cast<int>(instrIdx));
+        const double scale = kScaleBySize[sz - 1];
+        const int ns = enc.instruments[instrIdx].nstaves > 0 ? enc.instruments[instrIdx].nstaves : 1;
+        for (int s = 0; s < ns && msStaffIdx < score->staves().size(); ++s, ++msStaffIdx) {
+            score->staves()[msStaffIdx]->setProperty(Pid::MAG, PropertyValue(scale));
+        }
     }
 }
 

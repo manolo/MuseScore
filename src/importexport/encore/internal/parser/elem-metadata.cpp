@@ -79,8 +79,10 @@ bool EncInstrument::read(QDataStream& ds, quint32 vs, bool probeEncoding)
 
 bool EncLineStaffData::read(QDataStream& ds)
 {
-    // Bytes 0-13: visual layout data (Y-coordinates for staff lines, etc.)
-    ds.skipRawData(14);
+    // Bytes 0-12: visual layout data (Y-coordinates for staff lines, etc.)
+    // Byte 13: staff display size, 0-indexed (0=60%, 1=70%, 2=75%, 3=100%).
+    ds.skipRawData(13);
+    ds >> staffSizeHint;
     qint8 ct;
     ds >> ct;                                   // byte 14: clef type
     clef = static_cast<EncClefType>(ct);
