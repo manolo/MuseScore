@@ -7243,11 +7243,13 @@ def gen_v0c4_staccatissimo_orns():
 
 
 # ===========================================================================
-# ornaments_tremolo_r8_r16_r64.enc
-# Three newly-decoded tremolo ORN tipos:
-#   Beat 1: 0xE6 TREMOLO_8  -> TremoloType::R8  (1 slash)
-#   Beat 2: 0xEE TREMOLO_16 -> TremoloType::R16 (2 slashes)
-#   Beat 3: 0xE9 TREMOLO_64 -> TremoloType::R64 (4 slashes)
+# ornaments_tremolo_r8_r16_r64.enc  (name kept for backwards compat)
+# Confirmed standalone tremolo ORN tipo: 0xEE = TREMOLO_16 (R16, 2 slashes).
+# 0xE6 and 0xE9 are now known to be string-number ORNs (2 and 5), not tremolos.
+# The fixture now places:
+#   Beat 1: 0xE6 STRING_NUMBER_2  -> Fingering "2" (string number, not tremolo)
+#   Beat 2: 0xEE TREMOLO_16       -> TremoloType::R16 (2 slashes)
+#   Beat 3: 0xE9 STRING_NUMBER_5  -> Fingering "5" (string number, not tremolo)
 #   Beat 4: rest
 # ===========================================================================
 def gen_v0c4_tremolo_r8_r16_r64():

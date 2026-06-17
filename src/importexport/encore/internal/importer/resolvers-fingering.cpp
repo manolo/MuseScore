@@ -288,13 +288,22 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
         if (notes.empty()) {
             continue;
         }
-        int& idx = fingeringCount[c];
-        Note* n = notes[std::min(idx, static_cast<int>(notes.size()) - 1)];
-        ++idx;
-        Fingering* f = Factory::createFingering(n);
-        f->setTrack(useTrack);
-        f->setXmlText(String::number(pf.fingerNum));
-        n->add(f);
+        if (pf.isStringNum) {
+            // String number ORN (0xE6..0xEA): circled number above the top note.
+            Note* n = notes.back();
+            Fingering* f = Factory::createFingering(n, TextStyleType::STRING_NUMBER);
+            f->setTrack(useTrack);
+            f->setXmlText(String::number(pf.fingerNum));
+            n->add(f);
+        } else {
+            int& idx = fingeringCount[c];
+            Note* n = notes[std::min(idx, static_cast<int>(notes.size()) - 1)];
+            ++idx;
+            Fingering* f = Factory::createFingering(n);
+            f->setTrack(useTrack);
+            f->setXmlText(String::number(pf.fingerNum));
+            n->add(f);
+        }
     }
 
     // SystemLocks enforce Encore's line layout as hard constraints so the engine compresses

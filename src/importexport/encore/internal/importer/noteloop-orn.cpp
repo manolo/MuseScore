@@ -577,17 +577,6 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
                                        static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
         break;
     }
-    case EncOrnamentType::TREMOLO_8:
-    case EncOrnamentType::TREMOLO_8B: {
-        PendingOrnTremolo pt;
-        pt.tick = elemTick;
-        pt.measTick = measTick;
-        pt.staffIdx = staffIdx;
-        pt.msVoice = msVoice;
-        pt.tremType = TremoloType::R8;
-        ctx.pendingOrnTremolos.push_back(pt);
-        break;
-    }
     case EncOrnamentType::TREMOLO_16: {
         PendingOrnTremolo pt;
         pt.tick = elemTick;
@@ -598,15 +587,14 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         ctx.pendingOrnTremolos.push_back(pt);
         break;
     }
-    case EncOrnamentType::TREMOLO_64:
-    case EncOrnamentType::TREMOLO_64B: {
-        PendingOrnTremolo pt;
-        pt.tick = elemTick;
-        pt.measTick = measTick;
-        pt.staffIdx = staffIdx;
-        pt.msVoice = msVoice;
-        pt.tremType = TremoloType::R64;
-        ctx.pendingOrnTremolos.push_back(pt);
+    case EncOrnamentType::STRING_NUMBER_2:
+    case EncOrnamentType::STRING_NUMBER_3:
+    case EncOrnamentType::STRING_NUMBER_4:
+    case EncOrnamentType::STRING_NUMBER_5:
+    case EncOrnamentType::STRING_NUMBER_6: {
+        const int sn = static_cast<int>(eo->ornType())
+                       - static_cast<int>(EncOrnamentType::STRING_NUMBER_2) + 2;
+        ctx.pendingOrnFingerings.push_back({ elemTick, track, sn, measIdx, false, false, true });
         break;
     }
     case EncOrnamentType::GRAPHIC_LINE:
