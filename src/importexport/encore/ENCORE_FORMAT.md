@@ -900,7 +900,7 @@ Where MuseScore has a single combined SMuFL glyph, the importer uses it. Where n
 | 0x1D         | staccato (`.`) | `articStaccatoAbove` |
 | 0x1E, 0x1F   | harmonic | `stringsHarmonic` |
 | 0x20, 0x21   | fermata; **on tuplet note means "tuplet bracket above/below" (not a fermata)** | `fermataAbove` |
-| 0x22, 0x23   | tenuto + accent | `articTenutoAccentAbove` (single glyph) |
+| 0x22, 0x23   | tenuto + staccato (portato) | `articTenutoStaccatoAbove` (single glyph) |
 | 0x24         | tenuto + staccato (portato) | `articTenutoStaccatoAbove` (single glyph) |
 | 0x25, 0x27   | marcato + tenuto | `articMarcatoTenutoAbove` (single glyph) |
 | 0x26         | tenuto + heavy accent (∨) | `articMarcatoTenutoBelow` (single glyph) |
