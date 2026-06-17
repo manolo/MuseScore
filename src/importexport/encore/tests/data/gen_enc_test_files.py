@@ -2011,6 +2011,15 @@ def note_v0c4_artic(tick, voice, staffIdx, fv, pitch, articUp=0, articDown=0):
     return struct.pack('<H', tick) + bytes([(9 << 4) | (voice & 0xF)]) + bytes(d)
 
 
+def note_v0c4_opts(tick, voice, staffIdx, fv, pitch, options=0, position=0):
+    """v0xC4 note with options byte (elemStart+20 = d[17]) and position (elemStart+12 = d[9]).
+    Used to trigger the hasScaleStringAnchors options-bit-0 string-number path."""
+    d = bytearray(25)
+    d[0] = 28; d[1] = staffIdx & 0x3F; d[2] = fv; d[9] = position & 0xFF
+    d[12] = pitch; d[17] = options & 0xFF
+    return struct.pack('<H', tick) + bytes([(9 << 4) | (voice & 0xF)]) + bytes(d)
+
+
 def lyric_v0c4(tick, voice, staffIdx, text, kie=0):
     """Lyric (type 6) element, UTF-16 LE (v0xC4 default). The element size
     grows with the text length:
@@ -7284,6 +7293,21 @@ def gen_v0c4_tremolo_r8_r16_r64():
 # shaped element with no musical meaning. The importer must skip it silently
 # without crashing and without adding any articulation to the chord.
 # ===========================================================================
+def gen_v0c4_string_num_orn_no_dup():
+    # Regression: standalone string-number ORN (0xE6 = string 2) must not duplicate
+    # the string number already placed by the per-note hasScaleStringAnchors path.
+    #
+    # n1 tick=0:   artUp=0x39 (string 1 direct) → sets mc.hasScaleStringAnchors=true
+    # n2 tick=240: options bit 0 set, position=1 (D4) → options-bit-0 path creates "2"
+    #              AND ORN 0xE6 at same tick tries to add "2" again → dedup must drop it.
+    e  = note_v0c4_artic(  0, 0, 0, fv=3, pitch=60, articUp=0x39)  # string 1 anchor
+    e += orn16_v0c4(240, 0, 0, tipo=0xE6)                           # string 2 ORN
+    e += note_v0c4_opts(240, 0, 0, fv=3, pitch=62, options=0x01, position=1)
+    e += rest_v0c4(480, 0, 0, fv=2)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
 def gen_v0c4_graphic_line_skipped():
     # 28-byte 0x1C element: tick(2)+typeVoice(1)+size(1)+staff(1)+tipo(1)+22 zeros
     d = bytearray(28)
@@ -7568,5 +7592,6 @@ if __name__=='__main__':
     write("ornaments_staccatissimo_orns.enc",              gen_v0c4_staccatissimo_orns())
     write("ornaments_tremolo_r8_r16_r64.enc",              gen_v0c4_tremolo_r8_r16_r64())
     write("ornaments_graphic_line_skipped.enc",            gen_v0c4_graphic_line_skipped())
+    write("notes_string_num_orn_no_dup.enc",              gen_v0c4_string_num_orn_no_dup())
     print("Done.")
 
