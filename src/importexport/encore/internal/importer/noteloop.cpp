@@ -681,6 +681,31 @@ static void handleKeyChange(BuildCtx& ctx, const NoteLoopMeasCtx& mc,
     seg->add(ks);
 }
 
+// Runs at the end of each MEAS block after all elements are placed.
+// Closes open tuplets, attaches lyrics, adjusts pickup, fills gaps, validates,
+// and advances the measure-skip counter for multi-measure rest expansion.
+static void finalizeMeasureAfterNoteLoop(BuildCtx& ctx, NoteLoopMeasCtx& mc,
+                                          Measure* measure, const EncMeasure& encMeas,
+                                          const Fraction& measTick, int measIdx,
+                                          int& measSkip, size_t& msIdxCounter,
+                                          const EncRoot& enc)
+{
+    for (auto& [key, tt] : ctx.tuplets) {
+        mc.closeTupletWithFill(ctx, tt, key);
+    }
+    attachPendingLyrics(ctx, measure, encMeas, measTick);
+    adjustPickupMeasure(ctx, measure, measIdx);
+    fillTrailingGaps(ctx, measure, measTick);
+    for (int si = 0; si < ctx.totalStaves; ++si) {
+        measure->checkMeasure(static_cast<staff_idx_t>(si));
+    }
+    correctMeasureLength(measure, ctx.totalStaves);
+    capMeasureLength(measure, ctx.totalStaves);
+    const EncMeasure* prevMeas = (measIdx > 0) ? &enc.measures[measIdx - 1] : nullptr;
+    measSkip = measDisplayCount(encMeas, prevMeas) - 1;
+    ++msIdxCounter;
+}
+
 void buildNoteLoop(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
@@ -860,26 +885,8 @@ void buildNoteLoop(BuildCtx& ctx)
             }
         }  // end element for-loop
 
-        for (auto& [key, tt] : ctx.tuplets) {
-            mc.closeTupletWithFill(ctx, tt, key);
-        }
-
-        attachPendingLyrics(ctx, measure, encMeas, measTick);
-
-        adjustPickupMeasure(ctx, measure, measIdx);
-
-        fillTrailingGaps(ctx, measure, measTick);
-
-        for (int si = 0; si < ctx.totalStaves; ++si) {
-            measure->checkMeasure(static_cast<staff_idx_t>(si));
-        }
-
-        correctMeasureLength(measure, ctx.totalStaves);
-        capMeasureLength(measure, ctx.totalStaves);
-
-        const EncMeasure* prevMeas = (measIdx > 0) ? &enc.measures[measIdx - 1] : nullptr;
-        measSkip = measDisplayCount(encMeas, prevMeas) - 1;
-        ++msIdxCounter;
+        finalizeMeasureAfterNoteLoop(ctx, mc, measure, encMeas, measTick, measIdx,
+                                      measSkip, msIdxCounter, enc);
         ++measIdx;
     }
 
