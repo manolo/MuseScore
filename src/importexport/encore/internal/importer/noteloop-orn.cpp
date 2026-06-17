@@ -573,7 +573,7 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
     case EncOrnamentType::DOUBLE_MORDENT: {
         const bool cm = !noteTicks.count(static_cast<int>(e->tick));
         const Fraction bowTick = measTick + Fraction(static_cast<int>(e->tick), 960);
-        ctx.pendingBowings.push_back({ bowTick, track, SymId::ornamentMordent, measIdx, cm,
+        ctx.pendingBowings.push_back({ bowTick, track, SymId::ornamentPrallMordent, measIdx, cm,
                                        static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
         break;
     }
