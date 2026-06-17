@@ -91,10 +91,18 @@ enum class EncRepeatType : quint8 {
 
 enum class EncOrnamentType : quint8 {
     NONE       = 0,
+    // 0x1C: user-placed graphic line (Encore Graphics palette); no musical meaning; skip silently.
+    GRAPHIC_LINE = 0x1C,
     WEDGESTART = 0x1D,
     STAFFTEXT  = 0x1E,
     SLURSTART  = 0x21,
     ARPEGGIO   = 0x22,
+    // Standalone staccatissimo ORNs (parallel to per-note artic bytes at same values).
+    STACCATISSIMO          = 0x28,  // staccatissimo → articStaccatissimoAbove
+    TENUTO_STACCATISSIMO   = 0x29,  // tenuto + staccatissimo
+    TENUTO_STACCATISSIMO_2 = 0x2A,  // tenuto + staccatissimo (variant)
+    MARCATO_STACCATISSIMO  = 0x2B,  // heavy accent (∨) + staccatissimo
+    THICK_STOPPED          = 0x30,  // thick stopped brass (+, bold) → brassMuteClosed
     // See ENCORE_FORMAT.md §Ornament subtypes for tipo values, sizes, and quirks.
     TRILL_END    = 0x35,
     TRILL_START  = 0x36,
@@ -103,15 +111,39 @@ enum class EncOrnamentType : quint8 {
     TRILL_TR     = 0xB0,
     // 0xB6: standalone 16-byte short-trill ornament; places ornamentShortTrill glyph.
     TRILL_SHORT  = 0xB6,
+    // 0xB8: double mordent (3-wave long mordent), confirmed in plectrum corpus.
+    DOUBLE_MORDENT = 0xB8,
+    // Fingering: FINGER_1 = 0xB9 = 0xB8 + 1 (1..5).
+    FINGER_1   = 0xB9,
+    FINGER_2   = 0xBA,
+    FINGER_3   = 0xBB,
+    FINGER_4   = 0xBC,
+    FINGER_5   = 0xBD,
+    ACCENT        = 0xBE,  // standalone accent (>) in v0xC4; maps to articAccentAbove
+    MARCATO       = 0xBF,  // standalone marcato (^, vertex up) → articMarcatoAbove
     SEGNO       = 0xA2,
     TO_CODA     = 0xA5,
     CODA        = 0xA6,
     // 0xC9 staccato: Encore's MusicXML exporter drops it; we import it.
     STACCATO    = 0xC9,
     TEMPO      = 0x32,
+    UPBOW         = 0xC4,
+    DOWNBOW       = 0xC5,
+    // 0xC0: heavy accent (∨) + staccato → articMarcatoStaccatoBelow (combined glyph).
+    MARCATO_STACCATO_BELOW = 0xC0,
+    // 0xC6: heavy accent (∨, inverted marcato, vertex down) → articMarcatoBelow.
+    MARCATO_BELOW = 0xC6,
+    // 0xC8: tenuto (—) as standalone ORN → articTenutoAbove.
+    TENUTO = 0xC8,
+    // Tremolo ladder: 0xE6/0xE7=R8 (1 slash), 0xEE=R16 (2), 0xAF/0xEF=R32 (3), 0xE9/0xEA=R64 (4).
+    TREMOLO_8   = 0xE6,
+    TREMOLO_8B  = 0xE7,
+    TREMOLO_16  = 0xEE,
     // 0xAF standard, 0xEF alternate (half notes at tick >= durTicks).
     TREMOLO_32 = 0xAF,
     TREMOLO_32B = 0xEF,
+    TREMOLO_64  = 0xE9,
+    TREMOLO_64B = 0xEA,
     SLURSTOP   = 0x41,
     WEDGESTOP  = 0x4D,
     DYN_PPP    = 0x80,
@@ -127,15 +159,6 @@ enum class EncOrnamentType : quint8 {
     DYN_FP     = 0x8A,
     DYN_FZ     = 0xAA,
     DYN_SF     = 0xAB,
-    // Fingering: 0xB8 + finger number (1..5).
-    FINGER_1   = 0xB9,
-    FINGER_2   = 0xBA,
-    FINGER_3   = 0xBB,
-    FINGER_4   = 0xBC,
-    FINGER_5   = 0xBD,
-    ACCENT        = 0xBE,  // standalone accent (>) in v0xC4; maps to articAccentAbove
-    UPBOW         = 0xC4,
-    DOWNBOW       = 0xC5,
     FERMATA_ABOVE = 0xCC,  // standalone fermata above (size-16 ORN; yoffset > 0)
     FERMATA_BELOW = 0xCD,  // standalone fermata below (size-16 ORN; yoffset < 0)
     REPEAT_MEASURE = 0xA3, // "%" repeat-last-bar glyph (size-16 ORN)
