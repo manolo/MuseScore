@@ -19,18 +19,25 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#ifndef MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H
-#define MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H
 
-#include "ctx.h"
+#pragma once
+
+#include "readers.h"
 
 namespace mu::iex::enc {
 
-void buildParts(BuildCtx& ctx);
-void buildMeasures(BuildCtx& ctx);
-void buildInitialSignatures(BuildCtx& ctx);
-void emitMeasures(BuildCtx& ctx);
+// Shared base for v0xC2 and v0xC4 format readers.
+// Provides the element block offset, instrument encoding probe, and the full
+// instrument-metadata read (MIDI programs + key transpositions) used by v0xC4.
+// v0xC2 overrides readInstrumentMeta to skip MIDI/key data.
+struct EncFormatReader_V0xC4Base : EncFormatReader
+{
+    quint32 elemBlockOffset() const override { return 0x36; }
+    bool probeInstrumentEncoding() const override { return true; }
+
+    bool readInstrumentMeta(std::vector<EncInstrument>& instruments,
+                            QDataStream& ds,
+                            const EncRoot& file) const override;
+};
 
 } // namespace mu::iex::enc
-
-#endif // MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H

@@ -29,10 +29,10 @@
 
 #include "import.h"
 
-#include "../parser/elements.h"
-#include "mapping.h"
+#include "../parser/elem.h"
+#include "mappers.h"
 #include "../parser/ticks.h"
-#include "tuplets.h"
+#include "emitters-tuplets.h"
 
 #include <algorithm>
 #include <cmath>
@@ -292,7 +292,7 @@ static void buildScore(MasterScore* score, const EncRoot& enc)
     buildParts(ctx);
     buildMeasures(ctx);
     buildInitialSignatures(ctx);
-    buildNoteLoop(ctx);
+    emitMeasures(ctx);
 
     applyPageMargins(score, enc.pageSetup);
     applyStaffScale(score, enc);

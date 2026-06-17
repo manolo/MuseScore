@@ -1704,7 +1704,7 @@ TEST_F(Tst_Notes, notes_multiinstr_compact_routing)
 TEST_F(Tst_Notes, notes_v0c2_multiinstr_compact_routing)
 {
     // v0xC2 counterpart: same compact rawStaff encoding in an older file format.
-    // Verifies the lineSlotByRawByte lookup in noteloop.cpp works for v0xC2 (size=22 notes).
+    // Verifies the lineSlotByRawByte lookup in emitters.cpp works for v0xC2 (size=22 notes).
     MasterScore* score = readEncoreScore("notes_v0c2_multiinstr_compact_routing.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_EQ(score->nstaves(), 4);

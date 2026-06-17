@@ -34,7 +34,7 @@
 #include "engraving/dom/tuplet.h"
 
 #include "engraving/dom/instrtemplate.h"
-#include "importexport/encore/internal/importer/mapping.h"
+#include "importexport/encore/internal/importer/mappers.h"
 
 #include "testbase.h"
 

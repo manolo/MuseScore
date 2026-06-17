@@ -19,18 +19,19 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#ifndef MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H
-#define MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H
 
-#include "ctx.h"
+#ifndef MU_IMPORTEXPORT_ENC_PARSER_READER_V0XC4_H
+#define MU_IMPORTEXPORT_ENC_PARSER_READER_V0XC4_H
+
+#include <memory>
+#include "readers.h"
 
 namespace mu::iex::enc {
 
-void buildParts(BuildCtx& ctx);
-void buildMeasures(BuildCtx& ctx);
-void buildInitialSignatures(BuildCtx& ctx);
-void emitMeasures(BuildCtx& ctx);
+// Factory helper -- called from EncFormatReader::create().
+// Full class definition is in reader-v0xc4.cpp.
+std::unique_ptr<EncFormatReader> makeFormatReader_V0xC4();
 
 } // namespace mu::iex::enc
 
-#endif // MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H
+#endif // MU_IMPORTEXPORT_ENC_PARSER_READER_V0XC4_H

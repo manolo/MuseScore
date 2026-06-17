@@ -586,7 +586,7 @@ TEST_F(Tst_OrnamentsSlurs, v0c4_grace_after_main_grace_to_later_slur_anchors_to_
     // (SECOND, xoff=3), Note at tick=480 (xoff=9), SLURSTART at tick=240
     // (xoffset=5, xoffset2=9).
     //
-    // noteloop — without Fix 1 (retroactive attachment):
+    // emitters — without Fix 1 (retroactive attachment):
     //   Regular@240: gap-snap to 1/4, mainChord@1/4, cumTick→1/2. prevMidiTick=240.
     //   ACCIACCATURA@240: isChordExt=TRUE → pendingGraces.
     //   Note@480: cumTick=1/2, chord@1/2, pendingGraces flushed → ACCIACCATURA on

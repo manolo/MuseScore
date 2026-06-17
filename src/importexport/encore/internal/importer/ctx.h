@@ -30,9 +30,9 @@
 
 #include <QtGlobal>
 
-#include "../parser/elements.h"
-#include "../parser/reader.h"
-#include "tuplets.h"
+#include "../parser/elem.h"
+#include "../parser/readers.h"
+#include "emitters-tuplets.h"
 #include "engraving/types/fraction.h"
 #include "engraving/types/symid.h"
 #include "engraving/dom/lyrics.h"

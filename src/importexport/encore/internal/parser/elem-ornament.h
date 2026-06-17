@@ -19,18 +19,30 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#ifndef MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H
-#define MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H
 
-#include "ctx.h"
+#pragma once
+
+#include "elem-note.h"
 
 namespace mu::iex::enc {
 
-void buildParts(BuildCtx& ctx);
-void buildMeasures(BuildCtx& ctx);
-void buildInitialSignatures(BuildCtx& ctx);
-void emitMeasures(BuildCtx& ctx);
+struct EncOrnament : EncMeasureElem {
+    // Field names follow the Encore binary format notation used throughout the spec
+    quint8 tipo      { 0 };
+    qint16 yoffset   { 0 };  // signed 16-bit Cartesian y (positive = upward in Encore)
+    quint8 alMezuro  { 0 };
+    quint8 xoffset2  { 0 };
+    quint8 speguleco { 0 };
+    quint8 noto      { 0 };
+    quint8 tempo     { 0 };
+    quint8 tind      { 0 };
+
+    using EncMeasureElem::EncMeasureElem;
+
+    EncOrnamentType ornType() const { return static_cast<EncOrnamentType>(tipo); }
+    void setOrnType(EncOrnamentType t) { tipo = static_cast<quint8>(t); }
+
+    bool read(QDataStream& ds) override;
+};
 
 } // namespace mu::iex::enc
-
-#endif // MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H

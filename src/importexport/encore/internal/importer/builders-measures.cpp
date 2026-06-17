@@ -23,10 +23,10 @@
 #include "builders.h"
 #include "ctx.h"
 #include "import.h"
-#include "../parser/elements.h"
-#include "mapping.h"
+#include "../parser/elem.h"
+#include "mappers.h"
 #include "../parser/ticks.h"
-#include "tuplets.h"
+#include "emitters-tuplets.h"
 #include <algorithm>
 #include <memory>
 #include <map>
@@ -180,7 +180,7 @@ void buildMeasures(BuildCtx& ctx)
             measure->setTick(Fraction::fromTicks(currentTick));
 
             // Case A: timeSig[0] != timeSig[1] — pickup with explicit shorter sig; shorten now.
-            // Case B (same sig, partial content): detected post-noteloop via actual cumTick.
+            // Case B (same sig, partial content): detected post-emitters via actual cumTick.
             const bool isPickupA = firstMeasure && di == 0 && ts != ctx.nominalTimeSig;
             measure->setTimesig(isPickupA ? ctx.nominalTimeSig : ts);
             measure->setTicks(ts);
