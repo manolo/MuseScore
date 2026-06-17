@@ -110,13 +110,17 @@ int encArticByteToStringNumber(quint8 articByte)
     return 0;
 }
 
+// Scale string-number artic bytes: 0x39-0x40 encode string numbers 1-8 as (byte - kStringArticBase).
+static constexpr quint8 kStringArticBase = 0x38;
+static constexpr quint8 kStringArticMin  = 0x39;   // string 1
+static constexpr quint8 kStringArticMax  = 0x40;   // string 8
+
 int encArticByteToScaleStringNumber(quint8 articByte)
 {
-    // Bytes 0x39..0x40 encode string numbers 1..8 as (byte - 0x38).
     // These appear as explicit anchors in scale exercises; their presence in a
     // measure enables options-bit-0 string number display on all other notes.
-    if (articByte >= 0x39 && articByte <= 0x40) {
-        return static_cast<int>(articByte) - 0x38;
+    if (articByte >= kStringArticMin && articByte <= kStringArticMax) {
+        return static_cast<int>(articByte) - static_cast<int>(kStringArticBase);
     }
     return 0;
 }

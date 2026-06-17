@@ -98,12 +98,16 @@ void fillTrailingGaps(BuildCtx& ctx, Measure* measure, Fraction measTick)
     }
 }
 
-// Fix over/undershoots up to 1/24 from non-standard gaps (cascade fills).
+// Maximum measure-length correction: 1/24 of a whole note (≈ one 32nd-note triplet).
+// Corrections larger than this indicate genuine notation errors, not rounding noise.
+static const Fraction kFillMaxDelta(1, 24);
+
+// Fix over/undershoots up to kFillMaxDelta from non-standard gaps (cascade fills).
 // Overshoot: remove smallest gap rests. Undershoot: add V_MEASURE gap rest.
 void correctMeasureLength(Measure* measure, int totalStaves)
 {
     const Fraction mLen = measure->ticks();
-    const Fraction maxDelta(1, 24);
+    const Fraction maxDelta = kFillMaxDelta;
     for (int si = 0; si < totalStaves; ++si) {
         for (voice_idx_t v = 0; v < VOICES; ++v) {
             track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);

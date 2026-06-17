@@ -33,11 +33,11 @@ namespace mu::iex::enc {
 std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 magic)
 {
     switch (magic) {
-    case 0xA6:
+    case static_cast<quint8>(EncFormatVersion::V2_X):
         return std::make_unique<EncFormatReader_V0xA6>();
-    case 0xC2:
+    case static_cast<quint8>(EncFormatVersion::V3_4_X):
         return makeFormatReader_V0xC2();
-    case 0xC4:
+    case static_cast<quint8>(EncFormatVersion::V5_X):
         return makeFormatReader_V0xC4();
     default:
         LOGW() << QString("Encore: unsupported format version 0x%1 - import may fail")

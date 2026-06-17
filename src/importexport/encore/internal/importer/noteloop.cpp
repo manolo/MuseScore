@@ -468,14 +468,13 @@ static Fraction computeElementTick(
         const int stolenTicks = ctx.graceStolenTicks.count(trackKey)
                                 ? ctx.graceStolenTicks.at(trackKey) : 0;
         if (onFaceGrid && !gracePending && !inActiveTuplet) {
-            // Hardcode 960 ticks/whole: the beatTicks*timeSigDen formula breaks for
+            // Use kEncWholeTicks: the beatTicks*timeSigDen formula breaks for
             // non-standard beatTicks (e.g. 2/2 with beatTicks=240 gives 480).
-            static constexpr int wholeTicks = 960;
-            const Fraction encTickFrac((int)e->tick, wholeTicks);
+            const Fraction encTickFrac((int)e->tick, kEncWholeTicks);
             if (encTickFrac > ctx.cumTick[trackKey]) {
                 const Fraction gap = encTickFrac - ctx.cumTick[trackKey];
                 const int gapEncTicks
-                    = (gap.numerator() * wholeTicks)
+                    = (gap.numerator() * kEncWholeTicks)
                       / std::max(1, gap.denominator());
                 const bool gapIsGraceArtifact
                     = (stolenTicks > 0 && gapEncTicks <= stolenTicks);

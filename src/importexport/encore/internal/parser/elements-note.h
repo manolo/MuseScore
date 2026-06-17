@@ -34,6 +34,10 @@ namespace mu::iex::enc {
 // Notes within this many Encore ticks treated as simultaneous (MIDI timing drift).
 inline constexpr int CHORD_CLUSTER_THRESHOLD = 4;   // Encore ticks (~8ms at 120bpm)
 
+// faceValue byte accessors: low nibble = duration (1=whole..8=128th), high nibble = notehead type.
+inline quint8 fvLow(quint8 fv)  { return fv & 0x0F; }            // duration nibble
+inline quint8 fvHigh(quint8 fv) { return static_cast<quint8>((fv >> 4) & 0x0F); } // notehead nibble
+
 // ---------------------------------------------------------------------------
 // Base class for all measure elements
 // ---------------------------------------------------------------------------

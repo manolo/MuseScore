@@ -72,6 +72,10 @@ static bool transpCompatibleWith(int tmplChromatic, int encKeySemitones)
     return mod12(tmplChromatic) == mod12(encKeySemitones);
 }
 
+// Minimum instrument name length for template search. Single-letter SATB labels
+// ("S","A","T","B") match too broadly with substring scoring; skip them.
+static constexpr int kMinInstrNameLen = 4;
+
 // Find best non-drumset template by name+MIDI score (trackName exact +4, contain +2; MIDI +6; "common" +1).
 // With encKeySemitones filter, prefers transposition-compatible match; falls back to best name+MIDI
 // match when no compatible match exists (e.g. encKey=0 and no C-pitched variant for this MIDI program).
@@ -83,7 +87,7 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
     }
 
     // Names < 4 chars (e.g. SATB labels "S","A","T","B") match too broadly; skip.
-    if (encName.trimmed().size() < 4) {
+    if (encName.trimmed().size() < static_cast<size_t>(kMinInstrNameLen)) {
         return nullptr;
     }
 
@@ -185,7 +189,7 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
 // Find best drumset template by name score (exact match only, no substring).
 const InstrumentTemplate* findDrumsetTemplate(const QString& encName)
 {
-    if (encName.trimmed().size() < 4) {
+    if (encName.trimmed().size() < static_cast<size_t>(kMinInstrNameLen)) {
         return nullptr;
     }
 

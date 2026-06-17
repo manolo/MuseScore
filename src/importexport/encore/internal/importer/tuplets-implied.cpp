@@ -364,7 +364,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                                 // Check that the orphan is at the expected advance tick.
                                 const int advNum = baseLen.numerator() * normalN;
                                 const int advDen = baseLen.denominator() * actualN;
-                                const int advTicks = (advNum * 960 + advDen / 2) / advDen;
+                                const int advTicks = (advNum * kEncWholeTicks + advDen / 2) / advDen;
                                 const int tol = std::max(4, advTicks / 4);
                                 const int lastTick   = static_cast<int>(chords[i - 1][0]->tick);
                                 const int orphanTick = static_cast<int>(chords[i][0]->tick);

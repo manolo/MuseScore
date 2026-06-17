@@ -54,7 +54,7 @@ static bool isMidiArtifact(const EncNote* en,
     if (en->realDuration == 0 || en->realDuration >= 15) {
         return false;
     }
-    const quint8 safeFv = en->faceValue & 0x0F;
+    const quint8 safeFv = fvLow(en->faceValue);
     int fvBase = faceValue2ticks(safeFv);
     if (fvBase <= 15) {
         bool bypass = mc.isTieStartAt(ec.staffIdx, ec.voice, (int)ec.e->tick)
@@ -237,7 +237,7 @@ static void attachChordToTuplet(
     int actualN = isStandardExplicit ? preACheck : 0;
     int normalN = isStandardExplicit ? preNCheck : 0;
     // Implied tuplet (v0xC2 only, pre-validated). !tt.groupFull() prevents a post-group note from opening a new unvalidated group.
-    if (actualN == 0 && ctx.impliedTuplets && (en->faceValue & 0x0F) >= 4
+    if (actualN == 0 && ctx.impliedTuplets && (fvLow(en->faceValue)) >= 4
         && ((tt.inTuplet() && !tt.groupFull()) || impliedGroupMember.count(e))) {
         actualN = detectImpliedTuplet(en->realDuration, en->faceValue, normalN);
     }
@@ -531,7 +531,7 @@ static bool resolveNoteDuration(
         int preA = isStandardExplicit ? preACheck : 0;
         int preN = isStandardExplicit ? preNCheck : 0;
         if (!isStandardExplicit) {
-            if (ctx.impliedTuplets && (en->faceValue & 0x0F) >= 4
+            if (ctx.impliedTuplets && (fvLow(en->faceValue)) >= 4
                 && ((ttPre.inTuplet() && !ttPre.groupFull()) || impliedGroupMember.count(e))) {
                 preA = detectImpliedTuplet(en->realDuration, en->faceValue, preN);
             }
@@ -540,7 +540,7 @@ static bool resolveNoteDuration(
         // Implied-tuplet guard: skip if full group advance doesn't fit (partial triplet leaves 1/3072 residual).
         if (!isStandardExplicit && !ttPre.inTuplet()
             && !isChordExt && preA > 0 && preN > 0) {
-            Fraction singleAdv = TDuration(faceValue2DurationType(en->faceValue & 0x0F)).fraction()
+            Fraction singleAdv = TDuration(faceValue2DurationType(fvLow(en->faceValue))).fraction()
                                  * Fraction(preN, preA);
             Fraction fullGroupAdv = singleAdv * Fraction(preA, 1);
             Fraction mRemaining = measure->ticks() - ctx.cumTick[trackKey];
@@ -584,7 +584,7 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
 {
     // faceValue high nibble=7: slash notehead in Encore's rhythm-staff notation.
     // Force HEAD_SLASH so MuseScore matches Encore's visual representation.
-    if ((en->faceValue >> 4) == 7) {
+    if ((fvHigh(en->faceValue)) == 7) {
         note->setHeadGroup(NoteHeadGroup::HEAD_SLASH);
         Drumset* ds = note->part()->instrument()->drumset();
         if (ds) {
@@ -600,7 +600,7 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
         return;
     }
     // faceValue high nibble=3: square notehead (Encore bass drum notation).
-    if ((en->faceValue >> 4) == 3) {
+    if ((fvHigh(en->faceValue)) == 3) {
         note->setHeadGroup(NoteHeadGroup::HEAD_CUSTOM);
         Drumset* ds = note->part()->instrument()->drumset();
         if (ds) {
@@ -639,7 +639,7 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
             NoteHeadGroup::HEAD_LARGE_DIAMOND, // 8 rombo blando
             NoteHeadGroup::HEAD_NORMAL,        // 9 sin_cabeza (note made invisible below)
         };
-        const int nibble = (en->faceValue >> 4) & 0xF;
+        const int nibble = (fvHigh(en->faceValue)) & 0xF;
         const NoteHeadGroup nhg = (nibble < 10) ? nibble2head[nibble] : NoteHeadGroup::HEAD_NORMAL;
 
         Drumset* ds = note->part()->instrument()->drumset();
@@ -728,7 +728,7 @@ void handleNote(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
             preA = 0;
             preN = 0;
         }
-        if (preA == 0 && ctx.impliedTuplets && (en->faceValue & 0x0F) >= 4
+        if (preA == 0 && ctx.impliedTuplets && (fvLow(en->faceValue)) >= 4
             && (ctx.tuplets[trackKey].inTuplet() || impliedGroupMember.count(e))) {
             preA = detectImpliedTuplet(en->realDuration, en->faceValue, preN);
         }

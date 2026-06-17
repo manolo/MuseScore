@@ -28,6 +28,11 @@
 #include "engraving/dom/durationtype.h"
 
 namespace mu::iex::enc {
+
+// Encore's internal tick resolution: 960 ticks per whole note (= 240 per quarter).
+// This is fixed for all format versions and all time signatures.
+inline constexpr int kEncWholeTicks = 960;
+
 int faceValue2ticks(quint8 fv);
 mu::engraving::DurationType faceValue2DurationType(quint8 fv);
 mu::engraving::DurationType realDuration2DurationType(qint16 realDur, quint8 fv);
