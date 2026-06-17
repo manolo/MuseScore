@@ -1656,7 +1656,7 @@ TEST_F(Tst_Importer, encore_symbols_full_coverage)
     EXPECT_GE(jumps,          1) << "at least one D.C. / D.S. variant";
     EXPECT_GE(staccatos,      7);
     EXPECT_GE(tenutos,        9);
-    EXPECT_GE(accents,        7);
+    EXPECT_GE(accents,        5);  // 0x22/0x23 now map to portato (not accent)
     EXPECT_GE(marcatos,       6);
     EXPECT_GE(staccatissimos, 6);
     EXPECT_GE(trills,         6) << "trill-marks from per-note bytes + ORN 0x36/0x37";
