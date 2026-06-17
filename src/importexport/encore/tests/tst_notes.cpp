@@ -649,6 +649,62 @@ TEST_F(Tst_Notes, perc_clef_facevalue_overrides_standard_drumset_notehead)
 }
 
 // ===========================================================================
+// FEATURE: All 10 faceValue high-nibble notehead types map to correct
+// MuseScore NoteHeadGroups. Non-zero nibbles use note->setFixed(true) to
+// prevent segmentlayout from overriding the head from the shared drumset entry.
+// ===========================================================================
+TEST_F(Tst_Notes, perc_notehead_all_nibble_types)
+{
+    // notes_perc_notehead_all_nibbles.enc: 10 notes on PERC-clef staff,
+    // pitches 50-59, faceValue (nibble<<4)|3. One note per nibble 0..9.
+    MasterScore* score = readEncoreScore("notes_perc_notehead_all_nibbles.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    // Notes are spread across 3 measures (4 per measure), iterate all.
+    std::vector<Note*> notes;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) { continue; }
+        Measure* m = toMeasure(mb);
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* e = s->element(0);
+            if (e && e->isChord()) {
+                for (Note* n : toChord(e)->notes()) {
+                    notes.push_back(n);
+                }
+            }
+        }
+    }
+    ASSERT_EQ(notes.size(), 10u) << "Expected 10 notes (one per nibble 0-9) across 3 measures";
+
+    using G = NoteHeadGroup;
+    const std::vector<G> expected = {
+        G::HEAD_NORMAL,        // nibble 0
+        G::HEAD_DIAMOND,       // nibble 1
+        G::HEAD_TRIANGLE_UP,   // nibble 2
+        G::HEAD_CUSTOM,        // nibble 3 (square)
+        G::HEAD_CROSS,         // nibble 4
+        G::HEAD_XCIRCLE,       // nibble 5
+        G::HEAD_PLUS,          // nibble 6
+        G::HEAD_SLASH,         // nibble 7
+        G::HEAD_LARGE_DIAMOND, // nibble 8
+        G::HEAD_NORMAL,        // nibble 9 (invisible, head=NORMAL)
+    };
+
+    for (size_t i = 0; i < notes.size(); ++i) {
+        EXPECT_EQ(notes[i]->headGroup(), expected[i])
+            << "nibble " << i << " (pitch " << notes[i]->pitch() << ")";
+        // nibble=9: note must be invisible (sin_cabeza)
+        if (i == 9) {
+            EXPECT_FALSE(notes[i]->visible()) << "nibble 9 must be invisible (sin_cabeza)";
+        }
+    }
+
+    delete score;
+}
+
+// ===========================================================================
 // BUG FIX: Near-simultaneous chord notes (MIDI timing drift) no longer lost
 // ===========================================================================
 

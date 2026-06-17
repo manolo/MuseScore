@@ -603,19 +603,24 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
     if ((en->faceValue >> 4) == 3) {
         note->setHeadGroup(NoteHeadGroup::HEAD_CUSTOM);
         Drumset* ds = note->part()->instrument()->drumset();
-        if (ds && !ds->isValid(note->pitch())) {
-            DrumInstrument di;
-            di.name = u"drum";
-            di.notehead = NoteHeadGroup::HEAD_CUSTOM;
-            // Half/whole durations use the open (hollow) square;
-            // quarter and shorter use the filled square.
-            di.noteheads[int(NoteHeadType::HEAD_WHOLE)]   = SymId::noteheadSquareWhite;
-            di.noteheads[int(NoteHeadType::HEAD_HALF)]    = SymId::noteheadSquareWhite;
-            di.noteheads[int(NoteHeadType::HEAD_QUARTER)] = SymId::noteheadSquareBlack;
-            di.noteheads[int(NoteHeadType::HEAD_BREVIS)]  = SymId::noteheadSquareBlack;
-            di.line = 7;
-            di.stemDirection = DirectionV::DOWN;
-            ds->setDrum(note->pitch(), di);
+        if (ds) {
+            if (!ds->isValid(note->pitch())) {
+                DrumInstrument di;
+                di.name = u"drum";
+                di.notehead = NoteHeadGroup::HEAD_CUSTOM;
+                // Half/whole durations use the open (hollow) square;
+                // quarter and shorter use the filled square.
+                di.noteheads[int(NoteHeadType::HEAD_WHOLE)]   = SymId::noteheadSquareWhite;
+                di.noteheads[int(NoteHeadType::HEAD_HALF)]    = SymId::noteheadSquareWhite;
+                di.noteheads[int(NoteHeadType::HEAD_QUARTER)] = SymId::noteheadSquareBlack;
+                di.noteheads[int(NoteHeadType::HEAD_BREVIS)]  = SymId::noteheadSquareBlack;
+                di.line = 7;
+                di.stemDirection = DirectionV::DOWN;
+                ds->setDrum(note->pitch(), di);
+            } else {
+                // Pitch already in drumset (e.g. from template) — override its notehead.
+                ds->drum(note->pitch()).notehead = NoteHeadGroup::HEAD_CUSTOM;
+            }
         }
     } else {
         // 5-line PERC staff: line derived from Encore position byte.
