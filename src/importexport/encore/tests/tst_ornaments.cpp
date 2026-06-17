@@ -173,40 +173,43 @@ TEST_F(Tst_Ornaments, articulation_combos_expand_to_two_glyphs)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
+    // Combined single-glyph articulations map to their own kind.
+    // Individual components (Tenuto, Staccato, etc.) are for single-symbol artics.
     enum class K {
-        Tenuto, Staccato, Accent, Marcato, Staccatissimo, Other
+        Tenuto, Staccato, Accent, Marcato, Staccatissimo,
+        MarcatoStaccato, MarcatoTenuto, AccentStaccato, TenutoStaccato, TenutoAccent,
+        Other
     };
     auto kindOf = [](Articulation* a) -> K {
         using mu::engraving::SymId;
-        switch (a->symId()) {
-        case SymId::articTenutoAbove: case SymId::articTenutoBelow:
-            return K::Tenuto;
-        case SymId::articStaccatoAbove: case SymId::articStaccatoBelow:
-            return K::Staccato;
-        case SymId::articAccentAbove: case SymId::articAccentBelow:
-            return K::Accent;
-        case SymId::articMarcatoAbove: case SymId::articMarcatoBelow:
-            return K::Marcato;
-        case SymId::articStaccatissimoAbove: case SymId::articStaccatissimoBelow:
-            return K::Staccatissimo;
-        default:
-            return K::Other;
+        switch (SymId(a->subtype())) {
+        case SymId::articTenutoAbove:           return K::Tenuto;
+        case SymId::articStaccatoAbove:         return K::Staccato;
+        case SymId::articAccentAbove:           return K::Accent;
+        case SymId::articMarcatoAbove:          return K::Marcato;
+        case SymId::articStaccatissimoAbove:    return K::Staccatissimo;
+        case SymId::articMarcatoStaccatoAbove:  return K::MarcatoStaccato;
+        case SymId::articMarcatoTenutoAbove:    return K::MarcatoTenuto;
+        case SymId::articAccentStaccatoAbove:   return K::AccentStaccato;
+        case SymId::articTenutoStaccatoAbove:   return K::TenutoStaccato;
+        case SymId::articTenutoAccentAbove:     return K::TenutoAccent;
+        default:                                return K::Other;
         }
     };
-    // m1: 0x24 ten+stacc, 0x17 acc+stacc, 0x27 marc+ten, 0x15 marc+stacc;
-    // m2: 0x23 acc+ten, 0x2D ten+stiss, 0x2B acc+stiss, 0x24 ten+stacc.
-    // m3: 0x14 stacc+heavy-accent(∨), 0x26 ten+heavy-accent(∨).
+    // m1: 0x24 TenutoStaccato, 0x17 AccentStaccato, 0x27 MarcatoTenuto, 0x15 MarcatoStaccato.
+    // m2: 0x23 TenutoAccent, 0x2D Tenuto+Staccatissimo, 0x2B Accent+Staccatissimo, 0x24 TenutoStaccato.
+    // m3: 0x14 MarcatoStaccatoBelow→MarcatoStaccato, 0x26 MarcatoTenutoBelow→MarcatoTenuto.
     const std::vector<std::set<K> > expected = {
-        { K::Tenuto, K::Staccato },
-        { K::Accent, K::Staccato },
-        { K::Marcato, K::Tenuto },
-        { K::Marcato, K::Staccato },
-        { K::Accent, K::Tenuto },
-        { K::Tenuto, K::Staccatissimo },
-        { K::Accent, K::Staccatissimo },
-        { K::Tenuto, K::Staccato },
-        { K::Staccato, K::Marcato },   // 0x14: staccato + heavy accent (∨)
-        { K::Tenuto,   K::Marcato },   // 0x26: tenuto + heavy accent (∨)
+        { K::TenutoStaccato },           // 0x24 tenuto+staccato → articTenutoStaccatoAbove
+        { K::AccentStaccato },           // 0x17 accent+staccato → articAccentStaccatoAbove
+        { K::MarcatoTenuto },            // 0x27 marcato+tenuto  → articMarcatoTenutoAbove
+        { K::MarcatoStaccato },          // 0x15 marcato+staccato→ articMarcatoStaccatoAbove
+        { K::TenutoAccent },             // 0x23 tenuto+accent   → articTenutoAccentAbove
+        { K::Tenuto, K::Staccatissimo }, // 0x2D (no single glyph: two symbols)
+        { K::Accent, K::Staccatissimo }, // 0x2B (no single glyph: two symbols)
+        { K::TenutoStaccato },           // 0x24 again
+        { K::MarcatoStaccato },          // 0x14 staccato+heavy-accent(∨) → articMarcatoStaccatoBelow
+        { K::MarcatoTenuto },            // 0x26 tenuto+heavy-accent(∨) → articMarcatoTenutoBelow
     };
     std::vector<std::set<K> > seen;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
