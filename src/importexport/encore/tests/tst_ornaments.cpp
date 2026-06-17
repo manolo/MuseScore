@@ -1702,7 +1702,7 @@ TEST_F(Tst_Ornaments, accent_orn_does_not_spill_to_sibling_staff)
 //   0xC6 MARCATO_BELOW (v)         -> articMarcato* family
 //   0xC0 MARCATO_STACCATO_BELOW    -> articMarcatoStaccato* family
 //   0xC8 TENUTO (-)                -> articTenuto* family
-//   0x30 THICK_STOPPED             -> brassMuteClosed
+//   0x30 GUITAR_BEND_V             -> skipped (guitar bend, not imported yet)
 //   0xB8 DOUBLE_MORDENT            -> ornamentMordent
 // MuseScore auto-adjusts Above/Below based on note stem direction, so we test
 // by family (canonicalized via subtype()) rather than exact symId.
@@ -1714,13 +1714,12 @@ TEST_F(Tst_Ornaments, new_artic_types_from_orns)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    enum class K { Marcato, MarcatoStaccato, Tenuto, BrassMute, Mordent, Other };
+    enum class K { Marcato, MarcatoStaccato, Tenuto, Mordent, Other };
     auto kindOf = [](Articulation* a) -> K {
         SymId s = SymId(a->subtype());
         if (s == SymId::articMarcatoAbove || s == SymId::articMarcatoBelow) { return K::Marcato; }
         if (s == SymId::articMarcatoStaccatoAbove || s == SymId::articMarcatoStaccatoBelow) { return K::MarcatoStaccato; }
         if (s == SymId::articTenutoAbove || s == SymId::articTenutoBelow) { return K::Tenuto; }
-        if (s == SymId::brassMuteClosed) { return K::BrassMute; }
         if (s == SymId::ornamentMordent) { return K::Mordent; }
         return K::Other;
     };
@@ -1741,42 +1740,29 @@ TEST_F(Tst_Ornaments, new_artic_types_from_orns)
             }
         }
     }
-    // 6 chords, one ORN each: two marcato (0xBF and 0xC6), one marcatoStaccato (0xC0),
-    // one tenuto (0xC8), one brass mute (0x30), one mordent (0xB8).
+    // 5 chords with articulations: two marcato (0xBF and 0xC6), one marcatoStaccato (0xC0),
+    // one tenuto (0xC8), one mordent (0xB8). 0x30 (GUITAR_BEND_V) is skipped.
     const std::vector<K> expected = {
-        K::Marcato, K::Marcato, K::MarcatoStaccato, K::Tenuto, K::BrassMute, K::Mordent
+        K::Marcato, K::Marcato, K::MarcatoStaccato, K::Tenuto, K::Mordent
     };
     EXPECT_EQ(found, expected);
-    EXPECT_EQ(found.size(), 6u) << "Each of the 6 chords must have exactly one articulation";
+    EXPECT_EQ(found.size(), 5u) << "0x30 guitar bend must be skipped; only 5 chords get articulations";
     delete score;
 }
 
 // ===========================================================================
-// FEATURE: Staccatissimo standalone ORN tipos (0x28..0x2B) produce the
-// correct per-chord articulation families:
-//   0x28 -> { Staccatissimo }
-//   0x29 -> { Tenuto, Staccatissimo }
-//   0x2A -> { Tenuto, Staccatissimo }  (same as 0x29)
-//   0x2B -> { Marcato, Staccatissimo }
+// REGRESSION: ORN tipos 0x28-0x2B are guitar bends (size=28 spanner), NOT
+// staccatissimo. They must be silently skipped (LOGW) without adding any
+// articulation to the chords.
 // ===========================================================================
-TEST_F(Tst_Ornaments, staccatissimo_orns_combos)
+TEST_F(Tst_Ornaments, guitar_bend_orns_skipped)
 {
     MasterScore* score = readEncoreScore("ornaments_staccatissimo_orns.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    enum class K { Marcato, Tenuto, Staccatissimo, Other };
-    auto kindOf = [](Articulation* a) -> K {
-        SymId s = SymId(a->subtype());
-        if (s == SymId::articMarcatoAbove || s == SymId::articMarcatoBelow) { return K::Marcato; }
-        if (s == SymId::articTenutoAbove   || s == SymId::articTenutoBelow)  { return K::Tenuto; }
-        if (s == SymId::articStaccatissimoAbove || s == SymId::articStaccatissimoBelow) { return K::Staccatissimo; }
-        return K::Other;
-    };
-
-    using SK = std::set<K>;
-    std::vector<SK> found;
+    int articCount = 0;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
         if (!mb->isMeasure()) {
             continue;
@@ -1787,22 +1773,11 @@ TEST_F(Tst_Ornaments, staccatissimo_orns_combos)
             if (!el || !el->isChord()) {
                 continue;
             }
-            SK chordKinds;
-            for (Articulation* a : toChord(el)->articulations()) {
-                chordKinds.insert(kindOf(a));
-            }
-            if (!chordKinds.empty()) {
-                found.push_back(chordKinds);
-            }
+            articCount += static_cast<int>(toChord(el)->articulations().size());
         }
     }
-    const std::vector<SK> expected = {
-        { K::Staccatissimo },
-        { K::Tenuto, K::Staccatissimo },
-        { K::Tenuto, K::Staccatissimo },
-        { K::Marcato, K::Staccatissimo },
-    };
-    EXPECT_EQ(found, expected);
+    EXPECT_EQ(articCount, 0)
+        << "Guitar bend ORNs 0x28-0x2B must not add articulations to chords";
     delete score;
 }
 

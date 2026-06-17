@@ -498,11 +498,12 @@ Type 5. Variable size. Offsets from element start:
 
 | Tipo  | Name | MuseScore mapping |
 |-------|------|-------------------|
-| 0x1C  | GRAPHIC_LINE | User-drawn graphic line (Encore Graphics palette); no musical meaning; skip silently |
-| 0x28  | STACCATISSIMO | `articStaccatissimoAbove` |
-| 0x29, 0x2A | TENUTO_STACCATISSIMO | `articTenutoAbove` + `articStaccatissimoAbove` |
-| 0x2B  | MARCATO_STACCATISSIMO | `articMarcatoBelow` + `articStaccatissimoAbove` |
-| 0x30  | THICK_STOPPED | `brassMuteClosed` (thick stopped "+" mark) |
+| 0x1C  | GRAPHIC_LINE | User-drawn graphic line (Encore Graphics palette); no musical meaning; skip silently with LOGW |
+| 0x28  | GUITAR_BEND | Guitar bend, curved arrow up (size=28 spanner); not yet imported — skip with LOGW |
+| 0x29  | GUITAR_BEND_2 | Guitar bend, curved arrow (size=28 spanner); not yet imported — skip with LOGW |
+| 0x2A  | GUITAR_PREBEND | Guitar prebend (size=28 spanner); not yet imported — skip with LOGW |
+| 0x2B  | GUITAR_PREBEND_RELEASE | Guitar prebend-release (size=28 spanner); not yet imported — skip with LOGW |
+| 0x30  | GUITAR_BEND_V | Guitar V-shape bend (size=28 spanner); not yet imported — skip with LOGW |
 | 0xB8  | DOUBLE_MORDENT | `ornamentMordent` (3-wave long mordent, placed below) |
 | 0xBF  | MARCATO | `articMarcatoAbove` (^, vertex up; standard marcato) |
 | 0xC0  | MARCATO_STACCATO_BELOW | `articMarcatoStaccatoBelow` (heavy accent ∨ + staccato dot) |
