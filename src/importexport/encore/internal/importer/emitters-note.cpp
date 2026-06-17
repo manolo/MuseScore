@@ -578,13 +578,27 @@ static bool resolveNoteDuration(
     return true;
 }
 
+// Fix the note as "fixed" so layoutDrumset() cannot override its headGroup.
+// All non-normal noteheads must be fixed; otherwise a later note sharing the
+// same pitch will update the shared drumset entry and layout will overwrite
+// the earlier note's headGroup with the new entry value.
+static void fixNoteHeadImmune(Note* note, const EncNote* en, Drumset* ds)
+{
+    const int drumLine = (ds && ds->isValid(note->pitch()))
+                         ? ds->line(note->pitch())
+                         : std::max(-4, 10 - static_cast<int>(en->position));
+    note->setFixed(true);
+    note->setFixedLine(drumLine);
+}
+
 static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
 {
+    Drumset* ds = note->part()->instrument()->drumset();
+    const int nibble = fvHigh(en->faceValue) & 0xF;
+
     // faceValue high nibble=7: slash notehead in Encore's rhythm-staff notation.
-    // Force HEAD_SLASH so MuseScore matches Encore's visual representation.
-    if ((fvHigh(en->faceValue)) == 7) {
+    if (nibble == 7) {
         note->setHeadGroup(NoteHeadGroup::HEAD_SLASH);
-        Drumset* ds = note->part()->instrument()->drumset();
         if (ds) {
             if (!ds->isValid(note->pitch())) {
                 DrumInstrument di;
@@ -595,12 +609,12 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
             }
             ds->drum(note->pitch()).notehead = NoteHeadGroup::HEAD_SLASH;
         }
+        fixNoteHeadImmune(note, en, ds);
         return;
     }
     // faceValue high nibble=3: square notehead (Encore bass drum notation).
-    if ((fvHigh(en->faceValue)) == 3) {
+    if (nibble == 3) {
         note->setHeadGroup(NoteHeadGroup::HEAD_CUSTOM);
-        Drumset* ds = note->part()->instrument()->drumset();
         if (ds) {
             if (!ds->isValid(note->pitch())) {
                 DrumInstrument di;
@@ -616,11 +630,13 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
                 di.stemDirection = DirectionV::DOWN;
                 ds->setDrum(note->pitch(), di);
             } else {
-                // Pitch already in drumset (e.g. from template) — override its notehead.
                 ds->drum(note->pitch()).notehead = NoteHeadGroup::HEAD_CUSTOM;
             }
         }
-    } else {
+        fixNoteHeadImmune(note, en, ds);
+        return;
+    }
+    {
         // 5-line PERC staff: line derived from Encore position byte.
         // faceValue high nibble encodes the notehead type (all 10 values confirmed):
         //   0=normal, 1=diamond, 2=triangle-up, 4=cross, 5=xcircle,
@@ -629,18 +645,15 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
             NoteHeadGroup::HEAD_NORMAL,        // 0
             NoteHeadGroup::HEAD_DIAMOND,       // 1 rombo
             NoteHeadGroup::HEAD_TRIANGLE_UP,   // 2 triangulo
-            NoteHeadGroup::HEAD_NORMAL,        // 3 (square — handled above, never reaches here)
+            NoteHeadGroup::HEAD_NORMAL,        // 3 (square — handled above)
             NoteHeadGroup::HEAD_CROSS,         // 4 equis
             NoteHeadGroup::HEAD_XCIRCLE,       // 5 equis con circulo
             NoteHeadGroup::HEAD_PLUS,          // 6 mas (+)
-            NoteHeadGroup::HEAD_SLASH,         // 7 slash (handled above, never reaches here)
+            NoteHeadGroup::HEAD_SLASH,         // 7 slash (handled above)
             NoteHeadGroup::HEAD_LARGE_DIAMOND, // 8 rombo blando
             NoteHeadGroup::HEAD_NORMAL,        // 9 sin_cabeza (note made invisible below)
         };
-        const int nibble = (fvHigh(en->faceValue)) & 0xF;
         const NoteHeadGroup nhg = (nibble < 10) ? nibble2head[nibble] : NoteHeadGroup::HEAD_NORMAL;
-
-        Drumset* ds = note->part()->instrument()->drumset();
         if (ds) {
             if (!ds->isValid(note->pitch())) {
                 DrumInstrument di;
@@ -653,19 +666,10 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
             ds->drum(note->pitch()).notehead = nhg;
             note->setHeadGroup(nhg);
         }
-        // For non-default noteheads: mark the note as "fixed" so segmentlayout's
-        // layoutDrumset() does not override HEAD_GROUP from the drumset entry.
-        // This is necessary when multiple notes share the same pitch but need
-        // distinct notehead shapes (e.g. Encore's rhythm-notation files).
+        // All non-normal noteheads must be fixed so layoutDrumset() cannot later
+        // override the headGroup when a different note shares the same pitch.
         if (nibble != 0) {
-            // Mark the note as fixed so segmentlayout's layoutDrumset() does not
-            // override HEAD_GROUP from the drumset entry (which is shared per pitch).
-            // For fixed notes, line() returns m_fixedLine, so set that explicitly.
-            int drumLine = (ds && ds->isValid(note->pitch()))
-                           ? ds->line(note->pitch())
-                           : std::max(-4, 10 - static_cast<int>(en->position));
-            note->setFixed(true);
-            note->setFixedLine(drumLine);
+            fixNoteHeadImmune(note, en, ds);
         }
         // nibble=9: "sin_cabeza" (no notehead) — make note invisible.
         if (nibble == 9) {
