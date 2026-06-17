@@ -618,8 +618,25 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
             ds->setDrum(note->pitch(), di);
         }
     } else {
-        // 5-line PERC staff: line derived from Encore position byte (diatonic steps from C4; higher position = smaller MuseScore line).
-        // faceValue high nibble 5 = cross notehead (cymbal/triangle).
+        // 5-line PERC staff: line derived from Encore position byte.
+        // faceValue high nibble encodes the notehead type (all 10 values confirmed):
+        //   0=normal, 1=diamond, 2=triangle-up, 4=cross, 5=xcircle,
+        //   6=plus, 8=large-diamond(soft), 9=invisible(no head)
+        static const NoteHeadGroup nibble2head[] = {
+            NoteHeadGroup::HEAD_NORMAL,        // 0
+            NoteHeadGroup::HEAD_DIAMOND,       // 1 rombo
+            NoteHeadGroup::HEAD_TRIANGLE_UP,   // 2 triangulo
+            NoteHeadGroup::HEAD_NORMAL,        // 3 (square — handled above, never reaches here)
+            NoteHeadGroup::HEAD_CROSS,         // 4 equis
+            NoteHeadGroup::HEAD_XCIRCLE,       // 5 equis con circulo
+            NoteHeadGroup::HEAD_PLUS,          // 6 mas (+)
+            NoteHeadGroup::HEAD_SLASH,         // 7 slash (handled above, never reaches here)
+            NoteHeadGroup::HEAD_LARGE_DIAMOND, // 8 rombo blando
+            NoteHeadGroup::HEAD_NORMAL,        // 9 sin_cabeza (note made invisible below)
+        };
+        const int nibble = (en->faceValue >> 4) & 0xF;
+        const NoteHeadGroup nhg = (nibble < 10) ? nibble2head[nibble] : NoteHeadGroup::HEAD_NORMAL;
+
         Drumset* ds = note->part()->instrument()->drumset();
         if (ds) {
             if (!ds->isValid(note->pitch())) {
@@ -630,11 +647,12 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
                 ds->setDrum(note->pitch(), di);
             }
             // Override drumset default (e.g. MIDI Electric Snare defaults to HEAD_SLASH).
-            const NoteHeadGroup nhg = ((en->faceValue >> 4) == 5)
-                                      ? NoteHeadGroup::HEAD_CROSS
-                                      : NoteHeadGroup::HEAD_NORMAL;
             ds->drum(note->pitch()).notehead = nhg;
             note->setHeadGroup(nhg);
+        }
+        // nibble=9: "sin_cabeza" (no notehead) — make note invisible.
+        if (nibble == 9) {
+            note->setVisible(false);
         }
     }
 }

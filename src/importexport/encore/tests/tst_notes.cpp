@@ -599,9 +599,9 @@ TEST_F(Tst_Notes, perc_clef_note_positions_from_encore_position_byte)
     const Drumset* ds = notes[0]->part()->instrument()->drumset();
     ASSERT_NE(ds, nullptr) << "Staff must have a drumset assigned (PERC clef)";
 
-    // faceValue high nibble=5 (pitch 81) → registered as HEAD_CROSS in drumset
-    EXPECT_EQ(ds->noteHead(81), NoteHeadGroup::HEAD_CROSS)
-        << "fv high nibble=5 must register HEAD_CROSS in drumset";
+    // faceValue high nibble=5 (pitch 81) → registered as HEAD_XCIRCLE (X with circle)
+    EXPECT_EQ(ds->noteHead(81), NoteHeadGroup::HEAD_XCIRCLE)
+        << "fv high nibble=5 must register HEAD_XCIRCLE in drumset";
 
     // faceValue high nibble=0 (pitch 62, 65) → registered as HEAD_NORMAL
     EXPECT_EQ(ds->noteHead(62), NoteHeadGroup::HEAD_NORMAL)
