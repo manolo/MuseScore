@@ -705,6 +705,43 @@ TEST_F(Tst_Notes, perc_notehead_all_nibble_types)
 }
 
 // ===========================================================================
+// BUG FIX: Shared-pitch notes with different notehead nibbles must each keep
+// their own headGroup after layout. The drumset entry is shared per pitch, so
+// the second note's update would override the first if setFixed(true) were not
+// called for all non-normal nibbles (3 and 7 were missing setFixed).
+// ===========================================================================
+TEST_F(Tst_Notes, perc_shared_pitch_two_nibbles_stay_fixed)
+{
+    // notes_perc_shared_pitch_nibbles.enc: two PERC notes both at pitch=60.
+    //   beat 0: nibble=7 → HEAD_SLASH
+    //   beat 1: nibble=8 → HEAD_LARGE_DIAMOND
+    // Without fix: note 1 (nibble=8) updates drumset[60]=LARGE_DIAMOND; layout
+    // overrides note 0 (nibble=7, not fixed) to LARGE_DIAMOND. Or vice versa.
+    MasterScore* score = readEncoreScore("notes_perc_shared_pitch_nibbles.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<Note*> notes;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) continue;
+        Measure* m = toMeasure(mb);
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* e = s->element(0);
+            if (e && e->isChord()) {
+                for (Note* n : toChord(e)->notes()) notes.push_back(n);
+            }
+        }
+    }
+    ASSERT_GE(notes.size(), 2u);
+    EXPECT_EQ(notes[0]->headGroup(), NoteHeadGroup::HEAD_SLASH)
+        << "nibble=7 at pitch=60 must keep HEAD_SLASH even when pitch is shared";
+    EXPECT_EQ(notes[1]->headGroup(), NoteHeadGroup::HEAD_LARGE_DIAMOND)
+        << "nibble=8 at pitch=60 must keep HEAD_LARGE_DIAMOND even when pitch is shared";
+    delete score;
+}
+
+// ===========================================================================
 // BUG FIX: Near-simultaneous chord notes (MIDI timing drift) no longer lost
 // ===========================================================================
 
