@@ -3048,7 +3048,21 @@ def gen_v0c4_articulations_combo():
     for tick, byte, pitch in combos2:
         e2 += note_v0c4_artic(tick, 0, 0, fv=3, pitch=pitch, articUp=byte)
     e2 += end_marker()
-    return assemble(0xC4, [m1, (meas_hdr(4, 4), e2)], fill_ts=(4, 4))
+    # m3: regression for recently fixed artic bytes.
+    # 0x14 was accent+tenuto (now fixed from wrong marcato+staccato).
+    # 0x26 is heavy accent = marcato only (one symbol, fixed from marcato+staccatissimo).
+    combos3 = [
+        (  0, 0x14, 60, False),  # accent + tenuto (FIXED: was marcato + staccato)
+        (240, 0x26, 62, True),   # heavy accent = marcato only (FIXED: was + staccatissimo)
+    ]
+    e3 = b''
+    for tick, byte, pitch, use_dn in combos3:
+        e3 += note_v0c4_artic(tick, 0, 0, fv=3, pitch=pitch,
+                               articUp=0 if use_dn else byte,
+                               articDown=byte if use_dn else 0)
+    e3 += rest_v0c4(480, 0, 0, fv=2)  # fill remaining 2 beats
+    e3 += end_marker()
+    return assemble(0xC4, [m1, (meas_hdr(4, 4), e2), (meas_hdr(4, 4), e3)], fill_ts=(4, 4))
 
 
 # ===========================================================================

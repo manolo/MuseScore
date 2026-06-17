@@ -44,7 +44,7 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x2E: return { SymId::ornamentTurnInverted };  // inverted turn
     case 0x12: return { SymId::articAccentAbove };
     case 0x13: return { SymId::articMarcatoAbove };
-    case 0x14: return { SymId::articMarcatoAbove, SymId::articStaccatoAbove };
+    case 0x14: return { SymId::articAccentAbove, SymId::articTenutoAbove };  // accent + tenuto
     case 0x15: return { SymId::articMarcatoAbove, SymId::articStaccatoAbove };
     case 0x16: return { SymId::articAccentAbove, SymId::articStaccatissimoAbove };
     case 0x17: return { SymId::articAccentAbove, SymId::articStaccatoAbove };
