@@ -23,6 +23,7 @@
 #include "resolvers.h"
 #include "../parser/elements.h"
 #include "../parser/ticks.h"
+#include <optional>
 #include "engraving/dom/slur.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/masterscore.h"
@@ -138,6 +139,48 @@ static void createNormalSlur(const PendingSlur& ps, track_idx_t startTrack, trac
         }
     }
     score->addElement(slur);
+}
+
+// Fallback 1: xoffset2 directly comparable within target measure (xoffsets reset at barlines).
+// Returns the best candidate endTick, or nullopt if no note found.
+static std::optional<Fraction> resolveCrossMeasureXoffset(
+    const PendingSlur& ps, const EncMeasure& endEncMeas,
+    Measure* endMeas, const std::array<int, 256>& lineSlotByRawByte)
+{
+    const int wholeTicks = (endEncMeas.durTicks && endEncMeas.timeSigNum && endEncMeas.timeSigDen)
+                           ? (static_cast<int>(endEncMeas.durTicks) * endEncMeas.timeSigDen)
+                           / endEncMeas.timeSigNum : kEncWholeTicks;
+    int bestDist = std::numeric_limits<int>::max();
+    int bestEncTick = -1;
+    for (const auto& elem : endEncMeas.elements) {
+        const EncMeasureElem* em = elem.get();
+        if (em->type != static_cast<quint8>(EncElemType::NOTE)) { continue; }
+        if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) { continue; }
+        const int xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
+        const int dist = std::abs(xoff - ps.slurXoffset2);
+        if (dist <= bestDist) { bestDist = dist; bestEncTick = static_cast<int>(em->tick); }
+    }
+    if (bestEncTick >= 0 && wholeTicks > 0) {
+        const Fraction candidate = endMeas->tick() + Fraction(bestEncTick, wholeTicks).reduced();
+        if (candidate > ps.startTick) { return candidate; }
+    }
+    return std::nullopt;
+}
+
+// Fallback 2: last chord/rest in the target measure on any voice of the same staff.
+// Returns the tick or nullopt if the measure has no chords on that staff.
+static std::optional<Fraction> resolveLastChordInMeasure(const PendingSlur& ps, Measure* endMeas)
+{
+    Segment* lastSeg = nullptr;
+    for (Segment* s = endMeas->first(SegmentType::ChordRest); s;
+         s = s->next(SegmentType::ChordRest)) {
+        for (int v = 0; v < static_cast<int>(VOICES); ++v) {
+            track_idx_t t = static_cast<track_idx_t>(ps.staffIdx * VOICES + v);
+            if (s->element(t) && s->element(t)->isChord()) { lastSeg = s; break; }
+        }
+    }
+    if (!lastSeg) { return std::nullopt; }
+    return lastSeg->tick();
 }
 
 void resolveSlurs(BuildCtx& ctx)
@@ -344,60 +387,22 @@ void resolveSlurs(BuildCtx& ctx)
 
         const track_idx_t startTrack = resolveChordTrack(score, ps.startTick, ps.staffIdx, ps.track);
 
-        // Cross-measure fallback: xoffset2 resets at barlines, so it's directly comparable within the target measure.
+        // Fallback 1: cross-measure xoffset2 matching.
         if (!resolved && clampedEndMeasIdx < static_cast<int>(enc.measures.size())) {
-            const EncMeasure& endEncMeas = enc.measures[clampedEndMeasIdx];
-            const int wholeTicks = (endEncMeas.durTicks && endEncMeas.timeSigNum && endEncMeas.timeSigDen)
-                                   ? (static_cast<int>(endEncMeas.durTicks) * endEncMeas.timeSigDen)
-                                   / endEncMeas.timeSigNum : kEncWholeTicks;
-            int bestDist = std::numeric_limits<int>::max();
-            int bestEncTick = -1;
-            for (const auto& elem : endEncMeas.elements) {
-                const EncMeasureElem* em = elem.get();
-                if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
-                    continue;
-                }
-                if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
-                    continue;
-                }
-                const int xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
-                const int dist = std::abs(xoff - ps.slurXoffset2);
-                if (dist <= bestDist) {
-                    bestDist = dist;
-                    bestEncTick = static_cast<int>(em->tick);
-                }
-            }
-            if (bestEncTick >= 0 && wholeTicks > 0) {
-                const Fraction candidate = endMeas->tick()
-                                           + Fraction(bestEncTick, wholeTicks).reduced();
-                if (candidate > ps.startTick) {
-                    endTick = candidate;
-                    resolved = true;
-                }
+            if (auto t = resolveCrossMeasureXoffset(ps, enc.measures[clampedEndMeasIdx],
+                                                     endMeas, lineSlotByRawByte)) {
+                endTick = *t;
+                resolved = true;
             }
         }
 
+        // Fallback 2: last chord in target measure.
         if (!resolved) {
-            Segment* lastSeg = nullptr;
-            for (Segment* s = endMeas->first(SegmentType::ChordRest); s;
-                 s = s->next(SegmentType::ChordRest)) {
-                // Accept any voice on the same staff.
-                bool hasChord = false;
-                for (int v = 0; v < static_cast<int>(VOICES); ++v) {
-                    track_idx_t t = static_cast<track_idx_t>(ps.staffIdx * VOICES + v);
-                    if (s->element(t) && s->element(t)->isChord()) {
-                        hasChord = true;
-                        break;
-                    }
-                }
-                if (hasChord) {
-                    lastSeg = s;
-                }
+            if (auto t = resolveLastChordInMeasure(ps, endMeas)) {
+                endTick = *t;
+            } else {
+                continue;  // no chord on this staff: skip slur
             }
-            if (!lastSeg) {
-                continue;
-            }
-            endTick = lastSeg->tick();
         }
 
         if (endTick < ps.startTick) {
