@@ -22,6 +22,7 @@
 
 #include "resolvers.h"
 #include "../parser/elements.h"
+#include "../parser/ticks.h"
 #include "engraving/dom/slur.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/masterscore.h"
@@ -185,7 +186,7 @@ void resolveSlurs(BuildCtx& ctx)
             // beatTicks × timeSigDen is WRONG for compound meters.
             const int wt = (startEncMeas.durTicks && startEncMeas.timeSigNum && startEncMeas.timeSigDen)
                            ? (static_cast<int>(startEncMeas.durTicks) * startEncMeas.timeSigDen)
-                           / startEncMeas.timeSigNum : 960;
+                           / startEncMeas.timeSigNum : kEncWholeTicks;
             const int startEncTick = (relStartTick.numerator() * wt)
                                      / std::max(1, relStartTick.denominator());
             for (const auto& elem : startEncMeas.elements) {
@@ -312,7 +313,7 @@ void resolveSlurs(BuildCtx& ctx)
                                    && nextEncMeas.timeSigDen)
                                   ? (static_cast<int>(nextEncMeas.durTicks)
                                      * nextEncMeas.timeSigDen)
-                                  / nextEncMeas.timeSigNum : 960;
+                                  / nextEncMeas.timeSigNum : kEncWholeTicks;
                             Measure* nextMs = ctx.measuresByIdx[nextMIdx];
                             for (const auto& elem : nextEncMeas.elements) {
                                 const EncMeasureElem* em = elem.get();
@@ -348,7 +349,7 @@ void resolveSlurs(BuildCtx& ctx)
             const EncMeasure& endEncMeas = enc.measures[clampedEndMeasIdx];
             const int wholeTicks = (endEncMeas.durTicks && endEncMeas.timeSigNum && endEncMeas.timeSigDen)
                                    ? (static_cast<int>(endEncMeas.durTicks) * endEncMeas.timeSigDen)
-                                   / endEncMeas.timeSigNum : 960;
+                                   / endEncMeas.timeSigNum : kEncWholeTicks;
             int bestDist = std::numeric_limits<int>::max();
             int bestEncTick = -1;
             for (const auto& elem : endEncMeas.elements) {

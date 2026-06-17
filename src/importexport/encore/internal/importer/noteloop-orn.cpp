@@ -21,6 +21,7 @@
  */
 
 #include "noteloop-internal.h"
+#include "../parser/ticks.h"
 #include "mapping.h"
 #include "engraving/dom/dynamic.h"
 #include "engraving/dom/factory.h"
@@ -115,7 +116,6 @@ static void handleDynamicOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc,
                                   NoteElemCtx& ec, const EncOrnament* eo,
                                   Measure* measure, MasterScore* score)
 {
-    static constexpr int kWholeTicks = 960;
     const EncMeasure& encMeas = *mc.encMeas;
     const Fraction measTick = mc.measTick;
     const EncMeasureElem* e = ec.e;
@@ -147,7 +147,7 @@ static void handleDynamicOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc,
     default: break;
     }
     // Use enc tick as the base: cumTick for voice=0 may be 0 when notes are in other voices.
-    const Fraction dynBase = measTick + Fraction(static_cast<int>(e->tick), kWholeTicks);
+    const Fraction dynBase = measTick + Fraction(static_cast<int>(e->tick), kEncWholeTicks);
     Fraction placeTick = snapTickByXoffset(dynBase, static_cast<int>(e->tick),
                                            encMeas, staffIdx, eo, measTick);
     // Section-end dynamics are stored at measureDurTicks; clamp back to the last ChordRest.
@@ -348,6 +348,15 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
 
     const EncOrnament* eo = static_cast<const EncOrnament*>(e);
 
+    // Helper: register a bowing/articulation ORN in pendingBowings.
+    // The three repeated lines (cm, bowTick, push_back) are identical across 8 cases.
+    auto pushBowing = [&](SymId sid) {
+        const bool cm = !noteTicks.count(static_cast<int>(e->tick));
+        const Fraction bt = measTick + Fraction(static_cast<int>(e->tick), kEncWholeTicks);
+        ctx.pendingBowings.push_back({ bt, track, sid, measIdx, cm,
+                                       static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
+    };
+
     switch (eo->ornType()) {
     case EncOrnamentType::SLURSTART: {
         // No SLURSTOP in .enc; alMezuro = forward measure count. Endpoint resolved in post-pass.
@@ -509,56 +518,15 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
         ctx.pendingBreaths.push_back({ elemTick, track, SymId::breathMarkComma });
         break;
     }
-    case EncOrnamentType::ACCENT: {
-        const bool cm = !noteTicks.count(static_cast<int>(e->tick));
-        const Fraction bowTick = measTick + Fraction(static_cast<int>(e->tick), 960);
-        ctx.pendingBowings.push_back({ bowTick, track, SymId::articAccentAbove, measIdx, cm,
-                                       static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
+    case EncOrnamentType::ACCENT:               pushBowing(SymId::articAccentAbove);         break;
+    case EncOrnamentType::DOWNBOW:              pushBowing(SymId::stringsDownBow);           break;
+    case EncOrnamentType::UPBOW:
+        pushBowing(enc.fmt->ornC4IsAccent() ? SymId::articAccentAbove : SymId::stringsUpBow);
         break;
-    }
-    case EncOrnamentType::DOWNBOW: {
-        const bool cm = !noteTicks.count(static_cast<int>(e->tick));
-        const Fraction bowTick = measTick + Fraction(static_cast<int>(e->tick), 960);
-        ctx.pendingBowings.push_back({ bowTick, track, SymId::stringsDownBow, measIdx, cm,
-                                       static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
-        break;
-    }
-    case EncOrnamentType::UPBOW: {
-        const bool cm = !noteTicks.count(static_cast<int>(e->tick));
-        const SymId sid = enc.fmt->ornC4IsAccent() ? SymId::articAccentAbove : SymId::stringsUpBow;
-        const Fraction bowTick = measTick + Fraction(static_cast<int>(e->tick), 960);
-        ctx.pendingBowings.push_back({ bowTick, track, sid, measIdx, cm,
-                                       static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
-        break;
-    }
-    case EncOrnamentType::MARCATO: {
-        const bool cm = !noteTicks.count(static_cast<int>(e->tick));
-        const Fraction bowTick = measTick + Fraction(static_cast<int>(e->tick), 960);
-        ctx.pendingBowings.push_back({ bowTick, track, SymId::articMarcatoAbove, measIdx, cm,
-                                       static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
-        break;
-    }
-    case EncOrnamentType::MARCATO_BELOW: {
-        const bool cm = !noteTicks.count(static_cast<int>(e->tick));
-        const Fraction bowTick = measTick + Fraction(static_cast<int>(e->tick), 960);
-        ctx.pendingBowings.push_back({ bowTick, track, SymId::articMarcatoBelow, measIdx, cm,
-                                       static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
-        break;
-    }
-    case EncOrnamentType::MARCATO_STACCATO_BELOW: {
-        const bool cm = !noteTicks.count(static_cast<int>(e->tick));
-        const Fraction bowTick = measTick + Fraction(static_cast<int>(e->tick), 960);
-        ctx.pendingBowings.push_back({ bowTick, track, SymId::articMarcatoStaccatoBelow, measIdx, cm,
-                                       static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
-        break;
-    }
-    case EncOrnamentType::TENUTO: {
-        const bool cm = !noteTicks.count(static_cast<int>(e->tick));
-        const Fraction bowTick = measTick + Fraction(static_cast<int>(e->tick), 960);
-        ctx.pendingBowings.push_back({ bowTick, track, SymId::articTenutoAbove, measIdx, cm,
-                                       static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
-        break;
-    }
+    case EncOrnamentType::MARCATO:              pushBowing(SymId::articMarcatoAbove);        break;
+    case EncOrnamentType::MARCATO_BELOW:        pushBowing(SymId::articMarcatoBelow);        break;
+    case EncOrnamentType::MARCATO_STACCATO_BELOW: pushBowing(SymId::articMarcatoStaccatoBelow); break;
+    case EncOrnamentType::TENUTO:               pushBowing(SymId::articTenutoAbove);         break;
     case EncOrnamentType::GUITAR_BEND:
     case EncOrnamentType::GUITAR_BEND_2:
     case EncOrnamentType::GUITAR_PREBEND:
@@ -570,13 +538,7 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
                       .arg(staffIdx)
                       .arg(static_cast<int>(e->tick));
         break;
-    case EncOrnamentType::DOUBLE_MORDENT: {
-        const bool cm = !noteTicks.count(static_cast<int>(e->tick));
-        const Fraction bowTick = measTick + Fraction(static_cast<int>(e->tick), 960);
-        ctx.pendingBowings.push_back({ bowTick, track, SymId::ornamentPrallMordent, measIdx, cm,
-                                       static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
-        break;
-    }
+    case EncOrnamentType::DOUBLE_MORDENT:       pushBowing(SymId::ornamentPrallMordent);     break;
     case EncOrnamentType::TREMOLO_16: {
         PendingOrnTremolo pt;
         pt.tick = elemTick;
