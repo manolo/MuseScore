@@ -67,6 +67,8 @@ struct EncLineStaffData {
     EncStaffType staffType  { EncStaffType::MELODY };
     quint8 instrStaffIdx { 0 };
     bool showStaff { true }; // byte +19 of LINE staff entry: 0x01 = visible, 0x00 = hidden.
+    // Staff display size: byte +13 of LINE staff entry, 0-indexed (0=Size1/60%, 1=Size2/70%, 2=Size3/75%, 3=Size4/100%).
+    quint8 staffSizeHint { 3 };
 
     unsigned int instrumentIndex() const { return instrStaffIdx & 0x3F; }
     unsigned int staffIndex() const { return instrStaffIdx >> 6; }

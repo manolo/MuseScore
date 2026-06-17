@@ -26,6 +26,7 @@
 
 #include "elements.h"
 #include "encoding.h"
+#include "log.h"
 
 namespace mu::iex::enc {
 namespace {
@@ -144,20 +145,41 @@ static void readMidiProgramsNoTk(
     recoverMissingNames(instruments, ds);
 }
 
+// Detect Encore 4.x v0xC4 files where TK varSize encodes the TOTAL block size
+// (including the 8-byte magic+size header) rather than just the content length.
+// Symptom: consecutive contentFilePos values are spaced exactly `offset` bytes apart
+// (not `offset+8` as in the standard Encore 5.x layout).
+static bool isTotalBlockSizeTkFmt(const std::vector<EncInstrument>& instruments)
+{
+    if (instruments.size() < 2) {
+        return false;
+    }
+    const qint64 stride = instruments[1].contentFilePos - instruments[0].contentFilePos;
+    return stride > 0 && stride == static_cast<qint64>(instruments[0].offset);
+}
+
 // SmallTK layout (0 < offset <= 250).
 static void readMidiProgramsSmallTk(
     std::vector<EncInstrument>& instruments,
     QDataStream& ds)
 {
-    // MIDI programs are stored 76 bytes into the extra-data region that follows
-    // the TK block content. The content is `instr.offset` bytes long, so the
-    // absolute position is contentFilePos + offset + 76.
+    // Standard Encore 5.x: MIDI is 76 bytes past the content end
+    //   (content is `instr.offset` bytes; absolute = contentFilePos + offset + 76).
+    // Encore 4.x total-size variant: varSize is the TOTAL block size including header,
+    //   so actual content = varSize-8 = 104 bytes, and MIDI is at content[60].
     static constexpr qint64 MIDI_AFTER_CONTENT = 76;
+    static constexpr qint64 MIDI_IN_CONTENT    = 60;
+    const bool totalSizeFmt = isTotalBlockSizeTkFmt(instruments);
+    if (totalSizeFmt) {
+        LOGD() << "enc: small-TK total-block-size format detected (Encore 4.x): reading MIDI at content+60";
+    }
     for (auto& instr : instruments) {
         if (instr.contentFilePos < 0) {
             continue;
         }
-        const qint64 off = instr.contentFilePos + static_cast<qint64>(instr.offset) + MIDI_AFTER_CONTENT;
+        const qint64 off = totalSizeFmt
+            ? instr.contentFilePos + MIDI_IN_CONTENT
+            : instr.contentFilePos + static_cast<qint64>(instr.offset) + MIDI_AFTER_CONTENT;
         if (off >= static_cast<qint64>(ds.device()->size())) {
             continue;
         }
@@ -262,14 +284,19 @@ static void readKeyTranspositionsNoTk(std::vector<EncInstrument>& instruments, Q
 
 static void readKeyTranspositionsSmallTk(std::vector<EncInstrument>& instruments, QDataStream& ds)
 {
-    // smallTK layout: key is 23 bytes before the MIDI position (same relative
-    // offset as in the large-TK table: KEY_OFF = -23 from MIDI base).
-    static constexpr qint64 KEY_AFTER_CONTENT = 76 - 23;   // = 53
+    // Standard Encore 5.x: key is 23 bytes before the MIDI position
+    //   (KEY_OFF = -23 from MIDI base = 76-23 = 53 bytes past content end).
+    // Encore 4.x total-size variant: key at content[42] (matches v0xA6 TK layout).
+    static constexpr qint64 KEY_AFTER_CONTENT = 76 - 23;   // = 53 (standard 5.x)
+    static constexpr qint64 KEY_IN_CONTENT    = 42;         // Encore 4.x total-size variant
+    const bool totalSizeFmt = isTotalBlockSizeTkFmt(instruments);
     for (auto& instr : instruments) {
         if (instr.contentFilePos < 0) {
             continue;
         }
-        const qint64 off = instr.contentFilePos + static_cast<qint64>(instr.offset) + KEY_AFTER_CONTENT;
+        const qint64 off = totalSizeFmt
+            ? instr.contentFilePos + KEY_IN_CONTENT
+            : instr.contentFilePos + static_cast<qint64>(instr.offset) + KEY_AFTER_CONTENT;
         if (off < 0 || off >= static_cast<qint64>(ds.device()->size())) {
             continue;
         }

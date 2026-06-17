@@ -1270,6 +1270,31 @@ TEST_F(Tst_Importer, score_size3_sets_staff_scale_75pct)
     delete score;
 }
 
+// Encore 4.x (version=775): staff size comes from LINE staff entry byte[13], NOT header 0x52.
+// 0x52=8 (unrelated field) would give wrong scale (100%) if used; byte[13]=1 → Size=2 → 70%.
+TEST_F(Tst_Importer, enc4x_line_staff_size_hint_size2_sets_70pct)
+{
+    MasterScore* score = readEncoreScore("importer_enc4x_line_size2_70pct.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_enc4x_line_size2_70pct.enc";
+    ASSERT_FALSE(score->staves().empty());
+    const double mag = score->staff(0)->staffType(mu::engraving::Fraction(0, 1))->userMag();
+    EXPECT_NEAR(mag, 0.70, 1e-6)
+        << "Encore 4.x: byte[13]=1 in LINE staff entry must yield 70% scale, got " << mag * 100 << "%";
+    delete score;
+}
+
+// Encore 4.x: byte[13]=2 → Size=3 → 75%.  0x52=8 must NOT override the LINE-derived size.
+TEST_F(Tst_Importer, enc4x_line_staff_size_hint_size3_sets_75pct)
+{
+    MasterScore* score = readEncoreScore("importer_enc4x_line_size3_75pct.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load importer_enc4x_line_size3_75pct.enc";
+    ASSERT_FALSE(score->staves().empty());
+    const double mag = score->staff(0)->staffType(mu::engraving::Fraction(0, 1))->userMag();
+    EXPECT_NEAR(mag, 0.75, 1e-6)
+        << "Encore 4.x: byte[13]=2 in LINE staff entry must yield 75% scale, got " << mag * 100 << "%";
+    delete score;
+}
+
 // Regression: both notes and rests updated prevMidiTick; a note at the same tick as a rest was mis-detected
 // as chord extension, replacing the rest's segment while cumTick was already advanced past it.
 TEST_F(Tst_Importer, rest_does_not_anchor_chord_extension)

@@ -461,6 +461,32 @@ TEST_F(Tst_Instruments, small_tk_key_read_from_correct_offset)
     delete score;
 }
 
+TEST_F(Tst_Instruments, total_size_tk_midi_read_from_content_offset)
+{
+    // Encore 4.x format: TK varSize = TOTAL block size (includes 8-byte header).
+    // Stride between TK blocks = varSize (not varSize+8 as in standard 5.x layout).
+    // isTotalBlockSizeTkFmt() detects this and reads MIDI at content[60].
+    //
+    // instruments_total_size_tk_two_instrs.enc: TK00 varSize=80, MIDI=49 at content[60].
+    // TK01 varSize=80, MIDI=34 at content[60]. Stride=80=varSize.
+    //
+    // Without fix: reads MIDI at contentFilePos + varSize + 76 = 202+80+76=358, gets 0 (Grand Piano).
+    // With fix: reads MIDI at content[60]=49 for instr 0 and 34 for instr 1.
+    MasterScore* score = readEncoreScore("instruments_total_size_tk_two_instrs.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_GE(static_cast<int>(score->parts().size()), 2)
+        << "File has 2 instruments; both must be parsed";
+    const Instrument* inst0 = score->parts()[0]->instrument();
+    const Instrument* inst1 = score->parts()[1]->instrument();
+    ASSERT_NE(inst0, nullptr);
+    ASSERT_NE(inst1, nullptr);
+    EXPECT_NE(inst0->id(), String(u"grand-piano"))
+        << "MIDI=49 must be read from total-size TK content[60]; must not fall back to Grand Piano";
+    EXPECT_NE(inst1->id(), String(u"grand-piano"))
+        << "MIDI=34 must be read from total-size TK content[60]; must not fall back to Grand Piano";
+    delete score;
+}
+
 TEST_F(Tst_Instruments, no_tk_blocks_reads_midi_and_key_from_large_tk_offsets)
 {
     // instruments_no_tk_blocks_midi_key.enc: TK00 magic zeroed, MIDI=69 at 2278, Key=6 at 2255.

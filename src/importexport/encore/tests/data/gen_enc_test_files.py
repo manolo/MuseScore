@@ -144,6 +144,30 @@ def set_score_size(data, sz):
         d[0x52] = sz & 0xFF
     return bytes(d)
 
+def set_version(data, ver):
+    """Patch chuVersio uint16 LE at header offset 0x28."""
+    d = bytearray(data)
+    struct.pack_into('<H', d, 0x28, ver)
+    return bytes(d)
+
+def set_line_staff_size_hint(data, sz0indexed):
+    """Patch LINE staff entry byte[13] (staffSizeHint, 0-indexed) in ALL LINE blocks."""
+    d = bytearray(data)
+    pos = 0
+    while pos + 8 < len(d):
+        if d[pos:pos+4] == b'LINE':
+            blk_size = int.from_bytes(d[pos+4:pos+8], 'little')
+            # LINE content: 10-byte skip + 2-byte start + 1-byte count = 13 bytes before staff entries
+            for si in range(8):  # up to 8 staves per system
+                off = pos + 8 + 13 + si * 30 + 13  # entry_start + 13 = byte[13]
+                if off >= pos + 8 + blk_size:
+                    break
+                d[off] = sz0indexed & 0xFF
+            pos += 8 + blk_size
+        else:
+            pos += 1
+    return bytes(d)
+
 def set_staff_clef(data, staff_idx=0, clef=7):
     """Patch the clef byte for staff_idx in ALL LINE blocks of assembled data.
     LINE layout: 4-byte magic + 4-byte size + 13-byte header + N*30-byte staff entries.
@@ -3447,6 +3471,47 @@ def gen_v0c4_small_tk_midi49():
     name = b'SmallTkMidi\x00'
     pre  = _patch_tk00(name, new_varsize=112)
     pre  = _patch_small_tk_midi(pre, 0, 49)
+    e    = end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
+# ===========================================================================
+# instruments_total_size_tk_two_instrs.enc
+# Two TK blocks in Encore 4.x total-block-size format: varSize = TOTAL block
+# size (including 8-byte header), so stride between blocks = varSize (not
+# varSize+8 as in standard 5.x layout).  MIDI stored at content[60].
+# TK00: MIDI=49, TK01: MIDI=34.
+# Verifies that isTotalBlockSizeTkFmt() detects the layout and reads MIDI
+# from content[60] rather than the wrong content+varSize+76 formula.
+# ===========================================================================
+def gen_v0c4_total_size_tk_two_instrs():
+    VARSIZE      = 80          # total block size (8-byte header + 72-byte content)
+    CONTENT      = VARSIZE - 8 # 72 bytes of content per block
+    MIDI_IN_CONT = 60          # MIDI program at content[60] (Encore 4.x layout)
+    TK_START     = 194         # header is 194 bytes; TK blocks follow immediately
+
+    # Header: bytes 0..193 from SKELETON_PRE, set instrumentCount=2.
+    header = bytearray(SKELETON_PRE[:TK_START])
+    header[0x32] = 2
+
+    def make_tk(idx, name_str, midi_1idx):
+        magic   = 'TK{:02d}'.format(idx).encode('ascii')
+        content = bytearray(CONTENT)
+        nb      = name_str.encode('ascii') + b'\x00'
+        content[:len(nb)] = nb
+        content[MIDI_IN_CONT] = midi_1idx & 0xFF
+        return bytes(magic) + struct.pack('<I', VARSIZE) + bytes(content)
+
+    tk00 = make_tk(0, 'InstrA', 49)  # MIDI=49 (String Ensemble 1, 0-indexed=48)
+    tk01 = make_tk(1, 'InstrB', 34)  # MIDI=34 (Electric Bass, 0-indexed=33)
+
+    # PAGE+LINE blocks from skeleton: after header(194) + TK00-header(8) + TK00-content(2158).
+    LEGACY_TK_END = 194 + 8 + 2158
+    page_line     = SKELETON_PRE[LEGACY_TK_END:]
+
+    pre  = bytes(header) + tk00 + tk01 + page_line
     e    = end_marker()
     body = meas_block(meas_hdr(4, 4), e)
     body += b''.join(empty_meas(4, 4) for _ in range(5))
@@ -7484,6 +7549,7 @@ if __name__=='__main__':
     write("instruments_instr_percussion_drumset.enc",   gen_v0c4_instr_percussion_drumset())
     write("instruments_small_tk_key6.enc",               gen_v0c4_small_tk_key6())
     write("instruments_small_tk_midi49.enc",            gen_v0c4_small_tk_midi49())
+    write("instruments_total_size_tk_two_instrs.enc",   gen_v0c4_total_size_tk_two_instrs())
     write("instruments_instr_perc_clef_drumset.enc",    gen_v0c4_instr_perc_clef_drumset())
     write("instruments_instr_drums_name_drumset.enc",   gen_v0c4_instr_drums_name_drumset())
     write("instruments_instr_laud_accent.enc",          gen_v0c4_instr_laud_accent())
@@ -7601,6 +7667,17 @@ if __name__=='__main__':
         note_v0c4(0, 0, 0, fv=3, pitch=60) + end_marker())], fill_ts=(4, 4)), sz=2))
     write("importer_score_size3.enc", set_score_size(assemble(0xC4, [(meas_hdr(4, 4),
         note_v0c4(0, 0, 0, fv=3, pitch=60) + end_marker())], fill_ts=(4, 4)), sz=3))
+    # Encore 4.x (version=775): size from LINE staff entry byte[13], NOT header 0x52.
+    # 0x52 stores an unrelated field; values 1-8 map irregularly to Size 1-4.
+    # byte[13]=1 (0-indexed) -> Size=2 -> 70%; byte[13]=2 -> Size=3 -> 75%.
+    _enc4x_base = assemble(0xC4, [(meas_hdr(4, 4),
+        note_v0c4(0, 0, 0, fv=3, pitch=60) + end_marker())], fill_ts=(4, 4))
+    _enc4x_base = set_version(_enc4x_base, 775)     # Encore 4.x app version
+    _enc4x_base = set_score_size(_enc4x_base, 8)    # 0x52=8: unrelated field, would give wrong scale if used
+    write("importer_enc4x_line_size2_70pct.enc",
+          set_line_staff_size_hint(_enc4x_base, sz0indexed=1))  # byte[13]=1 -> Size=2 -> 70%
+    write("importer_enc4x_line_size3_75pct.enc",
+          set_line_staff_size_hint(_enc4x_base, sz0indexed=2))  # byte[13]=2 -> Size=3 -> 75%
     write("ornaments_v0c2_same_measure_slur_no_cross.enc", gen_v0c2_same_measure_slur_no_cross())
     write("ornaments_multiinstr_slur_routing.enc",         gen_v0c4_multiinstr_slur_routing())
     write("ornaments_v0c2_slur_firstnote_xoff_mismatch.enc", gen_v0c2_slur_firstnote_xoff_mismatch())
