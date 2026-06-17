@@ -26,6 +26,13 @@
 
 namespace mu::iex::enc {
 
+// Encore file format versions (byte at file offset 4).
+enum class EncFormatVersion : quint8 {
+    V2_X   = 0xA6,  // Encore 2.x (legacy)
+    V3_4_X = 0xC2,  // Encore 3.x / 4.x
+    V5_X   = 0xC4,  // Encore 5.x (current)
+};
+
 enum class EncCharSize : char {
     ONE_BYTE,
     TWO_BYTES
