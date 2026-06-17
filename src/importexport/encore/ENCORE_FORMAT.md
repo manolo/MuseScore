@@ -760,7 +760,7 @@ Syllabic role (begin/middle/end/single) derived from hyphen-before / hyphen-afte
 
 | Offset   | Size   | Description                                                                      |
 |----------|--------|----------------------------------------------------------------------------------|
-| +5       | 1      | face value — high nibble: 0=normal, 3=square notehead, 5=cross/X notehead (cymbal/triangle on PERC staves); low nibble: 1=whole, 2=half, 3=qtr, 4=8th, …, 8=128th |
+| +5       | 1      | face value — high nibble: 0=normal, 3=square notehead, 5=cross/X notehead (cymbal/triangle on PERC staves), 7=rhythm-staff slash (imported as HEAD_NORMAL); low nibble: 1=whole, 2=half, 3=qtr, 4=8th, …, 8=128th |
 | +6       | 1      | grace1 (high-nibble flags, see grace section)                                    |
 | +7       | 1      | grace2                                                                           |
 | +10      | 2      | layout x-position                                                                |
