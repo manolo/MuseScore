@@ -76,6 +76,15 @@ static bool transpCompatibleWith(int tmplChromatic, int encKeySemitones)
 // ("S","A","T","B") match too broadly with substring scoring; skip them.
 static constexpr int kMinInstrNameLen = 4;
 
+// Instrument template matching scores (see findEncoreInstrumentTemplate).
+static constexpr int kScoreTrackExact    = 4;  // trackName == needle
+static constexpr int kScoreTrackContains = 2;  // trackName contains needle
+static constexpr int kScoreLongExact     = 2;  // longName == needle
+static constexpr int kScoreLongContains  = 1;  // longName contains needle
+static constexpr int kScoreShortExact    = 1;  // shortName == needle
+static constexpr int kScoreMidiMatch     = 6;  // MIDI program matches
+static constexpr int kScoreCommonGenre   = 1;  // "common" genre tag
+
 // Find best non-drumset template by name+MIDI score (trackName exact +4, contain +2; MIDI +6; "common" +1).
 // With encKeySemitones filter, prefers transposition-compatible match; falls back to best name+MIDI
 // match when no compatible match exists (e.g. encKey=0 and no C-pitched variant for this MIDI program).
@@ -130,17 +139,17 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
             for (const QString& needle : needles) {
                 int s = 0;
                 if (nt == needle) {
-                    s += 4;
+                    s += kScoreTrackExact;
                 } else if (nt.contains(needle)) {
-                    s += 2;
+                    s += kScoreTrackContains;
                 }
                 if (nl == needle) {
-                    s += 2;
+                    s += kScoreLongExact;
                 } else if (nl.contains(needle)) {
-                    s += 1;
+                    s += kScoreLongContains;
                 }
                 if (ns == needle) {
-                    s += 1;
+                    s += kScoreShortExact;
                 }
                 if (s > nameStrength) {
                     nameStrength = s;
@@ -153,7 +162,7 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
             if (encMidiProgram >= 0) {
                 for (const InstrChannel& ch : it->channel) {
                     if (ch.program() == encMidiProgram) {
-                        midiBonus = 6;
+                        midiBonus = kScoreMidiMatch;
                         break;
                     }
                 }
@@ -162,7 +171,7 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
             int commonBonus = 0;
             for (const InstrumentGenre* gen : it->genres) {
                 if (gen && gen->id == "common") {
-                    commonBonus = 1;
+                    commonBonus = kScoreCommonGenre;
                     break;
                 }
             }
