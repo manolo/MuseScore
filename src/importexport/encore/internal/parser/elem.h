@@ -19,18 +19,15 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#ifndef MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H
-#define MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H
 
-#include "ctx.h"
+#ifndef MU_IMPORTEXPORT_ENC_PARSER_ELEMENTS_H
+#define MU_IMPORTEXPORT_ENC_PARSER_ELEMENTS_H
 
-namespace mu::iex::enc {
+#include "elem-enums.h"
+#include "elem-note.h"
+#include "elem-ornament.h"
+#include "elem-text.h"
+#include "elem-measure.h"
+#include "elem-root.h"
 
-void buildParts(BuildCtx& ctx);
-void buildMeasures(BuildCtx& ctx);
-void buildInitialSignatures(BuildCtx& ctx);
-void emitMeasures(BuildCtx& ctx);
-
-} // namespace mu::iex::enc
-
-#endif // MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H
+#endif // MU_IMPORTEXPORT_ENC_PARSER_ELEMENTS_H

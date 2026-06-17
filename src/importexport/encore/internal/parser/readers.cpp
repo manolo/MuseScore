@@ -19,18 +19,31 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#ifndef MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H
-#define MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H
 
-#include "ctx.h"
+#include "readers.h"
+#include "readers-v0xa6.h"
+#include "readers-v0xc2.h"
+#include "readers-v0xc4.h"
+
+#include "log.h"
 
 namespace mu::iex::enc {
 
-void buildParts(BuildCtx& ctx);
-void buildMeasures(BuildCtx& ctx);
-void buildInitialSignatures(BuildCtx& ctx);
-void emitMeasures(BuildCtx& ctx);
+// Maps magic byte to format reader; add new format cases here.
+std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 magic)
+{
+    switch (magic) {
+    case static_cast<quint8>(EncFormatVersion::V2_X):
+        return std::make_unique<EncFormatReader_V0xA6>();
+    case static_cast<quint8>(EncFormatVersion::V3_4_X):
+        return makeFormatReader_V0xC2();
+    case static_cast<quint8>(EncFormatVersion::V5_X):
+        return makeFormatReader_V0xC4();
+    default:
+        LOGW() << QString("Encore: unsupported format version 0x%1 - import may fail")
+                      .arg(magic, 2, 16, QChar('0'));
+        return makeFormatReader_V0xC4();
+    }
+}
 
 } // namespace mu::iex::enc
-
-#endif // MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H

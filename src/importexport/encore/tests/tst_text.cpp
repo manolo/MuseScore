@@ -50,7 +50,7 @@
 #include "engraving/dom/timesig.h"
 #include "engraving/dom/tuplet.h"
 
-#include "../internal/importer/noteloop-internal.h"
+#include "../internal/importer/emitters-internal.h"
 #include "testbase.h"
 
 static const QString ENC_DIR(QString(iex_encore_tests_DATA_ROOT) + "/data/");

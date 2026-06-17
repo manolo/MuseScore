@@ -19,18 +19,42 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#ifndef MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H
-#define MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H
 
-#include "ctx.h"
+#include "elem-ornament.h"
 
 namespace mu::iex::enc {
 
-void buildParts(BuildCtx& ctx);
-void buildMeasures(BuildCtx& ctx);
-void buildInitialSignatures(BuildCtx& ctx);
-void emitMeasures(BuildCtx& ctx);
+bool EncOrnament::read(QDataStream& ds)
+{
+    EncMeasureElem::read(ds);
+    ds >> tipo;
+    ds.skipRawData(4);
+    ds >> xoffset;
+    ds.skipRawData(1);
+    ds >> yoffset;
+    ds.skipRawData(4);
+    ds >> alMezuro;
+    ds.skipRawData(1);
+    ds >> xoffset2;
+    ds.skipRawData(5);
+    ds >> speguleco;
+    speguleco &= 3;
+    ds.skipRawData(1);
+    ds >> noto;
+    ds.skipRawData(1);
+    ds >> tempo;
+    // v0xC2 size-32: tind overlaps tempo at byte 30. See ENCORE_FORMAT.md §Ornament subtypes.
+    if (static_cast<int>(size) >= 33) {
+        ds.skipRawData(1);
+        ds >> tind;
+    } else {
+        tind = tempo;
+    }
+    int toSkip = static_cast<int>(size) - 5 - (static_cast<int>(size) >= 33 ? 28 : 26);
+    if (toSkip > 0) {
+        ds.skipRawData(toSkip);
+    }
+    return true;
+}
 
 } // namespace mu::iex::enc
-
-#endif // MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H

@@ -23,38 +23,38 @@ muse_create_module(iex_encore)
 target_sources(iex_encore PRIVATE
     enc-module.cpp
     enc-module.h
-    internal/parser/elem-note.cpp
-    internal/parser/elem-chord.cpp
-    internal/parser/elem-ornament.cpp
-    internal/parser/elem-lyric-tie.cpp
-    internal/parser/elem-measure.cpp
-    internal/parser/elem-metadata.cpp
-    internal/parser/elem-text.cpp
-    internal/parser/elem-root.cpp
+    internal/parser/parsers-note.cpp
+    internal/parser/parsers-chord.cpp
+    internal/parser/parsers-ornament.cpp
+    internal/parser/parsers-lyric-tie.cpp
+    internal/parser/parsers-measure.cpp
+    internal/parser/parsers-metadata.cpp
+    internal/parser/parsers-text.cpp
+    internal/parser/parsers-root.cpp
     internal/parser/encoding.h
     internal/parser/encoding.cpp
-    internal/parser/reader.h
-    internal/parser/reader.cpp
-    internal/parser/reader-v0xa6.h
-    internal/parser/reader-v0xa6.cpp
-    internal/parser/reader-v0xc4-base.h
-    internal/parser/reader-v0xc4-base.cpp
-    internal/parser/reader-v0xc2.h
-    internal/parser/reader-v0xc2.cpp
-    internal/parser/reader-v0xc4.h
-    internal/parser/reader-v0xc4.cpp
-    internal/parser/elements.h
-    internal/importer/mapping-clefs.cpp
-    internal/importer/mapping-title.cpp
-    internal/importer/mapping-instruments.cpp
-    internal/importer/mapping-tempo.cpp
-    internal/importer/mapping-articulations.cpp
-    internal/importer/mapping.h
+    internal/parser/readers.h
+    internal/parser/readers.cpp
+    internal/parser/readers-v0xa6.h
+    internal/parser/readers-v0xa6.cpp
+    internal/parser/readers-v0xc4-base.h
+    internal/parser/readers-v0xc4-base.cpp
+    internal/parser/readers-v0xc2.h
+    internal/parser/readers-v0xc2.cpp
+    internal/parser/readers-v0xc4.h
+    internal/parser/readers-v0xc4.cpp
+    internal/parser/elem.h
+    internal/importer/mappers-clefs.cpp
+    internal/importer/mappers-title.cpp
+    internal/importer/mappers-instruments.cpp
+    internal/importer/mappers-tempo.cpp
+    internal/importer/mappers-articulations.cpp
+    internal/importer/mappers.h
     internal/parser/ticks.cpp
     internal/parser/ticks.h
-    internal/importer/tuplets.cpp
-    internal/importer/tuplets-implied.cpp
-    internal/importer/tuplets.h
+    internal/importer/emitters-emitters-tuplets.cpp
+    internal/importer/emitters-emitters-tuplets-groups.cpp
+    internal/importer/emitters-tuplets.h
     internal/notationencreader.cpp
     internal/notationencreader.h
     internal/importer/import.cpp
@@ -62,17 +62,17 @@ target_sources(iex_encore PRIVATE
     internal/importer/builders.h
     internal/importer/builders-parts.cpp
     internal/importer/builders-measures.cpp
-    internal/importer/noteloop-internal.h
-    internal/importer/noteloop-note.cpp
-    internal/importer/noteloop-note-grace.cpp
-    internal/importer/noteloop-note-artic.cpp
-    internal/importer/noteloop-rest.cpp
-    internal/importer/noteloop-orn.cpp
-    internal/importer/noteloop-chords.cpp
-    internal/importer/noteloop-lyrics.cpp
-    internal/importer/noteloop-tempo.cpp
-    internal/importer/noteloop-fill.cpp
-    internal/importer/noteloop.cpp
+    internal/importer/emitters-internal.h
+    internal/importer/emitters-note.cpp
+    internal/importer/emitters-note-grace.cpp
+    internal/importer/emitters-note-artic.cpp
+    internal/importer/emitters-rest.cpp
+    internal/importer/emitters-orn.cpp
+    internal/importer/emitters-chords.cpp
+    internal/importer/emitters-lyrics.cpp
+    internal/importer/emitters-tempo.cpp
+    internal/importer/emitters-fill.cpp
+    internal/importer/emitters.cpp
     internal/importer/resolvers.h
     internal/importer/resolvers.cpp
     internal/importer/resolvers-slur.cpp
