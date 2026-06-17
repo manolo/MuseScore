@@ -872,34 +872,44 @@ this via the `E@tick → S@tick+120` pattern in `calculateRealDurations` and set
 
 Each byte holds one or two glyphs:
 
-| Value        | Glyphs                    |
-|--------------|---------------------------|
-| 0x04         | trill (plain; no accidental on upper neighbor)                     |
-| 0x05         | trill to minor second (flat upper neighbor; `intervalAbove=MINOR`) |
-| 0x06         | trill to augmented second (sharp; `intervalAbove=AUGMENTED`)       |
-| 0x07         | trill to major second (natural; `intervalAbove=MAJOR`)             |
-| 0x08         | turn                                                               |
-| 0x09         | inverted turn                                                      |
-| 0x0A, 0x0C   | inverted-mordent                                                   |
-| 0x0B, 0x2F   | mordent                                                            |
-| 0x12         | accent (`->`)                                                      |
-| 0x13         | marcato (`-^`)                                                     |
-| 0x14         | accent + tenuto                                                    |
-| 0x15         | marcato + staccato                                                 |
-| 0x16         | accent + staccatissimo                                             |
-| 0x17         | accent + staccato                                                  |
-| 0x18         | up bow                                                             |
-| 0x19         | down bow                                                           |
-| 0x1B         | stopped horn/brass (+)                                             |
-| 0x1C         | tenuto (`--`)                                                      |
-| 0x1D         | staccato (`-.`)                                                    |
-| 0x1E, 0x1F   | harmonic                                                           |
-| 0x20–0x22    | fermata variants; **but 0x20/0x21 on a note with tuplet != 0 means "tuplet bracket above/below" (not a fermata)** |
-| 0x24         | tenuto + staccato                                                  |
-| 0x25         | marcato + tenuto                                                   |
-| 0x28–0x2D    | staccatissimo combos                                               |
-| 0x2E         | inverted turn                                                      |
-| 0x30         | half-stopped horn (circle-plus)                                    |
+Where MuseScore has a single combined SMuFL glyph, the importer uses it. Where no combined glyph exists, two separate articulation elements are added.
+
+| Value        | Glyphs | MuseScore mapping |
+|--------------|--------|-------------------|
+| 0x04         | trill (plain) | `ornamentTrill` |
+| 0x05         | trill to minor second (flat upper neighbor) | `ornamentTrill` + `intervalAbove=MINOR` |
+| 0x06         | trill to augmented second (sharp) | `ornamentTrill` + `intervalAbove=AUGMENTED` |
+| 0x07         | trill to major second (natural) | `ornamentTrill` + `intervalAbove=MAJOR` |
+| 0x08         | turn | `ornamentTurn` |
+| 0x09         | wave / inverted-turn variant | `ornamentTrill` |
+| 0x0A         | inverted-mordent (short) | `ornamentShortTrill` |
+| 0x0C         | inverted-mordent (long) | `ornamentTremblement` |
+| 0x0B         | mordent (simple lower) | `ornamentMordent` |
+| 0x2F         | mordent (double/long lower) | `ornamentPrallMordent` |
+| 0x12         | accent (`>`) | `articAccentAbove` |
+| 0x13         | marcato (`^`) | `articMarcatoAbove` |
+| 0x14         | staccato + heavy accent (∨) | `articMarcatoStaccatoBelow` (single glyph) |
+| 0x15         | marcato + staccato | `articMarcatoStaccatoAbove` (single glyph) |
+| 0x16         | accent + staccatissimo | `articAccentAbove` + `articStaccatissimoAbove` (two elements) |
+| 0x17         | accent + staccato | `articAccentStaccatoAbove` (single glyph) |
+| 0x18         | up bow | `stringsUpBow` |
+| 0x19         | down bow | `stringsDownBow` |
+| 0x1A         | marcato (variant) | `articMarcatoAbove` |
+| 0x1B         | stopped horn/brass (+) | `brassMuteClosed` |
+| 0x1C         | tenuto (`—`) | `articTenutoAbove` |
+| 0x1D         | staccato (`.`) | `articStaccatoAbove` |
+| 0x1E, 0x1F   | harmonic | `stringsHarmonic` |
+| 0x20, 0x21   | fermata; **on tuplet note means "tuplet bracket above/below" (not a fermata)** | `fermataAbove` |
+| 0x22, 0x23   | tenuto + accent | `articTenutoAccentAbove` (single glyph) |
+| 0x24         | tenuto + staccato (portato) | `articTenutoStaccatoAbove` (single glyph) |
+| 0x25, 0x27   | marcato + tenuto | `articMarcatoTenutoAbove` (single glyph) |
+| 0x26         | tenuto + heavy accent (∨) | `articMarcatoTenutoBelow` (single glyph) |
+| 0x28, 0x29   | staccatissimo | `articStaccatissimoAbove` |
+| 0x2A         | staccatissimo + accent | `articStaccatissimoAbove` + `articAccentAbove` (two elements) |
+| 0x2B         | accent + staccatissimo | `articAccentAbove` + `articStaccatissimoAbove` (two elements) |
+| 0x2C, 0x2D   | tenuto + staccatissimo | `articTenutoAbove` + `articStaccatissimoAbove` (two elements) |
+| 0x2E         | inverted turn | `ornamentTurnInverted` |
+| 0x30         | half-stopped horn (circle-plus) | `brassMuteHalfClosed` |
 
 ### Technical markings (reuse articulation slots)
 
