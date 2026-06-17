@@ -1782,20 +1782,19 @@ TEST_F(Tst_Ornaments, guitar_bend_orns_skipped)
 }
 
 // ===========================================================================
-// FEATURE: Newly decoded tremolo ORN tipos produce the correct TremoloType:
-//   0xE6 TREMOLO_8  -> R8  (1 slash)
-//   0xEE TREMOLO_16 -> R16 (2 slashes)
-//   0xE9 TREMOLO_64 -> R64 (4 slashes)
-// Fixture: 3 quarter notes in 4/4, each with a different ORN tremolo.
+// REGRESSION: ORN tipo 0xEE (TREMOLO_16) produces R16 tremolo (2 slashes).
+// ORN tipos 0xE6 and 0xE9 are string-number markers (string 2 and 5),
+// NOT tremolos — they must produce Fingering STRING_NUMBER, not tremolo.
 // ===========================================================================
-TEST_F(Tst_Ornaments, tremolo_orn_r8_r16_r64)
+TEST_F(Tst_Ornaments, tremolo_orn_r16_and_string_numbers)
 {
     MasterScore* score = readEncoreScore("ornaments_tremolo_r8_r16_r64.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    std::vector<TremoloType> found;
+    std::vector<TremoloType> tremolos;
+    int stringNumCount = 0;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
         if (!mb->isMeasure()) {
             continue;
@@ -1808,16 +1807,22 @@ TEST_F(Tst_Ornaments, tremolo_orn_r8_r16_r64)
             }
             TremoloSingleChord* t = toChord(el)->tremoloSingleChord();
             if (t) {
-                found.push_back(t->tremoloType());
+                tremolos.push_back(t->tremoloType());
+            }
+            for (Note* n : toChord(el)->notes()) {
+                for (EngravingItem* e : n->el()) {
+                    if (e && e->isFingering()
+                        && toFingering(e)->textStyleType() == TextStyleType::STRING_NUMBER) {
+                        ++stringNumCount;
+                    }
+                }
             }
         }
     }
-    const std::vector<TremoloType> expected = {
-        TremoloType::R8,
-        TremoloType::R16,
-        TremoloType::R64,
-    };
-    EXPECT_EQ(found, expected);
+    // Only 0xEE produces a tremolo (R16).
+    EXPECT_EQ(tremolos, std::vector<TremoloType>{ TremoloType::R16 });
+    // 0xE6 and 0xE9 produce string numbers (2 and 5).
+    EXPECT_EQ(stringNumCount, 2) << "0xE6 and 0xE9 must produce STRING_NUMBER fingerings, not tremolos";
     delete score;
 }
 

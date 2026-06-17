@@ -136,6 +136,8 @@ struct PendingBowing {
 };
 
 // Fingering from stand-alone ORN elements (tipo 0xB9..0xBD), deferred like ARPEGGIO.
+// Also used for standalone string-number ORNs (0xE6..0xEA = strings 2..6); those set
+// isStringNum=true and the resolver uses TextStyleType::STRING_NUMBER.
 struct PendingOrnFingering {
     Fraction tick;
     track_idx_t track;
@@ -143,6 +145,7 @@ struct PendingOrnFingering {
     int measIdx = -1;
     bool crossMeasure = false;   // ORN at last v0 tick, no v4 note there: belongs to next measure
     bool preferSibling = false;  // more ORNs than v0 notes at tick: belongs to 2nd-staff chord
+    bool isStringNum  = false;   // true → render as STRING_NUMBER (circled), not FINGERING
 };
 
 // Segno/Coda markers (tipo 0xA2/0xA6).
