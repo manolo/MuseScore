@@ -559,39 +559,17 @@ void handleOrnament(BuildCtx& ctx, NoteLoopMeasCtx& mc, NoteElemCtx& ec)
                                        static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
         break;
     }
-    case EncOrnamentType::STACCATISSIMO: {
-        const bool cm = !noteTicks.count(static_cast<int>(e->tick));
-        const Fraction bowTick = measTick + Fraction(static_cast<int>(e->tick), 960);
-        ctx.pendingBowings.push_back({ bowTick, track, SymId::articStaccatissimoAbove, measIdx, cm,
-                                       static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
+    case EncOrnamentType::GUITAR_BEND:
+    case EncOrnamentType::GUITAR_BEND_2:
+    case EncOrnamentType::GUITAR_PREBEND:
+    case EncOrnamentType::GUITAR_PREBEND_RELEASE:
+    case EncOrnamentType::GUITAR_BEND_V:
+        LOGW() << QString("Encore: guitar bend 0x%1 not yet imported (measure %2 staff %3 tick %4)")
+                      .arg(eo->tipo, 2, 16, QChar('0'))
+                      .arg(measIdx)
+                      .arg(staffIdx)
+                      .arg(static_cast<int>(e->tick));
         break;
-    }
-    case EncOrnamentType::TENUTO_STACCATISSIMO:
-    case EncOrnamentType::TENUTO_STACCATISSIMO_2: {
-        const bool cm = !noteTicks.count(static_cast<int>(e->tick));
-        const Fraction bowTick = measTick + Fraction(static_cast<int>(e->tick), 960);
-        ctx.pendingBowings.push_back({ bowTick, track, SymId::articTenutoAbove, measIdx, cm,
-                                       static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
-        ctx.pendingBowings.push_back({ bowTick, track, SymId::articStaccatissimoAbove, measIdx, cm,
-                                       static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
-        break;
-    }
-    case EncOrnamentType::MARCATO_STACCATISSIMO: {
-        const bool cm = !noteTicks.count(static_cast<int>(e->tick));
-        const Fraction bowTick = measTick + Fraction(static_cast<int>(e->tick), 960);
-        ctx.pendingBowings.push_back({ bowTick, track, SymId::articMarcatoBelow, measIdx, cm,
-                                       static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
-        ctx.pendingBowings.push_back({ bowTick, track, SymId::articStaccatissimoAbove, measIdx, cm,
-                                       static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
-        break;
-    }
-    case EncOrnamentType::THICK_STOPPED: {
-        const bool cm = !noteTicks.count(static_cast<int>(e->tick));
-        const Fraction bowTick = measTick + Fraction(static_cast<int>(e->tick), 960);
-        ctx.pendingBowings.push_back({ bowTick, track, SymId::brassMuteClosed, measIdx, cm,
-                                       static_cast<int>(eo->xoffset), static_cast<int>(e->tick) });
-        break;
-    }
     case EncOrnamentType::DOUBLE_MORDENT: {
         const bool cm = !noteTicks.count(static_cast<int>(e->tick));
         const Fraction bowTick = measTick + Fraction(static_cast<int>(e->tick), 960);

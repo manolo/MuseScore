@@ -97,12 +97,14 @@ enum class EncOrnamentType : quint8 {
     STAFFTEXT  = 0x1E,
     SLURSTART  = 0x21,
     ARPEGGIO   = 0x22,
-    // Standalone staccatissimo ORNs (parallel to per-note artic bytes at same values).
-    STACCATISSIMO          = 0x28,  // staccatissimo → articStaccatissimoAbove
-    TENUTO_STACCATISSIMO   = 0x29,  // tenuto + staccatissimo
-    TENUTO_STACCATISSIMO_2 = 0x2A,  // tenuto + staccatissimo (variant)
-    MARCATO_STACCATISSIMO  = 0x2B,  // heavy accent (∨) + staccatissimo
-    THICK_STOPPED          = 0x30,  // thick stopped brass (+, bold) → brassMuteClosed
+    // Guitar bends (size=28 spanner format; alMezuro+xoffset2 encode bend arc).
+    // Confirmed in "Accidentals Marks and others2.enc" m37-m38.
+    // Not yet implemented in MuseScore importer — skip silently with LOGW.
+    GUITAR_BEND            = 0x28,  // regular bend (curved arrow up)
+    GUITAR_BEND_2          = 0x29,  // regular bend (curved arrow)
+    GUITAR_PREBEND         = 0x2A,  // prebend
+    GUITAR_PREBEND_RELEASE = 0x2B,  // prebend-release
+    GUITAR_BEND_V          = 0x30,  // V-shape bend
     // See ENCORE_FORMAT.md §Ornament subtypes for tipo values, sizes, and quirks.
     TRILL_END    = 0x35,
     TRILL_START  = 0x36,
