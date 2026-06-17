@@ -1032,6 +1032,34 @@ def gen_v0c4_perc_clef_positions():
 #
 #   pitch=40 fv=0x03 (hi=0, normal) position=7 → HEAD_NORMAL (not HEAD_SLASH)
 # ===========================================================================
+def gen_v0c4_perc_notehead_all_nibbles():
+    # Regression for all 10 faceValue high-nibble notehead types (0-9).
+    # Each note uses a DISTINCT pitch so drumset entries do not collide.
+    # position=5 (middle line) for all; fv=(nibble<<4)|3 (quarter note).
+    # Notes spaced at 240-tick (quarter) intervals across three 4/4 measures
+    # so encTick matches cumTick and notes are not dropped as overlapping.
+    #
+    # Expected headGroup after layout:
+    #   0=NORMAL  1=DIAMOND     2=TRIANGLE_UP  3=CUSTOM(square)
+    #   4=CROSS   5=XCIRCLE     6=PLUS         7=SLASH
+    #   8=LARGE_DIAMOND         9=NORMAL(invisible)
+    measures = []
+    for m_start in range(3):
+        e = b''
+        for beat in range(4):
+            nibble = m_start * 4 + beat
+            if nibble >= 10:
+                e += rest_v0c4(beat * 240, 0, 0, fv=3)
+                continue
+            pitch = 50 + nibble
+            fv    = (nibble << 4) | 3
+            e += note_v0c4_perc(beat * 240, 0, 0, fv=fv, pitch=pitch, position=5)
+        e += end_marker()
+        measures.append((meas_hdr(4, 4), e))
+    result = assemble(0xC4, measures, fill_ts=(4, 4))
+    return set_staff_clef(result, staff_idx=0, clef=7)   # PERC clef = 7
+
+
 def gen_v0c4_perc_standard_drumset_notehead():
     e  = note_v0c4_perc(0, 0, 0, fv=0x03, pitch=40, position=7)
     e += end_marker()
@@ -7407,6 +7435,7 @@ if __name__=='__main__':
     write("notes_v0c2_implied_group_boundary.enc", gen_v0c2_implied_group_boundary())
     write("notes_capped_tuplet_note.enc",    gen_v0c4_capped_tuplet_note())
     write("notes_perc_clef_positions.enc",   gen_v0c4_perc_clef_positions())
+    write("notes_perc_notehead_all_nibbles.enc", gen_v0c4_perc_notehead_all_nibbles())
     write("notes_perc_clef_standard_drumset_notehead.enc", gen_v0c4_perc_standard_drumset_notehead())
     write("notes_mixed_duration_tuplet_boundary_fill.enc", gen_v0c4_mixed_duration_tuplet_boundary_fill())
     write("notes_mixed_duration_triplet.enc",   gen_v0c4_mixed_duration_triplet())
