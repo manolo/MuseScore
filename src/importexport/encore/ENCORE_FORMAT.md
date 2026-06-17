@@ -881,7 +881,7 @@ Where MuseScore has a single combined SMuFL glyph, the importer uses it. Where n
 | 0x06         | trill to augmented second (sharp) | `ornamentTrill` + `intervalAbove=AUGMENTED` |
 | 0x07         | trill to major second (natural) | `ornamentTrill` + `intervalAbove=MAJOR` |
 | 0x08         | turn | `ornamentTurn` |
-| 0x09         | wave / inverted-turn variant | `ornamentTrill` |
+| 0x09         | wave mark | skipped (no MuseScore equivalent) |
 | 0x0A         | inverted-mordent (short) | `ornamentShortTrill` |
 | 0x0C         | inverted-mordent (long) | `ornamentTremblement` |
 | 0x0B         | mordent (simple lower) | `ornamentMordent` |
