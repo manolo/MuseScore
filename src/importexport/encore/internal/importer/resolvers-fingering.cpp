@@ -290,11 +290,23 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
         }
         if (pf.isStringNum) {
             // String number ORN (0xE6..0xEA): circled number above the top note.
+            // The per-note artic "options bit 0 + hasScaleStringAnchors" path may have already
+            // placed a STRING_NUMBER on this note. Skip if one already exists (dedup).
             Note* n = notes.back();
-            Fingering* f = Factory::createFingering(n, TextStyleType::STRING_NUMBER);
-            f->setTrack(useTrack);
-            f->setXmlText(String::number(pf.fingerNum));
-            n->add(f);
+            bool alreadyHas = false;
+            for (EngravingItem* el : n->el()) {
+                if (el && el->isFingering()
+                    && toFingering(el)->textStyleType() == TextStyleType::STRING_NUMBER) {
+                    alreadyHas = true;
+                    break;
+                }
+            }
+            if (!alreadyHas) {
+                Fingering* f = Factory::createFingering(n, TextStyleType::STRING_NUMBER);
+                f->setTrack(useTrack);
+                f->setXmlText(String::number(pf.fingerNum));
+                n->add(f);
+            }
         } else {
             int& idx = fingeringCount[c];
             Note* n = notes[std::min(idx, static_cast<int>(notes.size()) - 1)];
