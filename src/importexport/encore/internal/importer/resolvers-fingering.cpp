@@ -171,13 +171,10 @@ static void applySystemLocksFromLines(BuildCtx& ctx)
     }
 }
 
-void resolveFingeringAndBowing(BuildCtx& ctx)
+static void applyPendingBowings(BuildCtx& ctx, MasterScore* score)
 {
-    MasterScore* score = ctx.score;
-
-    // Bowing tick correction: Encore sometimes stores ORN enc tick=0 even when the mark
-    // visually falls on a later beat. Phase 1: adopt the tick from a same-measure ORN with a
-    // matching ornXoffset (±BOW_XOFF_CLUSTER). Phase 2: match via per-measure note xoffset data.
+    // Tick correction: Encore sometimes stores ORN enc tick=0 when the mark visually
+    // falls on a later beat. Correct before attachment.
     for (PendingBowing& pb : ctx.pendingBowings) {
         if (pb.crossMeasure || pb.encTickRaw > 0) {
             continue;
@@ -232,7 +229,10 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
         art->setSymId(pb.symId);
         c->add(art);
     }
+}
 
+static void applyPendingFingeringOrns(BuildCtx& ctx, MasterScore* score)
+{
     // Fingering ORNs (0xB9..0xBD): multiple ORNs at the same tick attach low-to-high.
     // crossMeasure: next-measure sibling chord. preferSibling: 2nd-staff chord at same tick.
     std::map<Chord*, int> fingeringCount;
@@ -318,6 +318,13 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
         }
     }
 
+}
+
+void resolveFingeringAndBowing(BuildCtx& ctx)
+{
+    MasterScore* score = ctx.score;
+    applyPendingBowings(ctx, score);
+    applyPendingFingeringOrns(ctx, score);
     // SystemLocks enforce Encore's line layout as hard constraints so the engine compresses
     // spacing within the system rather than redistributing measures across lines.
     applySystemLocksFromLines(ctx);
