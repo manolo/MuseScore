@@ -123,6 +123,14 @@ def note_v0c4(tick, voice, staffIdx, fv, pitch, tuplet=0):
     d[0]=28; d[1]=staffIdx&0x3F; d[2]=fv; d[10]=tuplet; d[12]=pitch
     return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)
 
+def note_v0c4_xoff(tick, voice, staffIdx, fv, pitch, xoff):
+    """v0xC4 28-byte note with explicit layout x-position at element+10..+11 (LE uint16).
+    d[7..8] = element bytes +10..+11 (xoffset field)."""
+    d = bytearray(25)
+    d[0]=28; d[1]=staffIdx&0x3F; d[2]=fv; d[12]=pitch
+    struct.pack_into('<H', d, 7, xoff & 0xFFFF)
+    return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)
+
 def note_v0c4_perc(tick, voice, staffIdx, fv, pitch, position=0):
     """28-byte v0xC4 note with percussion position byte (element+12 = d[9])."""
     d = bytearray(25)
@@ -7276,6 +7284,39 @@ def gen_v0c4_graphic_line_skipped():
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
 
+# ===========================================================================
+# ornaments_cross_measure_slur_precision.enc
+# Cross-measure slur (alMezuro=2) where slurXoffset2=15 matches the SECOND
+# note of the target measure, NOT the last. Verifies that Fallback 1
+# (xoffset2 direct comparison in resolvers-slur.cpp) selects the correct
+# endpoint note and does not fall through to "last ChordRest".
+#   M0: SLURSTART(alMezuro=2, xoffset=5, xoffset2=15) + 4 quarter notes
+#   M1: 4 filler notes (no slur)
+#   M2 (target): 4 notes with xoffsets 5/15/25/35, pitches C4/D4/E4/F4
+#     slurXoffset2=15 → D4 (MIDI 62), the 2nd note.
+# ===========================================================================
+def gen_v0c4_cross_measure_slur_precision():
+    e0  = ornament_v0c4(0, 0, 0, tipo=0x21, xoffset=5, alMezuro=2, xoffset2=15)
+    e0 += note_v0c4(  0, 0, 0, fv=3, pitch=60)
+    e0 += note_v0c4(240, 0, 0, fv=3, pitch=62)
+    e0 += note_v0c4(480, 0, 0, fv=3, pitch=64)
+    e0 += note_v0c4(720, 0, 0, fv=3, pitch=65)
+    e0 += end_marker()
+    e1  = note_v0c4(  0, 0, 0, fv=3, pitch=67)
+    e1 += note_v0c4(240, 0, 0, fv=3, pitch=69)
+    e1 += note_v0c4(480, 0, 0, fv=3, pitch=71)
+    e1 += note_v0c4(720, 0, 0, fv=3, pitch=72)
+    e1 += end_marker()
+    # Target measure: distinct xoffsets so Fallback 1 can pick the right note.
+    e2  = note_v0c4_xoff(  0, 0, 0, fv=3, pitch=60, xoff= 5)   # C4 xoff=5
+    e2 += note_v0c4_xoff(240, 0, 0, fv=3, pitch=62, xoff=15)   # D4 xoff=15 <- target
+    e2 += note_v0c4_xoff(480, 0, 0, fv=3, pitch=64, xoff=25)   # E4 xoff=25
+    e2 += note_v0c4_xoff(720, 0, 0, fv=3, pitch=65, xoff=35)   # F4 xoff=35
+    e2 += end_marker()
+    custom = [(meas_hdr(4,4), e0), (meas_hdr(4,4), e1), (meas_hdr(4,4), e2)]
+    return assemble(0xC4, custom, fill_ts=(4, 4))
+
+
 def write(name,data):
     path=os.path.join(OUT_DIR,name)
     with open(path,'wb') as f: f.write(data)
@@ -7506,6 +7547,7 @@ if __name__=='__main__':
     write("ornaments_accent_nonzero_voice.enc",             gen_v0c4_accent_nonzero_voice())
     write("ornaments_accent_offset_tick_nonzero_voice.enc", gen_v0c4_accent_offset_tick_nonzero_voice())
     write("notes_dual_rests_same_tick_routing.enc",         gen_v0c4_dual_rests_same_tick_routing())
+    write("ornaments_cross_measure_slur_precision.enc",    gen_v0c4_cross_measure_slur_precision())
     write("ornaments_new_artic_types.enc",                 gen_v0c4_new_artic_types())
     write("ornaments_staccatissimo_orns.enc",              gen_v0c4_staccatissimo_orns())
     write("ornaments_tremolo_r8_r16_r64.enc",              gen_v0c4_tremolo_r8_r16_r64())
