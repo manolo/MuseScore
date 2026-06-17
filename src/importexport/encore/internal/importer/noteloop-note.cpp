@@ -582,6 +582,17 @@ static bool resolveNoteDuration(
 
 static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
 {
+    // faceValue high nibble=7: slash notehead in Encore's rhythm-staff notation.
+    // MuseScore has no semantic equivalent; force HEAD_NORMAL so notes don't
+    // appear as slash marks (the drumset template may default to HEAD_SLASH).
+    if ((en->faceValue >> 4) == 7) {
+        note->setHeadGroup(NoteHeadGroup::HEAD_NORMAL);
+        Drumset* ds = note->part()->instrument()->drumset();
+        if (ds && ds->isValid(note->pitch())) {
+            ds->drum(note->pitch()).notehead = NoteHeadGroup::HEAD_NORMAL;
+        }
+        return;
+    }
     // faceValue high nibble=3: square notehead (Encore bass drum notation).
     if ((en->faceValue >> 4) == 3) {
         note->setHeadGroup(NoteHeadGroup::HEAD_CUSTOM);
