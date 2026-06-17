@@ -555,9 +555,9 @@ TEST_F(Tst_Ornaments, trill_mordent_from_per_note_artic_byte)
     }
     const std::vector<SymId> expected = {
         SymId::ornamentTrill,
-        SymId::ornamentShortTrill,   // <inverted-mordent>
-        SymId::ornamentMordent,
-        SymId::ornamentMordent,
+        SymId::ornamentShortTrill,    // 0x0A: inverted-mordent (short)
+        SymId::ornamentMordent,       // 0x0B: simple lower mordent
+        SymId::ornamentPrallMordent,  // 0x2F: double/long lower mordent
     };
     EXPECT_EQ(seen, expected);
     delete score;
