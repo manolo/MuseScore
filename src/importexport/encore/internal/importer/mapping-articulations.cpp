@@ -45,10 +45,10 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x2E: return { SymId::ornamentTurnInverted };  // inverted turn
     case 0x12: return { SymId::articAccentAbove };
     case 0x13: return { SymId::articMarcatoAbove };
-    case 0x14: return { SymId::articStaccatoAbove, SymId::articMarcatoBelow };  // staccato + heavy accent (∨)
-    case 0x15: return { SymId::articMarcatoAbove, SymId::articStaccatoAbove };
+    case 0x14: return { SymId::articMarcatoStaccatoBelow };   // staccato + heavy accent (∨) as single glyph
+    case 0x15: return { SymId::articMarcatoStaccatoAbove };   // marcato + staccato as single glyph
     case 0x16: return { SymId::articAccentAbove, SymId::articStaccatissimoAbove };
-    case 0x17: return { SymId::articAccentAbove, SymId::articStaccatoAbove };
+    case 0x17: return { SymId::articAccentStaccatoAbove };    // accent + staccato as single glyph
     case 0x18: return { SymId::stringsUpBow };
     case 0x19: return { SymId::stringsDownBow };
     case 0x1A: return { SymId::articMarcatoAbove };
@@ -56,12 +56,12 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x1D: return { SymId::articStaccatoAbove };
     case 0x20:
     case 0x21: return { SymId::fermataAbove };
-    case 0x22: return { SymId::articAccentAbove, SymId::articTenutoAbove };
-    case 0x23: return { SymId::articAccentAbove, SymId::articTenutoAbove };
-    case 0x24: return { SymId::articTenutoAbove, SymId::articStaccatoAbove };
-    case 0x25: return { SymId::articMarcatoAbove, SymId::articTenutoAbove };
-    case 0x26: return { SymId::articTenutoAbove, SymId::articMarcatoBelow };  // tenuto + heavy accent (∨)
-    case 0x27: return { SymId::articMarcatoAbove, SymId::articTenutoAbove };
+    case 0x22: return { SymId::articTenutoAccentAbove };      // tenuto + accent as single glyph
+    case 0x23: return { SymId::articTenutoAccentAbove };
+    case 0x24: return { SymId::articTenutoStaccatoAbove };    // tenuto + staccato (portato) as single glyph
+    case 0x25: return { SymId::articMarcatoTenutoAbove };     // marcato + tenuto as single glyph
+    case 0x26: return { SymId::articMarcatoTenutoBelow };     // tenuto + heavy accent (∨) as single glyph
+    case 0x27: return { SymId::articMarcatoTenutoAbove };     // marcato + tenuto as single glyph
     case 0x28:
     case 0x29: return { SymId::articStaccatissimoAbove };
     case 0x2A: return { SymId::articStaccatissimoAbove, SymId::articAccentAbove };  // staccatissimo + accent

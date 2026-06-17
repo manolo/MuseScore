@@ -1604,6 +1604,23 @@ TEST_F(Tst_Importer, encore_symbols_full_coverage)
                 case SymId::articStaccatissimoAbove: case SymId::articStaccatissimoBelow:
                     ++staccatissimos;
                     break;
+                // Combined single-glyph articulations: count toward each component.
+                // (Note: articStaccatoAbove/Below already counted above, not repeated here.)
+                case SymId::articMarcatoStaccatoAbove: case SymId::articMarcatoStaccatoBelow:
+                    ++marcatos; ++staccatos;
+                    break;
+                case SymId::articMarcatoTenutoAbove: case SymId::articMarcatoTenutoBelow:
+                    ++marcatos; ++tenutos;
+                    break;
+                case SymId::articAccentStaccatoAbove: case SymId::articAccentStaccatoBelow:
+                    ++accents; ++staccatos;
+                    break;
+                case SymId::articTenutoStaccatoAbove: case SymId::articTenutoStaccatoBelow:
+                    ++tenutos; ++staccatos;
+                    break;
+                case SymId::articTenutoAccentAbove: case SymId::articTenutoAccentBelow:
+                    ++tenutos; ++accents;
+                    break;
                 case SymId::ornamentTrill:
                     ++trills;
                     break;
