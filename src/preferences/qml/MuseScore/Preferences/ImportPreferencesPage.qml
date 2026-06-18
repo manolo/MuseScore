@@ -234,6 +234,19 @@ PreferencesPage {
                 importPreferencesModel.encoreFirstMeasureIsPickup = value
             }
 
+            onResetToDefaultRequested: {
+                importPreferencesModel.encoreImportPageLayout = true
+                importPreferencesModel.encoreImportPageBreaks = true
+                importPreferencesModel.encoreImportSystemLocks = true
+                importPreferencesModel.encoreImportStaffSize = true
+                importPreferencesModel.encoreImportTempoTextSemantic = true
+                importPreferencesModel.encoreImportUnsupportedArticulationsAsText = false
+                importPreferencesModel.encoreInstrumentSearchMode = 0
+                importPreferencesModel.encoreUnderfillStrategy = 0
+                importPreferencesModel.encoreOverfillStrategy = 0
+                importPreferencesModel.encoreFirstMeasureIsPickup = true
+            }
+
             onFocusChanged: {
                 if (activeFocus) {
                     root.ensureContentVisibleRequested(Qt.rect(x, y, width, height))
