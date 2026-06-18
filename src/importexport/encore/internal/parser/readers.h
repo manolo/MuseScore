@@ -98,12 +98,7 @@ struct EncFormatReader
 
     // Format capability queries — see ENCORE_FORMAT.md §Known quirks for per-version details.
     virtual bool hasGraceTimeBorrowing() const { return false; }  // v0xA6: grace borrows rdur from next note
-    virtual bool supportsImpliedTuplets() const { return false; }  // v0xC2: tuplet by rdur/fv mismatch
-    virtual bool usesG1LowTieSender() const { return false; }      // v0xC2: grace1 low nibble = tie-sender
-    virtual bool alMezuroIsReliable() const { return true; }       // v0xC2=false: alMezuro has no valid measure-count semantics
-    // True in v0xC2: standalone ORN tipo 0xC4 encodes accent above (not up-bow).
-    // In v0xC4, accent is in NOTE articulationByte 0x12; ORN 0xC4 = up-bow.
-    virtual bool ornC4IsAccent() const { return false; }
+    virtual bool supportsImpliedTuplets() const { return false; }  // v0xC2: dotted-eighth/sixteenth fix in calculateRealDurations
     virtual const char* formatName() const { return "v0xC4"; }    // for logging
     // Bytes to skip between kie (byte +10) and text. v0xC4=9 (text at +20), v0xC2=7 (text at +18).
     virtual quint8 lyricTextGapAfterKie() const { return 9; }

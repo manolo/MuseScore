@@ -80,6 +80,8 @@ struct EncNote : EncMeasureElem {
     // Set by calculateRealDurations() for v0xA6: note is a non-leading grace
     // within a grace group (shorter duration than the leading grace).
     bool isInnerGrace      { false };
+    // Set by postProcessElement() for formats where grace1 low nibble encodes tie-sender (v0xC2).
+    bool isTieSender       { false };
 
     using EncMeasureElem::EncMeasureElem;
 

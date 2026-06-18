@@ -52,6 +52,7 @@ struct PendingSlur {
     int startMeasIdx;
     int endMeasIdx;
     int alMezuro;
+    bool alMezuroValid { true };  // false when format cannot guarantee measure-count semantics
     int slurXoffset;
     int slurXoffset2;
     int staffIdx;
@@ -167,12 +168,6 @@ struct BuildCtx
 {
     mu::engraving::MasterScore* score;
     const EncRoot& enc;
-    const EncFormatReader* fmt { nullptr };    // set in buildScore(), non-owning
-
-    // Format capability flags set from fmt in buildScore().
-    bool impliedTuplets      { false };  // v0xC2: tuplet membership by rdur/faceValue mismatch
-    bool g1LowTieSender      { false };  // v0xC2: grace1 low nibble encodes tie-sender indicator
-    bool alMezuroIsReliable  { true };   // v0xC2=false: alMezuro byte has no valid measure-count semantics
 
     // Populated by buildParts():
     int totalStaves = 0;

@@ -1010,6 +1010,26 @@ Exercised by `Tst_Structure.timesig_v0c2_common_time_glyph_preserved`
 (glyph=0x63) and `Tst_Structure.timesig_v0c2_common_time_glyph_uppercase_preserved`
 (glyph=0x43).
 
+## Parser normalization ("fat parse, thin import")
+
+All format-specific interpretation is resolved in the parser layer before `EncRoot` is handed
+to the importer. `postProcessElement()` in each `EncFormatReader` subclass is the single hook
+where raw binary quirks are normalized into semantic fields. The importer (`BuildCtx` and all
+emitters/resolvers) has no knowledge of which format version produced the data.
+
+The three v0xC2 normalizations performed in `EncFormatReader_V0xC2::postProcessElement`:
+
+| Quirk | Raw binary encoding | Normalized field |
+|---|---|---|
+| Ornament tipo 0xC4 = accent | ORN tipo byte = 0xC4 | remapped to ACCENT (0xBE) so all formats share a single tipo value |
+| grace1 tie-sender flag | `grace1 & 0x0F == 1` | `EncNote.isTieSender = true` (false for all other formats) |
+| alMezuro unreliable | alMezuro may hold stale values | `EncOrnament.alMezuroValid = false`; copied to `PendingSlur.alMezuroValid` at enqueue |
+
+The importer uses `en->isTieSender` directly (no format flag) and `ps.alMezuroValid` (per-slur,
+not a global context flag). Adding a new Encore format version requires only a new
+`EncFormatReader` subclass and its `postProcessElement` — zero importer changes for quirks that
+fit the existing normalized fields.
+
 ## v0xC2 size=24 pitch sub-variants
 
 The v0xC2 pitch-swap (`semiTonePitch = byte[+13]; byte[+13] = 0`) was
@@ -1019,7 +1039,7 @@ pitch is already in the standard `semiTonePitch` slot (+15) and the
 tuplet slot contains 0.
 
 The importer guards the swap with `if (en->tuplet > 0)` in
-`postProcessElement` (`reader-v0xc4.cpp`): when `tuplet == 0` the swap
+`postProcessElement` (`readers-v0xc2.cpp`): when `tuplet == 0` the swap
 is skipped and `semiTonePitch` is preserved as-is.
 
 Without this guard all notes in sub-variant B files (e.g. TUVEHAMB.ENC)

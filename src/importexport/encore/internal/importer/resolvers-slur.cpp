@@ -201,10 +201,10 @@ void resolveSlurs(BuildCtx& ctx)
 
     // .enc has no SLURSTOP; endpoint derived from alMezuro (target measure) + xoffset heuristic.
     for (const PendingSlur& ps : ctx.pendingSlurs) {
-        // When alMezuro is not a reliable measure count (e.g. v0xC2), clamp to
-        // the start measure so the same-measure xoffset heuristic handles it.
+        // When alMezuro is not a reliable measure count, clamp to the start measure
+        // so the same-measure xoffset heuristic handles it.
         int clampedEndMeasIdx = ps.endMeasIdx;
-        if (!ctx.alMezuroIsReliable && ps.startMeasIdx >= 0
+        if (!ps.alMezuroValid && ps.startMeasIdx >= 0
             && ps.startMeasIdx < static_cast<int>(ctx.measuresByIdx.size())) {
             clampedEndMeasIdx = ps.startMeasIdx;
         }
@@ -217,8 +217,9 @@ void resolveSlurs(BuildCtx& ctx)
         bool resolved = false;
 
         // Same-measure heuristic: find the note closest to first_note_xoff + pixelSpan.
-        // Skipped for cross-measure v0xC4 slurs (alMezuro > 0) because xoffsets reset at barlines.
-        const bool tryHeuristic = (!ctx.alMezuroIsReliable || ps.alMezuro == 0)
+        // Skipped for cross-measure slurs with a reliable alMezuro count (alMezuro > 0) because
+        // xoffsets reset at barlines.
+        const bool tryHeuristic = (!ps.alMezuroValid || ps.alMezuro == 0)
                                   && ps.startMeasIdx >= 0
                                   && ps.startMeasIdx < static_cast<int>(enc.measures.size());
         if (tryHeuristic) {
@@ -340,9 +341,9 @@ void resolveSlurs(BuildCtx& ctx)
                         }
                         resolved = true;
                     }
-                    // v0xC2 cross-measure extension: targetEndXoff exceeds all same-measure xoffsets
-                    // and no same-measure note found → search up to 2 measures forward.
-                    if (!resolved && !ctx.alMezuroIsReliable && bestDist > 0
+                    // Cross-measure extension when alMezuro is unreliable: targetEndXoff exceeds all
+                    // same-measure xoffsets and no same-measure note found → search up to 2 measures forward.
+                    if (!resolved && !ps.alMezuroValid && bestDist > 0
                         && targetEndXoff > maxXoffInMeas
                         && bestEncTick < 0) {
                         for (int nextMIdx = ps.startMeasIdx + 1;
