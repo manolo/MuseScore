@@ -102,14 +102,12 @@ void applyConcertPitch(Note* n, int semitone)
     n->setTpcFromPitch();
 }
 
-// Derive display size (1-4) for a given instrument staff index.
-// Encore 5.x: header byte 0x52 is the authoritative size (1-4 direct index).
-// Encore 4.x: 0x52 stores an unrelated field; size comes from LINE staff entry byte[13]
-//   (0-indexed: 0=Size1/60%, 1=Size2/70%, 2=Size3/75%, 3=Size4/100%).
+// Derive display size (1-4) for a given instrument index.
+// LINE staff entry byte +13 (0-indexed 0-3) holds per-instrument size in both 4.x and 5.x.
+// header.scoreSize (byte 0x52) is a global fallback for files without LINE data.
 static int staffDisplaySize(const EncRoot& enc, int instrIdx)
 {
-    const bool isEncore4x = (enc.header.chuVersio < 1000);
-    if (isEncore4x && !enc.lines.empty()) {
+    if (!enc.lines.empty()) {
         for (const EncLineStaffData& lsd : enc.lines[0].staffData) {
             if (static_cast<int>(lsd.instrumentIndex()) == instrIdx) {
                 return std::clamp(static_cast<int>(lsd.staffSizeHint) + 1, 1, 4);
