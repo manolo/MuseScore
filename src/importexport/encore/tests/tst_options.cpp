@@ -228,6 +228,38 @@ TEST_F(Tst_Options, firstMeasure_not_pickup_keeps_full_nominal_duration)
 }
 
 // ===========================================================================
+// importSystemLocks
+// ===========================================================================
+
+TEST_F(Tst_Options, importSystemLocks_true_creates_system_locks)
+{
+    MasterScore* score = readEncoreScore("structure_system_break.enc");
+    ASSERT_NE(score, nullptr);
+    Measure* m0 = score->firstMeasure();
+    ASSERT_NE(m0, nullptr);
+    EXPECT_TRUE(m0->isStartOfSystemLock())
+        << "Default: first measure must be start of a SystemLock";
+    delete score;
+}
+
+TEST_F(Tst_Options, importSystemLocks_false_produces_no_system_locks)
+{
+    EncImportOptions opts;
+    opts.importSystemLocks = false;
+    MasterScore* score = readEncoreScoreWithOpts("structure_system_break.enc", opts);
+    ASSERT_NE(score, nullptr);
+    bool foundLock = false;
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        if (m->isStartOfSystemLock() || m->isEndOfSystemLock()) {
+            foundLock = true;
+            break;
+        }
+    }
+    EXPECT_FALSE(foundLock) << "importSystemLocks=false must produce no SystemLocks";
+    delete score;
+}
+
+// ===========================================================================
 // importStaffSize
 // All test files in data/ have scoreSize=3, which maps to MAG 0.75.
 // ===========================================================================
