@@ -78,13 +78,15 @@ using namespace mu::engraving;
 namespace mu::iex::enc {
 // Apply a found template (or fallback to Grand Piano) and set the instrument's long name.
 static void applyInstrumentOrFallback(Part* part, const InstrumentTemplate* tmpl,
-                                       const EncInstrument& instr, int matchStep)
+                                      const EncInstrument& instr, int matchStep)
 {
     static const char* stepDesc[] = {
         "", "PERC clef", "name+MIDI score", "drumset name", "perc keyword", "MIDI program", "RHYTHM staff"
     };
     auto setInstrName = [&](Instrument& ins) {
-        if (!instr.name.isEmpty()) { ins.setLongName(String(instr.name)); }
+        if (!instr.name.isEmpty()) {
+            ins.setLongName(String(instr.name));
+        }
         ins.setShortName(String());
         ins.instrumentLabel().setAllowGroupName(false);
     };
@@ -108,15 +110,17 @@ static void applyInstrumentOrFallback(Part* part, const InstrumentTemplate* tmpl
     } else {
         LOGD() << "  instrument \"" << instr.name.toStdString() << "\": no match, no piano template -> bare MIDI";
         part->setMidiProgram(0, 0);
-        if (!instr.name.isEmpty()) { part->setPlainLongName(String(instr.name)); }
+        if (!instr.name.isEmpty()) {
+            part->setPlainLongName(String(instr.name));
+        }
         part->setPlainShortName(String());
     }
 }
 
 static const InstrumentTemplate* applyBestInstrument(Part* part,
-                                                      const EncInstrument& instr,
-                                                      bool isPercByClef,
-                                                      bool isRhythm)
+                                                     const EncInstrument& instr,
+                                                     bool isPercByClef,
+                                                     bool isRhythm)
 {
     const int encMidi = instr.midiProgram > 0 ? instr.midiProgram - 1 : -1;
     const int encKey  = static_cast<int>(instr.keyTransposeSemitones);
@@ -126,7 +130,10 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
     int matchStep = 0;
     // tryStep: adopt candidate only if no match yet; record the step number.
     auto tryStep = [&](int step, const InstrumentTemplate* candidate) {
-        if (!tmpl && candidate) { tmpl = candidate; matchStep = step; }
+        if (!tmpl && candidate) {
+            tmpl = candidate;
+            matchStep = step;
+        }
     };
 
     // Step 1: PERC clef or GM Percussive range (113–128 1-indexed) → drumset.
@@ -152,7 +159,9 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
     }
 
     // Step 3: name scoring over drumset templates (handles localized names).
-    if (!nameTooShort) { tryStep(3, findDrumsetTemplate(instr.name)); }
+    if (!nameTooShort) {
+        tryStep(3, findDrumsetTemplate(instr.name));
+    }
 
     // Step 4: generic percussion keywords ("Percusión", "Drums", "Batería"…).
     if (!tmpl && !nameTooShort) {
@@ -165,7 +174,9 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
     }
 
     // Step 5 (RHYTHM): snare-drum; skip MIDI to avoid program-0 piano override.
-    if (isRhythm) { tryStep(6, searchTemplate(String(u"snare-drum"))); }
+    if (isRhythm) {
+        tryStep(6, searchTemplate(String(u"snare-drum")));
+    }
 
     // Step 5: MIDI program lookup (skipped for RHYTHM staves).
     if (!tmpl && !isRhythm && instr.midiProgram > 0) {
@@ -173,7 +184,7 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         if (midiTmpl) {
             const int tmplChr = midiTmpl->transpose.chromatic;
             const bool transpMismatch = (tmplChr % 12 != 0) && (encKey % 12 != 0)
-                && ((((encKey % 12) + 12) % 12) != (((tmplChr % 12) + 12) % 12));
+                                        && ((((encKey % 12) + 12) % 12) != (((tmplChr % 12) + 12) % 12));
             if (transpMismatch) {
                 LOGD() << "  instrument \"" << instr.name.toStdString()
                        << "\": MIDI " << instr.midiProgram << " match \""
@@ -246,6 +257,10 @@ void buildParts(BuildCtx& ctx)
             score->appendStaff(staff);
             if (tmpl) {
                 staff->init(tmpl, nullptr, s);
+                // Encore does not store bracket/brace grouping data, so remove any
+                // bracket the template may have set to avoid spurious cross-part brackets.
+                staff->setBracketType(0, BracketType::NO_BRACKET);
+                staff->setBracketSpan(0, 0);
             }
             ctx.staffPitchOffset.push_back(pitchOffset);
             ClefType cClef = ClefType::INVALID;
