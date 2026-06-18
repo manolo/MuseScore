@@ -25,7 +25,6 @@
 #include <QDataStream>
 
 #include "elem.h"
-#include "ticks.h"
 
 namespace mu::iex::enc {
 
