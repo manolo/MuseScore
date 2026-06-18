@@ -25,6 +25,7 @@
 #include "engraving/compat/scoreaccess.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
+#include "engraving/dom/layoutbreak.h"
 #include "engraving/dom/rest.h"
 #include "engraving/dom/segment.h"
 #include "engraving/dom/staff.h"
@@ -78,6 +79,50 @@ TEST_F(Tst_Options, importPageLayout_true_overrides_default_top_margin)
     ASSERT_NE(score, nullptr);
     EXPECT_NE(score->style().styleD(Sid::pageOddTopMargin), defaultTop)
         << "bazo_top_100 must produce a top margin different from the MS default";
+    delete score;
+}
+
+// ===========================================================================
+// importPageBreaks
+// structure_page_break.enc: 2 LINE blocks, both pageIdx=0 → page break after
+// the last measure of the first system.
+// ===========================================================================
+
+TEST_F(Tst_Options, importPageBreaks_true_places_page_break)
+{
+    MasterScore* score = readEncoreScore("structure_page_break.enc");
+    ASSERT_NE(score, nullptr);
+
+    bool foundPageBreak = false;
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (EngravingItem* e : m->el()) {
+            if (e && e->isLayoutBreak() && toLayoutBreak(e)->isPageBreak()) {
+                foundPageBreak = true;
+                break;
+            }
+        }
+        if (foundPageBreak) {
+            break;
+        }
+    }
+    EXPECT_TRUE(foundPageBreak)
+        << "Default (importPageBreaks=true): score must contain at least one page break";
+    delete score;
+}
+
+TEST_F(Tst_Options, importPageBreaks_false_produces_no_page_breaks)
+{
+    EncImportOptions opts;
+    opts.importPageBreaks = false;
+    MasterScore* score = readEncoreScoreWithOpts("structure_page_break.enc", opts);
+    ASSERT_NE(score, nullptr);
+
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (EngravingItem* e : m->el()) {
+            EXPECT_FALSE(e && e->isLayoutBreak() && toLayoutBreak(e)->isPageBreak())
+                << "importPageBreaks=false must produce no page breaks";
+        }
+    }
     delete score;
 }
 
