@@ -43,30 +43,38 @@ using namespace muse::io;
 using namespace mu::engraving;
 
 namespace mu::iex::enc {
-extern Err importEncore(MasterScore* score, const QString& name);
+extern Err importEncore(MasterScore* score, const QString& name, const EncImportOptions& opts = EncImportOptions {});
 }
 
 namespace mu::engraving {
-MasterScore* MTest::readEncoreScore(const QString& name)
+static MasterScore* loadEncore(const QString& path, const iex::enc::EncImportOptions& opts)
 {
-    QString path = root + "/" + name;
     MasterScore* score = compat::ScoreAccess::createMasterScoreWithBaseStyle(nullptr);
     score->setFileInfoProvider(std::make_shared<LocalFileInfoProvider>(path));
 
     ScoreLoad sl;
-    Err rv = iex::enc::importEncore(score, path);
+    Err rv = iex::enc::importEncore(score, path, opts);
 
     if (rv != Err::NoError) {
         LOGE() << "cannot load file at " << path;
         delete score;
-        score = nullptr;
-    } else {
-        for (Score* s : score->scoreList()) {
-            s->doLayout();
-        }
+        return nullptr;
     }
-
+    for (Score* s : score->scoreList()) {
+        s->doLayout();
+    }
     return score;
+}
+
+MasterScore* MTest::readEncoreScore(const QString& name)
+{
+    return loadEncore(root + "/" + name, iex::enc::EncImportOptions {});
+}
+
+MasterScore* MTest::readEncoreScoreWithOpts(const QString& name,
+                                            const iex::enc::EncImportOptions& opts)
+{
+    return loadEncore(root + "/" + name, opts);
 }
 
 bool MTest::saveScore(Score* score, const QString& name) const

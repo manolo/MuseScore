@@ -23,13 +23,13 @@
 #include "emitters-internal.h"
 
 #include "engraving/dom/chord.h"
+#include "engraving/dom/chordrest.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/lyrics.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/segment.h"
 
 namespace mu::iex::enc {
-
 // Queue a LYRIC element. Hyphen separators ("-") update the hyphen flags on the
 // preceding syllable and set a carry-forward flag for the next one.
 void enqueueLyric(BuildCtx& ctx, const EncLyric* el, track_idx_t track)
@@ -81,38 +81,55 @@ void attachPendingLyrics(BuildCtx& ctx, Measure* measure,
         const int lyVerseNo = static_cast<int>(lyTrack) % VOICES;
         const track_idx_t chordTrack = static_cast<track_idx_t>(lyStaffIdx) * VOICES;
 
-        std::vector<std::pair<int, Chord*> > noteTickPairs;
+        // Build a list of all ChordRest elements (chords and rests) with their enc ticks.
+        // Chords are preferred for lyric attachment; rests act as fallback anchors.
+        std::vector<std::pair<int, ChordRest*> > crTickPairs;
         for (Segment* s = measure->first(SegmentType::ChordRest);
              s; s = s->next(SegmentType::ChordRest)) {
             EngravingItem* el = s->element(chordTrack);
-            if (!el || !el->isChord()) {
+            if (!el || !el->isChordRest()) {
                 continue;
             }
             const Fraction relTick = s->tick() - measTick;
             const int segEncTick = (relTick.numerator() * encTicksPerQuarter * 4)
                                    / std::max(1, relTick.denominator());
-            noteTickPairs.emplace_back(segEncTick, toChord(el));
+            crTickPairs.emplace_back(segEncTick, toChordRest(el));
         }
 
-        std::vector<bool> noteConsumed(noteTickPairs.size(), false);
+        std::vector<bool> crConsumed(crTickPairs.size(), false);
         for (const auto& pl : entries) {
-            int bestNoteIdx = -1;
+            // First pass: find nearest chord within the threshold.
+            int bestIdx = -1;
             int bestDelta = matchThreshold + 1;
-            for (size_t ni = 0; ni < noteTickPairs.size(); ++ni) {
-                if (noteConsumed[ni]) {
+            for (size_t ni = 0; ni < crTickPairs.size(); ++ni) {
+                if (crConsumed[ni] || !crTickPairs[ni].second->isChord()) {
                     continue;
                 }
-                const int delta = std::abs(noteTickPairs[ni].first - pl.encTick);
+                const int delta = std::abs(crTickPairs[ni].first - pl.encTick);
                 if (delta < bestDelta) {
                     bestDelta = delta;
-                    bestNoteIdx = static_cast<int>(ni);
+                    bestIdx = static_cast<int>(ni);
                 }
             }
-            if (bestNoteIdx < 0) {
+            // Fallback: attach to the nearest rest in the measure.
+            if (bestIdx < 0) {
+                int bestRestDelta = INT_MAX;
+                for (size_t ni = 0; ni < crTickPairs.size(); ++ni) {
+                    if (crConsumed[ni] || !crTickPairs[ni].second->isRest()) {
+                        continue;
+                    }
+                    const int delta = std::abs(crTickPairs[ni].first - pl.encTick);
+                    if (delta < bestRestDelta) {
+                        bestRestDelta = delta;
+                        bestIdx = static_cast<int>(ni);
+                    }
+                }
+            }
+            if (bestIdx < 0) {
                 continue;
             }
-            noteConsumed[bestNoteIdx] = true;
-            Chord* c = noteTickPairs[bestNoteIdx].second;
+            crConsumed[bestIdx] = true;
+            ChordRest* c = crTickPairs[bestIdx].second;
             Lyrics* ly = Factory::createLyrics(c);
             ly->setTrack(chordTrack);
             ly->setVerse(lyVerseNo);
@@ -135,5 +152,4 @@ void attachPendingLyrics(BuildCtx& ctx, Measure* measure,
     // ctx.nextLyricHyphenBefore survives barlines so a trailing hyphen (e.g. "RO -")
     // carries into the next measure's first syllable.
 }
-
 } // namespace mu::iex::enc
