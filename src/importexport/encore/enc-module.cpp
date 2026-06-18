@@ -25,8 +25,8 @@
 
 #include "project/inotationreadersregister.h"
 #include "internal/notationencreader.h"
-#include "internal/encoreimportconfiguration.h"
-#include "iencoreimportconfiguration.h"
+#include "internal/enc-importconfiguration.h"
+#include "ienc-importconfiguration.h"
 
 #include "log.h"
 
@@ -42,8 +42,8 @@ std::string EncoreModule::moduleName() const
 
 void EncoreModule::registerExports()
 {
-    m_configuration = std::make_shared<EncoreImportConfiguration>();
-    globalIoc()->registerExport<IEncoreImportConfiguration>(moduleName(), m_configuration);
+    m_configuration = std::make_shared<EncImportConfiguration>();
+    globalIoc()->registerExport<IEncImportConfiguration>(moduleName(), m_configuration);
 }
 
 void EncoreModule::resolveImports()

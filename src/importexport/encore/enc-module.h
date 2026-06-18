@@ -27,7 +27,7 @@
 #include "modularity/imodulesetup.h"
 
 namespace mu::iex::enc {
-class EncoreImportConfiguration;
+class EncImportConfiguration;
 class EncoreModule : public muse::modularity::IModuleSetup
 {
 public:
@@ -37,7 +37,7 @@ public:
     void onInit(const muse::IApplication::RunMode&) override;
 
 private:
-    std::shared_ptr<EncoreImportConfiguration> m_configuration;
+    std::shared_ptr<EncImportConfiguration> m_configuration;
 };
 } // namespace mu::iex::enc
 

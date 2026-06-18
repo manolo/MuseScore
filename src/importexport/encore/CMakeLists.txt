@@ -23,9 +23,9 @@ muse_create_module(iex_encore)
 target_sources(iex_encore PRIVATE
     enc-module.cpp
     enc-module.h
-    iencoreimportconfiguration.h
-    internal/encoreimportconfiguration.h
-    internal/encoreimportconfiguration.cpp
+    ienc-importconfiguration.h
+    internal/enc-importconfiguration.h
+    internal/enc-importconfiguration.cpp
     internal/parser/parsers-note.cpp
     internal/parser/parsers-chord.cpp
     internal/parser/parsers-ornament.cpp
