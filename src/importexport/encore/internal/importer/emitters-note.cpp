@@ -236,8 +236,8 @@ static void attachChordToTuplet(
     auto& tt = ctx.tuplets[trackKey];
     int actualN = isStandardExplicit ? preACheck : 0;
     int normalN = isStandardExplicit ? preNCheck : 0;
-    // Implied tuplet (pre-validated by computeImpliedTupletMembers).
-    if (actualN == 0 && (fvLow(en->faceValue)) >= 4 && impliedGroupMember.count(e)) {
+    // Implied tuplet (v0xC2 only, pre-validated by computeImpliedTupletMembers).
+    if (actualN == 0 && ctx.impliedTuplets && (fvLow(en->faceValue)) >= 4 && impliedGroupMember.count(e)) {
         actualN = detectImpliedTuplet(en->realDuration, en->faceValue, normalN);
     }
     // Sandwich orphan (tup=0 surrounded by tup=N:M notes): use active ratio to stay in bracket.
@@ -540,7 +540,7 @@ static bool resolveNoteDuration(
         int preA = isStandardExplicit ? preACheck : 0;
         int preN = isStandardExplicit ? preNCheck : 0;
         if (!isStandardExplicit) {
-            if ((fvLow(en->faceValue)) >= 4 && impliedGroupMember.count(e)) {
+            if (ctx.impliedTuplets && (fvLow(en->faceValue)) >= 4 && impliedGroupMember.count(e)) {
                 preA = detectImpliedTuplet(en->realDuration, en->faceValue, preN);
             }
         }
@@ -728,7 +728,7 @@ void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
             preA = 0;
             preN = 0;
         }
-        if (preA == 0 && (fvLow(en->faceValue)) >= 4 && impliedGroupMember.count(e)) {
+        if (preA == 0 && ctx.impliedTuplets && (fvLow(en->faceValue)) >= 4 && impliedGroupMember.count(e)) {
             preA = detectImpliedTuplet(en->realDuration, en->faceValue, preN);
         }
         (void)preA;
