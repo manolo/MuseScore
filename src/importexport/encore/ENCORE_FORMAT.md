@@ -495,7 +495,7 @@ Type 5. Variable size. Offsets from element start:
 | 0xBB    | FINGER_3      | stand-alone fingering digit "3"                                                  |
 | 0xBC    | FINGER_4      | stand-alone fingering digit "4"                                                  |
 | 0xBD    | FINGER_5      | stand-alone fingering digit "5"                                                  |
-| 0xC4    | UPBOW/ACCENT  | v0xC4: up-bow stroke (V) as size-16 ORN; maps to stringsUpBow. v0xC2: accent above (>) attached to chord; maps to articAccentAbove. In v0xC2, the accent is stored as an ORN rather than a NOTE articulation byte; size=22 notes have no articulation slot and size=24 notes use +22 only for staccato/tenuto, not accent. |
+| 0xC4    | UPBOW/ACCENT  | v0xC4: up-bow stroke (V) as size-16 ORN; maps to stringsUpBow. v0xC2: accent above (>) attached to chord; maps to articAccentAbove. In v0xC2, the accent is stored as an ORN rather than a NOTE articulation byte; size=22 notes have no articulation slot and size=24 notes use +22 only for staccato/tenuto, not accent. **Parser normalization:** `postProcessElement` in the v0xC2 reader remaps tipo=0xC4 to ACCENT (0xBE) so the importer always receives a uniform tipo value regardless of format version. |
 | 0xC5    | DOWNBOW       | down-bow stroke (П) as size-16 ORN; maps to Articulation stringsDownBow         |
 | 0xC9    | STACCATO      | per-chord staccato dot                                                           |
 | 0xCC    | FERMATA_ABOVE | standalone fermata above (size-16 ORN; yoffset > 0)                             |
@@ -536,6 +536,10 @@ Always test with `speguleco & 0x01`, not `speguleco == 0`.
 alMezuro (+18) = count of measures forward to the end measure.
 xoffset2 (+20) = visual x within that target measure.
 No separate WEDGESTOP or SLURSTOP element is emitted.
+
+**v0xC2 caveat.** In v0xC2 files, alMezuro is unreliable and often holds stale or zero values.
+The parser sets `EncOrnament.alMezuroValid = false` for all v0xC2 ornaments; the importer then
+uses the xoffset pixel-span heuristic exclusively and ignores the alMezuro measure count.
 
 **Hairpin endpoint.** Three-tier resolution:
 1. **Next-dynamic** (primary): walk forward for the first Dynamic on the same track within the alMezuro
@@ -1318,6 +1322,10 @@ final:     chd_tick itself
 - **Lyric voice byte.** Lyric voice = verse index (0-based), not a real voice assignment.
   All verses are anchored to voice-0 notes.
 - **Repeat-mark field.** Repeat type is the low byte only: `type = field & 0xFF`.
+- **v0xC2 grace1 tie-sender encoding.** In v0xC2, when a grace note is a tie-sender, its `grace1`
+  low nibble is set to 1 (`grace1 & 0x0F == 1`). In v0xA6 and v0xC4 this nibble is always 0.
+  The parser decodes this into `EncNote.isTieSender` in `postProcessElement` so the importer
+  does not need to branch on format version.
 - **Duplicate NOTE elements.** Some files encode the same pitch twice in the same chord:
   two NOTE elements with identical tick/staff/voice/pitch. Two variants: (a) the second copy
   has bit 0x40 of grace1 set (chord-extension marker); (b) both copies have grace1=0 (v0xC2).

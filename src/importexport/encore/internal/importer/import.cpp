@@ -285,10 +285,7 @@ static void buildScore(MasterScore* score, const EncRoot& enc)
     score->style().set(Sid::tupletVHeadDistance,   0.0);
     score->style().set(Sid::tupletVStemDistance,   0.0);
 
-    BuildCtx ctx{ score, enc, enc.fmt.get() };
-    ctx.impliedTuplets     = ctx.fmt->supportsImpliedTuplets();
-    ctx.g1LowTieSender     = ctx.fmt->usesG1LowTieSender();
-    ctx.alMezuroIsReliable = ctx.fmt->alMezuroIsReliable();
+    BuildCtx ctx{ score, enc };
     buildParts(ctx);
     buildMeasures(ctx);
     buildInitialSignatures(ctx);

@@ -168,7 +168,7 @@ static void registerTieStartIfApplicable(BuildCtx& ctx,
                                           Note* note)
 {
     bool hasTieStart = mc.isTieStartAt(ec.staffIdx, ec.voice, (int)ec.e->tick, (int)en->position)
-                       || (ctx.g1LowTieSender && (en->grace1 & 0x0F) == 1);
+                       || en->isTieSender;
     if (hasTieStart) {
         ctx.pendingTieNote[{ ec.staffIdx, ec.voice, (int)en->semiTonePitch }] = note;
     }
@@ -236,9 +236,8 @@ static void attachChordToTuplet(
     auto& tt = ctx.tuplets[trackKey];
     int actualN = isStandardExplicit ? preACheck : 0;
     int normalN = isStandardExplicit ? preNCheck : 0;
-    // Implied tuplet (v0xC2 only, pre-validated). !tt.groupFull() prevents a post-group note from opening a new unvalidated group.
-    if (actualN == 0 && ctx.impliedTuplets && (fvLow(en->faceValue)) >= 4
-        && ((tt.inTuplet() && !tt.groupFull()) || impliedGroupMember.count(e))) {
+    // Implied tuplet (pre-validated by computeImpliedTupletMembers).
+    if (actualN == 0 && (fvLow(en->faceValue)) >= 4 && impliedGroupMember.count(e)) {
         actualN = detectImpliedTuplet(en->realDuration, en->faceValue, normalN);
     }
     // Sandwich orphan (tup=0 surrounded by tup=N:M notes): use active ratio to stay in bracket.
@@ -541,8 +540,7 @@ static bool resolveNoteDuration(
         int preA = isStandardExplicit ? preACheck : 0;
         int preN = isStandardExplicit ? preNCheck : 0;
         if (!isStandardExplicit) {
-            if (ctx.impliedTuplets && (fvLow(en->faceValue)) >= 4
-                && ((ttPre.inTuplet() && !ttPre.groupFull()) || impliedGroupMember.count(e))) {
+            if ((fvLow(en->faceValue)) >= 4 && impliedGroupMember.count(e)) {
                 preA = detectImpliedTuplet(en->realDuration, en->faceValue, preN);
             }
         }
@@ -730,8 +728,7 @@ void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
             preA = 0;
             preN = 0;
         }
-        if (preA == 0 && ctx.impliedTuplets && (fvLow(en->faceValue)) >= 4
-            && (ctx.tuplets[trackKey].inTuplet() || impliedGroupMember.count(e))) {
+        if (preA == 0 && (fvLow(en->faceValue)) >= 4 && impliedGroupMember.count(e)) {
             preA = detectImpliedTuplet(en->realDuration, en->faceValue, preN);
         }
         (void)preA;
