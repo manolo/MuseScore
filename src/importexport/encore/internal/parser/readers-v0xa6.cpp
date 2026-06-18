@@ -25,8 +25,39 @@
 #include <QDataStream>
 
 #include "elem.h"
+#include "ticks.h"
 
 namespace mu::iex::enc {
+
+// v0xA6 inner-grace detection: after a leading grace note (grace1 & 0x30 == 0x20),
+// subsequent NORMAL notes with (grace1 & 0x30) == 0x10 and a strictly larger faceValue
+// (shorter duration) are inner graces routed through the grace path in the emitters.
+static void markInnerGraces(std::vector<EncMeasureElem*>& elems)
+{
+    quint8 leadingFv = 0;
+    for (EncMeasureElem* e : elems) {
+        EncNote* en = dynamic_cast<EncNote*>(e);
+        if (!en || en->size != 10) {
+            leadingFv = 0;
+            continue;
+        }
+        if (en->graceType() != EncGraceType::NORMAL) {
+            if (leadingFv == 0) {
+                leadingFv = en->faceValue & 0x0F;
+            }
+            continue;
+        }
+        if ((en->grace1 & 0x30) == 0x10 && leadingFv != 0) {
+            const quint8 fv = en->faceValue & 0x0F;
+            if (fv > leadingFv) {
+                en->isInnerGrace = true;
+                leadingFv = std::max(leadingFv, fv);
+                continue;
+            }
+        }
+        leadingFv = 0;
+    }
+}
 // v0xA6 NOTE layouts: size=10 (pitch at +11, tuplet at +7), size=22 (pitch in tuplet slot),
 // size<27 (artic bytes lie beyond boundary, zero them). See ENCORE_FORMAT.md §Note element.
 bool EncFormatReader_V0xA6::postProcessElement(EncMeasureElem* elem,
@@ -90,6 +121,12 @@ bool EncFormatReader_V0xA6::deduplicateRest(
 bool EncFormatReader_V0xA6::isMeasureNearEnd(QDataStream& ds, qint64 measEnd) const
 {
     return ds.device()->pos() >= measEnd - 4;
+}
+
+void EncFormatReader_V0xA6::postProcessVoiceGroup(
+    std::vector<EncMeasureElem*>& elems, qint16) const
+{
+    markInnerGraces(elems);
 }
 
 void EncFormatReader_V0xA6::readKeyFromTKBlock(EncInstrument& instr,

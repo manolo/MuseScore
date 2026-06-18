@@ -26,13 +26,92 @@
 #include <QDataStream>
 
 #include "elem.h"
+#include "ticks.h"
 
 namespace mu::iex::enc {
+
+// v0xC2: Encore places the sixteenth of a dotted-eighth+sixteenth group at tick+120
+// (the undotted gap), not tick+180. Fix: detect eighth(rdur=120) + sixteenth(rdur=60,
+// tick+120) and set dotControl bit 0 to force the dot.
+static void fixDottedEighthPattern(std::vector<EncMeasureElem*>& elems, qint16 durTicks)
+{
+    (void)durTicks;
+    for (size_t i = 0; i < elems.size(); ++i) {
+        EncNote* en = dynamic_cast<EncNote*>(elems[i]);
+        if (!en || (en->faceValue & 0x0F) != 4 || en->realDuration != 120) {
+            continue;
+        }
+        const qint16 targetTick = static_cast<qint16>(elems[i]->tick + 120);
+        for (size_t j = i + 1; j < elems.size(); ++j) {
+            if (elems[j]->tick > targetTick) {
+                break;
+            }
+            if (elems[j]->tick == targetTick) {
+                const EncNote* enNext = dynamic_cast<const EncNote*>(elems[j]);
+                if (enNext
+                    && (enNext->faceValue & 0x0F) == 5
+                    && enNext->realDuration == 60) {
+                    en->dotControl |= 1;
+                    break;
+                }
+            }
+        }
+    }
+}
+
+// v0xC2: mark consecutive notes/rests whose rdur/faceValue ratio identifies an implied tuplet.
+// Groups same-tick elements as chords before scanning, matching the grouping in
+// computeImpliedTupletMembers so the two passes agree on group boundaries.
+static void markImpliedTupletMembers(std::vector<EncMeasureElem*>& elems)
+{
+    std::vector<std::vector<EncMeasureElem*> > chords;
+    for (EncMeasureElem* e : elems) {
+        if (!chords.empty() && chords.back()[0]->tick == e->tick) {
+            chords.back().push_back(e);
+        } else {
+            chords.push_back({ e });
+        }
+    }
+    int n = static_cast<int>(chords.size());
+    int i = 0;
+    while (i < n) {
+        EncMeasureElem* first = chords[i][0];
+        quint8 fv = 0;
+        if (auto* en = dynamic_cast<EncNote*>(first)) fv = en->faceValue & 0x0F;
+        else if (auto* er = dynamic_cast<EncRest*>(first)) fv = er->faceValue & 0x0F;
+        if (fv < 4) { ++i; continue; }
+        int normalN = 0;
+        int actualN = detectImpliedTuplet(first->realDuration, fv, normalN);
+        if (actualN < 2 || i + actualN > n) { ++i; continue; }
+        bool allMatch = true;
+        for (int k = 1; k < actualN; ++k) {
+            EncMeasureElem* ek = chords[i + k][0];
+            quint8 fvk = 0;
+            if (auto* en = dynamic_cast<EncNote*>(ek)) fvk = en->faceValue & 0x0F;
+            else if (auto* er = dynamic_cast<EncRest*>(ek)) fvk = er->faceValue & 0x0F;
+            int nk = 0;
+            if (fvk < 4 || detectImpliedTuplet(ek->realDuration, fvk, nk) != actualN || nk != normalN) {
+                allMatch = false;
+                break;
+            }
+        }
+        if (allMatch) {
+            for (int k = 0; k < actualN; ++k) {
+                for (EncMeasureElem* e : chords[i + k]) {
+                    if (auto* en = dynamic_cast<EncNote*>(e)) en->isImpliedTupletMember = true;
+                    else if (auto* er = dynamic_cast<EncRest*>(e)) er->isImpliedTupletMember = true;
+                }
+            }
+            i += actualN;
+        } else {
+            ++i;
+        }
+    }
+}
 
 // Encore 3.x / 4.x (v0xC2) format reader.
 // Differences from v0xC4:
 //   - ORN 0xC4 is an accent, not an up-bow
-//   - Implied tuplets are supported (realDuration/faceValue mismatch)
 //   - grace1 low nibble encodes the tie-sender flag
 //   - alMezuro field in ornaments is unreliable
 //   - Lyric text starts at element offset +18 (not +20)
@@ -40,7 +119,6 @@ namespace mu::iex::enc {
 //   - Instrument metadata: names only (no TK-based MIDI/key tables)
 struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
 {
-    bool supportsImpliedTuplets() const override { return true; }
     const char* formatName() const override { return "v0xC2"; }
     quint8 lyricTextGapAfterKie() const override { return 7; }
 
@@ -78,6 +156,12 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
             en->articulationDown = 0;
         }
         return false;
+    }
+
+    void postProcessVoiceGroup(std::vector<EncMeasureElem*>& elems, qint16 durTicks) const override
+    {
+        fixDottedEighthPattern(elems, durTicks);
+        markImpliedTupletMembers(elems);
     }
 
     // v0xC2 has no TK-based MIDI/key tables; the base helpers no-op gracefully when

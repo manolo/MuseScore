@@ -116,130 +116,6 @@ static void computeElementDurations(
     }
 }
 
-// Phase 2: mark inner-grace notes (en->isInnerGrace). Only runs when hasGraceTimeBorrowing.
-static void markInnerGraces(std::vector<EncMeasureElem*>& elems)
-{
-    // v0xA6 inner-grace marking: NORMAL notes with grace1&0x30==0x10 and fv > leading grace fv
-    // are inner graces; isInnerGrace routes them through the grace path in the emitters.
-    quint8 leadingFv = 0;
-    for (EncMeasureElem* e : elems) {
-        EncNote* en = dynamic_cast<EncNote*>(e);
-        if (!en || en->size != 10) {
-            leadingFv = 0;
-            continue;
-        }
-        if (en->graceType() != EncGraceType::NORMAL) {
-            if (leadingFv == 0) {
-                leadingFv = en->faceValue & 0x0F;
-            }
-            continue;
-        }
-        if ((en->grace1 & 0x30) == 0x10 && leadingFv != 0) {
-            const quint8 fv = en->faceValue & 0x0F;
-            if (fv > leadingFv) {
-                en->isInnerGrace = true;
-                leadingFv = std::max(leadingFv, fv);  // keep running max
-                continue;
-            }
-        }
-        leadingFv = 0;  // regular note ends the grace group
-    }
-}
-
-// Phase 3b: mark implied tuplet members (v0xC2 only). Runs together with fixDottedEighth.
-// Groups consecutive same-tick elements into chords, then scans chord groups for a run of
-// actualN consecutive chords whose first element has a matching rdur/faceValue triplet ratio.
-// Marks every element of each qualifying run as isImpliedTupletMember = true so that
-// computeImpliedTupletMembers in the importer can distinguish genuine v0xC2 implied tuplets
-// from incidental rdur/fv mismatches in v0xC4 files (MIDI timing drift).
-static void markImpliedTupletMembers(std::vector<EncMeasureElem*>& elems)
-{
-    // Build chord groups: consecutive same-tick elements are one chord.
-    std::vector<std::vector<EncMeasureElem*> > chords;
-    for (EncMeasureElem* e : elems) {
-        if (!chords.empty() && chords.back()[0]->tick == e->tick) {
-            chords.back().push_back(e);
-        } else {
-            chords.push_back({ e });
-        }
-    }
-    int n = static_cast<int>(chords.size());
-    int i = 0;
-    while (i < n) {
-        EncMeasureElem* first = chords[i][0];
-        quint8 fv = 0;
-        if (auto* en = dynamic_cast<EncNote*>(first)) {
-            fv = en->faceValue & 0x0F;
-        } else if (auto* er = dynamic_cast<EncRest*>(first)) {
-            fv = er->faceValue & 0x0F;
-        }
-        if (fv < 4) { ++i; continue; }
-        int normalN = 0;
-        int actualN = detectImpliedTuplet(first->realDuration, fv, normalN);
-        if (actualN < 2 || i + actualN > n) { ++i; continue; }
-        bool allMatch = true;
-        for (int k = 1; k < actualN; ++k) {
-            EncMeasureElem* ek = chords[i + k][0];
-            quint8 fvk = 0;
-            if (auto* en = dynamic_cast<EncNote*>(ek)) fvk = en->faceValue & 0x0F;
-            else if (auto* er = dynamic_cast<EncRest*>(ek)) fvk = er->faceValue & 0x0F;
-            int nk = 0;
-            if (fvk < 4 || detectImpliedTuplet(ek->realDuration, fvk, nk) != actualN || nk != normalN) {
-                allMatch = false;
-                break;
-            }
-        }
-        if (allMatch) {
-            for (int k = 0; k < actualN; ++k) {
-                for (EncMeasureElem* e : chords[i + k]) {
-                    if (auto* en = dynamic_cast<EncNote*>(e)) {
-                        en->isImpliedTupletMember = true;
-                    } else if (auto* er = dynamic_cast<EncRest*>(e)) {
-                        er->isImpliedTupletMember = true;
-                    }
-                }
-            }
-            i += actualN;
-        } else {
-            ++i;
-        }
-    }
-}
-
-// Phase 3: detect and fix dotted-eighth placement (v0xC2 quirk). Only runs when fixDottedEighth.
-static void fixDottedEighthPattern(
-    std::vector<EncMeasureElem*>& elems,
-    qint16 durTicks)
-{
-    // v0xC2: Encore places the sixteenth of a dotted-eighth+sixteenth group at tick+120
-    // (the undotted gap), not tick+180, so realDuration=120 is indistinguishable from a
-    // plain eighth. dotControl bit 0 is also 0, so the bit-0 fallback in computeDotCount
-    // does not fire. Fix: detect fv=4/rdur=120 followed by fv=5/rdur=60 exactly 120 ticks
-    // later in the same voice, then set dotControl bit 0 to force the dot.
-    (void)durTicks;
-    for (size_t i = 0; i < elems.size(); ++i) {
-        EncNote* en = dynamic_cast<EncNote*>(elems[i]);
-        if (!en || (en->faceValue & 0x0F) != 4 || en->realDuration != 120) {
-            continue;
-        }
-        const qint16 targetTick = static_cast<qint16>(elems[i]->tick + 120);
-        for (size_t j = i + 1; j < elems.size(); ++j) {
-            if (elems[j]->tick > targetTick) {
-                break;
-            }
-            if (elems[j]->tick == targetTick) {
-                const EncNote* enNext = dynamic_cast<const EncNote*>(elems[j]);
-                if (enNext
-                    && (enNext->faceValue & 0x0F) == 5
-                    && enNext->realDuration == 60) {
-                    en->dotControl |= 1;
-                    break;
-                }
-            }
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // EncMeasure
 // ---------------------------------------------------------------------------
@@ -341,7 +217,7 @@ bool EncMeasure::read(QDataStream& ds, const quint32 vs, const EncFormatReader& 
     return true;
 }
 
-void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, bool fixDottedEighth)
+void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, const EncFormatReader& fmt)
 {
     std::map<std::pair<int, int>, std::vector<EncMeasureElem*> > groups;
     for (auto& elem : elements) {
@@ -358,13 +234,7 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, bool fixDott
             return a->tick < b->tick;
         });
         computeElementDurations(elems, durTicks, hasGraceTimeBorrowing);
-        if (hasGraceTimeBorrowing) {
-            markInnerGraces(elems);
-        }
-        if (fixDottedEighth) {
-            fixDottedEighthPattern(elems, durTicks);
-            markImpliedTupletMembers(elems);
-        }
+        fmt.postProcessVoiceGroup(elems, durTicks);
     }
 }
 } // namespace mu::iex::enc
