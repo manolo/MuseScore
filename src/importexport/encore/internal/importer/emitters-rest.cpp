@@ -94,8 +94,7 @@ void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
             actualNr = 0;
             normalNr = 0;
         }
-        if (actualNr == 0 && ctx.impliedTuplets && (er->faceValue & 0x0F) >= 4
-            && ((tt.inTuplet() && !tt.groupFull()) || impliedGroupMember.count(e))) {
+        if (actualNr == 0 && (er->faceValue & 0x0F) >= 4 && impliedGroupMember.count(e)) {
             actualNr = detectImpliedTuplet(er->realDuration, er->faceValue, normalNr);
         }
         if (actualNr > 0 && normalNr > 0) {

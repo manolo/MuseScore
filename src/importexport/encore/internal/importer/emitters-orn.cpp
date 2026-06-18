@@ -384,6 +384,7 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         ps.startMeasIdx = measIdx;
         ps.endMeasIdx = endIdx;
         ps.alMezuro = static_cast<int>(eo->alMezuro);
+        ps.alMezuroValid = eo->alMezuroValid;
         // xoffset is a pixel position that wraps at 256; cast to quint8 to get the true positive value.
         ps.slurXoffset  = static_cast<int>(static_cast<quint8>(eo->xoffset));
         ps.slurXoffset2 = static_cast<int>(eo->xoffset2);  // already quint8
@@ -520,9 +521,7 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
     }
     case EncOrnamentType::ACCENT:               pushBowing(SymId::articAccentAbove);         break;
     case EncOrnamentType::DOWNBOW:              pushBowing(SymId::stringsDownBow);           break;
-    case EncOrnamentType::UPBOW:
-        pushBowing(enc.fmt->ornC4IsAccent() ? SymId::articAccentAbove : SymId::stringsUpBow);
-        break;
+    case EncOrnamentType::UPBOW:  pushBowing(SymId::stringsUpBow);  break;
     case EncOrnamentType::MARCATO:              pushBowing(SymId::articMarcatoAbove);        break;
     case EncOrnamentType::MARCATO_BELOW:        pushBowing(SymId::articMarcatoBelow);        break;
     case EncOrnamentType::MARCATO_STACCATO_BELOW: pushBowing(SymId::articMarcatoStaccatoBelow); break;

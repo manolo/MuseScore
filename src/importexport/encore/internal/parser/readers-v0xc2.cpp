@@ -41,14 +41,21 @@ namespace mu::iex::enc {
 struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
 {
     bool supportsImpliedTuplets() const override { return true; }
-    bool usesG1LowTieSender() const override { return true; }
     const char* formatName() const override { return "v0xC2"; }
-    bool alMezuroIsReliable() const override { return false; }
-    bool ornC4IsAccent() const override { return true; }
     quint8 lyricTextGapAfterKie() const override { return 7; }
 
     bool postProcessElement(EncMeasureElem* elem, QDataStream& ds, qint64 rawElemStart) const override
     {
+        if (EncOrnament* orn = dynamic_cast<EncOrnament*>(elem)) {
+            // v0xC2: tipo 0xC4 (UPBOW in v0xC4) encodes accent above in this format.
+            if (orn->tipo == static_cast<quint8>(EncOrnamentType::UPBOW)) {
+                orn->tipo = static_cast<quint8>(EncOrnamentType::ACCENT);
+            }
+            // v0xC2: alMezuro has no valid measure-count semantics for spanning ornaments.
+            orn->alMezuroValid = false;
+            return false;
+        }
+
         EncNote* en = dynamic_cast<EncNote*>(elem);
         if (!en) {
             return false;
@@ -60,6 +67,8 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
             en->semiTonePitch = en->tuplet;
             en->tuplet = 0;
         }
+        // Decode tie-sender flag from grace1 low nibble (v0xC2 only).
+        en->isTieSender = ((en->grace1 & 0x0F) == 1);
         // size=24 notes carry an articulation byte at +22 (2 bytes after alterGlyph at +21).
         if (en->size == 24 && ds.device()->seek(rawElemStart + 22)) {
             ds >> en->articulationUp;
