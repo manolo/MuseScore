@@ -75,6 +75,38 @@ void ImportPreferencesModel::load()
     musicXmlConfiguration()->needAskAboutApplyingNewStyleChanged().onReceive(this, [this](bool val) {
         emit needAskAboutApplyingNewStyleChanged(val);
     });
+
+    encoreConfiguration()->importPageLayoutChanged().onReceive(this, [this](bool val) {
+        emit encoreImportPageLayoutChanged(val);
+    });
+
+    encoreConfiguration()->importPageBreaksChanged().onReceive(this, [this](bool val) {
+        emit encoreImportPageBreaksChanged(val);
+    });
+
+    encoreConfiguration()->importStaffSizeChanged().onReceive(this, [this](bool val) {
+        emit encoreImportStaffSizeChanged(val);
+    });
+
+    encoreConfiguration()->importTempoTextSemanticChanged().onReceive(this, [this](bool val) {
+        emit encoreImportTempoTextSemanticChanged(val);
+    });
+
+    encoreConfiguration()->importUnsupportedArticulationsAsTextChanged().onReceive(this, [this](bool val) {
+        emit encoreImportUnsupportedArticulationsAsTextChanged(val);
+    });
+
+    encoreConfiguration()->firstMeasureIsPickupChanged().onReceive(this, [this](bool val) {
+        emit encoreFirstMeasureIsPickupChanged(val);
+    });
+
+    encoreConfiguration()->underfillMeasureStrategyChanged().onReceive(this, [this](iex::enc::UnderfillStrategy val) {
+        emit encoreUnderfillStrategyChanged(static_cast<int>(val));
+    });
+
+    encoreConfiguration()->overfillMeasureStrategyChanged().onReceive(this, [this](iex::enc::OverfillStrategy val) {
+        emit encoreOverfillStrategyChanged(static_cast<int>(val));
+    });
 }
 
 QVariantList ImportPreferencesModel::charsets() const
@@ -104,6 +136,34 @@ QVariantList ImportPreferencesModel::shortestNotes() const
         QVariantMap { { "title", muse::qtrc("preferences", "256th") }, { "value", division / 64 } },
         QVariantMap { { "title", muse::qtrc("preferences", "512th") }, { "value", division / 128 } },
         QVariantMap { { "title", muse::qtrc("preferences", "1024th") }, { "value", division / 256 } }
+    };
+
+    return result;
+}
+
+QVariantList ImportPreferencesModel::encoreUnderfillStrategyModel() const
+{
+    QVariantList result = {
+        QVariantMap { { "title", muse::qtrc("preferences", "Invisible rests") },
+            { "value", static_cast<int>(iex::enc::UnderfillStrategy::InvisibleRests) } },
+        QVariantMap { { "title", muse::qtrc("preferences", "Visible rests") },
+            { "value", static_cast<int>(iex::enc::UnderfillStrategy::VisibleRests) } },
+        QVariantMap { { "title", muse::qtrc("preferences", "Irregular measure") },
+            { "value", static_cast<int>(iex::enc::UnderfillStrategy::IrregularMeasure) } }
+    };
+
+    return result;
+}
+
+QVariantList ImportPreferencesModel::encoreOverfillStrategyModel() const
+{
+    QVariantList result = {
+        QVariantMap { { "title", muse::qtrc("preferences", "Truncate") },
+            { "value", static_cast<int>(iex::enc::OverfillStrategy::Truncate) } },
+        QVariantMap { { "title", muse::qtrc("preferences", "Stretch last note") },
+            { "value", static_cast<int>(iex::enc::OverfillStrategy::StretchLastNote) } },
+        QVariantMap { { "title", muse::qtrc("preferences", "Irregular measure") },
+            { "value", static_cast<int>(iex::enc::OverfillStrategy::IrregularMeasure) } }
     };
 
     return result;
@@ -277,4 +337,116 @@ void ImportPreferencesModel::setMnxRequireExactSchemaValidation(bool value)
 
     mnxConfiguration()->setMnxRequireExactSchemaValidation(value);
     emit mnxRequireExactSchemaValidationChanged(value);
+}
+
+bool ImportPreferencesModel::encoreImportPageLayout() const
+{
+    return encoreConfiguration()->importPageLayout();
+}
+
+void ImportPreferencesModel::setEncoreImportPageLayout(bool value)
+{
+    if (value == encoreImportPageLayout()) {
+        return;
+    }
+
+    encoreConfiguration()->setImportPageLayout(value);
+}
+
+bool ImportPreferencesModel::encoreImportPageBreaks() const
+{
+    return encoreConfiguration()->importPageBreaks();
+}
+
+void ImportPreferencesModel::setEncoreImportPageBreaks(bool value)
+{
+    if (value == encoreImportPageBreaks()) {
+        return;
+    }
+
+    encoreConfiguration()->setImportPageBreaks(value);
+}
+
+bool ImportPreferencesModel::encoreImportStaffSize() const
+{
+    return encoreConfiguration()->importStaffSize();
+}
+
+void ImportPreferencesModel::setEncoreImportStaffSize(bool value)
+{
+    if (value == encoreImportStaffSize()) {
+        return;
+    }
+
+    encoreConfiguration()->setImportStaffSize(value);
+}
+
+bool ImportPreferencesModel::encoreImportTempoTextSemantic() const
+{
+    return encoreConfiguration()->importTempoTextSemantic();
+}
+
+void ImportPreferencesModel::setEncoreImportTempoTextSemantic(bool value)
+{
+    if (value == encoreImportTempoTextSemantic()) {
+        return;
+    }
+
+    encoreConfiguration()->setImportTempoTextSemantic(value);
+}
+
+bool ImportPreferencesModel::encoreImportUnsupportedArticulationsAsText() const
+{
+    return encoreConfiguration()->importUnsupportedArticulationsAsText();
+}
+
+void ImportPreferencesModel::setEncoreImportUnsupportedArticulationsAsText(bool value)
+{
+    if (value == encoreImportUnsupportedArticulationsAsText()) {
+        return;
+    }
+
+    encoreConfiguration()->setImportUnsupportedArticulationsAsText(value);
+}
+
+int ImportPreferencesModel::encoreUnderfillStrategy() const
+{
+    return static_cast<int>(encoreConfiguration()->underfillMeasureStrategy());
+}
+
+void ImportPreferencesModel::setEncoreUnderfillStrategy(int value)
+{
+    if (value == encoreUnderfillStrategy()) {
+        return;
+    }
+
+    encoreConfiguration()->setUnderfillMeasureStrategy(static_cast<iex::enc::UnderfillStrategy>(value));
+}
+
+int ImportPreferencesModel::encoreOverfillStrategy() const
+{
+    return static_cast<int>(encoreConfiguration()->overfillMeasureStrategy());
+}
+
+void ImportPreferencesModel::setEncoreOverfillStrategy(int value)
+{
+    if (value == encoreOverfillStrategy()) {
+        return;
+    }
+
+    encoreConfiguration()->setOverfillMeasureStrategy(static_cast<iex::enc::OverfillStrategy>(value));
+}
+
+bool ImportPreferencesModel::encoreFirstMeasureIsPickup() const
+{
+    return encoreConfiguration()->firstMeasureIsPickup();
+}
+
+void ImportPreferencesModel::setEncoreFirstMeasureIsPickup(bool value)
+{
+    if (value == encoreFirstMeasureIsPickup()) {
+        return;
+    }
+
+    encoreConfiguration()->setFirstMeasureIsPickup(value);
 }

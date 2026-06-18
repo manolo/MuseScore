@@ -25,9 +25,12 @@
 
 #include "project/inotationreadersregister.h"
 #include "internal/notationencreader.h"
+#include "internal/encoreimportconfiguration.h"
+#include "iencoreimportconfiguration.h"
 
 #include "log.h"
 
+using namespace muse;
 using namespace muse::modularity;
 using namespace mu::iex::enc;
 using namespace mu::project;
@@ -37,10 +40,21 @@ std::string EncoreModule::moduleName() const
     return "iex_encore";
 }
 
+void EncoreModule::registerExports()
+{
+    m_configuration = std::make_shared<EncoreImportConfiguration>();
+    globalIoc()->registerExport<IEncoreImportConfiguration>(moduleName(), m_configuration);
+}
+
 void EncoreModule::resolveImports()
 {
     auto readers = globalIoc()->resolve<INotationReadersRegister>(moduleName());
     if (readers) {
         readers->reg({ "enc" }, std::make_shared<NotationEncoreReader>());
     }
+}
+
+void EncoreModule::onInit(const IApplication::RunMode&)
+{
+    m_configuration->init();
 }
