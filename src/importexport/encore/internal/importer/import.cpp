@@ -125,9 +125,9 @@ static void logEncRootInfo(const EncRoot& enc)
     const char* fmtName = enc.fmt ? enc.fmt->formatName() : "unknown";
 
     const char* encVer = (h.chuVersio >= 1000) ? "Encore 5.x"
-                        : (h.chuVersio >= 700)  ? "Encore 4.x"
-                        : (h.chuVersio >= 580)  ? "Encore 4.0"
-                        :                         "Encore 3.x or older";
+                         : (h.chuVersio >= 700) ? "Encore 4.x"
+                         : (h.chuVersio >= 580) ? "Encore 4.0"
+                         : "Encore 3.x or older";
 
     LOGD() << "---- Encore file info ----";
     LOGD() << "  Magic:" << h.magic.toStdString()
@@ -257,7 +257,7 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
     score->style().set(Sid::pageEvenBottomMargin, bottomIn);
 }
 
-static void buildScore(MasterScore* score, const EncRoot& enc)
+static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOptions& opts)
 {
     score->style().set(Sid::chordsXmlFile, true);
     score->chordList()->read(u"chords.xml");
@@ -285,14 +285,18 @@ static void buildScore(MasterScore* score, const EncRoot& enc)
     score->style().set(Sid::tupletVHeadDistance,   0.0);
     score->style().set(Sid::tupletVStemDistance,   0.0);
 
-    BuildCtx ctx{ score, enc };
+    BuildCtx ctx{ score, enc, opts };
     buildParts(ctx);
     buildMeasures(ctx);
     buildInitialSignatures(ctx);
     emitMeasures(ctx);
 
-    applyPageMargins(score, enc.pageSetup);
-    applyStaffScale(score, enc);
+    if (ctx.opts.importPageLayout) {
+        applyPageMargins(score, enc.pageSetup);
+    }
+    if (ctx.opts.importStaffSize) {
+        applyStaffScale(score, enc);
+    }
 
     resolveAll(ctx);
 
@@ -302,7 +306,7 @@ static void buildScore(MasterScore* score, const EncRoot& enc)
     score->doLayout();
 }
 
-Err importEncore(MasterScore* score, const QString& path)
+Err importEncore(MasterScore* score, const QString& path, const EncImportOptions& opts)
 {
     if (!QFileInfo::exists(path)) {
         return Err::FileNotFound;
@@ -337,7 +341,7 @@ Err importEncore(MasterScore* score, const QString& path)
     }
 
     logEncRootInfo(enc);
-    buildScore(score, enc);
+    buildScore(score, enc, opts);
 
     muse::Ret integrity = score->sanityCheck();
     if (!integrity) {
