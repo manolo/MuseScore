@@ -33,6 +33,7 @@ muse::Ret NotationEncoreReader::read(MasterScore* score, const muse::io::path_t&
     EncImportOptions opts;
     opts.importPageLayout                     = encoreConfiguration()->importPageLayout();
     opts.importPageBreaks                     = encoreConfiguration()->importPageBreaks();
+    opts.importSystemLocks                    = encoreConfiguration()->importSystemLocks();
     opts.importStaffSize                      = encoreConfiguration()->importStaffSize();
     opts.importTempoTextSemantic              = encoreConfiguration()->importTempoTextSemantic();
     opts.importUnsupportedArticulationsAsText = encoreConfiguration()->importUnsupportedArticulationsAsText();

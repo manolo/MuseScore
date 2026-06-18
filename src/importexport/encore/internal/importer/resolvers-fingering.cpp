@@ -317,7 +317,6 @@ static void applyPendingFingeringOrns(BuildCtx& ctx, MasterScore* score)
             n->add(f);
         }
     }
-
 }
 
 void resolveFingeringAndBowing(BuildCtx& ctx)
@@ -327,6 +326,8 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
     applyPendingFingeringOrns(ctx, score);
     // SystemLocks enforce Encore's line layout as hard constraints so the engine compresses
     // spacing within the system rather than redistributing measures across lines.
-    applySystemLocksFromLines(ctx);
+    if (ctx.opts.importSystemLocks) {
+        applySystemLocksFromLines(ctx);
+    }
 }
 } // namespace mu::iex::enc

@@ -44,6 +44,9 @@ struct EncImportOptions {
     bool importPageBreaks = true;   // import page breaks (requires future implementation)
     bool importStaffSize  = true;   // apply staff size scaling from the Encore file
 
+    // Layout group (continued)
+    bool importSystemLocks = true;  // lock each system to Encore's line measure count
+
     // Text / content group
     bool importTempoTextSemantic              = true;   // map Italian tempo terms to BPM values
     bool importUnsupportedArticulationsAsText = false;  // emit unknown artic bytes as staff text
