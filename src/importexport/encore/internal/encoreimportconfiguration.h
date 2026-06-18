@@ -38,6 +38,10 @@ public:
     void setImportPageBreaks(bool value) override;
     muse::async::Channel<bool> importPageBreaksChanged() const override;
 
+    bool importSystemLocks() const override;
+    void setImportSystemLocks(bool value) override;
+    muse::async::Channel<bool> importSystemLocksChanged() const override;
+
     bool importStaffSize() const override;
     void setImportStaffSize(bool value) override;
     muse::async::Channel<bool> importStaffSizeChanged() const override;
@@ -65,6 +69,7 @@ public:
 private:
     muse::async::Channel<bool> m_importPageLayoutChanged;
     muse::async::Channel<bool> m_importPageBreaksChanged;
+    muse::async::Channel<bool> m_importSystemLocksChanged;
     muse::async::Channel<bool> m_importStaffSizeChanged;
     muse::async::Channel<bool> m_importTempoTextSemanticChanged;
     muse::async::Channel<bool> m_importUnsupportedArticulationsAsTextChanged;

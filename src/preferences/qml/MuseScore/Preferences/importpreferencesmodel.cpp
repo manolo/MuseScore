@@ -84,6 +84,10 @@ void ImportPreferencesModel::load()
         emit encoreImportPageBreaksChanged(val);
     });
 
+    encoreConfiguration()->importSystemLocksChanged().onReceive(this, [this](bool val) {
+        emit encoreImportSystemLocksChanged(val);
+    });
+
     encoreConfiguration()->importStaffSizeChanged().onReceive(this, [this](bool val) {
         emit encoreImportStaffSizeChanged(val);
     });
@@ -365,6 +369,20 @@ void ImportPreferencesModel::setEncoreImportPageBreaks(bool value)
     }
 
     encoreConfiguration()->setImportPageBreaks(value);
+}
+
+bool ImportPreferencesModel::encoreImportSystemLocks() const
+{
+    return encoreConfiguration()->importSystemLocks();
+}
+
+void ImportPreferencesModel::setEncoreImportSystemLocks(bool value)
+{
+    if (value == encoreImportSystemLocks()) {
+        return;
+    }
+
+    encoreConfiguration()->setImportSystemLocks(value);
 }
 
 bool ImportPreferencesModel::encoreImportStaffSize() const

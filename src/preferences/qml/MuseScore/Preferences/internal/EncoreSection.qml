@@ -31,6 +31,7 @@ BaseSection {
     // Layout group
     property alias importPageLayout: importPageLayoutBox.checked
     property alias importPageBreaks: importPageBreaksBox.checked
+    property alias importSystemLocks: importSystemLocksBox.checked
     property alias importStaffSize: importStaffSizeBox.checked
 
     // Text / content group
@@ -48,6 +49,7 @@ BaseSection {
 
     signal importPageLayoutChangeRequested(bool value)
     signal importPageBreaksChangeRequested(bool value)
+    signal importSystemLocksChangeRequested(bool value)
     signal importStaffSizeChangeRequested(bool value)
     signal importTempoTextSemanticChangeRequested(bool value)
     signal importUnsupportedArticulationsAsTextChangeRequested(bool value)
@@ -82,6 +84,19 @@ BaseSection {
     }
 
     CheckBox {
+        id: importSystemLocksBox
+        width: parent.width
+
+        text: qsTrc("preferences", "Lock systems to Encore layout")
+
+        navigation.name: "EncoreImportSystemLocksBox"
+        navigation.panel: root.navigation
+        navigation.row: 2
+
+        onClicked: root.importSystemLocksChangeRequested(!checked)
+    }
+
+    CheckBox {
         id: importStaffSizeBox
         width: parent.width
 
@@ -89,7 +104,7 @@ BaseSection {
 
         navigation.name: "EncoreImportStaffSizeBox"
         navigation.panel: root.navigation
-        navigation.row: 2
+        navigation.row: 3
 
         onClicked: root.importStaffSizeChangeRequested(!checked)
     }
@@ -102,7 +117,7 @@ BaseSection {
 
         navigation.name: "EncoreImportTempoTextSemanticBox"
         navigation.panel: root.navigation
-        navigation.row: 3
+        navigation.row: 4
 
         onClicked: root.importTempoTextSemanticChangeRequested(!checked)
     }
@@ -115,7 +130,7 @@ BaseSection {
 
         navigation.name: "EncoreImportUnsupportedArticulationsAsTextBox"
         navigation.panel: root.navigation
-        navigation.row: 4
+        navigation.row: 5
 
         onClicked: root.importUnsupportedArticulationsAsTextChangeRequested(!checked)
     }
@@ -133,7 +148,7 @@ BaseSection {
 
         navigationName: "EncoreUnderfillStrategyBox"
         navigationPanel: root.navigation
-        navigationRow: 5
+        navigationRow: 6
 
         onValueEdited: function(newIndex, newValue) {
             root.underfillStrategyChangeRequested(newValue)
@@ -153,7 +168,7 @@ BaseSection {
 
         navigationName: "EncoreOverfillStrategyBox"
         navigationPanel: root.navigation
-        navigationRow: 6
+        navigationRow: 7
 
         onValueEdited: function(newIndex, newValue) {
             root.overfillStrategyChangeRequested(newValue)
@@ -168,7 +183,7 @@ BaseSection {
 
         navigation.name: "EncoreFirstMeasureIsPickupBox"
         navigation.panel: root.navigation
-        navigation.row: 7
+        navigation.row: 8
 
         onClicked: root.firstMeasureIsPickupChangeRequested(!checked)
     }

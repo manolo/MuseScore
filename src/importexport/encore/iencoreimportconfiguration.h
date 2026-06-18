@@ -42,6 +42,10 @@ public:
     virtual void setImportPageBreaks(bool value) = 0;
     virtual muse::async::Channel<bool> importPageBreaksChanged() const = 0;
 
+    virtual bool importSystemLocks() const = 0;
+    virtual void setImportSystemLocks(bool value) = 0;
+    virtual muse::async::Channel<bool> importSystemLocksChanged() const = 0;
+
     virtual bool importStaffSize() const = 0;
     virtual void setImportStaffSize(bool value) = 0;
     virtual muse::async::Channel<bool> importStaffSizeChanged() const = 0;

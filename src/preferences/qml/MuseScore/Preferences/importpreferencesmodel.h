@@ -59,6 +59,8 @@ class ImportPreferencesModel : public QObject, public muse::Contextable, public 
 
     Q_PROPERTY(bool encoreImportPageLayout READ encoreImportPageLayout WRITE setEncoreImportPageLayout NOTIFY encoreImportPageLayoutChanged)
     Q_PROPERTY(bool encoreImportPageBreaks READ encoreImportPageBreaks WRITE setEncoreImportPageBreaks NOTIFY encoreImportPageBreaksChanged)
+    Q_PROPERTY(
+        bool encoreImportSystemLocks READ encoreImportSystemLocks WRITE setEncoreImportSystemLocks NOTIFY encoreImportSystemLocksChanged)
     Q_PROPERTY(bool encoreImportStaffSize READ encoreImportStaffSize WRITE setEncoreImportStaffSize NOTIFY encoreImportStaffSizeChanged)
     Q_PROPERTY(bool encoreImportTempoTextSemantic READ encoreImportTempoTextSemantic WRITE setEncoreImportTempoTextSemantic
                NOTIFY encoreImportTempoTextSemanticChanged)
@@ -116,6 +118,7 @@ public:
 
     bool encoreImportPageLayout() const;
     bool encoreImportPageBreaks() const;
+    bool encoreImportSystemLocks() const;
     bool encoreImportStaffSize() const;
     bool encoreImportTempoTextSemantic() const;
     bool encoreImportUnsupportedArticulationsAsText() const;
@@ -142,6 +145,7 @@ public slots:
 
     void setEncoreImportPageLayout(bool value);
     void setEncoreImportPageBreaks(bool value);
+    void setEncoreImportSystemLocks(bool value);
     void setEncoreImportStaffSize(bool value);
     void setEncoreImportTempoTextSemantic(bool value);
     void setEncoreImportUnsupportedArticulationsAsText(bool value);
@@ -164,6 +168,7 @@ signals:
 
     void encoreImportPageLayoutChanged(bool value);
     void encoreImportPageBreaksChanged(bool value);
+    void encoreImportSystemLocksChanged(bool value);
     void encoreImportStaffSizeChanged(bool value);
     void encoreImportTempoTextSemanticChanged(bool value);
     void encoreImportUnsupportedArticulationsAsTextChanged(bool value);

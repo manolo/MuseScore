@@ -176,6 +176,7 @@ PreferencesPage {
         EncoreSection {
             importPageLayout: importPreferencesModel.encoreImportPageLayout
             importPageBreaks: importPreferencesModel.encoreImportPageBreaks
+            importSystemLocks: importPreferencesModel.encoreImportSystemLocks
             importStaffSize: importPreferencesModel.encoreImportStaffSize
             importTempoTextSemantic: importPreferencesModel.encoreImportTempoTextSemantic
             importUnsupportedArticulationsAsText: importPreferencesModel.encoreImportUnsupportedArticulationsAsText
@@ -196,6 +197,10 @@ PreferencesPage {
 
             onImportPageBreaksChangeRequested: function(value) {
                 importPreferencesModel.encoreImportPageBreaks = value
+            }
+
+            onImportSystemLocksChangeRequested: function(value) {
+                importPreferencesModel.encoreImportSystemLocks = value
             }
 
             onImportStaffSizeChangeRequested: function(value) {

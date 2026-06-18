@@ -31,6 +31,7 @@ static const std::string module_name("iex_encore");
 
 static const Settings::Key ENC_IMPORT_PAGE_LAYOUT_KEY(module_name, "import/encore/importPageLayout");
 static const Settings::Key ENC_IMPORT_PAGE_BREAKS_KEY(module_name, "import/encore/importPageBreaks");
+static const Settings::Key ENC_IMPORT_SYSTEM_LOCKS_KEY(module_name, "import/encore/importSystemLocks");
 static const Settings::Key ENC_IMPORT_STAFF_SIZE_KEY(module_name, "import/encore/importStaffSize");
 static const Settings::Key ENC_IMPORT_TEMPO_SEMANTIC_KEY(module_name, "import/encore/importTempoTextSemantic");
 static const Settings::Key ENC_IMPORT_ARTIC_AS_TEXT_KEY(module_name, "import/encore/importUnsupportedArticulationsAsText");
@@ -48,6 +49,11 @@ void EncoreImportConfiguration::init()
     settings()->setDefaultValue(ENC_IMPORT_PAGE_BREAKS_KEY, Val(true));
     settings()->valueChanged(ENC_IMPORT_PAGE_BREAKS_KEY).onReceive(this, [this](const Val& val) {
         m_importPageBreaksChanged.send(val.toBool());
+    });
+
+    settings()->setDefaultValue(ENC_IMPORT_SYSTEM_LOCKS_KEY, Val(true));
+    settings()->valueChanged(ENC_IMPORT_SYSTEM_LOCKS_KEY).onReceive(this, [this](const Val& val) {
+        m_importSystemLocksChanged.send(val.toBool());
     });
 
     settings()->setDefaultValue(ENC_IMPORT_STAFF_SIZE_KEY, Val(true));
@@ -109,6 +115,21 @@ void EncoreImportConfiguration::setImportPageBreaks(bool value)
 async::Channel<bool> EncoreImportConfiguration::importPageBreaksChanged() const
 {
     return m_importPageBreaksChanged;
+}
+
+bool EncoreImportConfiguration::importSystemLocks() const
+{
+    return settings()->value(ENC_IMPORT_SYSTEM_LOCKS_KEY).toBool();
+}
+
+void EncoreImportConfiguration::setImportSystemLocks(bool value)
+{
+    settings()->setSharedValue(ENC_IMPORT_SYSTEM_LOCKS_KEY, Val(value));
+}
+
+async::Channel<bool> EncoreImportConfiguration::importSystemLocksChanged() const
+{
+    return m_importSystemLocksChanged;
 }
 
 bool EncoreImportConfiguration::importStaffSize() const
