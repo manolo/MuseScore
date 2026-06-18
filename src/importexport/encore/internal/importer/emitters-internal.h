@@ -54,11 +54,11 @@ struct MeasEmitCtx {
 
     std::set<const EncMeasureElem*> validTupletGroupMember;
     std::set<const EncMeasureElem*> partialEndGroup;
-    std::vector<NestedTupletInfo>   nestedInfos;
+    std::vector<NestedTupletInfo> nestedInfos;
     // All notes that belong to an INNER group (the notes inside the nested sub-tuplet).
     std::set<const EncMeasureElem*> innerGroupMembers;
     // Override (actualN, normalN) for notes detected as uniform-fill groups (e.g. 15→[15:8]).
-    std::map<const EncMeasureElem*, std::pair<int,int>> overrideGroupRatios;
+    std::map<const EncMeasureElem*, std::pair<int, int> > overrideGroupRatios;
     // Lookup: first elem of inner group → NestedTupletInfo*
     std::map<const EncMeasureElem*, const NestedTupletInfo*> nestedByInnerFirst;
     // Lookup: last elem of inner group → NestedTupletInfo*
@@ -100,12 +100,10 @@ struct NoteElemCtx {
 
 void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec);
 // Returns true if note was a grace note (caller must return). (emitters-note-grace.cpp)
-bool tryHandleGraceNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec,
-                        const EncNote* en);
+bool tryHandleGraceNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec, const EncNote* en);
 // Apply articulations, ornaments, tremolos, string numbers to a note/chord. (emitters-note-artic.cpp)
-void applyNoteArticulations(mu::engraving::Note* note, mu::engraving::Chord* chord,
-                             const EncNote* en, mu::engraving::track_idx_t track,
-                             const MeasEmitCtx& mc);
+void applyNoteArticulations(mu::engraving::Note* note, mu::engraving::Chord* chord, const EncNote* en, mu::engraving::track_idx_t track,
+                            const MeasEmitCtx& mc);
 void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec);
 void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec);
 void handleChordSym(BuildCtx& ctx, const MeasEmitCtx& mc, const NoteElemCtx& ec);
@@ -113,17 +111,16 @@ void handleChordSym(BuildCtx& ctx, const MeasEmitCtx& mc, const NoteElemCtx& ec)
 // Queue one LYRIC element into ctx.pendingLyrics. (emitters-lyrics.cpp)
 void enqueueLyric(BuildCtx& ctx, const EncLyric* el, mu::engraving::track_idx_t track);
 // Attach queued lyrics to the nearest chords in the measure. (emitters-lyrics.cpp)
-void attachPendingLyrics(BuildCtx& ctx, mu::engraving::Measure* measure,
-                         const EncMeasure& encMeas, mu::engraving::Fraction measTick);
+void attachPendingLyrics(BuildCtx& ctx, mu::engraving::Measure* measure, const EncMeasure& encMeas, mu::engraving::Fraction measTick);
 
 // Case-B pickup adjustment: shorten measure 0 if loop placed less than its nominal length. (emitters-fill.cpp)
 void adjustPickupMeasure(BuildCtx& ctx, mu::engraving::Measure* measure, int measIdx);
 // Pre-fill trailing silence with invisible gap rests. (emitters-fill.cpp)
 void fillTrailingGaps(BuildCtx& ctx, mu::engraving::Measure* measure, mu::engraving::Fraction measTick);
 // Fix over/undershoots up to 1/24. (emitters-fill.cpp)
-void correctMeasureLength(mu::engraving::Measure* measure, int totalStaves);
+void correctMeasureLength(BuildCtx& ctx, mu::engraving::Measure* measure);
 // Nuclear hard-cap: remove trailing elements and fill deficit. (emitters-fill.cpp)
-void capMeasureLength(mu::engraving::Measure* measure, int totalStaves);
+void capMeasureLength(BuildCtx& ctx, mu::engraving::Measure* measure);
 
 // Apply per-measure BPM marks as TempoText elements. (emitters-tempo.cpp)
 void applyMeasureBpmMarks(BuildCtx& ctx);

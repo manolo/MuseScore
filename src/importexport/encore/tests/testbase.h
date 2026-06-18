@@ -25,6 +25,8 @@
 
 #include <QString>
 
+#include "../internal/importer/import-options.h"
+
 namespace mu::engraving {
 class MasterScore;
 class Score;
@@ -35,6 +37,7 @@ protected:
     QString root;
 
     MasterScore* readEncoreScore(const QString& name);
+    MasterScore* readEncoreScoreWithOpts(const QString& name, const mu::iex::enc::EncImportOptions& opts);
     bool saveScore(Score*, const QString& name) const;
     bool compareFiles(const QString& saveName, const QString& compareWith) const;
     bool saveCompareScore(Score*, const QString& saveName, const QString& compareWith) const;

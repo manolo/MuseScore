@@ -32,12 +32,14 @@
 #include "engraving/dom/tuplet.h"
 
 namespace mu::iex::enc {
-
 // Case B pickup adjustment: if measure 0 has the same timesig as measure 1 but
 // the note loop placed less content than the full measure, shorten it to the
 // actual cumTick. Update all subsequent measures' tick positions accordingly.
 void adjustPickupMeasure(BuildCtx& ctx, Measure* measure, int measIdx)
 {
+    if (!ctx.opts.firstMeasureIsPickup) {
+        return;
+    }
     if (measIdx != 0 || measure->timesig() != measure->ticks()) {
         return;
     }
@@ -65,11 +67,17 @@ void adjustPickupMeasure(BuildCtx& ctx, Measure* measure, int measIdx)
     }
 }
 
-// Pre-fill trailing silence with invisible gap rests so checkMeasure does not
-// add visible rests for space that was never encoded in the Encore file.
+// Pre-fill trailing silence with rests so checkMeasure does not add its own.
+// InvisibleRests (default): gap rests keep the score clean.
+// VisibleRests: normal rests so the user can see the empty beats.
+// IrregularMeasure: no rests added; the measure actual duration is shortened to match content.
 // Only applies to voices that have some content (cumTick > 0).
 void fillTrailingGaps(BuildCtx& ctx, Measure* measure, Fraction measTick)
 {
+    const bool makeGap = (ctx.opts.underfillMeasureStrategy != UnderfillStrategy::VisibleRests
+                          && ctx.opts.underfillMeasureStrategy != UnderfillStrategy::IrregularMeasure);
+    const bool irregular = (ctx.opts.underfillMeasureStrategy == UnderfillStrategy::IrregularMeasure);
+
     for (int si = 0; si < ctx.totalStaves; ++si) {
         for (voice_idx_t v = 0; v < VOICES; ++v) {
             const auto key = std::make_pair(si, static_cast<int>(v));
@@ -84,6 +92,9 @@ void fillTrailingGaps(BuildCtx& ctx, Measure* measure, Fraction measTick)
             if (remaining <= Fraction(0, 1)) {
                 continue;
             }
+            if (irregular) {
+                continue;  // IrregularMeasure: handled by shrinking measure duration
+            }
             const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
             const Fraction fillTick = measTick + voicePos;
             Segment* seg = measure->getSegment(SegmentType::ChordRest, fillTick);
@@ -91,7 +102,7 @@ void fillTrailingGaps(BuildCtx& ctx, Measure* measure, Fraction measTick)
                 Rest* r = Factory::createRest(seg, TDuration(DurationType::V_MEASURE));
                 r->setTicks(remaining);
                 r->setTrack(tr);
-                r->setGap(true);
+                r->setGap(makeGap);
                 seg->add(r);
             }
         }
@@ -104,11 +115,12 @@ static const Fraction kFillMaxDelta(1, 24);
 
 // Fix over/undershoots up to kFillMaxDelta from non-standard gaps (cascade fills).
 // Overshoot: remove smallest gap rests. Undershoot: add V_MEASURE gap rest.
-void correctMeasureLength(Measure* measure, int totalStaves)
+void correctMeasureLength(BuildCtx& ctx, Measure* measure)
 {
+    const bool makeGap = (ctx.opts.underfillMeasureStrategy != UnderfillStrategy::VisibleRests);
     const Fraction mLen = measure->ticks();
     const Fraction maxDelta = kFillMaxDelta;
-    for (int si = 0; si < totalStaves; ++si) {
+    for (int si = 0; si < ctx.totalStaves; ++si) {
         for (voice_idx_t v = 0; v < VOICES; ++v) {
             track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
             Fraction voiceSum(0, 1);
@@ -147,7 +159,7 @@ void correctMeasureLength(Measure* measure, int totalStaves)
                     delete gr;
                 }
             }
-            // Undershoot: add exact V_MEASURE gap rest for residual
+            // Undershoot: add exact V_MEASURE rest for residual
             const Fraction deficit = mLen - voiceSum;
             if (deficit > Fraction(0, 1) && deficit <= maxDelta) {
                 const Fraction fillTick = measure->tick() + voiceSum;
@@ -156,7 +168,7 @@ void correctMeasureLength(Measure* measure, int totalStaves)
                     Rest* r = Factory::createRest(fillSeg, TDuration(DurationType::V_MEASURE));
                     r->setTicks(deficit);
                     r->setTrack(tr);
-                    r->setGap(true);
+                    r->setGap(makeGap);
                     fillSeg->add(r);
                 }
             }
@@ -166,11 +178,12 @@ void correctMeasureLength(Measure* measure, int totalStaves)
 
 // Nuclear hard-cap: remove trailing ChordRest elements from any voice that
 // still overshoots after correctMeasureLength, then fill any residual deficit
-// with an invisible gap rest. Guarantees no measure has wrong total duration.
-void capMeasureLength(Measure* measure, int totalStaves)
+// with a rest. Guarantees no measure has wrong total duration.
+void capMeasureLength(BuildCtx& ctx, Measure* measure)
 {
+    const bool makeGap = (ctx.opts.underfillMeasureStrategy != UnderfillStrategy::VisibleRests);
     const Fraction mLen = measure->ticks();
-    for (int si = 0; si < totalStaves; ++si) {
+    for (int si = 0; si < ctx.totalStaves; ++si) {
         for (voice_idx_t v = 0; v < VOICES; ++v) {
             const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
             std::vector<ChordRest*> crs;
@@ -208,12 +221,11 @@ void capMeasureLength(Measure* measure, int totalStaves)
                     Rest* r = Factory::createRest(fillSeg, TDuration(DurationType::V_MEASURE));
                     r->setTicks(deficit);
                     r->setTrack(tr);
-                    r->setGap(true);
+                    r->setGap(makeGap);
                     fillSeg->add(r);
                 }
             }
         }
     }
 }
-
 } // namespace mu::iex::enc

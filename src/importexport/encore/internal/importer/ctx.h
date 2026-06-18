@@ -23,6 +23,8 @@
 #ifndef MU_IMPORTEXPORT_ENC_IMPORT_CTX_H
 #define MU_IMPORTEXPORT_ENC_IMPORT_CTX_H
 
+#include "import-options.h"
+
 #include <map>
 #include <set>
 #include <memory>
@@ -168,6 +170,7 @@ struct BuildCtx
 {
     mu::engraving::MasterScore* score;
     const EncRoot& enc;
+    EncImportOptions opts;
 
     // Populated by buildParts():
     int totalStaves = 0;
@@ -200,7 +203,7 @@ struct BuildCtx
     std::vector<PendingMeasureRepeat> pendingMeasureRepeats {};
     std::vector<PendingBowing> pendingBowings {};
     // (measIdx, staffIdx) → list of (enc_tick, note.xoffset) for bowing xoffset clustering.
-    std::map<std::pair<int,int>, std::vector<std::pair<int,int>>> noteXoffByMeasStaff {};
+    std::map<std::pair<int, int>, std::vector<std::pair<int, int> > > noteXoffByMeasStaff {};
     std::vector<PendingOrnFingering> pendingOrnFingerings {};
     std::vector<PendingMarker> pendingMarkers {};
     std::map<track_idx_t, std::vector<PendingLyric> > pendingLyrics {};

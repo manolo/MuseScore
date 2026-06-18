@@ -29,13 +29,14 @@
 #define MU_IMPORTEXPORT_ENC_IMPORT_IMPORT_H
 
 #include "engraving/engravingerrors.h"
+#include "import-options.h"
 
 namespace mu::engraving {
 class MasterScore;
 }
 
 namespace mu::iex::enc {
-mu::engraving::Err importEncore(mu::engraving::MasterScore* score, const QString& path);
+mu::engraving::Err importEncore(mu::engraving::MasterScore* score, const QString& path, const EncImportOptions& opts = EncImportOptions {});
 } // namespace mu::iex::enc
 
 #endif // MU_IMPORTEXPORT_ENC_IMPORT_IMPORT_H

@@ -7,20 +7,64 @@ how the importer consumes that format, where the code lives, and
 the decisions that map Encore concepts onto MuseScore engraving
 elements.
 
-## Code layout
+## Architecture
 
-Source tree: `src/importexport/encore/`.
+The importer is structured in two layers separated by a clean data boundary.
+The **parser** reads the binary `.enc` bytes and produces a tree of plain C++ structs.
+The **importer** walks that tree and emits MuseScore engraving DOM elements.
+Neither layer knows about the other's internals.
 
-| File                                          | Role |
-|-----------------------------------------------|------|
-| `internal/encoreelements.{h,cpp}`             | Every `Enc*` binary struct and its `read()` method. Owns `MeasureElemVec` via `std::unique_ptr`. |
-| `internal/encorerhythm.{h,cpp}`               | Face-value to ticks conversion, `realDuration2DurationType`, `calcDots / calcDotsSnap`, `detectImpliedTuplet`, and `dottedAdvance` (shared cap path between chords and rests). |
-| `internal/encoremapping.{h,cpp}`              | Clef/key conversions, DOM setup (`addTitleFrame`, `addInitialKeySig`, `addInitialTimeSig`, `addInitialClef`, `addRepeatMark`), instrument template matching (`normalizeEncoreInstrName`, `findEncoreInstrumentTemplate`), tempo-term lookup (`encTextToTempoBps`), articulation mapping (`encArticulation2SymIds`). |
-| `internal/encoretuplets.{h,cpp}`              | `TupletTracker` and `computeImpliedTupletMembers`. The most subtle pieces and the root cause of every past corruption fix. |
-| `internal/import/import.cpp`                   | Top-level `buildScore` orchestration. |
-| `tests/tst_encore.cpp`                        | End-to-end integration tests against real and synthetic `.enc` files. |
-| `tests/tst_encore_features.cpp`               | Per-feature unit tests with synthetic v0c4 fixtures. |
-| `tests/tst_encore_rhythm.cpp`                 | Rhythm helpers (face value, dot, tuplet, dotted advance). |
+### Source tree
+
+```
+src/importexport/encore/
+├── enc-module.{h,cpp}            Entry point: registers the module with MuseScore
+├── internal/
+│   ├── notationencreader.{h,cpp} INotationReader adapter; calls importEncore()
+│   │
+│   ├── parser/                   LAYER 1 — Binary bytes → EncRoot tree
+│   │   ├── elem*.h               Parsed data structs (EncRoot, EncNote, EncOrnament, …)
+│   │   ├── parsers-*.cpp         Per-block/element parsers
+│   │   ├── parsers-encoding.*    Text encoding probe (Latin-1 vs UTF-16 LE)
+│   │   ├── readers.{h,cpp}       EncFormatReader base + dispatch; findNextKnownMagic
+│   │   ├── readers-v0x*.{h,cpp}  Version-specific readers (v0xC4, v0xC2, v0xA6)
+│   │   └── ticks.{h,cpp}         Tick arithmetic: faceValue↔ticks, dots, tuplets
+│   │
+│   └── importer/                 LAYER 2 — EncRoot tree → MuseScore DOM
+│       ├── import.{h,cpp}        importEncore() top-level orchestration
+│       ├── import-options.h      EncImportOptions struct (8 user-configurable flags)
+│       ├── ctx.h                 BuildCtx: shared mutable state for all passes
+│       ├── builders*.{h,cpp}     Score / part / measure setup
+│       ├── emitters*.{h,cpp}     Per-type element emitters (notes, rests, ornaments, …)
+│       ├── mappers*.{h,cpp}      Encore → MuseScore type conversions
+│       └── resolvers*.{h,cpp}    Post-processing resolvers (slurs, hairpins, …)
+│
+└── tests/
+    └── tst_*.cpp                 Per-feature tests (notes, tuplets, ornaments, …)
+```
+
+### Data flow
+
+```
+.enc file
+    │
+    ▼  readers-v0x*.cpp + parsers-*.cpp
+EncRoot  (EncInstrument[], EncLine[], EncMeasure[], EncTitle)
+    │
+    ▼  import.cpp: importEncore()
+    ├── buildParts()               → Score: parts, staves, instruments
+    ├── buildMeasures()            → Score: empty Measure frames
+    ├── buildInitialSignatures()   → Score: clef / key / time-sig on measure 0
+    └── emitMeasures()             → per measure:
+          ├── emitters-*.cpp:        notes, rests, ornaments, dynamics, …
+          └── emitters-tuplets.cpp:  tuplet group tracking
+    │
+    ▼  resolveAll()
+    resolvers-*.cpp fix deferred cross-element links (slurs, hairpins, ornaments)
+    │
+    ▼
+MasterScore  (complete)
+```
 
 ## Block dispatch and resync
 
@@ -1539,6 +1583,40 @@ the user typed (e.g. 0.100 in stores as 7 pts and displays as 0.097 in).
 Files that were never saved through Page Setup have no WINI block.
 `EncPageSetup::hasData` will be false and `applyPageMargins` is a no-op;
 MuseScore defaults (15 mm per side) remain.
+
+## Import options (EncImportOptions)
+
+`importEncore()` accepts an optional `EncImportOptions` struct (`import-options.h`).
+All fields default to the current behaviour so existing callers are unaffected.
+The Preferences UI (Phase 2) will read these values from `IEncoreImportConfiguration`.
+
+### Layout group
+
+| Field | Default | Effect when changed |
+|---|---|---|
+| `importPageLayout` | `true` | When `false`, `applyPageMargins()` is skipped; MuseScore default margins apply. |
+| `importPageBreaks` | `true` | Reserved for when page-break detection is implemented (LINE block `pageIdx`). |
+| `importStaffSize` | `true` | When `false`, `applyStaffScale()` is skipped; all staves keep MAG 1.0. |
+
+### Text / content group
+
+| Field | Default | Effect when changed |
+|---|---|---|
+| `importTempoTextSemantic` | `true` | When `false`, Italian tempo terms in STAFFTEXT ornaments stay as `StaffText` instead of being promoted to `TempoText` with BPM. Numeric BPM marks from MEAS headers are unaffected. |
+| `importUnsupportedArticulationsAsText` | `false` | When `true`, articulation bytes with no MuseScore equivalent (0x01, 0x02, 0x09, 0x47-0x4A) are emitted as `StaffText` instead of being silently dropped. |
+
+### Measure correction group
+
+| Field | Type | Default | Options |
+|---|---|---|---|
+| `underfillMeasureStrategy` | `UnderfillStrategy` | `InvisibleRests` | `InvisibleRests`: gap rests (invisible). `VisibleRests`: normal visible rests. `IrregularMeasure`: reserved. |
+| `overfillMeasureStrategy` | `OverfillStrategy` | `Truncate` | `Truncate`: remove trailing notes (current). `StretchLastNote`: reserved. `IrregularMeasure`: reserved. |
+| `firstMeasureIsPickup` | `bool` | `true` | When `false`, Case A and Case B pickup detection are bypassed; the first measure keeps its nominal full duration and leading beats are left as rests. |
+
+### Pending lyric fix (not an option)
+
+`attachPendingLyrics()` now falls back to attaching unmatched lyrics to the nearest
+`Rest` in the measure instead of discarding them silently.
 
 ## Current corpus status
 

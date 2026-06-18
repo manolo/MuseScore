@@ -131,19 +131,32 @@ static void handleDynamicOrnament(BuildCtx& ctx, MeasEmitCtx& mc,
     }
     DynamicType dt = DynamicType::OTHER;
     switch (eo->ornType()) {
-    case EncOrnamentType::DYN_PPP:  dt = DynamicType::PPP;  break;
-    case EncOrnamentType::DYN_PP:   dt = DynamicType::PP;   break;
-    case EncOrnamentType::DYN_P:    dt = DynamicType::P;    break;
-    case EncOrnamentType::DYN_MP:   dt = DynamicType::MP;   break;
-    case EncOrnamentType::DYN_MF:   dt = DynamicType::MF;   break;
-    case EncOrnamentType::DYN_F:    dt = DynamicType::F;    break;
-    case EncOrnamentType::DYN_FF:   dt = DynamicType::FF;   break;
-    case EncOrnamentType::DYN_FFF:  dt = DynamicType::FFF;  break;
-    case EncOrnamentType::DYN_SFZ:  dt = DynamicType::SFZ;  break;
-    case EncOrnamentType::DYN_SFFZ: dt = DynamicType::SFFZ; break;
-    case EncOrnamentType::DYN_FP:   dt = DynamicType::FP;   break;
-    case EncOrnamentType::DYN_FZ:   dt = DynamicType::FZ;   break;
-    case EncOrnamentType::DYN_SF:   dt = DynamicType::SF;   break;
+    case EncOrnamentType::DYN_PPP:  dt = DynamicType::PPP;
+        break;
+    case EncOrnamentType::DYN_PP:   dt = DynamicType::PP;
+        break;
+    case EncOrnamentType::DYN_P:    dt = DynamicType::P;
+        break;
+    case EncOrnamentType::DYN_MP:   dt = DynamicType::MP;
+        break;
+    case EncOrnamentType::DYN_MF:   dt = DynamicType::MF;
+        break;
+    case EncOrnamentType::DYN_F:    dt = DynamicType::F;
+        break;
+    case EncOrnamentType::DYN_FF:   dt = DynamicType::FF;
+        break;
+    case EncOrnamentType::DYN_FFF:  dt = DynamicType::FFF;
+        break;
+    case EncOrnamentType::DYN_SFZ:  dt = DynamicType::SFZ;
+        break;
+    case EncOrnamentType::DYN_SFFZ: dt = DynamicType::SFFZ;
+        break;
+    case EncOrnamentType::DYN_FP:   dt = DynamicType::FP;
+        break;
+    case EncOrnamentType::DYN_FZ:   dt = DynamicType::FZ;
+        break;
+    case EncOrnamentType::DYN_SF:   dt = DynamicType::SF;
+        break;
     default: break;
     }
     // Use enc tick as the base: cumTick for voice=0 may be 0 when notes are in other voices.
@@ -216,7 +229,8 @@ static void handleStaffTextOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
     const bool placeBelow = (eo->yoffset < 0);
 
     // Promote Italian tempo terms to TempoText so MuseScore tracks them in the tempo map.
-    const double tempoBps = encTextToTempoBps(text);
+    // Skipped when importTempoTextSemantic is off: the text stays as StaffText.
+    const double tempoBps = ctx.opts.importTempoTextSemantic ? encTextToTempoBps(text) : -1.0;
     if (tempoBps >= 0.0) {
         TempoText* tt2 = Factory::createTempoText(seg);
         tt2->setTrack(track);
@@ -519,25 +533,33 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         ctx.pendingBreaths.push_back({ elemTick, track, SymId::breathMarkComma });
         break;
     }
-    case EncOrnamentType::ACCENT:               pushBowing(SymId::articAccentAbove);         break;
-    case EncOrnamentType::DOWNBOW:              pushBowing(SymId::stringsDownBow);           break;
-    case EncOrnamentType::UPBOW:  pushBowing(SymId::stringsUpBow);  break;
-    case EncOrnamentType::MARCATO:              pushBowing(SymId::articMarcatoAbove);        break;
-    case EncOrnamentType::MARCATO_BELOW:        pushBowing(SymId::articMarcatoBelow);        break;
-    case EncOrnamentType::MARCATO_STACCATO_BELOW: pushBowing(SymId::articMarcatoStaccatoBelow); break;
-    case EncOrnamentType::TENUTO:               pushBowing(SymId::articTenutoAbove);         break;
+    case EncOrnamentType::ACCENT:               pushBowing(SymId::articAccentAbove);
+        break;
+    case EncOrnamentType::DOWNBOW:              pushBowing(SymId::stringsDownBow);
+        break;
+    case EncOrnamentType::UPBOW:  pushBowing(SymId::stringsUpBow);
+        break;
+    case EncOrnamentType::MARCATO:              pushBowing(SymId::articMarcatoAbove);
+        break;
+    case EncOrnamentType::MARCATO_BELOW:        pushBowing(SymId::articMarcatoBelow);
+        break;
+    case EncOrnamentType::MARCATO_STACCATO_BELOW: pushBowing(SymId::articMarcatoStaccatoBelow);
+        break;
+    case EncOrnamentType::TENUTO:               pushBowing(SymId::articTenutoAbove);
+        break;
     case EncOrnamentType::GUITAR_BEND:
     case EncOrnamentType::GUITAR_BEND_2:
     case EncOrnamentType::GUITAR_PREBEND:
     case EncOrnamentType::GUITAR_PREBEND_RELEASE:
     case EncOrnamentType::GUITAR_BEND_V:
         LOGW() << QString("Encore: guitar bend 0x%1 not yet imported (measure %2 staff %3 tick %4)")
-                      .arg(eo->tipo, 2, 16, QChar('0'))
-                      .arg(measIdx)
-                      .arg(staffIdx)
-                      .arg(static_cast<int>(e->tick));
+            .arg(eo->tipo, 2, 16, QChar('0'))
+            .arg(measIdx)
+            .arg(staffIdx)
+            .arg(static_cast<int>(e->tick));
         break;
-    case EncOrnamentType::DOUBLE_MORDENT:       pushBowing(SymId::ornamentPrallMordent);     break;
+    case EncOrnamentType::DOUBLE_MORDENT:       pushBowing(SymId::ornamentPrallMordent);
+        break;
     case EncOrnamentType::TREMOLO_16: {
         PendingOrnTremolo pt;
         pt.tick = elemTick;
@@ -602,10 +624,10 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         break;
     default:
         LOGW() << QString("Encore: unknown ornament type 0x%1 at measure %2 staff %3 tick %4")
-                      .arg(eo->tipo, 2, 16, QChar('0'))
-                      .arg(measIdx)
-                      .arg(staffIdx)
-                      .arg(static_cast<int>(e->tick));
+            .arg(eo->tipo, 2, 16, QChar('0'))
+            .arg(measIdx)
+            .arg(staffIdx)
+            .arg(static_cast<int>(e->tick));
         break;
     }
 }

@@ -181,9 +181,17 @@ void buildMeasures(BuildCtx& ctx)
 
             // Case A: timeSig[0] != timeSig[1] — pickup with explicit shorter sig; shorten now.
             // Case B (same sig, partial content): detected post-emitters via actual cumTick.
-            const bool isPickupA = firstMeasure && di == 0 && ts != ctx.nominalTimeSig;
-            measure->setTimesig(isPickupA ? ctx.nominalTimeSig : ts);
-            measure->setTicks(ts);
+            // When firstMeasureIsPickup=false, bypass pickup detection and use the nominal sig.
+            const bool pickupEnabled = ctx.opts.firstMeasureIsPickup;
+            const bool isPickupA = pickupEnabled && firstMeasure && di == 0
+                                   && ts != ctx.nominalTimeSig;
+            if (!pickupEnabled && firstMeasure && di == 0) {
+                measure->setTimesig(ctx.nominalTimeSig);
+                measure->setTicks(ctx.nominalTimeSig);
+            } else {
+                measure->setTimesig(isPickupA ? ctx.nominalTimeSig : ts);
+                measure->setTicks(ts);
+            }
 
             if (di == 0) {
                 if (encMeas.startBarline() == EncBarlineType::REPEATSTART) {

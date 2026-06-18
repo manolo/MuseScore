@@ -80,6 +80,7 @@ target_sources(iex_encore PRIVATE
     internal/importer/resolvers-ornaments.cpp
     internal/importer/resolvers-fingering.cpp
     internal/importer/import.h
+    internal/importer/import-options.h
 )
 
 target_link_libraries(iex_encore PRIVATE engraving)

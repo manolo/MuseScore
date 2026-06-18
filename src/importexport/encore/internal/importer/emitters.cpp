@@ -699,8 +699,8 @@ static void finalizeMeasureAfterNoteLoop(BuildCtx& ctx, MeasEmitCtx& mc,
     for (int si = 0; si < ctx.totalStaves; ++si) {
         measure->checkMeasure(static_cast<staff_idx_t>(si));
     }
-    correctMeasureLength(measure, ctx.totalStaves);
-    capMeasureLength(measure, ctx.totalStaves);
+    correctMeasureLength(ctx, measure);
+    capMeasureLength(ctx, measure);
     const EncMeasure* prevMeas = (measIdx > 0) ? &enc.measures[measIdx - 1] : nullptr;
     measSkip = measDisplayCount(encMeas, prevMeas) - 1;
     ++msIdxCounter;
