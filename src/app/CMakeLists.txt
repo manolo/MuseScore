@@ -312,20 +312,6 @@ endif()
 # INSTALL
 ###########################################
 
-if (OS_IS_MAC)
-    # cmake 4.x refuses to copy a symlink over an existing directory during BUNDLE install.
-    # Contents/Resources is a symlink to share/ for development convenience; convert it to a
-    # real directory before the install so the BUNDLE copy succeeds and individual resource
-    # install rules (fonts, tables, sounds) populate the real directory in the install prefix.
-    install(CODE "
-        set(_res \"${CMAKE_BINARY_DIR}/src/app/mscore.app/Contents/Resources\")
-        if (IS_SYMLINK \"\${_res}\")
-            file(REMOVE \"\${_res}\")
-            file(MAKE_DIRECTORY \"\${_res}\")
-        endif()
-    ")
-endif()
-
 install(TARGETS MuseScoreStudio
     BUNDLE  DESTINATION .
     RUNTIME DESTINATION bin
