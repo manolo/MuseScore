@@ -19,7 +19,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#include "encoreimportconfiguration.h"
+#include "enc-importconfiguration.h"
 
 #include "settings.h"
 
@@ -40,7 +40,7 @@ static const Settings::Key ENC_UNDERFILL_STRATEGY_KEY(module_name, "import/encor
 static const Settings::Key ENC_OVERFILL_STRATEGY_KEY(module_name, "import/encore/overfillMeasureStrategy");
 static const Settings::Key ENC_FIRST_MEASURE_PICKUP_KEY(module_name, "import/encore/firstMeasureIsPickup");
 
-void EncoreImportConfiguration::init()
+void EncImportConfiguration::init()
 {
     settings()->setDefaultValue(ENC_IMPORT_PAGE_LAYOUT_KEY, Val(true));
     settings()->valueChanged(ENC_IMPORT_PAGE_LAYOUT_KEY).onReceive(this, [this](const Val& val) {
@@ -94,153 +94,153 @@ void EncoreImportConfiguration::init()
     });
 }
 
-bool EncoreImportConfiguration::importPageLayout() const
+bool EncImportConfiguration::importPageLayout() const
 {
     return settings()->value(ENC_IMPORT_PAGE_LAYOUT_KEY).toBool();
 }
 
-void EncoreImportConfiguration::setImportPageLayout(bool value)
+void EncImportConfiguration::setImportPageLayout(bool value)
 {
     settings()->setSharedValue(ENC_IMPORT_PAGE_LAYOUT_KEY, Val(value));
 }
 
-async::Channel<bool> EncoreImportConfiguration::importPageLayoutChanged() const
+async::Channel<bool> EncImportConfiguration::importPageLayoutChanged() const
 {
     return m_importPageLayoutChanged;
 }
 
-bool EncoreImportConfiguration::importPageBreaks() const
+bool EncImportConfiguration::importPageBreaks() const
 {
     return settings()->value(ENC_IMPORT_PAGE_BREAKS_KEY).toBool();
 }
 
-void EncoreImportConfiguration::setImportPageBreaks(bool value)
+void EncImportConfiguration::setImportPageBreaks(bool value)
 {
     settings()->setSharedValue(ENC_IMPORT_PAGE_BREAKS_KEY, Val(value));
 }
 
-async::Channel<bool> EncoreImportConfiguration::importPageBreaksChanged() const
+async::Channel<bool> EncImportConfiguration::importPageBreaksChanged() const
 {
     return m_importPageBreaksChanged;
 }
 
-bool EncoreImportConfiguration::importSystemLocks() const
+bool EncImportConfiguration::importSystemLocks() const
 {
     return settings()->value(ENC_IMPORT_SYSTEM_LOCKS_KEY).toBool();
 }
 
-void EncoreImportConfiguration::setImportSystemLocks(bool value)
+void EncImportConfiguration::setImportSystemLocks(bool value)
 {
     settings()->setSharedValue(ENC_IMPORT_SYSTEM_LOCKS_KEY, Val(value));
 }
 
-async::Channel<bool> EncoreImportConfiguration::importSystemLocksChanged() const
+async::Channel<bool> EncImportConfiguration::importSystemLocksChanged() const
 {
     return m_importSystemLocksChanged;
 }
 
-bool EncoreImportConfiguration::importStaffSize() const
+bool EncImportConfiguration::importStaffSize() const
 {
     return settings()->value(ENC_IMPORT_STAFF_SIZE_KEY).toBool();
 }
 
-void EncoreImportConfiguration::setImportStaffSize(bool value)
+void EncImportConfiguration::setImportStaffSize(bool value)
 {
     settings()->setSharedValue(ENC_IMPORT_STAFF_SIZE_KEY, Val(value));
 }
 
-async::Channel<bool> EncoreImportConfiguration::importStaffSizeChanged() const
+async::Channel<bool> EncImportConfiguration::importStaffSizeChanged() const
 {
     return m_importStaffSizeChanged;
 }
 
-bool EncoreImportConfiguration::importTempoTextSemantic() const
+bool EncImportConfiguration::importTempoTextSemantic() const
 {
     return settings()->value(ENC_IMPORT_TEMPO_SEMANTIC_KEY).toBool();
 }
 
-void EncoreImportConfiguration::setImportTempoTextSemantic(bool value)
+void EncImportConfiguration::setImportTempoTextSemantic(bool value)
 {
     settings()->setSharedValue(ENC_IMPORT_TEMPO_SEMANTIC_KEY, Val(value));
 }
 
-async::Channel<bool> EncoreImportConfiguration::importTempoTextSemanticChanged() const
+async::Channel<bool> EncImportConfiguration::importTempoTextSemanticChanged() const
 {
     return m_importTempoTextSemanticChanged;
 }
 
-bool EncoreImportConfiguration::importUnsupportedArticulationsAsText() const
+bool EncImportConfiguration::importUnsupportedArticulationsAsText() const
 {
     return settings()->value(ENC_IMPORT_ARTIC_AS_TEXT_KEY).toBool();
 }
 
-void EncoreImportConfiguration::setImportUnsupportedArticulationsAsText(bool value)
+void EncImportConfiguration::setImportUnsupportedArticulationsAsText(bool value)
 {
     settings()->setSharedValue(ENC_IMPORT_ARTIC_AS_TEXT_KEY, Val(value));
 }
 
-async::Channel<bool> EncoreImportConfiguration::importUnsupportedArticulationsAsTextChanged() const
+async::Channel<bool> EncImportConfiguration::importUnsupportedArticulationsAsTextChanged() const
 {
     return m_importUnsupportedArticulationsAsTextChanged;
 }
 
-InstrumentSearchMode EncoreImportConfiguration::instrumentSearchMode() const
+InstrumentSearchMode EncImportConfiguration::instrumentSearchMode() const
 {
     return static_cast<InstrumentSearchMode>(
         settings()->value(ENC_INSTRUMENT_SEARCH_MODE_KEY).toInt());
 }
 
-void EncoreImportConfiguration::setInstrumentSearchMode(InstrumentSearchMode value)
+void EncImportConfiguration::setInstrumentSearchMode(InstrumentSearchMode value)
 {
     settings()->setSharedValue(ENC_INSTRUMENT_SEARCH_MODE_KEY, Val(static_cast<int>(value)));
 }
 
-async::Channel<InstrumentSearchMode> EncoreImportConfiguration::instrumentSearchModeChanged() const
+async::Channel<InstrumentSearchMode> EncImportConfiguration::instrumentSearchModeChanged() const
 {
     return m_instrumentSearchModeChanged;
 }
 
-UnderfillStrategy EncoreImportConfiguration::underfillMeasureStrategy() const
+UnderfillStrategy EncImportConfiguration::underfillMeasureStrategy() const
 {
     return static_cast<UnderfillStrategy>(settings()->value(ENC_UNDERFILL_STRATEGY_KEY).toInt());
 }
 
-void EncoreImportConfiguration::setUnderfillMeasureStrategy(UnderfillStrategy value)
+void EncImportConfiguration::setUnderfillMeasureStrategy(UnderfillStrategy value)
 {
     settings()->setSharedValue(ENC_UNDERFILL_STRATEGY_KEY, Val(static_cast<int>(value)));
 }
 
-async::Channel<UnderfillStrategy> EncoreImportConfiguration::underfillMeasureStrategyChanged() const
+async::Channel<UnderfillStrategy> EncImportConfiguration::underfillMeasureStrategyChanged() const
 {
     return m_underfillMeasureStrategyChanged;
 }
 
-OverfillStrategy EncoreImportConfiguration::overfillMeasureStrategy() const
+OverfillStrategy EncImportConfiguration::overfillMeasureStrategy() const
 {
     return static_cast<OverfillStrategy>(settings()->value(ENC_OVERFILL_STRATEGY_KEY).toInt());
 }
 
-void EncoreImportConfiguration::setOverfillMeasureStrategy(OverfillStrategy value)
+void EncImportConfiguration::setOverfillMeasureStrategy(OverfillStrategy value)
 {
     settings()->setSharedValue(ENC_OVERFILL_STRATEGY_KEY, Val(static_cast<int>(value)));
 }
 
-async::Channel<OverfillStrategy> EncoreImportConfiguration::overfillMeasureStrategyChanged() const
+async::Channel<OverfillStrategy> EncImportConfiguration::overfillMeasureStrategyChanged() const
 {
     return m_overfillMeasureStrategyChanged;
 }
 
-bool EncoreImportConfiguration::firstMeasureIsPickup() const
+bool EncImportConfiguration::firstMeasureIsPickup() const
 {
     return settings()->value(ENC_FIRST_MEASURE_PICKUP_KEY).toBool();
 }
 
-void EncoreImportConfiguration::setFirstMeasureIsPickup(bool value)
+void EncImportConfiguration::setFirstMeasureIsPickup(bool value)
 {
     settings()->setSharedValue(ENC_FIRST_MEASURE_PICKUP_KEY, Val(value));
 }
 
-async::Channel<bool> EncoreImportConfiguration::firstMeasureIsPickupChanged() const
+async::Channel<bool> EncImportConfiguration::firstMeasureIsPickupChanged() const
 {
     return m_firstMeasureIsPickupChanged;
 }

@@ -21,11 +21,11 @@
  */
 #pragma once
 
-#include "../iencoreimportconfiguration.h"
+#include "../ienc-importconfiguration.h"
 #include "async/asyncable.h"
 
 namespace mu::iex::enc {
-class EncoreImportConfiguration : public IEncoreImportConfiguration, public muse::async::Asyncable
+class EncImportConfiguration : public IEncImportConfiguration, public muse::async::Asyncable
 {
 public:
     void init();

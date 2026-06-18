@@ -27,12 +27,12 @@
 #include "internal/importer/import-options.h"
 
 namespace mu::iex::enc {
-class IEncoreImportConfiguration : MODULE_GLOBAL_INTERFACE
+class IEncImportConfiguration : MODULE_GLOBAL_INTERFACE
 {
-    INTERFACE_ID(IEncoreImportConfiguration)
+    INTERFACE_ID(IEncImportConfiguration)
 
 public:
-    virtual ~IEncoreImportConfiguration() = default;
+    virtual ~IEncImportConfiguration() = default;
 
     virtual bool importPageLayout() const = 0;
     virtual void setImportPageLayout(bool value) = 0;

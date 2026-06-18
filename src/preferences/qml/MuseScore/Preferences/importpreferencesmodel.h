@@ -34,7 +34,7 @@
 #include "importexport/midi/imidiconfiguration.h"
 #include "importexport/mei/imeiconfiguration.h"
 #include "importexport/mnx/imnxconfiguration.h"
-#include "importexport/encore/iencoreimportconfiguration.h"
+#include "importexport/encore/ienc-importconfiguration.h"
 #include "notation/inotationconfiguration.h"
 
 namespace mu::preferences {
@@ -86,7 +86,7 @@ class ImportPreferencesModel : public QObject, public muse::Contextable, public 
     muse::GlobalInject<iex::midi::IMidiImportExportConfiguration> midiImportExportConfiguration;
     muse::GlobalInject<iex::mei::IMeiConfiguration> meiConfiguration;
     muse::GlobalInject<iex::mnxio::IMnxConfiguration> mnxConfiguration;
-    muse::GlobalInject<iex::enc::IEncoreImportConfiguration> encoreConfiguration;
+    muse::GlobalInject<iex::enc::IEncImportConfiguration> encoreConfiguration;
     muse::GlobalInject<notation::INotationConfiguration> notationConfiguration;
 
 public:
