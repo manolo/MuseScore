@@ -65,7 +65,7 @@ The plaintext `SCOW` equivalent is structurally different, so re-saving from Enc
 | 0x32     | 1      | number of instrument blocks             |
 | 0x33     | 1      | staves per system                       |
 | 0x34     | 2      | **rendered measure count** (see below)  |
-| 0x52     | 1      | **Encore 5.x only**: staff-size selector 1-4 (4 = default). **Encore 4.x**: unrelated field (values 1-8, no monotone mapping to Size); size comes from LINE staff entry byte +13 instead. |
+| 0x52     | 1      | **global staff-size selector** 1-4 (4 = default). Used as fallback when LINE block data is absent. **Encore 4.x**: this field is unrelated (values 1-8, no monotone mapping to Size); per-instrument size always comes from LINE staff entry byte +13. |
 
 Bytes 0x36..0xC1 are padding except 0x52 (noted above).
 
@@ -156,7 +156,7 @@ infer the actual kit from the track name.
 
 | Offset | Size | Description                                                                    |
 |--------|------|--------------------------------------------------------------------------------|
-| +13    | 1    | **staff display size (0-indexed)**: 0=Size1/60%, 1=Size2/70%, 2=Size3/75%, 3=Size4/100%. For Encore 4.x files (version < 1000) this is the authoritative size source; for 5.x header byte 0x52 takes precedence. Confirmed across 8 reference files with known Staff Sheet values. |
+| +13    | 1    | **staff display size (0-indexed)**: 0=Size1/60%, 1=Size2/70%, 2=Size3/75%, 3=Size4/100%. Populated in both 4.x and 5.x files; this is the authoritative per-instrument size source. header byte 0x52 is a global fallback used only when LINE data is absent. Confirmed across 8 reference files with known Staff Sheet values. |
 | +14    | 1    | clef type                                                                      |
 | +15    | 1    | key signature                                                                  |
 | +16    | 1    | page-row counter (varies per system; NOT the page number and NOT a fixed property) |
