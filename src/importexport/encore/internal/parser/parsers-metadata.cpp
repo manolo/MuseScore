@@ -22,7 +22,7 @@
 
 #include "elem.h"
 
-#include "encoding.h"
+#include "parsers-encoding.h"
 
 namespace mu::iex::enc {
 // ---------------------------------------------------------------------------
