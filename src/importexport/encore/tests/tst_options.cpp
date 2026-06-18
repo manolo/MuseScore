@@ -27,7 +27,9 @@
 #include "engraving/dom/measure.h"
 #include "engraving/dom/rest.h"
 #include "engraving/dom/segment.h"
+#include "engraving/dom/staff.h"
 #include "engraving/dom/stafftext.h"
+#include "engraving/dom/stafftype.h"
 #include "engraving/dom/tempotext.h"
 #include "engraving/style/style.h"
 #include "engraving/types/fraction.h"
@@ -222,5 +224,143 @@ TEST_F(Tst_Options, firstMeasure_not_pickup_keeps_full_nominal_duration)
     ASSERT_NE(m0, nullptr);
     EXPECT_EQ(m0->ticks(), m0->timesig())
         << "firstMeasureIsPickup=false: first measure must retain full nominal duration";
+    delete score;
+}
+
+// ===========================================================================
+// importStaffSize
+// All test files in data/ have scoreSize=3, which maps to MAG 0.75.
+// ===========================================================================
+
+TEST_F(Tst_Options, importStaffSize_true_applies_encore_scale)
+{
+    MasterScore* score = readEncoreScore("bazo.enc");
+    ASSERT_NE(score, nullptr);
+    // scoreSize=3 → kScaleBySize[2] = 0.75
+    const double mag = score->staff(0)->staffType(Fraction(0, 1))->userMag();
+    EXPECT_DOUBLE_EQ(mag, 0.75)
+        << "importStaffSize=true (default) must apply Encore scoreSize=3 → MAG 0.75";
+    delete score;
+}
+
+TEST_F(Tst_Options, importStaffSize_false_keeps_unit_scale)
+{
+    EncImportOptions opts;
+    opts.importStaffSize = false;
+    MasterScore* score = readEncoreScoreWithOpts("bazo.enc", opts);
+    ASSERT_NE(score, nullptr);
+    const double mag = score->staff(0)->staffType(Fraction(0, 1))->userMag();
+    EXPECT_DOUBLE_EQ(mag, 1.0)
+        << "importStaffSize=false must leave staff MAG at the MuseScore default (1.0)";
+    delete score;
+}
+
+// ===========================================================================
+// importUnsupportedArticulationsAsText
+// ornaments_open_string_and_stick.enc: note 1 = 0x46 (open string, mapped),
+//   note 2 = 0x47 (stick technique, unmapped).
+// ===========================================================================
+
+TEST_F(Tst_Options, unsupported_artic_default_drops_silently)
+{
+    MasterScore* score = readEncoreScore("ornaments_open_string_and_stick.enc");
+    ASSERT_NE(score, nullptr);
+    // Default: no StaffText emitted for the unmapped 0x47 byte.
+    int staffTextCount = 0;
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (Segment* s = m->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isStaffText()) {
+                    ++staffTextCount;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(staffTextCount, 0)
+        << "Default: unsupported artic bytes must be dropped with no StaffText";
+    delete score;
+}
+
+TEST_F(Tst_Options, unsupported_artic_as_text_emits_stafftext)
+{
+    EncImportOptions opts;
+    opts.importUnsupportedArticulationsAsText = true;
+    MasterScore* score = readEncoreScoreWithOpts("ornaments_open_string_and_stick.enc", opts);
+    ASSERT_NE(score, nullptr);
+    int staffTextCount = 0;
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (Segment* s = m->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isStaffText()) {
+                    ++staffTextCount;
+                }
+            }
+        }
+    }
+    EXPECT_GT(staffTextCount, 0)
+        << "importUnsupportedArticulationsAsText=true must emit at least one StaffText for 0x47";
+    delete score;
+}
+
+// ===========================================================================
+// underfillMeasureStrategy = IrregularMeasure
+// ===========================================================================
+
+TEST_F(Tst_Options, underfill_irregular_measure_produces_no_gap_rests)
+{
+    EncImportOptions opts;
+    opts.underfillMeasureStrategy = UnderfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("structure_pickup_casea_sparse.enc", opts);
+    ASSERT_NE(score, nullptr);
+    int gapCount = 0;
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (Segment* s = m->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            for (track_idx_t tr = 0; tr < score->ntracks(); ++tr) {
+                EngravingItem* e = s->element(tr);
+                if (e && e->isRest() && toRest(e)->isGap()) {
+                    ++gapCount;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(gapCount, 0)
+        << "IrregularMeasure must not produce any gap rests";
+    delete score;
+}
+
+TEST_F(Tst_Options, underfill_irregular_measure_passes_sanity_check)
+{
+    EncImportOptions opts;
+    opts.underfillMeasureStrategy = UnderfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("structure_pickup_casea_sparse.enc", opts);
+    ASSERT_NE(score, nullptr);
+    const muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "IrregularMeasure: score failed sanity check: " << ret.text();
+    delete score;
+}
+
+// ===========================================================================
+// overfillMeasureStrategy — reserved variants: sanity-only tests
+// (StretchLastNote and IrregularMeasure are not yet fully implemented)
+// ===========================================================================
+
+TEST_F(Tst_Options, overfill_stretch_last_note_does_not_crash)
+{
+    EncImportOptions opts;
+    opts.overfillMeasureStrategy = OverfillStrategy::StretchLastNote;
+    MasterScore* score = readEncoreScoreWithOpts("bazo.enc", opts);
+    ASSERT_NE(score, nullptr) << "StretchLastNote strategy must not crash during import";
+    delete score;
+}
+
+TEST_F(Tst_Options, overfill_irregular_measure_does_not_crash)
+{
+    EncImportOptions opts;
+    opts.overfillMeasureStrategy = OverfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("bazo.enc", opts);
+    ASSERT_NE(score, nullptr) << "IrregularMeasure overfill strategy must not crash during import";
     delete score;
 }

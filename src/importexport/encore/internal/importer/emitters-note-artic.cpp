@@ -25,6 +25,7 @@
 
 #include "engraving/dom/chord.h"
 #include "engraving/dom/factory.h"
+#include "engraving/dom/stafftext.h"
 #include "engraving/dom/fermata.h"
 #include "engraving/dom/fingering.h"
 #include "engraving/dom/note.h"
@@ -37,8 +38,8 @@ using namespace mu::engraving;
 // Apply articulations, ornaments, fermatas, tremolos, and string numbers to a
 // note/chord from the two articulation bytes (articulationUp, articulationDown).
 // Also handles scale string numbers from the options byte and position field.
-void applyNoteArticulations(Note* note, Chord* chord, const EncNote* en,
-                             track_idx_t track, const MeasEmitCtx& mc)
+void applyNoteArticulations(BuildCtx& ctx, Note* note, Chord* chord, const EncNote* en,
+                            track_idx_t track, const MeasEmitCtx& mc)
 {
     auto isOrnamentSymId = [](SymId s) {
         return s == SymId::ornamentTrill
@@ -57,23 +58,31 @@ void applyNoteArticulations(Note* note, Chord* chord, const EncNote* en,
     };
 
     // Artic bytes that Encore uses for marks with no MuseScore equivalent.
-    // Emit a warning so the user knows they are silently dropped.
     static const std::map<quint8, const char*> WARN_BYTES = {
-        { 0x01, "flat mark"      }, { 0x02, "sharp/natural mark" },
-        { 0x09, "wave mark"      },
+        { 0x01, "flat mark" }, { 0x02, "sharp/natural mark" },
+        { 0x09, "wave mark" },
         { 0x47, "stick technique" },
-        { 0x48, "brush"          }, { 0x49, "soft mallet" }, { 0x4A, "hard mallet" },
+        { 0x48, "brush" }, { 0x49, "soft mallet" }, { 0x4A, "hard mallet" },
     };
+    Segment* chordSegForText = chord->segment();
     for (int slot = 0; slot < 2; ++slot) {
         const quint8 check = slot == 0 ? en->articulationUp : en->articulationDown;
         auto it = WARN_BYTES.find(check);
-        if (it != WARN_BYTES.end()) {
+        if (it == WARN_BYTES.end()) {
+            continue;
+        }
+        if (ctx.opts.importUnsupportedArticulationsAsText) {
+            StaffText* st = Factory::createStaffText(chordSegForText);
+            st->setTrack(track);
+            st->setXmlText(String::fromAscii(it->second));
+            chordSegForText->add(st);
+        } else {
             LOGW() << QString("Encore: artic byte 0x%1 (%2) not imported"
                               " (measure %3 staff %4 tick %5)")
-                          .arg(check, 2, 16, QChar('0'))
-                          .arg(it->second)
-                          .arg(mc.measIdx).arg(static_cast<int>(en->staffIdx))
-                          .arg(static_cast<int>(en->tick));
+                .arg(check, 2, 16, QChar('0'))
+                .arg(it->second)
+                .arg(mc.measIdx).arg(static_cast<int>(en->staffIdx))
+                .arg(static_cast<int>(en->tick));
         }
     }
 
@@ -161,10 +170,14 @@ void applyNoteArticulations(Note* note, Chord* chord, const EncNote* en,
         TremoloSingleChord* trem = Factory::createTremoloSingleChord(chord);
         TremoloType type = TremoloType::R8;
         switch (strokes) {
-        case 1: type = TremoloType::R8;   break;
-        case 2: type = TremoloType::R16;  break;
-        case 3: type = TremoloType::R32;  break;
-        case 4: type = TremoloType::R64;  break;
+        case 1: type = TremoloType::R8;
+            break;
+        case 2: type = TremoloType::R16;
+            break;
+        case 3: type = TremoloType::R32;
+            break;
+        case 4: type = TremoloType::R64;
+            break;
         default: break;
         }
         trem->setTremoloType(type);
@@ -191,5 +204,4 @@ void applyNoteArticulations(Note* note, Chord* chord, const EncNote* en,
         note->add(fg);
     }
 }
-
 } // namespace mu::iex::enc

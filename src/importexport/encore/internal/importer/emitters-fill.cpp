@@ -93,7 +93,7 @@ void fillTrailingGaps(BuildCtx& ctx, Measure* measure, Fraction measTick)
                 continue;
             }
             if (irregular) {
-                continue;  // IrregularMeasure: handled by shrinking measure duration
+                continue;
             }
             const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
             const Fraction fillTick = measTick + voicePos;
@@ -104,6 +104,31 @@ void fillTrailingGaps(BuildCtx& ctx, Measure* measure, Fraction measTick)
                 r->setTrack(tr);
                 r->setGap(makeGap);
                 seg->add(r);
+            }
+        }
+    }
+
+    if (irregular) {
+        // Shrink the measure to the maximum voice content position.
+        Fraction maxPos { 0, 1 };
+        for (int si = 0; si < ctx.totalStaves; ++si) {
+            for (voice_idx_t v = 0; v < VOICES; ++v) {
+                const auto k = std::make_pair(si, static_cast<int>(v));
+                if (ctx.cumTick.count(k) && ctx.cumTick.at(k) > maxPos) {
+                    maxPos = ctx.cumTick.at(k);
+                }
+            }
+        }
+        if (maxPos > Fraction(0, 1) && maxPos < measure->ticks()) {
+            const Fraction delta = measure->ticks() - maxPos;
+            measure->setTicks(maxPos);
+            for (Measure* m = measure->nextMeasure(); m; m = m->nextMeasure()) {
+                m->setTick(m->tick() - delta);
+            }
+            for (PendingHairpin& ph : ctx.pendingHairpins) {
+                if (ph.maxEndTick > measTick + maxPos) {
+                    ph.maxEndTick -= delta;
+                }
             }
         }
     }
