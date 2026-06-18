@@ -286,7 +286,6 @@ static void buildScore(MasterScore* score, const EncRoot& enc)
     score->style().set(Sid::tupletVStemDistance,   0.0);
 
     BuildCtx ctx{ score, enc };
-    ctx.impliedTuplets = enc.fmt->supportsImpliedTuplets();
     buildParts(ctx);
     buildMeasures(ctx);
     buildInitialSignatures(ctx);

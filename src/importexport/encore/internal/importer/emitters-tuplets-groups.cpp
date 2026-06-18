@@ -57,7 +57,10 @@ static void getExplicit(const std::vector<const EncMeasureElem*>& grp,
     }
 }
 
-// Implied tuplet ratio from realDuration vs faceValue (v0xC2 files).
+// Implied tuplet ratio from realDuration vs faceValue.
+// Only fires when the first element of the chord group was pre-marked by the parser
+// (calculateRealDurations Phase 3b), so v0xC4 notes with incidental MIDI drift are
+// never misidentified as implied triplets here.
 static void getImplied(const std::vector<const EncMeasureElem*>& grp,
                        int& outActual, int& outNormal)
 {
@@ -68,6 +71,15 @@ static void getImplied(const std::vector<const EncMeasureElem*>& grp,
     }
     const EncMeasureElem* e = grp[0];
     EncElemType et = static_cast<EncElemType>(e->type);
+    bool isMarked = false;
+    if (et == EncElemType::NOTE) {
+        isMarked = static_cast<const EncNote*>(e)->isImpliedTupletMember;
+    } else if (et == EncElemType::REST) {
+        isMarked = static_cast<const EncRest*>(e)->isImpliedTupletMember;
+    }
+    if (!isMarked) {
+        return;
+    }
     quint8 fv = 0;
     qint16 rdur = 0;
     if (et == EncElemType::NOTE) {

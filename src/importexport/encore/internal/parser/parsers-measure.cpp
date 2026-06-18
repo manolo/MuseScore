@@ -146,6 +146,66 @@ static void markInnerGraces(std::vector<EncMeasureElem*>& elems)
     }
 }
 
+// Phase 3b: mark implied tuplet members (v0xC2 only). Runs together with fixDottedEighth.
+// Groups consecutive same-tick elements into chords, then scans chord groups for a run of
+// actualN consecutive chords whose first element has a matching rdur/faceValue triplet ratio.
+// Marks every element of each qualifying run as isImpliedTupletMember = true so that
+// computeImpliedTupletMembers in the importer can distinguish genuine v0xC2 implied tuplets
+// from incidental rdur/fv mismatches in v0xC4 files (MIDI timing drift).
+static void markImpliedTupletMembers(std::vector<EncMeasureElem*>& elems)
+{
+    // Build chord groups: consecutive same-tick elements are one chord.
+    std::vector<std::vector<EncMeasureElem*> > chords;
+    for (EncMeasureElem* e : elems) {
+        if (!chords.empty() && chords.back()[0]->tick == e->tick) {
+            chords.back().push_back(e);
+        } else {
+            chords.push_back({ e });
+        }
+    }
+    int n = static_cast<int>(chords.size());
+    int i = 0;
+    while (i < n) {
+        EncMeasureElem* first = chords[i][0];
+        quint8 fv = 0;
+        if (auto* en = dynamic_cast<EncNote*>(first)) {
+            fv = en->faceValue & 0x0F;
+        } else if (auto* er = dynamic_cast<EncRest*>(first)) {
+            fv = er->faceValue & 0x0F;
+        }
+        if (fv < 4) { ++i; continue; }
+        int normalN = 0;
+        int actualN = detectImpliedTuplet(first->realDuration, fv, normalN);
+        if (actualN < 2 || i + actualN > n) { ++i; continue; }
+        bool allMatch = true;
+        for (int k = 1; k < actualN; ++k) {
+            EncMeasureElem* ek = chords[i + k][0];
+            quint8 fvk = 0;
+            if (auto* en = dynamic_cast<EncNote*>(ek)) fvk = en->faceValue & 0x0F;
+            else if (auto* er = dynamic_cast<EncRest*>(ek)) fvk = er->faceValue & 0x0F;
+            int nk = 0;
+            if (fvk < 4 || detectImpliedTuplet(ek->realDuration, fvk, nk) != actualN || nk != normalN) {
+                allMatch = false;
+                break;
+            }
+        }
+        if (allMatch) {
+            for (int k = 0; k < actualN; ++k) {
+                for (EncMeasureElem* e : chords[i + k]) {
+                    if (auto* en = dynamic_cast<EncNote*>(e)) {
+                        en->isImpliedTupletMember = true;
+                    } else if (auto* er = dynamic_cast<EncRest*>(e)) {
+                        er->isImpliedTupletMember = true;
+                    }
+                }
+            }
+            i += actualN;
+        } else {
+            ++i;
+        }
+    }
+}
+
 // Phase 3: detect and fix dotted-eighth placement (v0xC2 quirk). Only runs when fixDottedEighth.
 static void fixDottedEighthPattern(
     std::vector<EncMeasureElem*>& elems,
@@ -303,6 +363,7 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, bool fixDott
         }
         if (fixDottedEighth) {
             fixDottedEighthPattern(elems, durTicks);
+            markImpliedTupletMembers(elems);
         }
     }
 }
