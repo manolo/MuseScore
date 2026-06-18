@@ -28,6 +28,7 @@
 #include "engraving/dom/note.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/systemlock.h"
+#include "engraving/dom/layoutbreak.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/segment.h"
 #include "engraving/dom/articulation.h"
@@ -168,6 +169,60 @@ static void applySystemLocksFromLines(BuildCtx& ctx)
             continue;
         }
         ctx.score->addSystemLock(new SystemLock(firstM, lastM));
+    }
+}
+
+// pageIdx in EncLineStaffData is the row-on-page counter (0-based, resets each page).
+// A page break is placed at the end of line[i] whenever line[i+1].pageIdx <= line[i].pageIdx
+// (the counter did not increment, meaning a new page started).
+static void applyPageBreaksFromLines(BuildCtx& ctx)
+{
+    const auto& lines  = ctx.enc.lines;
+    const auto& enc2ms = ctx.encToMsIdx;
+    const int totalMeas = static_cast<int>(ctx.measuresByIdx.size());
+
+    for (size_t li = 1; li < lines.size(); ++li) {
+        const EncLine& prev = lines[li - 1];
+        const EncLine& curr = lines[li];
+
+        if (prev.staffData.empty() || curr.staffData.empty()) {
+            continue;
+        }
+        if (curr.staffData[0].pageIdx > prev.staffData[0].pageIdx) {
+            continue;   // same page: row counter incremented normally
+        }
+
+        // Page break: add LayoutBreak to the last measure of line[li-1].
+        const int firstBlock = static_cast<int>(prev.start);
+        const int lastBlock  = firstBlock + static_cast<int>(prev.measureCount) - 1;
+        if (firstBlock < 0 || lastBlock < firstBlock
+            || lastBlock >= static_cast<int>(enc2ms.size())) {
+            continue;
+        }
+        const int nextBlockMs = (lastBlock + 1 < static_cast<int>(enc2ms.size()))
+                                ? static_cast<int>(enc2ms[static_cast<size_t>(lastBlock + 1)])
+                                : totalMeas;
+        const int lastMsIdx = nextBlockMs - 1;
+        if (lastMsIdx < 0 || lastMsIdx >= totalMeas) {
+            continue;
+        }
+        Measure* lastM = ctx.measuresByIdx[static_cast<size_t>(lastMsIdx)];
+        if (!lastM) {
+            continue;
+        }
+        bool alreadyHasPageBreak = false;
+        for (EngravingItem* e : lastM->el()) {
+            if (e && e->isLayoutBreak() && toLayoutBreak(e)->isPageBreak()) {
+                alreadyHasPageBreak = true;
+                break;
+            }
+        }
+        if (!alreadyHasPageBreak) {
+            LayoutBreak* lb = Factory::createLayoutBreak(lastM);
+            lb->setLayoutBreakType(LayoutBreakType::PAGE);
+            lb->setTrack(0);
+            lastM->add(lb);
+        }
     }
 }
 
@@ -328,6 +383,9 @@ void resolveFingeringAndBowing(BuildCtx& ctx)
     // spacing within the system rather than redistributing measures across lines.
     if (ctx.opts.importSystemLocks) {
         applySystemLocksFromLines(ctx);
+    }
+    if (ctx.opts.importPageBreaks) {
+        applyPageBreaksFromLines(ctx);
     }
 }
 } // namespace mu::iex::enc

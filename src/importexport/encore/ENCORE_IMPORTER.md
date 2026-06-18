@@ -1595,7 +1595,7 @@ The Preferences UI (Phase 2) will read these values from `IEncoreImportConfigura
 | Field | Default | Effect when changed |
 |---|---|---|
 | `importPageLayout` | `true` | When `false`, `applyPageMargins()` is skipped; MuseScore default margins apply. |
-| `importPageBreaks` | `true` | Reserved for when page-break detection is implemented (LINE block `pageIdx`). |
+| `importPageBreaks` | `true` | When `true`, a `LayoutBreak::PAGE` is inserted after the last measure of each system where the LINE block `pageIdx` resets (row-on-page counter decreases or stays the same), indicating a new page. When `false`, no page breaks are added and MuseScore paginates freely. |
 | `importSystemLocks` | `true` | When `false`, `applySystemLocksFromLines()` is skipped; MuseScore freely reflows measures across systems. |
 | `importStaffSize` | `true` | When `false`, `applyStaffScale()` is skipped; all staves keep MAG 1.0. |
 
