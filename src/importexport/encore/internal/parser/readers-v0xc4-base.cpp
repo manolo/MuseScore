@@ -30,7 +30,6 @@
 
 namespace mu::iex::enc {
 namespace {
-
 // Scans the first 4096 bytes for PAGE/LINE/MEAS block magic; returns ds.device()->size() if not found.
 // includePageBlock=false skips PAGE (used by the compact-layout MIDI scan).
 static qint64 findFirstBlockOffset(QDataStream& ds, bool includePageBlock = true)
@@ -97,22 +96,57 @@ void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& d
         instruments[n].name = tryReadName(off);
     }
 
-    // Compact-layout fallback: if the primary slot is empty or all-spaces,
-    // try the compact base (offset 314, step 112).  Compact entries are stored in
-    // REVERSE instrument order (entry 0 = last instrument, entry 1 = second-to-last,
-    // ...). This correctly maps the single recoverable entry for the last instrument
-    // when earlier entries fall past the first block offset.
-    for (size_t k = 0; k < instruments.size(); ++k) {
-        const size_t target = instruments.size() - 1 - k;
-        if (!instruments[target].name.trimmed().isEmpty()) {
-            continue;
-        }
-        const qint64 cOff = COMPACT_NAME_BASE + static_cast<qint64>(k) * COMPACT_NAME_STEP;
-        const QString candidate = tryReadName(cOff);
-        if (!candidate.trimmed().isEmpty()) {
-            instruments[target].name = candidate;
+    // Compact-layout fallback: entries are stored in FORWARD instrument order
+    // (entry 0 = first instrument without a name, entry 1 = second, ...).
+    // Assign names to instruments that are still missing a name, in order.
+    {
+        size_t nextTarget = 0;
+        for (size_t k = 0; k < instruments.size(); ++k) {
+            while (nextTarget < instruments.size()
+                   && !instruments[nextTarget].name.trimmed().isEmpty()) {
+                ++nextTarget;
+            }
+            if (nextTarget >= instruments.size()) {
+                break;
+            }
+            const qint64 cOff = COMPACT_NAME_BASE + static_cast<qint64>(k) * COMPACT_NAME_STEP;
+            const QString candidate = tryReadName(cOff);
+            if (!candidate.trimmed().isEmpty()) {
+                instruments[nextTarget].name = candidate;
+                ++nextTarget;
+            }
         }
     }
+}
+
+// Find the offset of the first ~~~~ block (v0xC2 compact instrument table).
+// Returns -1 if not found.  Reads the first 1 KiB in one shot to avoid
+// QDataStream buffering issues with interleaved seeks.
+static qint64 findTildeBlockOffset(QDataStream& ds)
+{
+    const qint64 fileSize = static_cast<qint64>(ds.device()->size());
+    static constexpr qint64 kScanLimit = 1024;
+    const qint64 readSize = qMin(fileSize, kScanLimit + 8);
+    if (!ds.device()->seek(0)) {
+        return -1;
+    }
+    const QByteArray chunk = ds.device()->read(static_cast<qint64>(readSize));
+    const int n = chunk.size();
+    for (int off = 0; off + 7 < n; ++off) {
+        if ((quint8)chunk[off] != 0x7e || (quint8)chunk[off + 1] != 0x7e
+            || (quint8)chunk[off + 2] != 0x7e || (quint8)chunk[off + 3] != 0x7e) {
+            continue;
+        }
+        // Validate varSize (little-endian uint32 at off+4)
+        const quint32 vs = (quint8)chunk[off + 4]
+                           | ((quint8)chunk[off + 5] << 8)
+                           | ((quint8)chunk[off + 6] << 16)
+                           | ((quint8)chunk[off + 7] << 24);
+        if (vs > 0 && static_cast<qint64>(vs) < fileSize / 2) {
+            return static_cast<qint64>(off);
+        }
+    }
+    return -1;
 }
 
 // No-TK layout (instruments[0].contentFilePos < 0).
@@ -121,27 +155,124 @@ static void readMidiProgramsNoTk(
     QDataStream& ds,
     qint64 firstBlockOff)
 {
+    // For v0xC2 files with a ~~~~ block, findFirstBlockOffset may return a large offset
+    // (past the ~~~~ block) because ~~~~ is not a recognized block type.  Cap it so
+    // the compact layout is correctly detected.
+    const qint64 tildeOff = findTildeBlockOffset(ds);
+    const qint64 effectiveFirstBlock = (tildeOff >= 0 && tildeOff < firstBlockOff)
+                                       ? tildeOff : firstBlockOff;
+
     static constexpr qint64 LT_BASE = 2278, LT_STEP = 2158;
-    static constexpr qint64 CMP_BASE = 390,  CMP_STEP = 276;
-    const bool useLargeTk = (firstBlockOff > LT_BASE);
-    const qint64 base = useLargeTk ? LT_BASE : CMP_BASE;
-    const qint64 step = useLargeTk ? LT_STEP : CMP_STEP;
-    for (size_t n = 0; n < instruments.size(); ++n) {
-        const qint64 off = base + static_cast<qint64>(n) * step;
-        if (off >= firstBlockOff || off >= static_cast<qint64>(ds.device()->size())) {
-            break;
+    // Compact v0xC2: MIDI is at byte +93 within each 112-byte instrument entry.
+    // COMPACT_NAME_BASE=314 = entry_table_start(281) + name_field_offset(33).
+    // COMPACT_MIDI_BASE = entry_table_start + midi_field_offset = 281 + 93 = 374.
+    static constexpr qint64 COMPACT_MIDI_BASE = 374;
+    static constexpr qint64 COMPACT_MIDI_STEP = 112;
+
+    const bool useLargeTk = (effectiveFirstBlock > LT_BASE);
+    if (useLargeTk) {
+        for (size_t n = 0; n < instruments.size(); ++n) {
+            const qint64 off = LT_BASE + static_cast<qint64>(n) * LT_STEP;
+            if (off >= effectiveFirstBlock || off >= static_cast<qint64>(ds.device()->size())) {
+                break;
+            }
+            if (!ds.device()->seek(off)) {
+                break;
+            }
+            char clt = 0;
+            ds.device()->read(&clt, 1);
+            const quint8 prg = static_cast<quint8>(clt);
+            if (prg >= 1 && prg <= 128) {
+                instruments[n].midiProgram = static_cast<int>(prg);
+            }
         }
-        if (!ds.device()->seek(off)) {
-            break;
+    } else {
+        // Compact layout, two sub-layouts:
+        //   a) Encore 3.x compact (older synthetic files): MIDI at CMP_BASE=390, step=276.
+        //   b) Encore 4.x v0xC2 with ~~~~ block: MIDI at byte +93 of each 112-byte entry,
+        //      base=374 (= entry_table_start(281) + midi_field_offset(93)), step=112.
+        //      Instrument entries map to instruments that lack both a name AND a MIDI
+        //      program (instruments with their own named TK block are skipped).
+        static constexpr qint64 CMP_BASE = 390, CMP_STEP = 276;
+
+        // First try sub-layout (a): check if CMP_BASE has valid MIDI.
+        quint8 probeA = 0;
+        if (CMP_BASE < static_cast<qint64>(ds.device()->size()) && ds.device()->seek(CMP_BASE)) {
+            ds >> probeA;
         }
-        quint8 prg;
-        ds >> prg;
-        if (prg >= 1 && prg <= 128) {
-            instruments[n].midiProgram = static_cast<int>(prg);
+        // probeA is only valid if CMP_BASE is before the first data block.
+        const bool aLayoutValid = (probeA >= 1 && probeA <= 128 && CMP_BASE < effectiveFirstBlock);
+        if (aLayoutValid) {
+            // Sub-layout (a): sequential table (guarded by firstBlockOff).
+            for (size_t n = 0; n < instruments.size(); ++n) {
+                const qint64 off = CMP_BASE + static_cast<qint64>(n) * CMP_STEP;
+                if (off >= effectiveFirstBlock || off >= static_cast<qint64>(ds.device()->size())) {
+                    break;
+                }
+                if (!ds.device()->seek(off)) {
+                    break;
+                }
+                char cp = 0;
+                ds.device()->read(&cp, 1);
+                const quint8 prg = static_cast<quint8>(cp);
+                if (prg >= 1 && prg <= 128) {
+                    instruments[n].midiProgram = static_cast<int>(prg);
+                }
+            }
+        } else {
+            // Sub-layout (b): MIDI at byte +93 of each 112-byte compact entry.
+            // Skip instruments that already have a name (from their own TK block).
+            // Detect instruments with an explicit (non-TK) block by probing the
+            // primary name location (NAME_BASE + n*NAME_STEP = 202, 2360, ...).
+            // If the first byte there is printable ASCII, the instrument has its
+            // own block (e.g. the "Voz " block in some v0xC2 files) and should
+            // not receive a compact MIDI assignment.
+            static constexpr qint64 PNB = 202, PNS = 2158;  // primary name base/step
+            auto hasPrimaryBlock = [&](size_t n) -> bool {
+                const qint64 off = PNB + static_cast<qint64>(n) * PNS;
+                if (off + 1 >= static_cast<qint64>(ds.device()->size())) {
+                    return false;
+                }
+                if (!ds.device()->seek(off)) {
+                    return false;
+                }
+                char b = 0;
+                if (ds.device()->read(&b, 1) != 1) {
+                    return false;
+                }
+                const quint8 u = static_cast<quint8>(b);
+                return u >= 0x20 && u < 0x7F;   // printable ASCII = valid name start
+            };
+
+            size_t nextTarget = 0;
+            for (size_t k = 0; k < instruments.size(); ++k) {
+                while (nextTarget < instruments.size()
+                       && (instruments[nextTarget].midiProgram != 0
+                           || instruments[nextTarget].contentFilePos >= 0
+                           || hasPrimaryBlock(nextTarget))) {
+                    ++nextTarget;
+                }
+                if (nextTarget >= instruments.size()) {
+                    break;
+                }
+                const qint64 off = COMPACT_MIDI_BASE + static_cast<qint64>(k) * COMPACT_MIDI_STEP;
+                if (off >= static_cast<qint64>(ds.device()->size())) {
+                    break;
+                }
+                if (!ds.device()->seek(off)) {
+                    break;
+                }
+                char cp2 = 0;
+                ds.device()->read(&cp2, 1);
+                const quint8 prg = static_cast<quint8>(cp2);
+                if (prg >= 1 && prg <= 128) {
+                    instruments[nextTarget].midiProgram = static_cast<int>(prg);
+                }
+                ++nextTarget;
+            }
         }
     }
-    // Recover names even for no-TK files: some compact v0xC2 files store
-    // instrument names at header offsets not covered by the MIDI-program read above.
+    // Recover names even for no-TK files.
     recoverMissingNames(instruments, ds);
 }
 
@@ -178,8 +309,8 @@ static void readMidiProgramsSmallTk(
             continue;
         }
         const qint64 off = totalSizeFmt
-            ? instr.contentFilePos + MIDI_IN_CONTENT
-            : instr.contentFilePos + static_cast<qint64>(instr.offset) + MIDI_AFTER_CONTENT;
+                           ? instr.contentFilePos + MIDI_IN_CONTENT
+                           : instr.contentFilePos + static_cast<qint64>(instr.offset) + MIDI_AFTER_CONTENT;
         if (off >= static_cast<qint64>(ds.device()->size())) {
             continue;
         }
@@ -202,7 +333,7 @@ void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds)
     }
     const bool noTkBlocks = (instruments[0].contentFilePos < 0);
     if (noTkBlocks) {
-        const qint64 firstBlockOff = findFirstBlockOffset(ds, /*includePageBlock=*/true);
+        const qint64 firstBlockOff = findFirstBlockOffset(ds, /*includePageBlock=*/ true);
         readMidiProgramsNoTk(instruments, ds, firstBlockOff);
         return;
     }
@@ -211,13 +342,46 @@ void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds)
 
     if (smallTK) {
         readMidiProgramsSmallTk(instruments, ds);
+        // Fallback for mixed-TK files (e.g. v0xC2 with one named TK block and the
+        // remaining instruments in a compact ~~~~ block at a fixed layout).
+        // Apply compact byte-93 MIDI for any instrument that still lacks both a TK
+        // block (contentFilePos<0) and a MIDI program (midiProgram==0).
+        {
+            static constexpr qint64 CMPX_MIDI_BASE = 374;
+            static constexpr qint64 CMPX_MIDI_STEP = 112;
+            size_t nextTarget = 0;
+            for (size_t k = 0; k < instruments.size(); ++k) {
+                while (nextTarget < instruments.size()
+                       && (instruments[nextTarget].midiProgram != 0
+                           || instruments[nextTarget].contentFilePos >= 0)) {
+                    ++nextTarget;
+                }
+                if (nextTarget >= instruments.size()) {
+                    break;
+                }
+                const qint64 off = CMPX_MIDI_BASE + static_cast<qint64>(k) * CMPX_MIDI_STEP;
+                if (off >= static_cast<qint64>(ds.device()->size())) {
+                    break;
+                }
+                if (!ds.device()->seek(off)) {
+                    break;
+                }
+                char cp2 = 0;
+                ds.device()->read(&cp2, 1);
+                const quint8 prg = static_cast<quint8>(cp2);
+                if (prg >= 1 && prg <= 128) {
+                    instruments[nextTarget].midiProgram = static_cast<int>(prg);
+                }
+                ++nextTarget;
+            }
+        }
         return;
     }
 
     // Large-TK or compact layout.
     qint64 firstBlockOff = ds.device()->size();
     if (compact) {
-        firstBlockOff = findFirstBlockOffset(ds, /*includePageBlock=*/false);
+        firstBlockOff = findFirstBlockOffset(ds, /*includePageBlock=*/ false);
     }
 
     const qint64 base = compact ? 390 : 2278;
@@ -295,8 +459,8 @@ static void readKeyTranspositionsSmallTk(std::vector<EncInstrument>& instruments
             continue;
         }
         const qint64 off = totalSizeFmt
-            ? instr.contentFilePos + KEY_IN_CONTENT
-            : instr.contentFilePos + static_cast<qint64>(instr.offset) + KEY_AFTER_CONTENT;
+                           ? instr.contentFilePos + KEY_IN_CONTENT
+                           : instr.contentFilePos + static_cast<qint64>(instr.offset) + KEY_AFTER_CONTENT;
         if (off < 0 || off >= static_cast<qint64>(ds.device()->size())) {
             continue;
         }
@@ -340,7 +504,7 @@ void readKeyTranspositions(std::vector<EncInstrument>& instruments, QDataStream&
     }
     const bool noTkBlocks = (instruments[0].contentFilePos < 0);
     if (noTkBlocks) {
-        const qint64 firstBlockOff = findFirstBlockOffset(ds, /*includePageBlock=*/true);
+        const qint64 firstBlockOff = findFirstBlockOffset(ds, /*includePageBlock=*/ true);
         readKeyTranspositionsNoTk(instruments, ds, firstBlockOff);
         return;
     }
@@ -385,5 +549,4 @@ bool EncFormatReader_V0xC4Base::readInstrumentMeta(std::vector<EncInstrument>& i
     readKeyTranspositions(instruments, ds);
     return true;
 }
-
 } // namespace mu::iex::enc
