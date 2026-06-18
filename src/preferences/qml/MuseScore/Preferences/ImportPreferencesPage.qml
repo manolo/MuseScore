@@ -181,6 +181,9 @@ PreferencesPage {
             importTempoTextSemantic: importPreferencesModel.encoreImportTempoTextSemantic
             importUnsupportedArticulationsAsText: importPreferencesModel.encoreImportUnsupportedArticulationsAsText
 
+            instrumentSearchModeModel: importPreferencesModel.encoreInstrumentSearchModeModel()
+            currentInstrumentSearchMode: importPreferencesModel.encoreInstrumentSearchMode
+
             underfillStrategyModel: importPreferencesModel.encoreUnderfillStrategyModel()
             currentUnderfillStrategy: importPreferencesModel.encoreUnderfillStrategy
             overfillStrategyModel: importPreferencesModel.encoreOverfillStrategyModel()
@@ -213,6 +216,10 @@ PreferencesPage {
 
             onImportUnsupportedArticulationsAsTextChangeRequested: function(value) {
                 importPreferencesModel.encoreImportUnsupportedArticulationsAsText = value
+            }
+
+            onInstrumentSearchModeChangeRequested: function(value) {
+                importPreferencesModel.encoreInstrumentSearchMode = value
             }
 
             onUnderfillStrategyChangeRequested: function(value) {

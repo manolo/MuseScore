@@ -120,15 +120,22 @@ static void applyInstrumentOrFallback(Part* part, const InstrumentTemplate* tmpl
 static const InstrumentTemplate* applyBestInstrument(Part* part,
                                                      const EncInstrument& instr,
                                                      bool isPercByClef,
-                                                     bool isRhythm)
+                                                     bool isRhythm,
+                                                     InstrumentSearchMode searchMode)
 {
+    // Piano mode: skip all matching and go straight to fallback.
+    if (searchMode == InstrumentSearchMode::Piano) {
+        applyInstrumentOrFallback(part, nullptr, instr, 0);
+        return nullptr;
+    }
+
     const int encMidi = instr.midiProgram > 0 ? instr.midiProgram - 1 : -1;
     const int encKey  = static_cast<int>(instr.keyTransposeSemitones);
-    const bool nameTooShort = instr.name.trimmed().size() < 4;  // see kMinInstrNameLen in mappers-instruments.cpp
+    const bool nameTooShort = instr.name.trimmed().size() < 4;
+    const bool useNameSearch = (searchMode == InstrumentSearchMode::NameAndMidi);
 
     const InstrumentTemplate* tmpl = nullptr;
     int matchStep = 0;
-    // tryStep: adopt candidate only if no match yet; record the step number.
     auto tryStep = [&](int step, const InstrumentTemplate* candidate) {
         if (!tmpl && candidate) {
             tmpl = candidate;
@@ -142,34 +149,34 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         tryStep(1, searchTemplate(String(u"drumset")));
     }
 
-    // Step 2: name+MIDI score with transposition filter.
-    // C/octave templates always qualify; non-octave mismatches are logged and skipped.
-    if (!tmpl) {
-        tryStep(2, findEncoreInstrumentTemplate(instr.name, encMidi, encKey));
-        if (!tmpl && !instr.name.trimmed().isEmpty()) {
-            const InstrumentTemplate* rejected = findEncoreInstrumentTemplate(instr.name, encMidi);
-            if (rejected) {
-                LOGD() << "  instrument \"" << instr.name.toStdString()
-                       << "\": MIDI " << instr.midiProgram << " match \""
-                       << rejected->trackName.toStdString()
-                       << "\" rejected (template chromatic=" << rejected->transpose.chromatic
-                       << " vs encKey=" << encKey << "), trying MIDI";
+    // Steps 2-4: name-based matching (skipped in MidiOnly mode).
+    if (useNameSearch) {
+        // Step 2: name+MIDI score with transposition filter.
+        if (!tmpl) {
+            tryStep(2, findEncoreInstrumentTemplate(instr.name, encMidi, encKey));
+            if (!tmpl && !instr.name.trimmed().isEmpty()) {
+                const InstrumentTemplate* rejected = findEncoreInstrumentTemplate(instr.name, encMidi);
+                if (rejected) {
+                    LOGD() << "  instrument \"" << instr.name.toStdString()
+                           << "\": MIDI " << instr.midiProgram << " match \""
+                           << rejected->trackName.toStdString()
+                           << "\" rejected (template chromatic=" << rejected->transpose.chromatic
+                           << " vs encKey=" << encKey << "), trying MIDI";
+                }
             }
         }
-    }
-
-    // Step 3: name scoring over drumset templates (handles localized names).
-    if (!nameTooShort) {
-        tryStep(3, findDrumsetTemplate(instr.name));
-    }
-
-    // Step 4: generic percussion keywords ("Percusión", "Drums", "Batería"…).
-    if (!tmpl && !nameTooShort) {
-        const QString lname = instr.name.toLower();
-        if (lname.contains(QStringLiteral("perc"))
-            || lname.contains(QStringLiteral("drum"))
-            || lname.contains(QStringLiteral("bater"))) {
-            tryStep(4, searchTemplate(String(u"drumset")));
+        // Step 3: name scoring over drumset templates.
+        if (!nameTooShort) {
+            tryStep(3, findDrumsetTemplate(instr.name));
+        }
+        // Step 4: generic percussion keywords.
+        if (!tmpl && !nameTooShort) {
+            const QString lname = instr.name.toLower();
+            if (lname.contains(QStringLiteral("perc"))
+                || lname.contains(QStringLiteral("drum"))
+                || lname.contains(QStringLiteral("bater"))) {
+                tryStep(4, searchTemplate(String(u"drumset")));
+            }
         }
     }
 
@@ -215,7 +222,8 @@ void buildParts(BuildCtx& ctx)
         const bool isRhythm = !enc.lines.empty()
                               && cumStaffIdx < static_cast<int>(enc.lines[0].staffData.size())
                               && enc.lines[0].staffData[cumStaffIdx].staffType == EncStaffType::RHYTHM;
-        const InstrumentTemplate* tmpl = applyBestInstrument(part, instr, isPercByClef, isRhythm);
+        const InstrumentTemplate* tmpl = applyBestInstrument(part, instr, isPercByClef, isRhythm,
+                                                             ctx.opts.instrumentSearchMode);
 
         const bool showFromLine = enc.lines.empty()
                                   || cumStaffIdx >= static_cast<int>(enc.lines[0].staffData.size())

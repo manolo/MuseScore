@@ -104,6 +104,10 @@ void ImportPreferencesModel::load()
         emit encoreFirstMeasureIsPickupChanged(val);
     });
 
+    encoreConfiguration()->instrumentSearchModeChanged().onReceive(this, [this](iex::enc::InstrumentSearchMode val) {
+        emit encoreInstrumentSearchModeChanged(static_cast<int>(val));
+    });
+
     encoreConfiguration()->underfillMeasureStrategyChanged().onReceive(this, [this](iex::enc::UnderfillStrategy val) {
         emit encoreUnderfillStrategyChanged(static_cast<int>(val));
     });
@@ -143,6 +147,18 @@ QVariantList ImportPreferencesModel::shortestNotes() const
     };
 
     return result;
+}
+
+QVariantList ImportPreferencesModel::encoreInstrumentSearchModeModel() const
+{
+    return {
+        QVariantMap { { "title", muse::qtrc("preferences", "Name + MIDI") },
+            { "value", static_cast<int>(iex::enc::InstrumentSearchMode::NameAndMidi) } },
+        QVariantMap { { "title", muse::qtrc("preferences", "MIDI only") },
+            { "value", static_cast<int>(iex::enc::InstrumentSearchMode::MidiOnly) } },
+        QVariantMap { { "title", muse::qtrc("preferences", "Grand Piano") },
+            { "value", static_cast<int>(iex::enc::InstrumentSearchMode::Piano) } },
+    };
 }
 
 QVariantList ImportPreferencesModel::encoreUnderfillStrategyModel() const
@@ -425,6 +441,20 @@ void ImportPreferencesModel::setEncoreImportUnsupportedArticulationsAsText(bool 
     }
 
     encoreConfiguration()->setImportUnsupportedArticulationsAsText(value);
+}
+
+int ImportPreferencesModel::encoreInstrumentSearchMode() const
+{
+    return static_cast<int>(encoreConfiguration()->instrumentSearchMode());
+}
+
+void ImportPreferencesModel::setEncoreInstrumentSearchMode(int value)
+{
+    if (value == encoreInstrumentSearchMode()) {
+        return;
+    }
+
+    encoreConfiguration()->setInstrumentSearchMode(static_cast<iex::enc::InstrumentSearchMode>(value));
 }
 
 int ImportPreferencesModel::encoreUnderfillStrategy() const
