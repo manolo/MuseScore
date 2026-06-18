@@ -52,8 +52,8 @@ target_sources(iex_encore PRIVATE
     internal/importer/mappers.h
     internal/parser/ticks.cpp
     internal/parser/ticks.h
-    internal/importer/emitters-emitters-tuplets.cpp
-    internal/importer/emitters-emitters-tuplets-groups.cpp
+    internal/importer/emitters-tuplets.cpp
+    internal/importer/emitters-tuplets-groups.cpp
     internal/importer/emitters-tuplets.h
     internal/notationencreader.cpp
     internal/notationencreader.h
