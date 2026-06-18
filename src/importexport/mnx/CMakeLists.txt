@@ -20,7 +20,6 @@ else()
         mnxdom
         GIT_REPOSITORY https://github.com/rpatters1/mnxdom.git
         GIT_TAG        e7c947bf768caccf315426dcae0dfac02caf738b
-        EXCLUDE_FROM_ALL
     )
     FetchContent_MakeAvailable(mnxdom)
     set(MNXDOM_LIB mnxdom)
