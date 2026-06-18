@@ -111,7 +111,11 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
     };
     addNeedle(encName);
     addNeedle(norm);
-    for (const QString& word : norm.split(u' ', Qt::SkipEmptyParts)) {
+    for (QString word : norm.split(u' ', Qt::SkipEmptyParts)) {
+        // Strip trailing punctuation so "Bandurr." matches "Bandurria" via contains.
+        while (!word.isEmpty() && !word.back().isLetterOrNumber()) {
+            word.chop(1);
+        }
         if (word.length() >= 4) {
             addNeedle(word);
         }
@@ -212,7 +216,10 @@ const InstrumentTemplate* findDrumsetTemplate(const QString& encName)
     };
     addNeedle(encName);
     addNeedle(norm);
-    for (const QString& word : norm.split(u' ', Qt::SkipEmptyParts)) {
+    for (QString word : norm.split(u' ', Qt::SkipEmptyParts)) {
+        while (!word.isEmpty() && !word.back().isLetterOrNumber()) {
+            word.chop(1);
+        }
         if (word.length() >= 4) {
             addNeedle(word);
         }
@@ -263,24 +270,26 @@ const InstrumentTemplate* findTemplateByMidi(int encMidiProgram0indexed)
     bool bestIsCommon = false;
     for (const InstrumentGroup* g : instrumentGroups) {
         for (const InstrumentTemplate* it : g->instrumentTemplates) {
-            if (it->useDrumset) {
+            if (it->useDrumset || it->channel.empty()) {
                 continue;
             }
-            for (const InstrChannel& ch : it->channel) {
-                if (ch.program() == encMidiProgram0indexed) {
-                    bool isCommon = false;
-                    for (const InstrumentGenre* gen : it->genres) {
-                        if (gen && gen->id == "common") {
-                            isCommon = true;
-                            break;
-                        }
-                    }
-                    if (!best || (isCommon && !bestIsCommon)) {
-                        best = it;
-                        bestIsCommon = isCommon;
-                    }
+            // Match only the first channel of each instrument. The first channel is the
+            // instrument's primary sound; additional channels (tremolo, pizzicato, mute…)
+            // are articulation variants that share programs across many instruments and
+            // would produce false matches if included.
+            if (it->channel.front().program() != encMidiProgram0indexed) {
+                continue;
+            }
+            bool isCommon = false;
+            for (const InstrumentGenre* gen : it->genres) {
+                if (gen && gen->id == "common") {
+                    isCommon = true;
                     break;
                 }
+            }
+            if (!best || (isCommon && !bestIsCommon)) {
+                best = it;
+                bestIsCommon = isCommon;
             }
         }
     }
