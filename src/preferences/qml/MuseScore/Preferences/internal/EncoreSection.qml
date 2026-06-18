@@ -145,7 +145,7 @@ BaseSection {
         CheckBox {
             id: importSystemLocksBox
             Layout.fillWidth: true
-            text: qsTrc("preferences", "Lock systems to Encore layout")
+            text: qsTrc("preferences", "Import line breaks")
             navigation.name: "EncoreImportSystemLocksBox"
             navigation.panel: root.navigation
             navigation.row: 3
@@ -162,10 +162,14 @@ BaseSection {
             onClicked: root.importStaffSizeChangeRequested(!checked)
         }
 
+        // Spacer row to separate text/content options from layout options above
+        Item { Layout.fillWidth: true; height: 4 }
+        Item { Layout.fillWidth: true; height: 4 }
+
         CheckBox {
             id: importTempoTextSemanticBox
             Layout.fillWidth: true
-            text: qsTrc("preferences", "Interpret Italian tempo as BPM")
+            text: qsTrc("preferences", "Text tempo: prefer BPM")
             navigation.name: "EncoreImportTempoTextSemanticBox"
             navigation.panel: root.navigation
             navigation.row: 5
@@ -175,7 +179,7 @@ BaseSection {
         CheckBox {
             id: importUnsupportedArticulationsAsTextBox
             Layout.fillWidth: true
-            text: qsTrc("preferences", "Articulations as text")
+            text: qsTrc("preferences", "Unknown artic. as text")
             navigation.name: "EncoreImportUnsupportedArticulationsAsTextBox"
             navigation.panel: root.navigation
             navigation.row: 6
