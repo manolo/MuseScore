@@ -167,8 +167,10 @@ void correctMeasureLength(BuildCtx& ctx, Measure* measure)
             if (!hasContent) {
                 continue;
             }
-            // Overshoot: remove gap rests smallest-first
-            if (voiceSum > mLen && (voiceSum - mLen) <= maxDelta) {
+            // Overshoot: remove gap rests smallest-first.
+            // Skip for IrregularMeasure overfill — capMeasureLength will extend instead.
+            if (voiceSum > mLen && (voiceSum - mLen) <= maxDelta
+                && ctx.opts.overfillMeasureStrategy != OverfillStrategy::IrregularMeasure) {
                 std::stable_sort(gapRests.begin(), gapRests.end(),
                                  [](Rest* a, Rest* b) {
                     return a->actualTicks() < b->actualTicks();
@@ -204,10 +206,47 @@ void correctMeasureLength(BuildCtx& ctx, Measure* measure)
 // Nuclear hard-cap: remove trailing ChordRest elements from any voice that
 // still overshoots after correctMeasureLength, then fill any residual deficit
 // with a rest. Guarantees no measure has wrong total duration.
+// Exception: IrregularMeasure overfill extends the measure to the maximum voice
+// content instead of truncating, preserving all notes and their spanner endpoints.
 void capMeasureLength(BuildCtx& ctx, Measure* measure)
 {
     const bool makeGap = (ctx.opts.underfillMeasureStrategy != UnderfillStrategy::VisibleRests);
     const Fraction mLen = measure->ticks();
+    const Fraction measTick = measure->tick();
+
+    if (ctx.opts.overfillMeasureStrategy == OverfillStrategy::IrregularMeasure) {
+        Fraction maxVoiceSum { 0, 1 };
+        for (int si = 0; si < ctx.totalStaves; ++si) {
+            for (voice_idx_t v = 0; v < VOICES; ++v) {
+                const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
+                Fraction voiceSum { 0, 1 };
+                for (Segment* seg = measure->first(SegmentType::ChordRest);
+                     seg; seg = seg->next(SegmentType::ChordRest)) {
+                    EngravingItem* el = seg->element(tr);
+                    if (el) {
+                        voiceSum += toChordRest(el)->actualTicks();
+                    }
+                }
+                if (voiceSum > maxVoiceSum) {
+                    maxVoiceSum = voiceSum;
+                }
+            }
+        }
+        if (maxVoiceSum > mLen) {
+            const Fraction delta = maxVoiceSum - mLen;
+            measure->setTicks(maxVoiceSum);
+            for (Measure* m = measure->nextMeasure(); m; m = m->nextMeasure()) {
+                m->setTick(m->tick() + delta);
+            }
+            for (PendingHairpin& ph : ctx.pendingHairpins) {
+                if (ph.maxEndTick >= measTick + mLen) {
+                    ph.maxEndTick += delta;
+                }
+            }
+        }
+        return;
+    }
+
     for (int si = 0; si < ctx.totalStaves; ++si) {
         for (voice_idx_t v = 0; v < VOICES; ++v) {
             const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
