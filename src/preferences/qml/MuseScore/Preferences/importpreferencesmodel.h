@@ -34,6 +34,7 @@
 #include "importexport/midi/imidiconfiguration.h"
 #include "importexport/mei/imeiconfiguration.h"
 #include "importexport/mnx/imnxconfiguration.h"
+#include "importexport/encore/iencoreimportconfiguration.h"
 #include "notation/inotationconfiguration.h"
 
 namespace mu::preferences {
@@ -56,6 +57,19 @@ class ImportPreferencesModel : public QObject, public muse::Contextable, public 
     Q_PROPERTY(bool mnxRequireExactSchemaValidation READ mnxRequireExactSchemaValidation WRITE setMnxRequireExactSchemaValidation
                NOTIFY mnxRequireExactSchemaValidationChanged)
 
+    Q_PROPERTY(bool encoreImportPageLayout READ encoreImportPageLayout WRITE setEncoreImportPageLayout NOTIFY encoreImportPageLayoutChanged)
+    Q_PROPERTY(bool encoreImportPageBreaks READ encoreImportPageBreaks WRITE setEncoreImportPageBreaks NOTIFY encoreImportPageBreaksChanged)
+    Q_PROPERTY(bool encoreImportStaffSize READ encoreImportStaffSize WRITE setEncoreImportStaffSize NOTIFY encoreImportStaffSizeChanged)
+    Q_PROPERTY(bool encoreImportTempoTextSemantic READ encoreImportTempoTextSemantic WRITE setEncoreImportTempoTextSemantic
+               NOTIFY encoreImportTempoTextSemanticChanged)
+    Q_PROPERTY(bool encoreImportUnsupportedArticulationsAsText READ encoreImportUnsupportedArticulationsAsText
+               WRITE setEncoreImportUnsupportedArticulationsAsText NOTIFY encoreImportUnsupportedArticulationsAsTextChanged)
+    Q_PROPERTY(
+        int encoreUnderfillStrategy READ encoreUnderfillStrategy WRITE setEncoreUnderfillStrategy NOTIFY encoreUnderfillStrategyChanged)
+    Q_PROPERTY(int encoreOverfillStrategy READ encoreOverfillStrategy WRITE setEncoreOverfillStrategy NOTIFY encoreOverfillStrategyChanged)
+    Q_PROPERTY(bool encoreFirstMeasureIsPickup READ encoreFirstMeasureIsPickup WRITE setEncoreFirstMeasureIsPickup
+               NOTIFY encoreFirstMeasureIsPickupChanged)
+
     Q_PROPERTY(int currentShortestNote READ currentShortestNote WRITE setCurrentShortestNote NOTIFY currentShortestNoteChanged)
     Q_PROPERTY(bool roundTempo READ roundTempo WRITE setRoundTempo NOTIFY roundTempoChanged)
 
@@ -68,6 +82,7 @@ class ImportPreferencesModel : public QObject, public muse::Contextable, public 
     muse::GlobalInject<iex::midi::IMidiImportExportConfiguration> midiImportExportConfiguration;
     muse::GlobalInject<iex::mei::IMeiConfiguration> meiConfiguration;
     muse::GlobalInject<iex::mnxio::IMnxConfiguration> mnxConfiguration;
+    muse::GlobalInject<iex::enc::IEncoreImportConfiguration> encoreConfiguration;
     muse::GlobalInject<notation::INotationConfiguration> notationConfiguration;
 
 public:
@@ -77,6 +92,8 @@ public:
 
     Q_INVOKABLE QVariantList charsets() const;
     Q_INVOKABLE QVariantList shortestNotes() const;
+    Q_INVOKABLE QVariantList encoreUnderfillStrategyModel() const;
+    Q_INVOKABLE QVariantList encoreOverfillStrategyModel() const;
     Q_INVOKABLE QStringList stylePathFilter() const;
     Q_INVOKABLE QString styleChooseTitle() const;
     Q_INVOKABLE QString fileDirectory(const QString& filePath) const;
@@ -97,6 +114,15 @@ public:
     bool meiImportLayout() const;
     bool mnxRequireExactSchemaValidation() const;
 
+    bool encoreImportPageLayout() const;
+    bool encoreImportPageBreaks() const;
+    bool encoreImportStaffSize() const;
+    bool encoreImportTempoTextSemantic() const;
+    bool encoreImportUnsupportedArticulationsAsText() const;
+    int encoreUnderfillStrategy() const;
+    int encoreOverfillStrategy() const;
+    bool encoreFirstMeasureIsPickup() const;
+
 public slots:
     void setStyleFileImportPath(QString path);
     void setCurrentOvertureCharset(QString charset);
@@ -114,6 +140,15 @@ public slots:
     void setMeiImportLayout(bool import);
     void setMnxRequireExactSchemaValidation(bool value);
 
+    void setEncoreImportPageLayout(bool value);
+    void setEncoreImportPageBreaks(bool value);
+    void setEncoreImportStaffSize(bool value);
+    void setEncoreImportTempoTextSemantic(bool value);
+    void setEncoreImportUnsupportedArticulationsAsText(bool value);
+    void setEncoreUnderfillStrategy(int value);
+    void setEncoreOverfillStrategy(int value);
+    void setEncoreFirstMeasureIsPickup(bool value);
+
 signals:
     void styleFileImportPathChanged(QString styleFileImportPath);
     void currentOvertureCharsetChanged(QString currentOvertureCharset);
@@ -126,5 +161,14 @@ signals:
     void needAskAboutApplyingNewStyleChanged(bool needAskAboutApplyingNewStyle);
     void meiImportLayoutChanged(bool importLayout);
     void mnxRequireExactSchemaValidationChanged(bool value);
+
+    void encoreImportPageLayoutChanged(bool value);
+    void encoreImportPageBreaksChanged(bool value);
+    void encoreImportStaffSizeChanged(bool value);
+    void encoreImportTempoTextSemanticChanged(bool value);
+    void encoreImportUnsupportedArticulationsAsTextChanged(bool value);
+    void encoreUnderfillStrategyChanged(int value);
+    void encoreOverfillStrategyChanged(int value);
+    void encoreFirstMeasureIsPickupChanged(bool value);
 };
 }

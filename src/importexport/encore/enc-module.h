@@ -22,14 +22,22 @@
 #ifndef MU_IMPORTEXPORT_ENC_MODULE_H
 #define MU_IMPORTEXPORT_ENC_MODULE_H
 
+#include <memory>
+
 #include "modularity/imodulesetup.h"
 
 namespace mu::iex::enc {
+class EncoreImportConfiguration;
 class EncoreModule : public muse::modularity::IModuleSetup
 {
 public:
     std::string moduleName() const override;
+    void registerExports() override;
     void resolveImports() override;
+    void onInit(const muse::IApplication::RunMode&) override;
+
+private:
+    std::shared_ptr<EncoreImportConfiguration> m_configuration;
 };
 } // namespace mu::iex::enc
 

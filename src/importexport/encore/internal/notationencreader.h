@@ -22,13 +22,18 @@
 #ifndef MU_IMPORTEXPORT_NOTATIONENCOREREADER_H
 #define MU_IMPORTEXPORT_NOTATIONENCOREREADER_H
 
+#include "modularity/ioc.h"
 #include "project/inotationreader.h"
+#include "../iencoreimportconfiguration.h"
 
 namespace mu::iex::enc {
 class NotationEncoreReader : public project::INotationReader
 {
 public:
     muse::Ret read(mu::engraving::MasterScore* score, const muse::io::path_t& path, const Options& options = Options()) override;
+
+private:
+    muse::GlobalInject<IEncoreImportConfiguration> encoreConfiguration;
 };
 } // namespace mu::iex::enc
 

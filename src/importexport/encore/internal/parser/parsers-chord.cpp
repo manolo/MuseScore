@@ -24,7 +24,6 @@
 #include "parsers-encoding.h"
 
 namespace mu::iex::enc {
-
 // Chord quality suffixes indexed by toniko value (0-62).
 // Derived from Enc2MusicXML's tnk[] table (textfile.cpp).
 // Empty entries denote undefined/reserved chord types; they degrade to major.
@@ -160,11 +159,10 @@ QString EncChordSym::chordName() const
     if (tipo & 0x02) {
         const QString bass = encRootToString(baso);
         if (!bass.isEmpty()) {
-            name += u'/' + bass;
+            name += QChar(u'/') + bass;
         }
     }
 
     return name;
 }
-
 } // namespace mu::iex::enc
