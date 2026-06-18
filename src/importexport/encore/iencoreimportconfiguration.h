@@ -58,6 +58,10 @@ public:
     virtual void setImportUnsupportedArticulationsAsText(bool value) = 0;
     virtual muse::async::Channel<bool> importUnsupportedArticulationsAsTextChanged() const = 0;
 
+    virtual InstrumentSearchMode instrumentSearchMode() const = 0;
+    virtual void setInstrumentSearchMode(InstrumentSearchMode value) = 0;
+    virtual muse::async::Channel<InstrumentSearchMode> instrumentSearchModeChanged() const = 0;
+
     virtual UnderfillStrategy underfillMeasureStrategy() const = 0;
     virtual void setUnderfillMeasureStrategy(UnderfillStrategy value) = 0;
     virtual muse::async::Channel<UnderfillStrategy> underfillMeasureStrategyChanged() const = 0;

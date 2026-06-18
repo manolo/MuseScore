@@ -37,6 +37,7 @@ muse::Ret NotationEncoreReader::read(MasterScore* score, const muse::io::path_t&
     opts.importStaffSize                      = encoreConfiguration()->importStaffSize();
     opts.importTempoTextSemantic              = encoreConfiguration()->importTempoTextSemantic();
     opts.importUnsupportedArticulationsAsText = encoreConfiguration()->importUnsupportedArticulationsAsText();
+    opts.instrumentSearchMode                  = encoreConfiguration()->instrumentSearchMode();
     opts.underfillMeasureStrategy             = encoreConfiguration()->underfillMeasureStrategy();
     opts.overfillMeasureStrategy              = encoreConfiguration()->overfillMeasureStrategy();
     opts.firstMeasureIsPickup                 = encoreConfiguration()->firstMeasureIsPickup();

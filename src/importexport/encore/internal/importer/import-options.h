@@ -38,6 +38,12 @@ enum class OverfillStrategy {
     IrregularMeasure,  // set actual measure duration to match content
 };
 
+enum class InstrumentSearchMode {
+    NameAndMidi,  // name matching + MIDI fallback — current default
+    MidiOnly,     // skip name matching, use only MIDI program
+    Piano,        // assign Grand Piano to all instruments
+};
+
 struct EncImportOptions {
     // Layout group
     bool importPageLayout = true;   // apply page size and margins from the Encore file
@@ -50,6 +56,9 @@ struct EncImportOptions {
     // Text / content group
     bool importTempoTextSemantic              = true;   // map Italian tempo terms to BPM values
     bool importUnsupportedArticulationsAsText = false;  // emit unknown artic bytes as staff text
+
+    // Instrument search
+    InstrumentSearchMode instrumentSearchMode = InstrumentSearchMode::NameAndMidi;
 
     // Measure correction group
     UnderfillStrategy underfillMeasureStrategy = UnderfillStrategy::InvisibleRests;
