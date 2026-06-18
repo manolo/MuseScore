@@ -124,8 +124,7 @@ bool EncRoot::read(QDataStream& ds)
         } else if (nextId == "MEAS") {
             EncMeasure meas;
             meas.read(ds, varSize, *fmt);
-            meas.calculateRealDurations(fmt->hasGraceTimeBorrowing(),
-                                    fmt->supportsImpliedTuplets());
+            meas.calculateRealDurations(fmt->hasGraceTimeBorrowing(), *fmt);
             // Skip extra "ghost" MEAS blocks beyond the declared measureCount.
             if (header.measureCount > 0
                 && static_cast<int>(measures.size()) >= header.measureCount) {

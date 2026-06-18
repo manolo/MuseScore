@@ -47,6 +47,8 @@ struct EncFormatReader_V0xA6 final : EncFormatReader
 
     bool hasGraceTimeBorrowing() const override { return true; }
     const char* formatName() const override { return "v0xA6"; }
+
+    void postProcessVoiceGroup(std::vector<EncMeasureElem*>& elems, qint16 durTicks) const override;
 };
 } // namespace mu::iex::enc
 
