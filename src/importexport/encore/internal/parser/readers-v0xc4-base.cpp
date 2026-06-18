@@ -25,7 +25,7 @@
 #include <QDataStream>
 
 #include "elem.h"
-#include "encoding.h"
+#include "parsers-encoding.h"
 #include "log.h"
 
 namespace mu::iex::enc {
