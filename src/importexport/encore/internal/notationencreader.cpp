@@ -30,6 +30,15 @@ using namespace mu::engraving;
 
 muse::Ret NotationEncoreReader::read(MasterScore* score, const muse::io::path_t& path, const Options&)
 {
-    Err err = importEncore(score, path.toQString());
+    EncImportOptions opts;
+    opts.importPageLayout                     = encoreConfiguration()->importPageLayout();
+    opts.importPageBreaks                     = encoreConfiguration()->importPageBreaks();
+    opts.importStaffSize                      = encoreConfiguration()->importStaffSize();
+    opts.importTempoTextSemantic              = encoreConfiguration()->importTempoTextSemantic();
+    opts.importUnsupportedArticulationsAsText = encoreConfiguration()->importUnsupportedArticulationsAsText();
+    opts.underfillMeasureStrategy             = encoreConfiguration()->underfillMeasureStrategy();
+    opts.overfillMeasureStrategy              = encoreConfiguration()->overfillMeasureStrategy();
+    opts.firstMeasureIsPickup                 = encoreConfiguration()->firstMeasureIsPickup();
+    Err err = importEncore(score, path.toQString(), opts);
     return make_ret(err, path);
 }

@@ -170,6 +170,64 @@ PreferencesPage {
                 }
             }
         }
+
+        SeparatorLine { }
+
+        EncoreSection {
+            importPageLayout: importPreferencesModel.encoreImportPageLayout
+            importPageBreaks: importPreferencesModel.encoreImportPageBreaks
+            importStaffSize: importPreferencesModel.encoreImportStaffSize
+            importTempoTextSemantic: importPreferencesModel.encoreImportTempoTextSemantic
+            importUnsupportedArticulationsAsText: importPreferencesModel.encoreImportUnsupportedArticulationsAsText
+
+            underfillStrategyModel: importPreferencesModel.encoreUnderfillStrategyModel()
+            currentUnderfillStrategy: importPreferencesModel.encoreUnderfillStrategy
+            overfillStrategyModel: importPreferencesModel.encoreOverfillStrategyModel()
+            currentOverfillStrategy: importPreferencesModel.encoreOverfillStrategy
+
+            firstMeasureIsPickup: importPreferencesModel.encoreFirstMeasureIsPickup
+
+            navigation.section: root.navigationSection
+            navigation.order: root.navigationOrderStart + 6
+
+            onImportPageLayoutChangeRequested: function(value) {
+                importPreferencesModel.encoreImportPageLayout = value
+            }
+
+            onImportPageBreaksChangeRequested: function(value) {
+                importPreferencesModel.encoreImportPageBreaks = value
+            }
+
+            onImportStaffSizeChangeRequested: function(value) {
+                importPreferencesModel.encoreImportStaffSize = value
+            }
+
+            onImportTempoTextSemanticChangeRequested: function(value) {
+                importPreferencesModel.encoreImportTempoTextSemantic = value
+            }
+
+            onImportUnsupportedArticulationsAsTextChangeRequested: function(value) {
+                importPreferencesModel.encoreImportUnsupportedArticulationsAsText = value
+            }
+
+            onUnderfillStrategyChangeRequested: function(value) {
+                importPreferencesModel.encoreUnderfillStrategy = value
+            }
+
+            onOverfillStrategyChangeRequested: function(value) {
+                importPreferencesModel.encoreOverfillStrategy = value
+            }
+
+            onFirstMeasureIsPickupChangeRequested: function(value) {
+                importPreferencesModel.encoreFirstMeasureIsPickup = value
+            }
+
+            onFocusChanged: {
+                if (activeFocus) {
+                    root.ensureContentVisibleRequested(Qt.rect(x, y, width, height))
+                }
+            }
+        }
     }
 
     function reset() {
