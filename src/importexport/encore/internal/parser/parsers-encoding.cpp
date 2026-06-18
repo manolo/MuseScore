@@ -20,7 +20,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "encoding.h"
+#include "parsers-encoding.h"
 
 namespace mu::iex::enc {
 
