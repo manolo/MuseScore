@@ -164,11 +164,11 @@ QVariantList ImportPreferencesModel::encoreInstrumentSearchModeModel() const
 QVariantList ImportPreferencesModel::encoreUnderfillStrategyModel() const
 {
     QVariantList result = {
-        QVariantMap { { "title", muse::qtrc("preferences", "Invisible rests") },
+        QVariantMap { { "title", muse::qtrc("preferences", "Fill with invisible rests") },
             { "value", static_cast<int>(iex::enc::UnderfillStrategy::InvisibleRests) } },
-        QVariantMap { { "title", muse::qtrc("preferences", "Visible rests") },
+        QVariantMap { { "title", muse::qtrc("preferences", "Fill with visible rests") },
             { "value", static_cast<int>(iex::enc::UnderfillStrategy::VisibleRests) } },
-        QVariantMap { { "title", muse::qtrc("preferences", "Irregular measure") },
+        QVariantMap { { "title", muse::qtrc("preferences", "Shorten measure") },
             { "value", static_cast<int>(iex::enc::UnderfillStrategy::IrregularMeasure) } }
     };
 
@@ -178,11 +178,11 @@ QVariantList ImportPreferencesModel::encoreUnderfillStrategyModel() const
 QVariantList ImportPreferencesModel::encoreOverfillStrategyModel() const
 {
     QVariantList result = {
-        QVariantMap { { "title", muse::qtrc("preferences", "Truncate") },
+        QVariantMap { { "title", muse::qtrc("preferences", "Truncate notes") },
             { "value", static_cast<int>(iex::enc::OverfillStrategy::Truncate) } },
         QVariantMap { { "title", muse::qtrc("preferences", "Stretch last note") },
             { "value", static_cast<int>(iex::enc::OverfillStrategy::StretchLastNote) } },
-        QVariantMap { { "title", muse::qtrc("preferences", "Irregular measure") },
+        QVariantMap { { "title", muse::qtrc("preferences", "Extend measure") },
             { "value", static_cast<int>(iex::enc::OverfillStrategy::IrregularMeasure) } }
     };
 
