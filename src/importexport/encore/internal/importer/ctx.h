@@ -169,11 +169,6 @@ struct BuildCtx
     mu::engraving::MasterScore* score;
     const EncRoot& enc;
 
-    // True for v0xC2: realDuration/faceValue mismatch implies tuplet membership.
-    // Guards implied-tuplet detection in emitters so v0xC4 notes with incidental
-    // rdur/fv mismatch (MIDI timing drift) are not misidentified as triplets.
-    bool impliedTuplets { false };
-
     // Populated by buildParts():
     int totalStaves = 0;
     std::vector<int> staffPitchOffset {};

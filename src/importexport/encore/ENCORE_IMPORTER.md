@@ -1025,13 +1025,11 @@ The three v0xC2 normalizations performed in `EncFormatReader_V0xC2::postProcessE
 | grace1 tie-sender flag | `grace1 & 0x0F == 1` | `EncNote.isTieSender = true` (false for all other formats) |
 | alMezuro unreliable | alMezuro may hold stale values | `EncOrnament.alMezuroValid = false`; copied to `PendingSlur.alMezuroValid` at enqueue |
 
-The importer uses `en->isTieSender` directly (no format flag) and `ps.alMezuroValid` (per-slur,
-not a global context flag). `ctx.impliedTuplets` is still a BuildCtx flag because
-`computeImpliedTupletMembers` runs for all formats and detects incidental rdur/fv mismatches in
-v0xC4 files as apparent triplets; without the flag guard, those false-positive detections would
-corrupt regular notes. Adding a new Encore format version still requires only a new
-`EncFormatReader` subclass for the three normalized quirks above; `impliedTuplets` is set from
-`enc.fmt->supportsImpliedTuplets()` in `buildScore()`.
+The importer uses `en->isTieSender` and `en->isImpliedTupletMember` directly (no format flags)
+and `ps.alMezuroValid` (per-slur, not a global context flag). Adding a new Encore format version
+requires only a new `EncFormatReader` subclass and its `postProcessElement` (for the three
+ornament/note quirks) plus a `calculateRealDurations` phase when tuplet detection semantics
+differ.
 
 ## v0xC2 size=24 pitch sub-variants
 

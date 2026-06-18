@@ -79,9 +79,13 @@ struct EncNote : EncMeasureElem {
     quint8 articulationDown{ 0 };
     // Set by calculateRealDurations() for v0xA6: note is a non-leading grace
     // within a grace group (shorter duration than the leading grace).
-    bool isInnerGrace      { false };
+    bool isInnerGrace           { false };
     // Set by postProcessElement() for formats where grace1 low nibble encodes tie-sender (v0xC2).
-    bool isTieSender       { false };
+    bool isTieSender            { false };
+    // Set by calculateRealDurations() Phase 4 for v0xC2: note belongs to an implied tuplet group
+    // (rdur/faceValue mismatch identifies the ratio). Used by computeImpliedTupletMembers so
+    // notes with incidental MIDI timing drift in other formats are never misidentified.
+    bool isImpliedTupletMember  { false };
 
     using EncMeasureElem::EncMeasureElem;
 
@@ -103,6 +107,8 @@ struct EncRest : EncMeasureElem {
     // measures (Encore shows one rest symbol with this number above it).
     // Only meaningful when the MEAS block contains exactly this one REST element.
     quint8 mrestCount { 1 };
+    // Set by calculateRealDurations() Phase 4 for v0xC2 (same semantics as EncNote::isImpliedTupletMember).
+    bool isImpliedTupletMember { false };
 
     using EncMeasureElem::EncMeasureElem;
 
