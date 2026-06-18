@@ -45,11 +45,11 @@ using namespace mu::engraving;
 
 // Returns true if the note is a short MIDI artifact that should be skipped.
 static bool isMidiArtifact(const EncNote* en,
-                            const NoteElemCtx& ec,
-                            const MeasEmitCtx& mc,
-                            std::set<std::tuple<int, int, int> >& filteredSenders,
-                            int savedPrevMidiTick,
-                            bool isChordExt)
+                           const NoteElemCtx& ec,
+                           const MeasEmitCtx& mc,
+                           std::set<std::tuple<int, int, int> >& filteredSenders,
+                           int savedPrevMidiTick,
+                           bool isChordExt)
 {
     if (en->realDuration == 0 || en->realDuration >= 15) {
         return false;
@@ -78,8 +78,8 @@ static bool isMidiArtifact(const EncNote* en,
 
 // Returns true if this note is a cascade-filtered tie-receiver and should be skipped.
 static bool isCascadeFilteredTieReceiver(const EncNote* en,
-                                          const NoteElemCtx& ec,
-                                          std::set<std::tuple<int, int, int> >& filteredSenders)
+                                         const NoteElemCtx& ec,
+                                         std::set<std::tuple<int, int, int> >& filteredSenders)
 {
     if ((en->grace1 & 0x0F) != 2) {
         return false;
@@ -94,8 +94,8 @@ static bool isCascadeFilteredTieReceiver(const EncNote* en,
 
 // Attaches any pending grace notes for trackKey to chord.
 static void attachPendingGracesToChord(BuildCtx& ctx,
-                                        const std::pair<int, int>& trackKey,
-                                        Chord* chord)
+                                       const std::pair<int, int>& trackKey,
+                                       Chord* chord)
 {
     auto& pg = ctx.pendingGraces[trackKey];
     for (Chord* gc : pg) {
@@ -109,8 +109,8 @@ static void attachPendingGracesToChord(BuildCtx& ctx,
 
 // Creates Fingering/string-number elements from articulationUp/articulationDown bytes.
 static void applyFingeringsFromArtic(const NoteElemCtx& ec,
-                                      Note* note,
-                                      const EncNote* en)
+                                     Note* note,
+                                     const EncNote* en)
 {
     track_idx_t track = ec.track;
     for (quint8 ab : { en->articulationUp, en->articulationDown }) {
@@ -143,9 +143,9 @@ static void applyFingeringsFromArtic(const NoteElemCtx& ec,
 
 // Completes a pending tie from a previous note to this note.
 static void completePendingTie(BuildCtx& ctx,
-                                const NoteElemCtx& ec,
-                                const EncNote* en,
-                                Note* note)
+                               const NoteElemCtx& ec,
+                               const EncNote* en,
+                               Note* note)
 {
     auto tieKey = std::make_tuple(ec.staffIdx, ec.voice, (int)en->semiTonePitch);
     auto it = ctx.pendingTieNote.find(tieKey);
@@ -162,10 +162,10 @@ static void completePendingTie(BuildCtx& ctx,
 
 // Registers this note as a tie-start if applicable.
 static void registerTieStartIfApplicable(BuildCtx& ctx,
-                                          const NoteElemCtx& ec,
-                                          const MeasEmitCtx& mc,
-                                          const EncNote* en,
-                                          Note* note)
+                                         const NoteElemCtx& ec,
+                                         const MeasEmitCtx& mc,
+                                         const EncNote* en,
+                                         Note* note)
 {
     bool hasTieStart = mc.isTieStartAt(ec.staffIdx, ec.voice, (int)ec.e->tick, (int)en->position)
                        || en->isTieSender;
@@ -567,7 +567,9 @@ static bool resolveNoteDuration(
             if (remaining > Fraction(0, 1) && fullDur.fraction() > remaining) {
                 TDuration capped(remaining, true);
                 // 1/3072-type residual: no valid TDuration; zero-tick chord breaks sanityCheck.
-                if (capped.fraction().numerator() == 0) { return bailOut(); }
+                if (capped.fraction().numerator() == 0) {
+                    return bailOut();
+                }
                 dt   = capped.type();
                 dots = capped.dots();
             }
@@ -798,7 +800,7 @@ void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
     // Complete pending tie from same (staffIdx, voice, pitch).
     completePendingTie(ctx, ec, en, note);
 
-    applyNoteArticulations(note, chord, en, track, mc);
+    applyNoteArticulations(ctx, note, chord, en, track, mc);
 
     // Register tie-start (TIE element or grace1 low==1 for chord members outside the ±3-tick window).
     registerTieStartIfApplicable(ctx, ec, mc, en, note);

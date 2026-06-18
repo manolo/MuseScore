@@ -102,8 +102,8 @@ void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec);
 // Returns true if note was a grace note (caller must return). (emitters-note-grace.cpp)
 bool tryHandleGraceNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec, const EncNote* en);
 // Apply articulations, ornaments, tremolos, string numbers to a note/chord. (emitters-note-artic.cpp)
-void applyNoteArticulations(mu::engraving::Note* note, mu::engraving::Chord* chord, const EncNote* en, mu::engraving::track_idx_t track,
-                            const MeasEmitCtx& mc);
+void applyNoteArticulations(BuildCtx& ctx, mu::engraving::Note* note, mu::engraving::Chord* chord, const EncNote* en,
+                            mu::engraving::track_idx_t track, const MeasEmitCtx& mc);
 void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec);
 void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec);
 void handleChordSym(BuildCtx& ctx, const MeasEmitCtx& mc, const NoteElemCtx& ec);
