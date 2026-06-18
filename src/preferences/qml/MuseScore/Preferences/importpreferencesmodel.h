@@ -66,6 +66,8 @@ class ImportPreferencesModel : public QObject, public muse::Contextable, public 
                NOTIFY encoreImportTempoTextSemanticChanged)
     Q_PROPERTY(bool encoreImportUnsupportedArticulationsAsText READ encoreImportUnsupportedArticulationsAsText
                WRITE setEncoreImportUnsupportedArticulationsAsText NOTIFY encoreImportUnsupportedArticulationsAsTextChanged)
+    Q_PROPERTY(int encoreInstrumentSearchMode READ encoreInstrumentSearchMode WRITE setEncoreInstrumentSearchMode
+               NOTIFY encoreInstrumentSearchModeChanged)
     Q_PROPERTY(
         int encoreUnderfillStrategy READ encoreUnderfillStrategy WRITE setEncoreUnderfillStrategy NOTIFY encoreUnderfillStrategyChanged)
     Q_PROPERTY(int encoreOverfillStrategy READ encoreOverfillStrategy WRITE setEncoreOverfillStrategy NOTIFY encoreOverfillStrategyChanged)
@@ -94,6 +96,7 @@ public:
 
     Q_INVOKABLE QVariantList charsets() const;
     Q_INVOKABLE QVariantList shortestNotes() const;
+    Q_INVOKABLE QVariantList encoreInstrumentSearchModeModel() const;
     Q_INVOKABLE QVariantList encoreUnderfillStrategyModel() const;
     Q_INVOKABLE QVariantList encoreOverfillStrategyModel() const;
     Q_INVOKABLE QStringList stylePathFilter() const;
@@ -122,6 +125,7 @@ public:
     bool encoreImportStaffSize() const;
     bool encoreImportTempoTextSemantic() const;
     bool encoreImportUnsupportedArticulationsAsText() const;
+    int encoreInstrumentSearchMode() const;
     int encoreUnderfillStrategy() const;
     int encoreOverfillStrategy() const;
     bool encoreFirstMeasureIsPickup() const;
@@ -149,6 +153,7 @@ public slots:
     void setEncoreImportStaffSize(bool value);
     void setEncoreImportTempoTextSemantic(bool value);
     void setEncoreImportUnsupportedArticulationsAsText(bool value);
+    void setEncoreInstrumentSearchMode(int value);
     void setEncoreUnderfillStrategy(int value);
     void setEncoreOverfillStrategy(int value);
     void setEncoreFirstMeasureIsPickup(bool value);
@@ -172,6 +177,7 @@ signals:
     void encoreImportStaffSizeChanged(bool value);
     void encoreImportTempoTextSemanticChanged(bool value);
     void encoreImportUnsupportedArticulationsAsTextChanged(bool value);
+    void encoreInstrumentSearchModeChanged(int value);
     void encoreUnderfillStrategyChanged(int value);
     void encoreOverfillStrategyChanged(int value);
     void encoreFirstMeasureIsPickupChanged(bool value);

@@ -54,6 +54,10 @@ public:
     void setImportUnsupportedArticulationsAsText(bool value) override;
     muse::async::Channel<bool> importUnsupportedArticulationsAsTextChanged() const override;
 
+    InstrumentSearchMode instrumentSearchMode() const override;
+    void setInstrumentSearchMode(InstrumentSearchMode value) override;
+    muse::async::Channel<InstrumentSearchMode> instrumentSearchModeChanged() const override;
+
     UnderfillStrategy underfillMeasureStrategy() const override;
     void setUnderfillMeasureStrategy(UnderfillStrategy value) override;
     muse::async::Channel<UnderfillStrategy> underfillMeasureStrategyChanged() const override;
@@ -73,6 +77,7 @@ private:
     muse::async::Channel<bool> m_importStaffSizeChanged;
     muse::async::Channel<bool> m_importTempoTextSemanticChanged;
     muse::async::Channel<bool> m_importUnsupportedArticulationsAsTextChanged;
+    muse::async::Channel<InstrumentSearchMode> m_instrumentSearchModeChanged;
     muse::async::Channel<UnderfillStrategy> m_underfillMeasureStrategyChanged;
     muse::async::Channel<OverfillStrategy> m_overfillMeasureStrategyChanged;
     muse::async::Channel<bool> m_firstMeasureIsPickupChanged;
