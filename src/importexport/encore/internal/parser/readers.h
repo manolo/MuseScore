@@ -98,8 +98,14 @@ struct EncFormatReader
 
     // Format capability queries — see ENCORE_FORMAT.md §Known quirks for per-version details.
     virtual bool hasGraceTimeBorrowing() const { return false; }  // v0xA6: grace borrows rdur from next note
-    virtual bool supportsImpliedTuplets() const { return false; }  // v0xC2: dotted-eighth/sixteenth fix in calculateRealDurations
     virtual const char* formatName() const { return "v0xC4"; }    // for logging
+
+    // Called once per (staffIdx, voice) element group after computeElementDurations().
+    // Override to perform format-specific per-voice post-processing:
+    //   v0xA6: marks inner-grace notes (isInnerGrace)
+    //   v0xC2: fixes dotted-eighth placement and marks implied tuplet members
+    virtual void postProcessVoiceGroup(std::vector<EncMeasureElem*>& /*elems*/,
+                                       qint16 /*durTicks*/) const {}
     // Bytes to skip between kie (byte +10) and text. v0xC4=9 (text at +20), v0xC2=7 (text at +18).
     virtual quint8 lyricTextGapAfterKie() const { return 9; }
 
