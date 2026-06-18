@@ -22,12 +22,14 @@
 import QtQuick
 import QtQuick.Layouts
 
+import Muse.Ui
 import Muse.UiComponents
 
 BaseSection {
     id: root
 
-    title: qsTrc("preferences", "Encore")
+    // Suppress BaseSection default title; we render it ourselves in the header row.
+    title: ""
 
     // Layout group
     property alias importPageLayout: importPageLayoutBox.checked
@@ -62,6 +64,56 @@ BaseSection {
     signal underfillStrategyChangeRequested(int value)
     signal overfillStrategyChangeRequested(int value)
     signal firstMeasureIsPickupChangeRequested(bool value)
+    signal resetToDefaultRequested()
+
+    // Header: section title + reset button
+    RowLayout {
+        width: parent.width
+        spacing: 6
+
+        StyledTextLabel {
+            text: qsTrc("preferences", "Encore")
+            font: ui.theme.bodyBoldFont
+            horizontalAlignment: Text.AlignLeft
+            Layout.fillWidth: true
+        }
+
+        FlatButton {
+            Layout.alignment: Qt.AlignVCenter
+            width: 24
+            height: 24
+
+            icon: IconCode.UNDO
+            toolTipTitle: qsTrc("preferences", "Reset to default")
+
+            navigation.name: "EncoreResetToDefaultButton"
+            navigation.panel: root.navigation
+            navigation.row: 10
+
+            onClicked: root.resetToDefaultRequested()
+        }
+    }
+
+    // Instrument search — first option
+    ComboBoxWithTitle {
+        id: instrumentSearchModeBox
+
+        title: qsTrc("preferences", "Instrument search")
+        columnWidth: root.columnWidth
+
+        currentIndex: indexOfValue(root.currentInstrumentSearchMode)
+
+        textRole: "title"
+        valueRole: "value"
+
+        navigationName: "EncoreInstrumentSearchModeBox"
+        navigationPanel: root.navigation
+        navigationRow: 0
+
+        onValueEdited: function(newIndex, newValue) {
+            root.instrumentSearchModeChangeRequested(newValue)
+        }
+    }
 
     // Two-column grid for checkboxes
     GridLayout {
@@ -76,7 +128,7 @@ BaseSection {
             text: qsTrc("preferences", "Import page layout")
             navigation.name: "EncoreImportPageLayoutBox"
             navigation.panel: root.navigation
-            navigation.row: 0
+            navigation.row: 1
             onClicked: root.importPageLayoutChangeRequested(!checked)
         }
 
@@ -86,7 +138,7 @@ BaseSection {
             text: qsTrc("preferences", "Import page breaks")
             navigation.name: "EncoreImportPageBreaksBox"
             navigation.panel: root.navigation
-            navigation.row: 1
+            navigation.row: 2
             onClicked: root.importPageBreaksChangeRequested(!checked)
         }
 
@@ -96,7 +148,7 @@ BaseSection {
             text: qsTrc("preferences", "Lock systems to Encore layout")
             navigation.name: "EncoreImportSystemLocksBox"
             navigation.panel: root.navigation
-            navigation.row: 2
+            navigation.row: 3
             onClicked: root.importSystemLocksChangeRequested(!checked)
         }
 
@@ -106,7 +158,7 @@ BaseSection {
             text: qsTrc("preferences", "Import staff size")
             navigation.name: "EncoreImportStaffSizeBox"
             navigation.panel: root.navigation
-            navigation.row: 3
+            navigation.row: 4
             onClicked: root.importStaffSizeChangeRequested(!checked)
         }
 
@@ -116,7 +168,7 @@ BaseSection {
             text: qsTrc("preferences", "Interpret Italian tempo as BPM")
             navigation.name: "EncoreImportTempoTextSemanticBox"
             navigation.panel: root.navigation
-            navigation.row: 4
+            navigation.row: 5
             onClicked: root.importTempoTextSemanticChangeRequested(!checked)
         }
 
@@ -126,29 +178,23 @@ BaseSection {
             text: qsTrc("preferences", "Articulations as text")
             navigation.name: "EncoreImportUnsupportedArticulationsAsTextBox"
             navigation.panel: root.navigation
-            navigation.row: 5
+            navigation.row: 6
             onClicked: root.importUnsupportedArticulationsAsTextChangeRequested(!checked)
         }
     }
 
-    ComboBoxWithTitle {
-        id: instrumentSearchModeBox
+    // First measure — before measure correction dropdowns
+    CheckBox {
+        id: firstMeasureIsPickupBox
+        width: parent.width
 
-        title: qsTrc("preferences", "Instrument search")
-        columnWidth: root.columnWidth
+        text: qsTrc("preferences", "Treat first measure as pickup (anacrusis)")
 
-        currentIndex: indexOfValue(root.currentInstrumentSearchMode)
+        navigation.name: "EncoreFirstMeasureIsPickupBox"
+        navigation.panel: root.navigation
+        navigation.row: 7
 
-        textRole: "title"
-        valueRole: "value"
-
-        navigationName: "EncoreInstrumentSearchModeBox"
-        navigationPanel: root.navigation
-        navigationRow: 6
-
-        onValueEdited: function(newIndex, newValue) {
-            root.instrumentSearchModeChangeRequested(newValue)
-        }
+        onClicked: root.firstMeasureIsPickupChangeRequested(!checked)
     }
 
     ComboBoxWithTitle {
@@ -164,7 +210,7 @@ BaseSection {
 
         navigationName: "EncoreUnderfillStrategyBox"
         navigationPanel: root.navigation
-        navigationRow: 7
+        navigationRow: 8
 
         onValueEdited: function(newIndex, newValue) {
             root.underfillStrategyChangeRequested(newValue)
@@ -184,23 +230,10 @@ BaseSection {
 
         navigationName: "EncoreOverfillStrategyBox"
         navigationPanel: root.navigation
-        navigationRow: 8
+        navigationRow: 9
 
         onValueEdited: function(newIndex, newValue) {
             root.overfillStrategyChangeRequested(newValue)
         }
-    }
-
-    CheckBox {
-        id: firstMeasureIsPickupBox
-        width: parent.width
-
-        text: qsTrc("preferences", "Treat first measure as pickup (anacrusis)")
-
-        navigation.name: "EncoreFirstMeasureIsPickupBox"
-        navigation.panel: root.navigation
-        navigation.row: 9
-
-        onClicked: root.firstMeasureIsPickupChangeRequested(!checked)
     }
 }
