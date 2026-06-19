@@ -114,27 +114,47 @@ field of each TK block):
 matching the Encore Staff Sheet "Key" dropdown (`0` = sounds as written, `-12` = octave lower,
 range ±33 semitones). Encore shifts every note pitch by this value.
 
-**No-TK-block files.** Some v0xC4 files have no TK blocks at all. These files come in two
-sub-layouts determined by where the first PAGE/LINE/MEAS block starts:
+**No-TK-block files.** Some v0xC4 files and many v0xC2 files have no TK blocks at all.
+These files fall into three sub-layouts determined by where the first PAGE/LINE/MEAS block
+starts and whether a `~~~~` compact-table marker is present:
 
-- **Compact layout** (first block ≤ offset 2278): MIDI at offset 390, Key at 367.
+- **Compact v0xC4 layout** (first block ≤ offset 2278): MIDI at offset 390, Key at 367.
   Single-instrument only for Key; multi-instrument Key is not read.
 - **Large-TK layout** (first block > offset 2278): MIDI at base 2278, Key at 2255,
   using the same offsets as TK-based files. This handles Encore 5 files exported
   without TK blocks but with the standard instrument metadata tables.
+- **Compact v0xC2 layout (two variants).** v0xC2 files (Encore 3.x/4.x) store instruments
+  in a fixed 112-byte-entry table. Two sub-variants exist based on whether the file contains
+  a `~~~~` (`0x7e7e7e7e`) compact-table marker in the first 1 KiB:
 
-**Name recovery for no-TK files.** Instrument names are stored at fixed offsets regardless of
-whether TK blocks are present:
-```
-NAME_BASE = 202     (offset of first instrument name in the file)
-NAME_STEP = 2158    (stride between instruments)
-instrument n → file offset  NAME_BASE + n * NAME_STEP
-```
-Some compact v0xC2 files (Encore 3.x/4.x, no TK blocks, first-block-offset ≈ 418) store names in a
-**different compact-entry layout**: the instrument table begins at 0x128 (296); each entry is
-112 bytes; the name field is 18 bytes into each entry, giving
-`COMPACT_NAME_BASE = 314, COMPACT_NAME_STEP = 112`. When the primary offset yields an empty or
-all-spaces name, also probe the compact offsets as fallback.
+  **Variant A: WITH `~~~~` marker** (e.g. pajarilo.enc, files with mixed TK+compact):
+  ```
+  Entry table start  = 281  (after ~~~~ header)
+  Entry step         = 112
+  Name at entry +33  → COMPACT_NAME_BASE = 314
+  MIDI at entry +93  → COMPACT_MIDI_BASE = 374
+  ```
+  Some instruments also have an explicit "primary block" at `NAME_BASE + n*NAME_STEP`
+  (NAME_BASE=202, NAME_STEP=2158). When the first byte at that position is printable ASCII,
+  the instrument is a "primary-block instrument" (e.g. "Voz " style). Its MIDI is stored
+  at `NAME_BASE + n*NAME_STEP + 60` (not in the compact table entry).
+
+  **Variant B: WITHOUT `~~~~` marker** (e.g. tapada.enc, granada.enc):
+  ```
+  Entry table start  = 176
+  Entry step         = 112
+  Name at entry +26  → NAME_BASE = 202  (= 176 + 26)
+  MIDI at entry +86  → MIDI_BASE = 262  (= 176 + 86)
+  ```
+  All instruments are in this linear table. The name for instrument n is at
+  `202 + n*112`; MIDI is at `262 + n*112`. No hasPrimaryBlock logic applies.
+
+**Name recovery for no-TK files.** The read position for instrument names depends on the
+sub-layout (see above). The canonical constant `NAME_BASE = 202` is the name offset for
+instrument 0 in both Variant B (202 = entry_base 176 + name_off 26) and in the large-TK /
+primary-probe path. `NAME_STEP = 2158` is only correct for large-TK or Variant A files
+where TK-block-sized spacing is expected; do NOT use it for Variant B compact files
+(step must be 112 there).
 
 **Percussion quirk.** Percussion tracks always report MIDI program 1 (GM Grand Piano);
 infer the actual kit from the track name.

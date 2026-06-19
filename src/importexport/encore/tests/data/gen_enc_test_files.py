@@ -7482,6 +7482,91 @@ def write(name,data):
     with open(path,'wb') as f: f.write(data)
     print(f"  {name}  ({len(data):,} bytes)")
 
+
+# ===========================================================================
+# instruments_c2_no_tilde_compact_names_midi.enc
+# v0xC2 file without a ~~~~ block: 3 instruments in the linear compact table
+# at NAME_BASE(202) + n*112 (name) and 262 + n*112 (MIDI).
+#   [0] no name, MIDI=49 -> Cello  (midiProgram-1=48, 0-indexed)
+#   [1] "Guitarra", MIDI=25 -> Classical Guitar (24 0-indexed, name+MIDI match)
+#   [2] no name, MIDI=57 -> Trumpet (56 0-indexed)
+# Before the fix: recoverMissingNames used NAME_STEP=2158 (wrong, falls into
+# LINE data) and COMPACT_NAME_BASE=314 (off by one entry), so instrument [0]
+# got the name "Guitarra" and [1] got garbage; MIDI was similarly shifted:
+# instrument [0] received entry[1]'s value instead of its own.
+# ===========================================================================
+def gen_v0c2_no_tilde_compact_names_midi():
+    hdr = bytearray(512)
+    hdr[0:4] = b'SCOW'
+    hdr[4] = 0xC2
+    struct.pack_into('<H', hdr, 0x28, 0x0420)
+    struct.pack_into('<H', hdr, 0x2C, 0xF000)
+    struct.pack_into('<h', hdr, 0x2E, 1)
+    struct.pack_into('<h', hdr, 0x30, 1)
+    hdr[0x32] = 3
+    hdr[0x33] = 3
+    struct.pack_into('<h', hdr, 0x34, 1)
+    # [0] no name at 202, MIDI=49 at 262
+    hdr[262] = 49
+    # [1] name "Guitarra" at 314, MIDI=25 at 374
+    hdr[314:323] = b'Guitarra\x00'
+    hdr[374] = 25
+    # [2] no name at 426, MIDI=57 at 486
+    hdr[486] = 57
+
+    def staff_entry_c2(isidx):
+        e = bytearray(30); e[19] = 1; e[21] = isidx; return bytes(e)
+
+    line_data  = b'\x00' * 10 + struct.pack('<H', 0) + bytes([1])
+    line_data += staff_entry_c2(0x00) + staff_entry_c2(0x01) + staff_entry_c2(0x02)
+    line_block = b'LINE' + struct.pack('<I', len(line_data)) + line_data
+
+    elems  = note_v0c2(0, 0, 0, fv=1, pitch=60)
+    elems += note_v0c2(0, 0, 1, fv=1, pitch=64)
+    elems += note_v0c2(0, 0, 2, fv=1, pitch=67)
+    elems += end_marker()
+    return bytes(hdr) + line_block + meas_block(meas_hdr(4, 4), elems) + SKELETON_POST
+
+
+# ===========================================================================
+# instruments_c2_tilde_primary_block_midi.enc
+# v0xC2 file WITH a ~~~~ block: single instrument with printable ASCII at
+# NAME_BASE(202) triggering hasPrimaryBlock(0)=true. MIDI is at 202+60=262
+# (value=25 -> Classical Guitar, 0-indexed 24).
+# Before the fix: hasPrimaryBlock instruments were skipped by the compact MIDI
+# loop and kept midiProgram=0, falling back to Grand Piano.
+# ===========================================================================
+def gen_v0c2_tilde_primary_block_midi():
+    hdr = bytearray(400)
+    hdr[0:4] = b'SCOW'
+    hdr[4] = 0xC2
+    struct.pack_into('<H', hdr, 0x28, 0x0420)
+    struct.pack_into('<H', hdr, 0x2C, 0xF000)
+    struct.pack_into('<h', hdr, 0x2E, 1)
+    struct.pack_into('<h', hdr, 0x30, 1)
+    hdr[0x32] = 1
+    hdr[0x33] = 1
+    struct.pack_into('<h', hdr, 0x34, 1)
+    # ~~~~ block at offset 100 with varSize=50
+    struct.pack_into('BBBB', hdr, 100, 0x7e, 0x7e, 0x7e, 0x7e)
+    struct.pack_into('<I', hdr, 104, 50)
+    # Primary block marker at NAME_BASE=202: 'V' triggers hasPrimaryBlock(0)
+    hdr[202] = 0x56
+    # MIDI at NAME_BASE+60=262: 25 (Classical Guitar 1-indexed, 0-indexed=24)
+    hdr[262] = 25
+
+    def staff_entry_c2(isidx):
+        e = bytearray(30); e[19] = 1; e[21] = isidx; return bytes(e)
+
+    line_data  = b'\x00' * 10 + struct.pack('<H', 0) + bytes([1])
+    line_data += staff_entry_c2(0x00)
+    line_block = b'LINE' + struct.pack('<I', len(line_data)) + line_data
+
+    elems  = note_v0c2(0, 0, 0, fv=1, pitch=60)
+    elems += end_marker()
+    return bytes(hdr) + line_block + meas_block(meas_hdr(4, 4), elems) + SKELETON_POST
+
+
 if __name__=='__main__':
     print("Generating synthetic Encore test files (using bazo.enc skeleton):")
     write("structure_v0c2_pitches.enc",       gen_v0c2_pitches())
@@ -7727,5 +7812,7 @@ if __name__=='__main__':
     write("ornaments_tremolo_r8_r16_r64.enc",              gen_v0c4_tremolo_r8_r16_r64())
     write("ornaments_graphic_line_skipped.enc",            gen_v0c4_graphic_line_skipped())
     write("notes_string_num_orn_no_dup.enc",              gen_v0c4_string_num_orn_no_dup())
+    write("instruments_c2_no_tilde_compact_names_midi.enc", gen_v0c2_no_tilde_compact_names_midi())
+    write("instruments_c2_tilde_primary_block_midi.enc",    gen_v0c2_tilde_primary_block_midi())
     print("Done.")
 

@@ -669,3 +669,63 @@ TEST_F(Tst_Instruments, abbreviated_name_with_trailing_dot_matches_bandurria)
         << "Name 'Bandurr. I' must resolve to bandurria after punctuation stripping";
     delete score;
 }
+
+// ===========================================================================
+// FIX: v0xC2 files without a ~~~~ block use a different compact-table layout
+// (entries at NAME_BASE+n*112, MIDI at 262+n*112) compared to ~~~~-block
+// files (NAME_BASE+n*2158, MIDI at 374+k*112).  Before the fix, names were
+// read with step=2158 (landing in LINE data) and MIDI was read from entry
+// k+1 instead of entry k, so instrument [0] received the name and MIDI of
+// instrument [1], [1] got [2]'s data, etc. (duplicated names, shifted MIDI).
+// ===========================================================================
+TEST_F(Tst_Instruments, c2_no_tilde_compact_instr1_name_not_duplicated_to_instr0)
+{
+    // instruments_c2_no_tilde_compact_names_midi.enc:
+    //   [0] no name, MIDI=49   [1] "Guitarra", MIDI=25   [2] no name, MIDI=57
+    MasterScore* score = readEncoreScore("instruments_c2_no_tilde_compact_names_midi.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_EQ(score->parts().size(), 3u);
+    // Part 1 must have the name "Guitarra" (not shifted to part 0).
+    EXPECT_EQ(score->parts()[1]->longName(), String(u"Guitarra"))
+        << "Name 'Guitarra' must be assigned to instrument [1], not [0]";
+    // Part 0 must NOT have "Guitarra" (would indicate the old shift bug).
+    EXPECT_NE(score->parts()[0]->longName(), String(u"Guitarra"))
+        << "Instrument [0] must not receive instrument [1]'s name";
+    delete score;
+}
+
+TEST_F(Tst_Instruments, c2_no_tilde_compact_midi_assigned_to_correct_instr)
+{
+    // Same file: verify MIDI programs are not shifted by one entry.
+    // [0] MIDI=49, [1] MIDI=25 (name "Guitarra"), [2] MIDI=57.
+    // Old bug: [0] received entry[1]'s MIDI=25 and matched Classical Guitar,
+    // making [0] and [1] both resolve to the same instrument.
+    MasterScore* score = readEncoreScore("instruments_c2_no_tilde_compact_names_midi.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_EQ(score->parts().size(), 3u);
+    const String id0 = score->parts()[0]->instrument()->id();
+    const String id1 = score->parts()[1]->instrument()->id();
+    const String id2 = score->parts()[2]->instrument()->id();
+    EXPECT_NE(id0, id1) << "Instrument [0] must not match instrument [1] (MIDI shifted bug)";
+    EXPECT_NE(id1, id2) << "Instrument [1] must not match instrument [2]";
+    delete score;
+}
+
+// ===========================================================================
+// FIX: v0xC2 ~~~~-block files where instrument n has printable ASCII at
+// NAME_BASE+n*NAME_STEP (hasPrimaryBlock=true) now have their MIDI read
+// from block_start+60 instead of being silently skipped (midiProgram=0).
+// Regression: "Voz 1" in pajarilo.enc was getting midiProgram=0 before fix.
+// ===========================================================================
+TEST_F(Tst_Instruments, c2_tilde_primary_block_midi_read_from_offset_60)
+{
+    // instruments_c2_tilde_primary_block_midi.enc: ~~~~-block file, single
+    // instrument with printable ASCII 'V' at offset 202 (hasPrimaryBlock=true).
+    // MIDI=25 at 202+60=262 must be read (-> Classical Guitar, not Grand Piano).
+    MasterScore* score = readEncoreScore("instruments_c2_tilde_primary_block_midi.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_EQ(score->parts().size(), 1u);
+    EXPECT_NE(score->parts()[0]->instrument()->id(), String(u"grand-piano"))
+        << "Primary-block MIDI=25 at block+60 must be read; Grand Piano means midiProgram stayed 0";
+    delete score;
+}

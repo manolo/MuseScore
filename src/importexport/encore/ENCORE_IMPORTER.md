@@ -66,6 +66,30 @@ EncRoot  (EncInstrument[], EncLine[], EncMeasure[], EncTitle)
 MasterScore  (complete)
 ```
 
+## Import options (Preferences → Import → Encore)
+
+`EncImportOptions` (in `importer/import-options.h`) holds eight user-configurable flags.
+`IEncImportConfiguration` / `EncImportConfiguration` (in `ienc-importconfiguration.h` /
+`internal/enc-importconfiguration.h`) persist them via `muse::Settings` and expose
+`async::Channel<T>` change signals. `NotationEncoreReader` reads the config on every
+import and passes the filled struct into `importEncore()`.
+
+| Field | Default | Effect |
+|---|---|---|
+| `importPageLayout` | true | Apply WINI page margins; false = use MuseScore defaults |
+| `importPageBreaks` | true | Insert page breaks from LINE `pageIdx` increments |
+| `importSystemLocks` | true | Insert system locks from LINE `showByte` bit 1 |
+| `importStaffSize` | true | Apply LINE staff-size hint; false = use MuseScore default |
+| `importTempoTextSemantic` | true | Promote Italian tempo terms to TempoText with BPM; false = plain StaffText |
+| `importUnsupportedArticulationsAsText` | false | Unknown artic bytes emitted as StaffText; false = silently dropped |
+| `instrumentSearchMode` | NameAndMidi | `NameAndMidi` = name+MIDI scoring; `MidiOnly` = skip name steps 2-4; `Piano` = always Grand Piano |
+| `underfillMeasureStrategy` | InvisibleRests | How to fill trailing gaps: `InvisibleRests`, `VisibleRests`, `IrregularMeasure` |
+| `overfillMeasureStrategy` | Truncate | How to handle overflow: `Truncate`, `IrregularMeasure` |
+| `firstMeasureIsPickup` | true | Shorten first measure as pickup if underflowed; false = pad with leading rests |
+
+`EncImportOptions` is stored in `BuildCtx` and consulted throughout `emitters-*.cpp`
+and `resolvers-*.cpp`.
+
 ## Block dispatch and resync
 
 The top-level loop in `enc-import.cpp` reads block magics and
@@ -78,6 +102,48 @@ around 2 KiB. `findNextKnownMagic` is capped at a 1 MiB resync
 window; a longer junk gap indicates a corrupt file and the loop
 stops instead of walking the entire payload. This was added in
 `0c48ce9c27` after a real corpus file produced a 100+ MB scan.
+
+## v0xC2 compact instrument-table reading
+
+v0xC2 files without TK blocks use a 112-byte-per-entry linear table for instrument
+names and MIDI programs. Two sub-layouts exist (see ENCORE_FORMAT.md §No-TK-block files).
+The reader (`readers-v0xc4-base.cpp`) auto-detects which variant applies.
+
+**Detection logic (`readMidiProgramsNoTk`, `recoverMissingNames`):**
+
+1. Call `findTildeBlockOffset(ds)`. If it returns a valid offset (≥ 0), Variant A applies;
+   otherwise Variant B.
+
+2. If Variant B (no `~~~~`): `noTkBlocks && tildeOff < 0`:
+   - Names: `NAME_BASE + n * 112` (= 202, 314, 426, …)
+   - MIDI: `262 + n * 112` (= 262, 374, 486, …)
+   - No `hasPrimaryBlock` check; all instruments read directly.
+
+3. If Variant A (has `~~~~`):
+   - Names: first try `NAME_BASE + n * NAME_STEP` (step=2158) for TK-style instruments;
+     then compact fallback at `314 + k * 112` for remaining unnamed instruments.
+   - MIDI: compact at `374 + k * 112` for instruments without a primary block.
+   - **Primary-block instruments:** `hasPrimaryBlock(n)` probes `202 + n*2158` for
+     printable ASCII. If true, MIDI is read from `(202 + n*2158) + 60` instead
+     (the "Voz " block style found in some Encore 4.x files).
+
+4. **Fallback path (sub-layout a):** if `data[390] >= 1 && 390 < effectiveFirstBlock`,
+   MIDI comes from `390 + n * 276` (compact v0xC4 layout, no `~~~~`).
+
+**Template channel matching.** `findTemplateByMidi` only inspects the first channel of
+each template (tremolo/secondary channels are skipped) to avoid misrouting instruments
+whose secondary channels happen to match a wrong MIDI program (e.g. acoustic-bass channel
+44 vs. the main channel 32).
+
+**Trailing-punctuation stripping.** When building word-level needles for name matching,
+trailing non-alphanumeric characters are stripped (e.g. "Bandurr." → "Bandurr") before
+checking for a substring match. This lets abbreviated names ("Bandurr. I") reach the
+correct template ("Bandurria").
+
+**Template bracket clearing.** After `Staff::init(tmpl)` copies bracket data from the
+template, the importer explicitly clears brackets/spans on every staff to avoid spurious
+cross-part braces (e.g. accordion template carrying a brace that would span unrelated parts
+in multi-instrument scores).
 
 ## Instrument routing
 
