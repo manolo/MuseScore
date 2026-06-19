@@ -836,7 +836,7 @@ combined with a non-zero `byte[+15]`.
 | +7       | 1      | grace2                                                                           |
 | +10      | 2      | layout x-position                                                                |
 | +13      | 1      | **MIDI pitch** (sub-variant A: non-zero) or 0 (sub-variant B: pitch is at +15)  |
-| +14      | 1      | dotControl bitmask (same semantics as v0xC4)                                     |
+| +14      | 1      | dotControl — layout/display byte. Bit 0 sometimes indicates a dotted note but **may be coincidentally set on undotted notes** (observed: 0x28, 0x30, 0x39, 0x60 on plain 16ths and 8ths in v0xC2 files such as tapada.enc). Parsers must NOT treat bit 0 as a reliable dotted indicator when `realDuration ≤ faceValue2ticks(fv)`. See v0xC2 dotted-eighth anomaly note below. |
 | +15      | 1      | **MIDI pitch** (sub-variant B only); 0 in sub-variant A                          |
 | +16      | 2      | playback duration in ticks                                                       |
 | +19      | 1      | velocity                                                                         |
@@ -893,16 +893,24 @@ Do NOT pass dotControl as a raw tick count to `calcDots()` — it will return 0 
 cases. Instead:
 1. Try `calcDots(dotControl, fv)` (works when dotControl happens to equal a dotted tick count).
 2. Fallback to `calcDotsSnap(realDuration, fv)` (handles exact or ±1-tick-accurate rdur).
-3. If both return 0 AND `dotControl & 1`, force 1 dot. This handles MIDI timing drift
-   where rdur is 10–20 ticks off from the theoretical dotted value.
+3. If both return 0 AND `dotControl & 1` AND `realDuration > faceValue2ticks(fv)`, force 1 dot.
+   The `rdur > faceTicks` guard is critical: when `rdur ≤ faceTicks` the note is plain or
+   truncated by multi-stream overlap, and bit 0 is a spurious layout flag (not a dotted indicator).
 
 **v0xC2 dotted-eighth anomaly.** In v0xC2 files, the MIDI note-on for the sixteenth in a
 `dotted-eighth + sixteenth` group is stored at `tick + faceValue(eighth) = tick + 120`,
 NOT at `tick + dotted(eighth) = tick + 180`. This makes `realDuration = 120` for the dotted
-eighth, identical to a plain eighth, so `calcDotsSnap` returns 0. The `dotControl` byte
-(typically `0x60`) also lacks bit 0 (unlike v0xC4 which uses `0x1D`). Detect
-this via the `E@tick → S@tick+120` pattern in `calculateRealDurations` and sets
-`dotControl |= 1` so the bit-0 fallback fires correctly.
+eighth (equal to a plain eighth), so `calcDotsSnap` returns 0. The `dotControl` byte
+(typically `0x60`) also lacks bit 0.
+
+Detection: when an 8th with `rdur=120` is followed by a 16th at `tick+120` with `rdur=60`,
+AND `faceSum + 60 == durTicks` (the voice group is exactly 60t short — the amount the
+anomaly steals), set `EncNote::forceDotted = true` on the 8th. The `forceDotted` signal
+bypasses `dotControl` entirely in the emitter.
+
+The `faceSum` guard is required because the same binary pattern (8th+16th@tick+120) also
+appears in a genuine 8th followed by a 16th inside a fully-filled measure. Without the guard
+any 8th preceding a 16th would be promoted to dotted, overflowing the measure.
 
 ---
 

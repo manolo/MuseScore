@@ -7495,6 +7495,25 @@ def write(name,data):
 # got the name "Guitarra" and [1] got garbage; MIDI was similarly shifted:
 # instrument [0] received entry[1]'s value instead of its own.
 # ===========================================================================
+# ===========================================================================
+# notes_v0c2_full_measure_no_false_dot.enc
+# v0xC2 4/4 fully-filled measure: 8th + 16th + 16th + 8th + 8th = 480t.
+# The 8th at tick=0 is followed by a 16th at tick=120, which matches the
+# fixDottedEighthPattern trigger (8th rdur=120 + 16th rdur=60 at tick+120).
+# faceSum(480) + 60 = 540 != 480 = durTicks, so the faceSum guard blocks the
+# fix.  Without the guard the first 8th becomes a dotted-8th (90t), causing
+# measure overflow and reshaping of all subsequent notes.
+# ===========================================================================
+def gen_v0c2_full_measure_no_false_dot():
+    e  = note_v0c2(0,   0, 0, fv=4, pitch=81)   # 8th
+    e += note_v0c2(120, 0, 0, fv=5, pitch=78)   # 16th
+    e += note_v0c2(180, 0, 0, fv=5, pitch=80)   # 16th
+    e += note_v0c2(240, 0, 0, fv=4, pitch=83)   # 8th
+    e += note_v0c2(360, 0, 0, fv=4, pitch=85)   # 8th
+    e += end_marker()
+    return assemble(0xC2, [(meas_hdr(4, 4), e)])
+
+
 def note_v0c2_with_dotctrl(tick, voice, staffIdx, fv, pitch, dotCtrl=0):
     """22-byte v0xC2 note with an explicit dotControl byte."""
     d = bytearray(19)
@@ -7843,6 +7862,7 @@ if __name__=='__main__':
     write("ornaments_graphic_line_skipped.enc",            gen_v0c4_graphic_line_skipped())
     write("notes_string_num_orn_no_dup.enc",              gen_v0c4_string_num_orn_no_dup())
     write("notes_v0c2_plain_sixteenth_no_spurious_dot.enc", gen_v0c2_plain_sixteenth_no_spurious_dot())
+    write("notes_v0c2_full_measure_no_false_dot.enc",      gen_v0c2_full_measure_no_false_dot())
     write("instruments_c2_no_tilde_compact_names_midi.enc", gen_v0c2_no_tilde_compact_names_midi())
     write("instruments_c2_tilde_primary_block_midi.enc",    gen_v0c2_tilde_primary_block_midi())
     print("Done.")
