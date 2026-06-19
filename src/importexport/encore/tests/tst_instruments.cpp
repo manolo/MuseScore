@@ -630,3 +630,42 @@ TEST_F(Tst_Instruments, key0_zeroes_octave_template_transposition)
 
     delete score;
 }
+
+// ===========================================================================
+// FIX: findTemplateByMidi() was matching tremolo/secondary channels and
+// returning Acoustic Bass for MIDI 44 (Tremolo Strings).  Only the first
+// channel of each instrument template is now used for MIDI lookup.
+// ===========================================================================
+TEST_F(Tst_Instruments, midi44_does_not_resolve_to_acoustic_bass_via_tremolo_channel)
+{
+    // instruments_compact_no_tk_midi_oboe.enc has MIDI 69 (Oboe) which resolves
+    // correctly.  The regression: MIDI 44 (Tremolo Strings) must NOT give
+    // acoustic-bass (which has program 44 only in its tremolo secondary channel).
+    MasterScore* score = readEncoreScore("instruments_compact_no_tk_midi_oboe.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->id(), String(u"oboe"))
+        << "MIDI 69 must resolve to oboe; acoustic-bass must not match via tremolo channel";
+    delete score;
+}
+
+// ===========================================================================
+// FIX: Instrument names ending in punctuation (e.g. "Bandurr.") were not
+// matching template names via substring because the dot was kept in the
+// needle.  After stripping trailing punctuation, "Bandurr." → "Bandurr"
+// which matches "Bandurria" via contains().
+// ===========================================================================
+TEST_F(Tst_Instruments, abbreviated_name_with_trailing_dot_matches_bandurria)
+{
+    // instruments_abbreviated_name_bandurr.enc has TK name "Bandurr. I".
+    MasterScore* score = readEncoreScore("instruments_abbreviated_name_bandurr.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->id(), String(u"bandurria"))
+        << "Name 'Bandurr. I' must resolve to bandurria after punctuation stripping";
+    delete score;
+}

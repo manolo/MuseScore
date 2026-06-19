@@ -28,6 +28,8 @@
 #include "engraving/dom/layoutbreak.h"
 #include "engraving/dom/rest.h"
 #include "engraving/dom/segment.h"
+#include "engraving/dom/instrument.h"
+#include "engraving/dom/part.h"
 #include "engraving/dom/staff.h"
 #include "engraving/dom/stafftext.h"
 #include "engraving/dom/stafftype.h"
@@ -439,5 +441,83 @@ TEST_F(Tst_Options, overfill_irregular_measure_does_not_crash)
     opts.overfillMeasureStrategy = OverfillStrategy::IrregularMeasure;
     MasterScore* score = readEncoreScoreWithOpts("bazo.enc", opts);
     ASSERT_NE(score, nullptr) << "IrregularMeasure overfill strategy must not crash during import";
+    delete score;
+}
+
+// ===========================================================================
+// instrumentSearchMode
+// ===========================================================================
+
+// Piano mode: all instruments fall back to Grand Piano.
+TEST_F(Tst_Options, instrumentSearchMode_piano_assigns_grand_piano_to_all)
+{
+    EncImportOptions opts;
+    opts.instrumentSearchMode = InstrumentSearchMode::Piano;
+    MasterScore* score = readEncoreScoreWithOpts("bazo.enc", opts);
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    for (const Part* part : score->parts()) {
+        const Instrument* inst = part->instrument();
+        ASSERT_NE(inst, nullptr);
+        EXPECT_EQ(inst->id(), String(u"grand-piano"))
+            << "Piano mode: every instrument must be Grand Piano";
+    }
+    delete score;
+}
+
+// MidiOnly mode: name matching is skipped, only MIDI program drives selection.
+// bazo.enc has scoreSize=3 (75%); the instrument is usually resolved by name.
+// With MidiOnly, the name-based step is bypassed so a file whose name can't
+// be resolved must still produce a valid (non-crashing) result.
+TEST_F(Tst_Options, instrumentSearchMode_midi_only_does_not_crash)
+{
+    EncImportOptions opts;
+    opts.instrumentSearchMode = InstrumentSearchMode::MidiOnly;
+    MasterScore* score = readEncoreScoreWithOpts("bazo.enc", opts);
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "MidiOnly mode must not produce a corrupt score: " << ret.text();
+    delete score;
+}
+
+// Default mode: name+MIDI gives a better result than MidiOnly when the name matches.
+TEST_F(Tst_Options, instrumentSearchMode_name_and_midi_resolves_bandurria)
+{
+    // instruments_abbreviated_name_bandurr.enc has name "Bandurr. I" which matches
+    // "Bandurria" via substring (after punctuation stripping).
+    MasterScore* score = readEncoreScore("instruments_abbreviated_name_bandurr.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    EXPECT_EQ(score->parts().front()->instrument()->id(), String(u"bandurria"))
+        << "Name+MIDI default: 'Bandurr. I' must resolve to bandurria template";
+    delete score;
+}
+
+// ===========================================================================
+// Instrument template bracket clearing
+// ===========================================================================
+
+// Accordion template has a brace with span=2 that would overflow into the next
+// part when the accordion has only 1 staff.  After clearing template brackets,
+// no spurious cross-part bracket should appear.
+TEST_F(Tst_Options, template_brackets_cleared_no_spurious_brace)
+{
+    // akordo.enc has multiple instruments; if template bracket clearing fails,
+    // layout may crash or produce wrong bracket spans.
+    MasterScore* score = readEncoreScore("akordo.enc");
+    ASSERT_NE(score, nullptr);
+    // Verify no staff has a bracket that overflows past the score's staves.
+    for (staff_idx_t si = 0; si < score->nstaves(); ++si) {
+        Staff* st = score->staff(si);
+        ASSERT_NE(st, nullptr);
+        const size_t span = st->bracketSpan(0);
+        if (span > 1) {
+            EXPECT_LE(si + span, score->nstaves())
+                << "Bracket on staff " << si << " spans " << span
+                << " but score only has " << score->nstaves() << " staves";
+        }
+    }
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
     delete score;
 }
