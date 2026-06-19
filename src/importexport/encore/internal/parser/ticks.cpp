@@ -186,7 +186,18 @@ int computeDotCount(quint8 dotControl, qint16 realDuration, quint8 faceValue, bo
             return dBySnap;
         }
         if (useBit0Fallback && (dotControl & 1)) {
-            return 1;   // bit 0 = Encore's dotted flag; force dot when rdur drift is too large
+            // Guard: only force a dot when rdur > faceTicks.
+            // A dotted note has a longer MIDI duration than the plain face value, so
+            // rdur must exceed faceTicks for the bit-0 flag to be a plausible dotted
+            // indicator.  When rdur <= faceTicks the note is plain (exact match) or
+            // shorter than the face value (multi-stream overlap / timing slop); bit 0
+            // in dotControl may then be a spurious layout flag rather than a dotted
+            // indicator (observed in v0xC2 files such as tapada.enc).
+            // The dotted-eighth anomaly in v0xC2 is handled via EncNote::forceDotted.
+            const int faceTicks = faceValue2ticks(faceValue);
+            if (faceTicks > 0 && realDuration > faceTicks) {
+                return 1;
+            }
         }
         return 0;
     }

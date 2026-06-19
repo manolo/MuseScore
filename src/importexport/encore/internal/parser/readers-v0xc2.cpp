@@ -29,13 +29,35 @@
 #include "ticks.h"
 
 namespace mu::iex::enc {
-
 // v0xC2: Encore places the sixteenth of a dotted-eighth+sixteenth group at tick+120
 // (the undotted gap), not tick+180. Fix: detect eighth(rdur=120) + sixteenth(rdur=60,
-// tick+120) and set dotControl bit 0 to force the dot.
+// tick+120) and set forceDotted.
+//
+// Guard: the fix must only fire when the measure is SHORT by exactly 60t (the amount
+// the dotted-eighth anomaly steals).  Without this guard the fix produces false
+// positives on any genuine 8th+16th sequence inside a full measure (e.g. tapada.enc
+// m40 staff 2: face sum=360t in a 480t measure is short by 120t, not 60t → no fix).
 static void fixDottedEighthPattern(std::vector<EncMeasureElem*>& elems, qint16 durTicks)
 {
-    (void)durTicks;
+    // Pre-compute face-value sum to decide whether the measure needs correction.
+    int faceSum = 0;
+    for (const EncMeasureElem* e : elems) {
+        quint8 fv = 0;
+        if (const auto* en = dynamic_cast<const EncNote*>(e)) {
+            fv = en->faceValue & 0x0F;
+        } else if (const auto* er = dynamic_cast<const EncRest*>(e)) {
+            fv = er->faceValue & 0x0F;
+        }
+        faceSum += faceValue2ticks(fv);
+    }
+    // The dotted-8th anomaly: one 8th is stored as plain (120t) instead of
+    // dotted (180t), making the measure exactly 60t short.
+    // If the deficit is not 60t, the measure is already correct or has a
+    // different issue — don't apply the dotted fix.
+    if (faceSum + 60 != static_cast<int>(durTicks)) {
+        return;
+    }
+
     for (size_t i = 0; i < elems.size(); ++i) {
         EncNote* en = dynamic_cast<EncNote*>(elems[i]);
         if (!en || (en->faceValue & 0x0F) != 4 || en->realDuration != 120) {
@@ -51,7 +73,8 @@ static void fixDottedEighthPattern(std::vector<EncMeasureElem*>& elems, qint16 d
                 if (enNext
                     && (enNext->faceValue & 0x0F) == 5
                     && enNext->realDuration == 60) {
-                    en->dotControl |= 1;
+                    en->dotControl |= 1;   // kept for documentation; dot is forced via forceDotted
+                    en->forceDotted = true;
                     break;
                 }
             }
@@ -77,18 +100,30 @@ static void markImpliedTupletMembers(std::vector<EncMeasureElem*>& elems)
     while (i < n) {
         EncMeasureElem* first = chords[i][0];
         quint8 fv = 0;
-        if (auto* en = dynamic_cast<EncNote*>(first)) fv = en->faceValue & 0x0F;
-        else if (auto* er = dynamic_cast<EncRest*>(first)) fv = er->faceValue & 0x0F;
-        if (fv < 4) { ++i; continue; }
+        if (auto* en = dynamic_cast<EncNote*>(first)) {
+            fv = en->faceValue & 0x0F;
+        } else if (auto* er = dynamic_cast<EncRest*>(first)) {
+            fv = er->faceValue & 0x0F;
+        }
+        if (fv < 4) {
+            ++i;
+            continue;
+        }
         int normalN = 0;
         int actualN = detectImpliedTuplet(first->realDuration, fv, normalN);
-        if (actualN < 2 || i + actualN > n) { ++i; continue; }
+        if (actualN < 2 || i + actualN > n) {
+            ++i;
+            continue;
+        }
         bool allMatch = true;
         for (int k = 1; k < actualN; ++k) {
             EncMeasureElem* ek = chords[i + k][0];
             quint8 fvk = 0;
-            if (auto* en = dynamic_cast<EncNote*>(ek)) fvk = en->faceValue & 0x0F;
-            else if (auto* er = dynamic_cast<EncRest*>(ek)) fvk = er->faceValue & 0x0F;
+            if (auto* en = dynamic_cast<EncNote*>(ek)) {
+                fvk = en->faceValue & 0x0F;
+            } else if (auto* er = dynamic_cast<EncRest*>(ek)) {
+                fvk = er->faceValue & 0x0F;
+            }
             int nk = 0;
             if (fvk < 4 || detectImpliedTuplet(ek->realDuration, fvk, nk) != actualN || nk != normalN) {
                 allMatch = false;
@@ -98,8 +133,11 @@ static void markImpliedTupletMembers(std::vector<EncMeasureElem*>& elems)
         if (allMatch) {
             for (int k = 0; k < actualN; ++k) {
                 for (EncMeasureElem* e : chords[i + k]) {
-                    if (auto* en = dynamic_cast<EncNote*>(e)) en->isImpliedTupletMember = true;
-                    else if (auto* er = dynamic_cast<EncRest*>(e)) er->isImpliedTupletMember = true;
+                    if (auto* en = dynamic_cast<EncNote*>(e)) {
+                        en->isImpliedTupletMember = true;
+                    } else if (auto* er = dynamic_cast<EncRest*>(e)) {
+                        er->isImpliedTupletMember = true;
+                    }
                 }
             }
             i += actualN;
@@ -178,5 +216,4 @@ std::unique_ptr<EncFormatReader> makeFormatReader_V0xC2()
 {
     return std::make_unique<EncFormatReader_V0xC2>();
 }
-
 } // namespace mu::iex::enc

@@ -140,18 +140,29 @@ TEST(Tst_EncoreRhythm, dotCalculation)
 TEST(Tst_EncoreRhythm, computeDotCount_v0c2_dotted_eighth)
 {
     // Pre-fix state: dotControl=0x60, rdur=120 (plain gap), fv=4 (eighth).
-    // calcDots(0x60=96, 4): base=120, 96≠180 → 0.
-    // calcDotsSnap(120, 4): |120-120|=0 → 0 (exact plain match).
-    // bit0 fallback: 0x60 & 1 = 0 → 0.
     EXPECT_EQ(computeDotCount(0x60, 120, 4, /*useBit0Fallback=*/ true), 0)
-        << "v0xC2 dotted-eighth without fix: dotControl=0x60 yields 0 dots (bug)";
+        << "v0xC2 dotted-eighth without fix: dotControl=0x60 yields 0 dots";
 
-    // Post-fix state: calculateRealDurations sets dotControl|=1 → dotControl=0x61.
-    // calcDots(97, 4): 97≠180 → 0.
-    // calcDotsSnap(120, 4): exact match → 0.
-    // bit0 fallback: 0x61 & 1 = 1 → 1.
-    EXPECT_EQ(computeDotCount(0x61, 120, 4, /*useBit0Fallback=*/ true), 1)
-        << "v0xC2 dotted-eighth after fix: dotControl=0x61 (bit 0 set) yields 1 dot";
+    // Post-fix state: dotControl=0x61 (bit 0 set by fixDottedEighthPattern).
+    // The new guard: rdur=120 == faceTicks(8th)=120 → bit-0 fallback suppressed.
+    // The dot is now forced via EncNote::forceDotted in the emitter, NOT via computeDotCount.
+    EXPECT_EQ(computeDotCount(0x61, 120, 4, /*useBit0Fallback=*/ true), 0)
+        << "v0xC2 dotted-eighth: computeDotCount returns 0 when rdur==faceTicks; "
+        "dot is forced by EncNote::forceDotted in emitters-note.cpp";
+
+    // Guard: bit-0 fallback must NOT fire when rdur <= faceTicks.
+    // rdur=60 == faceTicks(16th)=60 → rdur not > faceTicks → 0 dots (tapada plain 16th).
+    EXPECT_EQ(computeDotCount(0x39, 60, 5, /*useBit0Fallback=*/ true), 0)
+        << "Plain 16th with spurious dotControl bit0 must not be dotted (rdur==faceTicks)";
+    // rdur=60 < faceTicks(8th)=120 → rdur not > faceTicks → 0 dots (tapada plain 8th overlap).
+    EXPECT_EQ(computeDotCount(0x39, 60, 4, /*useBit0Fallback=*/ true), 0)
+        << "rdur < faceTicks: bit-0 must not force dot even when set";
+
+    // The bit-0 fallback fires for genuine MIDI drift (rdur > faceTicks).
+    // dotControl=0x01, rdur=160 (drifted dotted-8th, faceTicks=120), fv=4.
+    // calcDots/calcDotsSnap return 0 (drift too large); rdur>faceTicks → bit-0 fires → 1.
+    EXPECT_EQ(computeDotCount(0x01, 160, 4, /*useBit0Fallback=*/ true), 1)
+        << "Genuine drift (rdur=160 > faceTicks=120): bit0 fires → 1 dot";
 }
 
 TEST(Tst_EncoreRhythm, impliedTuplets)

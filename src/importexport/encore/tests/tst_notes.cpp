@@ -665,7 +665,9 @@ TEST_F(Tst_Notes, perc_notehead_all_nibble_types)
     // Notes are spread across 3 measures (4 per measure), iterate all.
     std::vector<Note*> notes;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
-        if (!mb->isMeasure()) { continue; }
+        if (!mb->isMeasure()) {
+            continue;
+        }
         Measure* m = toMeasure(mb);
         for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
             EngravingItem* e = s->element(0);
@@ -724,12 +726,16 @@ TEST_F(Tst_Notes, perc_shared_pitch_two_nibbles_stay_fixed)
 
     std::vector<Note*> notes;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
-        if (!mb->isMeasure()) continue;
+        if (!mb->isMeasure()) {
+            continue;
+        }
         Measure* m = toMeasure(mb);
         for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
             EngravingItem* e = s->element(0);
             if (e && e->isChord()) {
-                for (Note* n : toChord(e)->notes()) notes.push_back(n);
+                for (Note* n : toChord(e)->notes()) {
+                    notes.push_back(n);
+                }
             }
         }
     }
@@ -1534,18 +1540,22 @@ TEST_F(Tst_Notes, string_num_orn_does_not_duplicate_anchor_path_number)
     Measure* m = score->firstMeasure();
     ASSERT_NE(m, nullptr);
 
-    std::map<int, std::vector<int>> numsByBeat;  // beat_index → list of string numbers
+    std::map<int, std::vector<int> > numsByBeat;  // beat_index → list of string numbers
     int beat = 0;
     for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
         EngravingItem* el = seg->element(0);
-        if (!el || !el->isChord()) { continue; }
+        if (!el || !el->isChord()) {
+            continue;
+        }
         for (Note* n : toChord(el)->notes()) {
             for (EngravingItem* sub : n->el()) {
                 if (sub && sub->isFingering()
                     && toFingering(sub)->textStyleType() == TextStyleType::STRING_NUMBER) {
                     bool ok;
                     int v = toFingering(sub)->plainText().toInt(&ok);
-                    if (ok) { numsByBeat[beat].push_back(v); }
+                    if (ok) {
+                        numsByBeat[beat].push_back(v);
+                    }
                 }
             }
         }
@@ -1553,8 +1563,12 @@ TEST_F(Tst_Notes, string_num_orn_does_not_duplicate_anchor_path_number)
     }
     EXPECT_EQ(numsByBeat[0].size(), 1u) << "n1 must have exactly one string number (1)";
     EXPECT_EQ(numsByBeat[1].size(), 1u) << "n2 must have exactly one string number (2), not two";
-    if (!numsByBeat[0].empty()) { EXPECT_EQ(numsByBeat[0][0], 1); }
-    if (!numsByBeat[1].empty()) { EXPECT_EQ(numsByBeat[1][0], 2); }
+    if (!numsByBeat[0].empty()) {
+        EXPECT_EQ(numsByBeat[0][0], 1);
+    }
+    if (!numsByBeat[1].empty()) {
+        EXPECT_EQ(numsByBeat[1][0], 2);
+    }
 
     delete score;
 }
@@ -1972,5 +1986,45 @@ TEST_F(Tst_Notes, dual_explicit_rests_same_tick_no_cumtick_drift)
         }
     }
 
+    delete score;
+}
+
+// ===========================================================================
+// FIX: v0xC2 notes whose dotControl has bit 0 coincidentally set (e.g. 0x39)
+// but whose realDuration == faceValue2ticks(fv) (exact plain match) must NOT
+// receive a spurious dot. Before the fix, computeDotCount's bit-0 fallback
+// fired on these notes, turning plain 16ths into dotted 16ths (90t each) and
+// overflowing the measure by 60t, which truncated the last 8th note.
+// ===========================================================================
+TEST_F(Tst_Notes, v0c2_plain_sixteenth_with_spurious_dotctrl_bit0_no_dot)
+{
+    // notes_v0c2_plain_sixteenth_no_spurious_dot.enc: 4/4 measure.
+    // 2 x 16th (dotControl=0x39, bit 0 set) + 3 x 8th = 480t.
+    // Old bug: first two notes become dotted 16ths (90t each) -> 540t overflow.
+    MasterScore* score = readEncoreScore("notes_v0c2_plain_sixteenth_no_spurious_dot.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Measure must pass sanityCheck: " << ret.text();
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->timesig(), Fraction(4, 4));
+
+    std::vector<Chord*> chords;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChord()) {
+            chords.push_back(toChord(e));
+        }
+    }
+    ASSERT_EQ(chords.size(), 5u)
+        << "5 chords expected (2x16th + 3x8th); fewer means overflow truncated a note";
+    EXPECT_EQ(chords[0]->durationType().type(), DurationType::V_16TH);
+    EXPECT_EQ(chords[0]->dots(), 0) << "16th with dotControl=0x39 must NOT be dotted";
+    EXPECT_EQ(chords[1]->durationType().type(), DurationType::V_16TH);
+    EXPECT_EQ(chords[1]->dots(), 0) << "16th with dotControl=0x39 must NOT be dotted";
+    EXPECT_EQ(chords[2]->durationType().type(), DurationType::V_EIGHTH);
+    EXPECT_EQ(chords[3]->durationType().type(), DurationType::V_EIGHTH);
+    EXPECT_EQ(chords[4]->durationType().type(), DurationType::V_EIGHTH);
     delete score;
 }
