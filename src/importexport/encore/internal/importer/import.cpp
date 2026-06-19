@@ -233,25 +233,28 @@ static const std::pair<double, double> kStandardPageSizes[] = {
 // Try to identify the paper size from WINI screen-pixel coordinates.
 // pageWUnits = rightEdge + left, pageHUnits = bottomEdge + top.
 // For a correct match the scale (units/inch) must be consistent on both axes.
+// Some Encore versions store A3/other pages at a slightly inconsistent DPI
+// (different zoom on screen), so we pick the standard page that gives the
+// smallest |dpiW - dpiH| among candidates with both DPIs in the plausible range.
 static bool detectWiniPageSize(int pageWUnits, int pageHUnits,
                                double& outWidthIn, double& outHeightIn)
 {
     static constexpr double kDpiMin  = 60.0;   // minimum plausible screen DPI
-    static constexpr double kDpiMax  = 130.0;  // maximum plausible screen DPI
-    static constexpr double kTol     = 0.5;    // tolerance (units/inch)
+    static constexpr double kDpiMax  = 135.0;  // maximum plausible screen DPI
+    static constexpr double kMaxDelta = 6.0;   // max allowed |dpiW - dpiH|
 
-    double bestDelta = kTol;
+    double bestDelta = kMaxDelta;
     bool found = false;
     for (const auto& [w, h] : kStandardPageSizes) {
         const double dpiW = pageWUnits / w;
         const double dpiH = pageHUnits / h;
-        if (dpiW < kDpiMin || dpiW > kDpiMax) {
+        if (dpiW < kDpiMin || dpiW > kDpiMax || dpiH < kDpiMin || dpiH > kDpiMax) {
             continue;
         }
         const double delta = std::abs(dpiW - dpiH);
         if (delta < bestDelta) {
-            bestDelta  = delta;
-            outWidthIn = w;
+            bestDelta   = delta;
+            outWidthIn  = w;
             outHeightIn = h;
             found = true;
         }
