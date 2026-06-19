@@ -222,52 +222,80 @@ static void applyStaffScale(MasterScore* score, const EncRoot& enc)
 // Try to identify the paper size from WINI screen-pixel coordinates.
 // pageWUnits = rightEdge + left, pageHUnits = bottomEdge + top.
 //
-// Iterates over every standard QPageSize (skipping Custom) and picks the one
-// that best satisfies two criteria:
-//   1. Axis consistency: small |dpiW - dpiH| (same number of units per inch on
-//      both axes, as expected for a real paper size).
-//   2. DPI plausibility: average DPI close to the typical Encore screen DPI
-//      (~85 PPI on the era's monitors).  This breaks ties between sizes with the
-//      same aspect ratio at different scales — e.g. A4@85DPI vs C5@110DPI both
-//      have near-zero delta but very different DPIs; the penalty selects A4.
+// Two-pass approach:
+//   Pass 1 — ISO A-series only (A0..A10).  All AN sizes share the 1:√2 aspect
+//   ratio, so for A-series WINI data the only ambiguity is WHICH AN size — and
+//   that is resolved by smallest |dpiW−dpiH|.  Checking A-series first prevents
+//   non-A formats (e.g. 12"×18") from incorrectly winning when their
+//   accidentally smaller delta would beat the correct AN with a unified scan.
+//   Pass 2 — all remaining standard sizes, pick smallest delta.
 //
 // Returns false when no standard size matches within tolerance (custom page).
 static bool detectWiniPageSize(int pageWUnits, int pageHUnits,
                                double& outWidthIn, double& outHeightIn)
 {
-    static constexpr double kDpiMin    = 60.0;   // minimum plausible screen DPI
-    static constexpr double kDpiMax    = 135.0;  // maximum plausible screen DPI
-    static constexpr double kMaxDelta  = 6.0;    // max |dpiW - dpiH|
-    static constexpr double kTypDpi    = 85.0;   // typical Encore-era screen DPI
-    static constexpr double kDpiWeight = 0.5;    // penalty weight for DPI distance
+    static constexpr double kDpiMin   = 60.0;   // minimum plausible screen DPI
+    static constexpr double kDpiMax   = 135.0;  // maximum plausible screen DPI
+    static constexpr double kMaxDelta = 6.0;    // max |dpiW - dpiH|
 
-    double bestScore = kMaxDelta + 1.0;
-    bool found = false;
-    for (int id = 0; id <= static_cast<int>(QPageSize::LastPageSize); ++id) {
-        if (id == static_cast<int>(QPageSize::Custom)) {
-            continue;
-        }
-        const QSizeF sz = QPageSize::size(static_cast<QPageSize::PageSizeId>(id), QPageSize::Inch);
+    // ISO A-series IDs in Qt's QPageSize enum (Qt 6).
+    static const QPageSize::PageSizeId kASeriesIds[] = {
+        QPageSize::A0, QPageSize::A1, QPageSize::A2, QPageSize::A3,
+        QPageSize::A4, QPageSize::A5, QPageSize::A6, QPageSize::A7,
+        QPageSize::A8, QPageSize::A9, QPageSize::A10,
+    };
+
+    auto tryCandidate = [&](QPageSize::PageSizeId id,
+                            double& bestDelta,
+                            double& bestW, double& bestH) -> bool {
+        const QSizeF sz = QPageSize::size(id, QPageSize::Inch);
         const double w  = sz.width();
         const double h  = sz.height();
         if (w <= 0.0 || h <= 0.0) {
-            continue;
+            return false;
         }
         const double dpiW = pageWUnits / w;
         const double dpiH = pageHUnits / h;
         if (dpiW < kDpiMin || dpiW > kDpiMax || dpiH < kDpiMin || dpiH > kDpiMax) {
-            continue;
+            return false;
         }
         const double delta = std::abs(dpiW - dpiH);
-        if (delta >= kMaxDelta) {
+        if (delta < kMaxDelta && delta < bestDelta) {
+            bestDelta = delta;
+            bestW = w;
+            bestH = h;
+            return true;
+        }
+        return false;
+    };
+
+    // Build a set of A-series IDs for fast exclusion in pass 2.
+    std::set<int> aSeriesSet;
+    for (const auto id : kASeriesIds) {
+        aSeriesSet.insert(static_cast<int>(id));
+    }
+
+    // Pass 1: ISO A-series.
+    double bestDelta = kMaxDelta;
+    bool found = false;
+    for (const auto id : kASeriesIds) {
+        if (tryCandidate(id, bestDelta, outWidthIn, outHeightIn)) {
+            found = true;
+        }
+    }
+    if (found) {
+        return true;
+    }
+
+    // Pass 2: all other standard sizes (Letter, Legal, B-series, etc.).
+    for (int id = 0; id <= static_cast<int>(QPageSize::LastPageSize); ++id) {
+        if (id == static_cast<int>(QPageSize::Custom)) {
             continue;
         }
-        const double avgDpi = (dpiW + dpiH) * 0.5;
-        const double score  = delta + kDpiWeight * std::abs(avgDpi - kTypDpi);
-        if (score < bestScore) {
-            bestScore   = score;
-            outWidthIn  = w;
-            outHeightIn = h;
+        if (aSeriesSet.count(id)) {
+            continue;   // already tried in pass 1
+        }
+        if (tryCandidate(static_cast<QPageSize::PageSizeId>(id), bestDelta, outWidthIn, outHeightIn)) {
             found = true;
         }
     }
