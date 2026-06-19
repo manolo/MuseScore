@@ -262,6 +262,7 @@ static void handleTempoOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
                                 const NoteElemCtx& ec, const EncOrnament* eo,
                                 MasterScore* score)
 {
+    const EncRoot& enc      = ctx.enc;
     const EncMeasure& encMeas = *mc.encMeas;
     const Fraction measTick = mc.measTick;
     const Fraction elemTick = ec.elemTick;
@@ -269,30 +270,53 @@ static void handleTempoOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
     Measure* measure = mc.measure;
 
     if (eo->tempo > 0) {
-        // Skip ORN TEMPO when it conflicts with the measure's header BPM. Encore stores tempo marks
-        // in the last measure of a system when the mark is visually at the next system start;
-        // the MEAS header BPM is authoritative in that case.
-        if (encMeas.bpm != 0 && static_cast<quint16>(eo->tempo) != encMeas.bpm) {
+        // When importTempoTextSemantic is off, visual tempo marks (ORN TEMPO) are suppressed
+        // just like Italian text terms; only the MEAS header BPM creates a TempoText.
+        if (!ctx.opts.importTempoTextSemantic) {
             return;
         }
+        // Detect beat unit from beatTicks so we can compare units correctly and set BPS/display.
+        const quint16 rawBeatTicks = encMeas.beatTicks;
+        // Use nominal timesig so a pickup measure inherits the main sig's classification.
+        const Fraction mts = measure->timesig();
+        // Dotted-quarter beat: beatTicks=360 (explicit) or compound time sig (6/8, 9/8, 12/8)
+        // with legacy beatTicks=240.
+        const bool cmpd = (rawBeatTicks == 360)
+                          || (mts.denominator() == 8
+                              && mts.numerator() % 3 == 0
+                              && mts.numerator() > 3);
+        // Skip ORN TEMPO only when it is a misplaced ornament: Encore sometimes stores a tempo
+        // mark in the last measure of system N when the mark visually belongs to the first
+        // measure of system N+1.  Evidence of misplacement: the immediately following measure
+        // already has a header BPM equal to the ORN's tempo (it will be applied there instead).
+        // If no subsequent measure matches, the ORN is genuine and must be used even if it
+        // disagrees with the current measure's header BPM.
+        if (encMeas.bpm != 0 && static_cast<quint16>(eo->tempo) != encMeas.bpm) {
+            // Suppress only when this is a misplaced ornament: the next measure already
+            // has the matching BPM and will handle it via applyMeasureBpmMarks.
+            const size_t nextMi = mc.measIdx + 1;
+            if (nextMi < enc.measures.size()
+                && enc.measures[nextMi].bpm == static_cast<quint16>(eo->tempo)) {
+                return;  // Misplaced ornament
+            }
+            // Not misplaced: the ORN is the genuine score marking; fall through to use it.
+        }
+
         Segment* seg = measure->getSegment(SegmentType::ChordRest, elemTick);
         if (!seg) {
             seg = measure->getSegment(SegmentType::ChordRest, measTick);
         }
         TempoText* tt2 = Factory::createTempoText(seg);
         tt2->setTrack(track);
-        // Detect dotted-quarter beat: beatTicks=360 covers 3/8 feel; the compound sig check
-        // (den=8, num%3==0, num>3) catches 6/8 when old fixtures stored beatTicks=240.
-        const quint16 rawBeatTicks = encMeas.beatTicks;
-        // Use nominal timesig so a pickup measure inherits the main sig's classification.
-        const Fraction mts = measure->timesig();
-        const bool cmpd = (rawBeatTicks == 360)
-                          || (mts.denominator() == 8
-                              && mts.numerator() % 3 == 0
-                              && mts.numerator() > 3);
+
+        // The ORN tempo field always stores quarter-note BPM (same convention as encMeas.bpm),
+        // except for compound time (6/8, 9/8, 12/8) where it stores dotted-quarter BPM.
+        // beatTicks reflects the internal Encore tick unit but does NOT change the BPM unit:
+        // a 5/8 piece with beatTicks=120 still expresses tempo as negras/min, not corcheas/min.
         const double bps = cmpd ? eo->tempo * 1.5 / 60.0 : eo->tempo / 60.0;
+        const int displayBeatTicks = cmpd ? 360 : 240;
         tt2->setTempo(BeatsPerSecond(bps));
-        tt2->setXmlText(tempoXmlText(static_cast<int>(eo->tempo), cmpd ? 360 : 240));
+        tt2->setXmlText(tempoXmlText(static_cast<int>(eo->tempo), displayBeatTicks));
         tt2->setFollowText(true);
         seg->add(tt2);
         score->setTempo(elemTick, BeatsPerSecond(bps));
@@ -304,12 +328,23 @@ static void handleWedgeStart(BuildCtx& ctx, const MeasEmitCtx& mc,
 {
     const EncMeasure& encMeas = *mc.encMeas;
     const Fraction measTick = mc.measTick;
-    const Fraction elemTick = ec.elemTick;
     const int staffIdx = ec.staffIdx;
     const track_idx_t track = ec.track;
     const int voice = ec.voice;
     const int measIdx = mc.measIdx;
     const EncMeasureElem* e = ec.e;
+
+    // On grand-staff instruments (staffWithin > 0), ec.elemTick is cumTick-based and may be
+    // wrong because the WEDGESTART ORN (always voice=0) uses a different trackKey than the
+    // actual notes (which may be in voice=1+).  Compute the tick directly from the raw Encore
+    // element tick so hairpins in the second half of a grand-staff measure get the right start.
+    // For single-staff instruments (staffWithin == 0) cumTick is correct; use ec.elemTick.
+    const int wholeTicks2 = (e->staffWithin > 0 && encMeas.beatTicks > 0 && encMeas.timeSigDen > 0)
+                            ? static_cast<int>(encMeas.beatTicks) * static_cast<int>(encMeas.timeSigDen)
+                            : 0;
+    const Fraction rawElemTick = (wholeTicks2 > 0)
+                                 ? measTick + Fraction(static_cast<int>(e->tick), wholeTicks2).reduced()
+                                 : ec.elemTick;
 
     // No WEDGESTOP in .enc; alMezuro = forward measure count (upper bound). Precise tick2 resolved in post-pass.
     int endIdx = measIdx + static_cast<int>(eo->alMezuro);
@@ -318,7 +353,7 @@ static void handleWedgeStart(BuildCtx& ctx, const MeasEmitCtx& mc,
     }
     Measure* endMeas = ctx.measuresByIdx[endIdx];
     Fraction maxEnd = endMeas->tick() + endMeas->ticks();
-    const Fraction snappedStart = snapTickByXoffset(elemTick, static_cast<int>(e->tick),
+    const Fraction snappedStart = snapTickByXoffset(rawElemTick, static_cast<int>(e->tick),
                                                     encMeas, staffIdx, eo, measTick);
     if (maxEnd <= snappedStart) {
         return;
@@ -328,15 +363,44 @@ static void handleWedgeStart(BuildCtx& ctx, const MeasEmitCtx& mc,
         = ((eo->speguleco & 0x01) == 0)
           ? HairpinType::CRESC_HAIRPIN
           : HairpinType::DIM_HAIRPIN;
+    // On grand-staff instruments (staffWithin > 0), WEDGESTART ORNs use Encore voice=0 but the
+    // actual notes may be in a different Encore voice (e.g. voice=1).  Find the voice used by
+    // the first note on the same sub-staff so the hairpin ends up on the same MuseScore track
+    // as the notes it spans — otherwise it lands on the measure-rest-only voice 0 and cannot
+    // be positioned at its true start tick.
+    track_idx_t resolvedTrack = track;
+    int resolvedEncVoice = voice;
+    if (e->staffWithin > 0) {
+        for (const auto& elem : encMeas.elements) {
+            const EncMeasureElem* em = elem.get();
+            if (em->type != static_cast<quint8>(EncElemType::NOTE)
+                && em->type != static_cast<quint8>(EncElemType::REST)) {
+                continue;
+            }
+            if (static_cast<int>(em->staffIdx) != static_cast<int>(e->staffIdx)
+                || static_cast<int>(em->staffWithin) != static_cast<int>(e->staffWithin)) {
+                continue;
+            }
+            const int emEncVoice = static_cast<int>(em->voice);
+            const int vBase = static_cast<int>(e->staffWithin) * (static_cast<int>(VOICES) / 2);
+            const int emMsVoice = (emEncVoice >= vBase) ? emEncVoice - vBase : emEncVoice;
+            resolvedTrack    = static_cast<track_idx_t>(staffIdx * VOICES + emMsVoice);
+            resolvedEncVoice = emEncVoice;
+            break;
+        }
+    }
+
     PendingHairpin ph;
     ph.startTick = snappedStart;
     ph.maxEndTick = maxEnd;
-    ph.track = track;
+    ph.track = resolvedTrack;
     ph.type = hpType;
     ph.endMeasIdx = endIdx;
     ph.hairpinXoffset2 = static_cast<int>(eo->xoffset2);
-    ph.staffIdx = staffIdx;
-    ph.encVoice = voice;
+    // Raw Encore staffIdx (rawStaff & 0x3F), not the MuseScore-mapped slot: resolveHairpinEndByXoffset
+    // compares against em->staffIdx on note elements which also use rawStaff & 0x3F.
+    ph.staffIdx = static_cast<int>(e->staffIdx);
+    ph.encVoice = resolvedEncVoice;
     ctx.pendingHairpins.push_back(ph);
 }
 

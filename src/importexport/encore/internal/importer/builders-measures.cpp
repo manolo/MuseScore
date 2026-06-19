@@ -216,7 +216,10 @@ void buildMeasures(BuildCtx& ctx)
             }
 
             score->measures()->append(measure);
-            currentTick += ts.ticks();
+            // Must match setTicks() above: both use nominalTimeSig in the no-pickup first-measure
+            // branch so subsequent measure positions are consistent with that measure's duration.
+            const bool usedNominal = !pickupEnabled && firstMeasure && di == 0;
+            currentTick += usedNominal ? ctx.nominalTimeSig.ticks() : ts.ticks();
         }
         firstMeasure = false;
         msIdxCounter += static_cast<size_t>(displayCount);

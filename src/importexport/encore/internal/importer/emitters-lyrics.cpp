@@ -62,14 +62,45 @@ void enqueueLyric(BuildCtx& ctx, const EncLyric* el, track_idx_t track)
 void attachPendingLyrics(BuildCtx& ctx, Measure* measure,
                          const EncMeasure& encMeas, Fraction measTick)
 {
-    // In compound meters (6/8, 9/8, 12/8) beatTicks is ticks per dotted-quarter beat.
-    // Scale to ticks-per-quarter for the segEncTick formula.
-    const bool isCompoundMeter = (encMeas.timeSigDen == 8 || encMeas.timeSigDen == 16)
-                                 && encMeas.timeSigNum >= 6
-                                 && (encMeas.timeSigNum % 3) == 0;
+    // Build a sorted list of Encore NOTE encTicks for each staff/voice, so the
+    // segEncTick lookup uses the actual Encore tick of each note rather than a
+    // conversion of the MuseScore cumTick.  The cumTick-to-encTick conversion is
+    // unreliable because the note loop accumulates durations (not Encore ticks),
+    // and the relationship is not proportional when durations don't align with
+    // the Encore tick grid (e.g. v0xC4 6/8 with beatTicks=240, lyric offset=51
+    // while the first note is at encTick=0).
+    //
+    // encNoteTicksByTrack[track] = sorted list of Encore ticks for NOTE elements on
+    // that (staffIdx, voice) combination, populated from encMeas.elements.
+    std::map<track_idx_t, std::vector<int> > encNoteTicksByTrack;
+    for (const auto& elem : encMeas.elements) {
+        const EncMeasureElem* e = elem.get();
+        if (e->type != static_cast<quint8>(EncElemType::NOTE)) {
+            continue;
+        }
+        const int encStaff = static_cast<int>(e->staffIdx);
+        const int encVoice = static_cast<int>(e->voice);
+        // In the note loop, the MuseScore staffIdx is derived via lineSlotByRawByte
+        // which maps the raw staff byte to a slot.  For the bass staff
+        // (staffWithin=1), voice remapping subtracts vBase.  For lyrics (always
+        // staff 0 of the lyric track), match against voice 0 of each staff slot.
+        for (auto& [lyTrack, _entries] : ctx.pendingLyrics) {
+            const int lyStaff = static_cast<int>(lyTrack) / VOICES;
+            // Accept notes with encStaff == lyStaff (raw staffIdx) and any voice;
+            // de-duplication of chords at the same encTick is handled below.
+            if (encStaff == lyStaff && encVoice == 0) {
+                auto& tickList = encNoteTicksByTrack[lyTrack];
+                const int t = static_cast<int>(e->tick);
+                if (tickList.empty() || tickList.back() != t) {
+                    tickList.push_back(t);
+                }
+            }
+        }
+    }
+
+    // matchThreshold: half a beat in Encore ticks.
     const int beatTicksVal = encMeas.beatTicks ? static_cast<int>(encMeas.beatTicks) : 240;
-    const int encTicksPerQuarter = isCompoundMeter ? beatTicksVal * 2 / 3 : beatTicksVal;
-    const int matchThreshold = isCompoundMeter ? beatTicksVal * 2 / 3 : beatTicksVal / 2;
+    const int matchThreshold = beatTicksVal / 2;
 
     for (auto& [lyTrack, entries] : ctx.pendingLyrics) {
         if (entries.empty()) {
@@ -82,17 +113,37 @@ void attachPendingLyrics(BuildCtx& ctx, Measure* measure,
         const track_idx_t chordTrack = static_cast<track_idx_t>(lyStaffIdx) * VOICES;
 
         // Build a list of all ChordRest elements (chords and rests) with their enc ticks.
-        // Chords are preferred for lyric attachment; rests act as fallback anchors.
+        // segEncTick is taken directly from the Encore NOTE elements in order (positional
+        // assignment): the kth MuseScore chord corresponds to the kth Encore note tick.
+        // This is more accurate than converting MuseScore cumTick to Encore ticks because
+        // the note loop accumulates durations (not encTicks), so the relationship is not
+        // proportional when note durations don't align with the Encore tick grid.
+        const std::vector<int>* noteTickList = nullptr;
+        {
+            auto it = encNoteTicksByTrack.find(lyTrack);
+            if (it != encNoteTicksByTrack.end() && !it->second.empty()) {
+                noteTickList = &it->second;
+            }
+        }
         std::vector<std::pair<int, ChordRest*> > crTickPairs;
+        size_t noteTickIdx = 0;
         for (Segment* s = measure->first(SegmentType::ChordRest);
              s; s = s->next(SegmentType::ChordRest)) {
             EngravingItem* el = s->element(chordTrack);
             if (!el || !el->isChordRest()) {
                 continue;
             }
-            const Fraction relTick = s->tick() - measTick;
-            const int segEncTick = (relTick.numerator() * encTicksPerQuarter * 4)
-                                   / std::max(1, relTick.denominator());
+            int segEncTick;
+            if (noteTickList && noteTickIdx < noteTickList->size()) {
+                segEncTick = (*noteTickList)[noteTickIdx++];
+            } else {
+                // Fallback for rests or when Encore note list is exhausted: estimate
+                // from the measure's beat grid.
+                const Fraction relTick = s->tick() - measTick;
+                const int durTicks = encMeas.durTicks ? static_cast<int>(encMeas.durTicks) : 960;
+                segEncTick = (relTick.numerator() * durTicks)
+                             / std::max(1, relTick.denominator());
+            }
             crTickPairs.emplace_back(segEncTick, toChordRest(el));
         }
 

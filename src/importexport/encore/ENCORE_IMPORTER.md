@@ -426,24 +426,48 @@ segment. That covers:
   already provides the right BPS for the term and a visible
   label.
 
-The TempoText display is time-signature-aware. For compound meters
-(6/8, 9/8, 12/8 where the beat is a dotted quarter) the text is
-`♩. = <dotted-quarter-BPM>` where `dotted-quarter-BPM = quarter-BPM * 2/3`.
-For simple meters the text is `♩ = <quarter-BPM>`.
+The TempoText display is time-signature-aware, driven by the MEAS header
+`beatTicks` field (beat unit = beatTicks/240 of a quarter note):
+
+| beatTicks | Beat unit | Display symbol | BPS formula |
+|-----------|-----------|----------------|-------------|
+| 240 | quarter | `♩ = N` | N / 60 |
+| 360 | dotted quarter | `♩. = N` | N × 1.5 / 60 |
+| 120 | eighth | `♪ = N` | N × 0.5 / 60 |
+
+For compound meters (6/8, 9/8, 12/8 with `beatTicks=360` or legacy
+`beatTicks=240`) the display is `♩. = N` and the BPS factor is 1.5 so
+that N refers to dotted-quarter BPM. For pieces in non-compound time
+with an eighth-note beat (e.g. 5/8, 7/8 with `beatTicks=120`), the
+display is `♪ = N` and the BPS factor is 0.5 (eighth to quarter
+conversion).
 
 ### ORN TEMPO subtype 0x32
 
-The ORN `tempo` byte stores the beat-unit BPM displayed in Encore,
-which is NOT always the quarter-note BPM:
+The ORN `tempo` byte stores the beat-unit BPM displayed in Encore.
+The beat unit is determined by `encMeas.beatTicks`:
 
-- Simple meter: `tempo` byte = quarter-note BPM. No conversion needed.
-- Compound meter (6/8, 9/8, 12/8): `tempo` byte = dotted-quarter BPM.
-  The importer multiplies by 3/2 to obtain quarter-note BPM for the
-  tempo map: `quarterBpm = tempo * 3/2`.
+- `beatTicks=240` (quarter): `tempo` = quarter-note BPM. BPS = tempo/60.
+- `beatTicks=360` (dotted quarter, e.g. 6/8): `tempo` = dotted-quarter BPM.
+  BPS = tempo × 1.5 / 60.
+- `beatTicks=120` (eighth, e.g. 5/8 felt in eighths): `tempo` = eighth-note BPM.
+  BPS = tempo × 0.5 / 60.  Encore displays this as "corchea = N" in Spanish.
+
+**Conflict check**: the MEAS header `bpm` is always stored in quarter-note BPM.
+When the ORN's `tempo` disagrees with `encMeas.bpm`, the ORN is normally
+suppressed (Encore sometimes places tempo marks one system too early, and the
+header BPM is authoritative).  This comparison is only valid when `beatTicks=240`
+(same units).  For non-quarter beats (`beatTicks=120`, `360`, etc.) the values
+are in different units and cannot be compared: the ORN is used regardless of
+the header BPM.
 
 The conversion uses the MuseScore measure's nominal timesig (so a
 pickup measure with actual 4/8 but nominal 6/8 correctly inherits
 the 6/8 compound factor).
+
+Exercised by:
+- `Tst_TempoXmlText.eighth_beat_uses_eighth_sym`
+- `Tst_Text.orn_tempo_eighth_beat_not_suppressed_by_header_bpm`
 
 ## TIE element handling
 
@@ -580,6 +604,86 @@ staffIdx, msVoice, tremType). The post-pass:
 Tipo `0xBE` appears rarely (3 times in Beethoven Plectro) on quarter
 notes at measure starts, always with `byte+14 = 0xF4`. Its semantics
 are not yet decoded; it is currently silently ignored.
+
+## Hairpin staffIdx, track and xoffset2 snap on grand-staff instruments
+
+Three interrelated issues arise when placing WEDGESTART hairpins on a grand-staff instrument
+(e.g. piano) where treble and bass are separate MuseScore staves.
+
+### staffIdx mismatch in xoffset2 snap
+
+`resolveHairpinEndByXoffset` snaps a hairpin's end tick to the last note whose
+`xoffset <= ph.hairpinXoffset2`. The filter `em->staffIdx != ph.staffIdx` compares the
+note's **raw Encore staffIdx** (`rawStaff & 0x3F`) against `ph.staffIdx`.
+
+For a single-instrument piano, all notes (both treble and bass) have raw staffIdx=0 because
+the staffWithin bit (`rawStaff >> 6`) distinguishes the staves, not the lower 6 bits.
+`ph.staffIdx` must therefore be the raw Encore value (`e->staffIdx` of the WEDGESTART ORN),
+not the MuseScore-mapped slot from `lineSlotByRawByte` (which would be 1 for the bass, never
+matching any note's em->staffIdx=0, effectively disabling xoffset2 snap for all bass hairpins).
+
+### Track mismatch: ORN voice vs. note voice
+
+WEDGESTART ORNs always carry Encore voice=0, but the notes they span may use a different
+Encore voice. On a grand-staff instrument with `staffWithin=1`, the note voice is not
+remapped down (voice < vBase=2 stays unchanged), so bass notes in Encore voice=1 end up in
+MuseScore voice=1 (track=5 for bass staff 1), while the WEDGESTART's voice=0 produces
+track=4 (voice=0 of bass staff). Voice=0 contains only a whole-measure rest; attaching both
+hairpins there pins them both to beat 1 regardless of their intended start tick.
+
+The fix: in `handleWedgeStart`, when `e->staffWithin > 0`, scan `encMeas.elements` for the
+first note on the same sub-staff (same staffIdx + staffWithin) and use that note's Encore
+voice to compute the MuseScore track. This ensures the hairpin is placed in the voice that
+has actual notes, so its startTick anchors to a real note segment instead of a measure rest.
+
+### Voice filter removed in xoffset2 snap
+
+The xoffset2 snap also filtered by `ph.encVoice` against `em->voice`. Because the ORN and
+notes can be in different Encore voices, this filter was removed: any note on the same raw
+staffIdx with `xoffset <= xoffset2` is a valid snap candidate.
+
+### Track assignment for WEDGESTART on grand-staff instruments
+
+WEDGESTART ORN elements always carry Encore voice=0, but the actual notes they span may be in
+a different Encore voice. On a grand-staff instrument with `staffWithin=1`, notes in Encore
+voice=1 remap to MuseScore voice=1 (track=5 for bass staff 1), while the WEDGESTART's voice=0
+maps to track=4 (voice=0, a measure-rest-only voice). The hairpin must be on the same track
+as the notes so its startTick can anchor to a real note segment.
+
+Fix: scan `encMeas.elements` for the first note on the same sub-staff (staffIdx + staffWithin)
+and use its Encore voice after remapping to derive the correct MuseScore track.
+
+### Start-tick computation for WEDGESTART on grand-staff instruments
+
+`ec.elemTick` is cumTick-based and reflects the accumulated position for the WEDGESTART's
+own (staffIdx, voice) trackKey. Because ORNs always use voice=0 and the bass notes may be
+in voice=1+, cumTick for (staffIdx=1, voice=0) stays at 0 for the entire measure. Both
+WEDGESTART elements in a same-measure swell pair would therefore get `elemTick = measTick`,
+making the second hairpin also appear to start at beat 1.
+
+Fix: for grand-staff instruments (`e->staffWithin > 0`), compute the start tick directly from
+the raw Encore element tick: `rawElemTick = measTick + Fraction(e->tick, wholeTicks2)`.
+
+### Same-measure swell pair: midpoint split
+
+Two consecutive WEDGESTART elements in the same Encore measure (the < > swell pattern) should
+each cover approximately half the measure.  The xoffset2 pixel coordinates do not map cleanly
+to MuseScore ticks in measures that have empty beats (no notes in the second half), producing
+short hairpins confined to the first 40-50% of the visual measure.
+
+Fix (pre-pass in `resolveHairpins`): for each CRESC+DIM pair that both start in the same
+MuseScore measure (`score->tick2measure()` returns the same `Measure*`), compute the measure
+midpoint (`measure->tick() + measure->ticks() / 2`) and assign:
+- CRESC end → midpoint
+- DIM start → midpoint
+- DIM end → barline (`measure->tick() + measure->ticks()`)
+
+The xoffset2 snap and dynamic-clipping steps (1) and (2) are skipped for swell-pair
+hairpins; the midpoint override takes precedence.  Cross-measure hairpins sharing the same
+track are unaffected (different `tick2measure()` result → no override).
+
+Exercised by `Tst_Importer.v0c4_swell_pair_splits_at_measure_midpoint`.
+A dedicated 2-staff regression test covering the grand-staff track/staffIdx fixes is planned.
 
 ## Trill spans (TRILL_START / TRILL_END)
 
@@ -847,15 +951,27 @@ would pair adjacent bytes into garbage CJK code units (e.g.
 queue and consumed only to drive each surviving syllable's
 `LyricsSyllabic` (`SINGLE`, `BEGIN`, `END`, `MIDDLE`).
 
-**Tick-anchored attachment.** Each remaining syllable carries
-the raw Encore tick. At the end of the measure pass the importer
-walks the measure's chord-rest segments and assigns each chord
-the syllable whose tick is closest to the chord's measure-
-relative tick, within a half-beat threshold. This anchors lyrics
-on the chord Encore intended (e.g. `JU` on the quarter, `LIO` on
-the eighth, `RO` on the second eighth in the LaMorenaDeMiCopla
-m18 case) instead of consuming queue entries in order regardless
-of position.
+**Tick-anchored attachment.** Each remaining syllable carries the raw Encore tick (the
+lyric element's `tick` field, which may be visually offset by ~30-80 ticks from the
+associated note's tick due to Encore's layout).  At the end of the measure pass the
+importer walks the measure's chord-rest segments and assigns each chord the syllable
+whose encTick is closest, within a half-beat threshold (`beatTicks / 2`).
+
+**segEncTick from Encore NOTE elements (not from MuseScore cumTick).** Each
+ChordRest segment's reference tick (`segEncTick`) is taken positionally from the
+Encore NOTE elements in `encMeas.elements`, not derived from the MuseScore cumTick.
+The previous approach (`cumTick × encTicksPerQuarter × 4`) was unreliable because:
+- The note loop uses accumulated durations (cumTick), not Encore tick proportions.
+- In 6/8 with `beatTicks=240` (quarter as beat, v0xC4), the formula applied a ×2/3
+  compound correction, halving all segEncTick values and causing a systematic shift
+  of one note (e.g. `John` attached to the second note in "When Johnny Comes Marching
+  Home", and `ing` lost entirely because no note fell within the threshold).
+- Using Encore NOTE encTicks directly avoids the conversion step: the kth MuseScore
+  ChordRest corresponds to the kth NOTE element in `encMeas.elements`.
+
+Exercised by `Tst_Text.lyrics_offset_ticks_still_attach_correctly` (lyric ticks
+offset by +50 from their note ticks) and `Tst_Text.lyrics_compound_meter_all_syllables_matched`
+(v0xC2 6/8, `beatTicks=360`).
 
 **Multi-verse.** Each LYRIC element's `voice` field maps to the
 resulting `Lyrics::verse()` value (0-indexed). Every verse
@@ -1010,6 +1126,15 @@ based `0xA5` ("To Coda" attached as an ornament element) is the
 parallel encoding for the same direction and also routes to
 TOCODA via the pending-markers post-pass.
 
+**"Coda" word label not imported.** Encore renders its first CODA
+marker as "⊕ Coda" (symbol + the word). This is Encore's own
+display convention — the word "Coda" is not stored in the ENC
+file as a data element (it does not appear in the TEXT block and
+there is no accompanying STAFFTEXT ornament element). MuseScore's
+`MarkerType::CODA` renders as the ⊕ symbol only, which is the
+standard music-engraving convention. The omission is therefore
+intentional and correct.
+
 ## Volta coalescing and numbered text
 
 Encore stores the `repeatAlternative` bitmask on every measure
@@ -1026,6 +1151,19 @@ new measure. When the bitmask changes (or drops to 0) the active
 Volta is closed and a new one is opened on the next non-zero
 measure. The `beginText` is set from the endings list ("1.",
 "2.", "1., 2.", ...) so the bracket label renders.
+
+**Overlapping bitmask filtering (`usedVoltaBits`).** Encore sometimes sets bits in a
+later bracket that were already shown in an earlier bracket.  For example, "1.-3."
+followed by a measure with raw bits `{2,4}` (bitmask `0x0A`): ending 2 was already
+shown in the "1.-3." bracket, so only the NEW ending (4) should appear on the second
+bracket ("4."), not "2, 4.".
+
+`BuildCtx::usedVoltaBits` accumulates all bitmasks emitted so far in the current
+repeat block.  Each new volta bracket filters its bitmask against `~usedVoltaBits`
+to obtain the display mask.  Both `Volta::setEndings` and the displayed text use
+the filtered mask.  When `repeatAlternative` drops to 0 the counter resets.
+
+Exercised by `Tst_Importer.v0c4_volta_overlapping_bits_filtered`.
 
 ## Gap-snap wholeTicks must always be 960
 
@@ -1639,9 +1777,9 @@ Global spatium is not changed.
 | Header value | Staff scale |
 |---|---|
 | 1 | 60% |
-| 2 | 70% |
-| 3 | 75% |
-| 4 | 100% |
+| 2 | 75% |
+| 3 | 100% |
+| 4 | 130% |
 
 ## Page margins
 
@@ -1742,6 +1880,22 @@ The Preferences UI (Phase 2) will read these values from `IEncoreImportConfigura
 | `underfillMeasureStrategy` | `UnderfillStrategy` | `InvisibleRests` | `InvisibleRests`: gap rests (invisible). `VisibleRests`: normal visible rests. `IrregularMeasure`: reserved. |
 | `overfillMeasureStrategy` | `OverfillStrategy` | `Truncate` | `Truncate`: remove trailing notes (current). `StretchLastNote`: reserved. `IrregularMeasure`: reserved. |
 | `firstMeasureIsPickup` | `bool` | `true` | When `false`, Case A and Case B pickup detection are bypassed; the first measure keeps its nominal full duration and leading beats are left as rests. |
+
+#### firstMeasureIsPickup=false + IrregularMeasure invariant
+
+When `firstMeasureIsPickup=false` and the first Encore measure is a Case A pickup (its
+declared time signature differs from the nominal), `buildMeasures` sets the first MuseScore
+measure's ticks to `nominalTimeSig` and must also advance `currentTick` by the same
+`nominalTimeSig` value — not by the shorter Encore pickup duration `ts`.
+
+If these two values diverge, subsequent measures are placed at inconsistent positions.
+When `IrregularMeasure` then fires during `fillTrailingGaps` (because the measure's actual
+content is shorter than its nominal duration), it computes a shift delta based on
+`nominalTimeSig` but applies it to positions anchored at `ts`, moving all later measure
+internal ticks away from their implied barlines. Spanners such as volta brackets that are
+placed using `measure->tick()` therefore land mid-measure instead of at barlines.
+
+Exercised by `Tst_Options.firstMeasure_not_pickup_irregular_volta_at_barline`.
 
 ### Pending lyric fix (not an option)
 

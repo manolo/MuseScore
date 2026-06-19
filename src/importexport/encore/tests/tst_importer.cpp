@@ -373,6 +373,37 @@ TEST_F(Tst_Importer, v0c4_header_measure_count_truncates_ghost_measures)
     delete score;
 }
 
+// Regression: when a second volta bracket's bitmask contains bits already shown in the
+// first bracket (e.g. raw bits {2,4} after {1,2,3}), the second bracket must display
+// only the NEW endings ({4}), not the full raw set ("2, 4.").  File has:
+//   MEAS[0,1]: repeatAlt=0x07 → endings {1,2,3} → volta "1, 2, 3."
+//   MEAS[2]:   repeatAlt=0x0A → raw {2,4}, filtered = {4} → volta "4."
+TEST_F(Tst_Importer, v0c4_volta_overlapping_bits_filtered)
+{
+    MasterScore* score = readEncoreScore("importer_volta_overlapping_bits.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<Volta*> voltas;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isVolta()) {
+            voltas.push_back(toVolta(sp));
+        }
+    }
+    std::sort(voltas.begin(), voltas.end(),
+              [](Volta* a, Volta* b) { return a->tick() < b->tick(); });
+    ASSERT_EQ(voltas.size(), 2u);
+    EXPECT_EQ(voltas[0]->beginText(), String(u"1, 2, 3."))
+        << "First volta (bits 0x07) must show all three endings";
+    EXPECT_EQ(voltas[1]->beginText(), String(u"4."))
+        << "Second volta (raw bits 0x0A) must show only ending 4 "
+        "(ending 2 already covered by the first bracket)";
+    EXPECT_EQ(static_cast<int>(voltas[1]->endings().size()), 1)
+        << "Endings list must also contain only {4}";
+    EXPECT_EQ(voltas[1]->endings()[0], 4);
+    delete score;
+}
+
 // Regression: importer created one Volta per measure (3 voltas for 1/1/2 bits) and never set begin-text.
 // Fix: coalesce equal-bitmask runs into one Volta and set begin-text from the endings list.
 TEST_F(Tst_Importer, v0c4_volta_coalesce_and_numbered_text)
@@ -567,6 +598,42 @@ TEST_F(Tst_Importer, v0c4_hairpin_speguleco_bit0)
         << "speguleco=0x02 must import as crescendo";
     EXPECT_EQ(seenTypes[1], HairpinType::DIM_HAIRPIN)
         << "speguleco=0x03 must import as diminuendo";
+    delete score;
+}
+
+// Regression: same-measure CRESC+DIM swell pair must split the measure at the midpoint.
+// File: importer_hairpin_speguleco_bit0.enc has CRESC(tick=0) and DIM(tick=480) in MEAS[0],
+// both alMezuro=0 (same-measure swell pair).  Before the fix both ended up at the same
+// tick range and overlapped; after the fix each covers exactly half the measure.
+TEST_F(Tst_Importer, v0c4_swell_pair_splits_at_measure_midpoint)
+{
+    MasterScore* score = readEncoreScore("importer_hairpin_speguleco_bit0.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<Hairpin*> hairpins;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isHairpin()) {
+            hairpins.push_back(toHairpin(sp));
+        }
+    }
+    std::sort(hairpins.begin(), hairpins.end(),
+              [](Hairpin* a, Hairpin* b) { return a->tick() < b->tick(); });
+    ASSERT_EQ(hairpins.size(), 2u);
+
+    const Measure* m0 = score->firstMeasure();
+    ASSERT_NE(m0, nullptr);
+    const Fraction midTick = m0->tick() + m0->ticks() / 2;
+
+    EXPECT_EQ(hairpins[0]->hairpinType(), HairpinType::CRESC_HAIRPIN);
+    EXPECT_EQ(hairpins[0]->tick2(), midTick)
+        << "CRESC in same-measure swell pair must end exactly at the measure midpoint";
+
+    EXPECT_EQ(hairpins[1]->hairpinType(), HairpinType::DIM_HAIRPIN);
+    EXPECT_EQ(hairpins[1]->tick(), midTick)
+        << "DIM in same-measure swell pair must start exactly at the measure midpoint";
+    EXPECT_EQ(hairpins[1]->tick2(), m0->tick() + m0->ticks())
+        << "DIM in same-measure swell pair must end at the barline";
     delete score;
 }
 
@@ -1248,50 +1315,50 @@ TEST_F(Tst_Importer, inner_tuplet_note_level_cap_no_crash)
     delete score;
 }
 
-// Encore scoreSize=2 → Staff Properties Scale = 70 % (Pid::MAG = 0.70).
-TEST_F(Tst_Importer, score_size2_sets_staff_scale_70pct)
+// Encore scoreSize=2 → Staff Properties Scale = 75 % (Pid::MAG = 0.75).
+TEST_F(Tst_Importer, score_size2_sets_staff_scale_75pct)
 {
     MasterScore* score = readEncoreScore("importer_score_size2.enc");
     ASSERT_NE(score, nullptr) << "Failed to load importer_score_size2.enc";
     ASSERT_FALSE(score->staves().empty());
     const double mag = score->staff(0)->staffType(mu::engraving::Fraction(0, 1))->userMag();
-    EXPECT_NEAR(mag, 0.70, 1e-6) << "Expected staff scale 70 % for scoreSize=2, got " << mag * 100 << " %";
+    EXPECT_NEAR(mag, 0.75, 1e-6) << "Expected staff scale 75 % for scoreSize=2, got " << mag * 100 << " %";
     delete score;
 }
 
-// Encore scoreSize=3 → Staff Properties Scale = 75 % (Pid::MAG = 0.75).
-TEST_F(Tst_Importer, score_size3_sets_staff_scale_75pct)
+// Encore scoreSize=3 → Staff Properties Scale = 100 % (Pid::MAG = 1.00).
+TEST_F(Tst_Importer, score_size3_sets_staff_scale_100pct)
 {
     MasterScore* score = readEncoreScore("importer_score_size3.enc");
     ASSERT_NE(score, nullptr) << "Failed to load importer_score_size3.enc";
     ASSERT_FALSE(score->staves().empty());
     const double mag = score->staff(0)->staffType(mu::engraving::Fraction(0, 1))->userMag();
-    EXPECT_NEAR(mag, 0.75, 1e-6) << "Expected staff scale 75 % for scoreSize=3, got " << mag * 100 << " %";
+    EXPECT_NEAR(mag, 1.00, 1e-6) << "Expected staff scale 100 % for scoreSize=3, got " << mag * 100 << " %";
     delete score;
 }
 
 // Encore 4.x (version=775): staff size comes from LINE staff entry byte[13], NOT header 0x52.
-// 0x52=8 (unrelated field) would give wrong scale (100%) if used; byte[13]=1 → Size=2 → 70%.
-TEST_F(Tst_Importer, enc4x_line_staff_size_hint_size2_sets_70pct)
+// 0x52=8 (unrelated field) would give wrong scale if used; byte[13]=1 → Size=2 → 75%.
+TEST_F(Tst_Importer, enc4x_line_staff_size_hint_size2_sets_75pct)
 {
     MasterScore* score = readEncoreScore("importer_enc4x_line_size2_70pct.enc");
     ASSERT_NE(score, nullptr) << "Failed to load importer_enc4x_line_size2_70pct.enc";
     ASSERT_FALSE(score->staves().empty());
     const double mag = score->staff(0)->staffType(mu::engraving::Fraction(0, 1))->userMag();
-    EXPECT_NEAR(mag, 0.70, 1e-6)
-        << "Encore 4.x: byte[13]=1 in LINE staff entry must yield 70% scale, got " << mag * 100 << "%";
+    EXPECT_NEAR(mag, 0.75, 1e-6)
+        << "Encore 4.x: byte[13]=1 in LINE staff entry must yield 75% scale, got " << mag * 100 << "%";
     delete score;
 }
 
-// Encore 4.x: byte[13]=2 → Size=3 → 75%.  0x52=8 must NOT override the LINE-derived size.
-TEST_F(Tst_Importer, enc4x_line_staff_size_hint_size3_sets_75pct)
+// Encore 4.x: byte[13]=2 → Size=3 → 100%.  0x52=8 must NOT override the LINE-derived size.
+TEST_F(Tst_Importer, enc4x_line_staff_size_hint_size3_sets_100pct)
 {
     MasterScore* score = readEncoreScore("importer_enc4x_line_size3_75pct.enc");
     ASSERT_NE(score, nullptr) << "Failed to load importer_enc4x_line_size3_75pct.enc";
     ASSERT_FALSE(score->staves().empty());
     const double mag = score->staff(0)->staffType(mu::engraving::Fraction(0, 1))->userMag();
-    EXPECT_NEAR(mag, 0.75, 1e-6)
-        << "Encore 4.x: byte[13]=2 in LINE staff entry must yield 75% scale, got " << mag * 100 << "%";
+    EXPECT_NEAR(mag, 1.00, 1e-6)
+        << "Encore 4.x: byte[13]=2 in LINE staff entry must yield 100% scale, got " << mag * 100 << "%";
     delete score;
 }
 

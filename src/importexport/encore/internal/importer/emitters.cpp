@@ -553,18 +553,29 @@ static void coalesceVolta(BuildCtx& ctx, Measure* measure,
         if (ctx.activeVolta && ctx.activeVoltaBits == encMeas.repeatAlternative) {
             ctx.activeVolta->setTick2(measTick + measure->ticks());
         } else {
+            // Accumulate the bits from the bracket we are closing so the next bracket
+            // can filter out already-labelled endings (e.g. "1.-3." then raw bits {2,4}
+            // → show only "4." for the second bracket because 2 is already used).
+            if (ctx.activeVolta) {
+                ctx.usedVoltaBits |= ctx.activeVoltaBits;
+            }
+            // Visible endings = new bits not already covered by earlier brackets.
+            const quint8 rawBits = encMeas.repeatAlternative;
+            const quint8 newBits = rawBits & ~ctx.usedVoltaBits;
+            const quint8 displayBits = (newBits != 0) ? newBits : rawBits;
+
+            std::vector<int> endings;
+            for (int b = 0; b < 8; ++b) {
+                if (displayBits & (1 << b)) {
+                    endings.push_back(b + 1);
+                }
+            }
             Volta* volta = Factory::createVolta(ctx.score->dummy());
             volta->setVoltaType(Volta::Type::CLOSED);
             volta->setTrack(0);
             volta->setTrack2(0);
             volta->setTick(measTick);
             volta->setTick2(measTick + measure->ticks());
-            std::vector<int> endings;
-            for (int b = 0; b < 8; ++b) {
-                if (encMeas.repeatAlternative & (1 << b)) {
-                    endings.push_back(b + 1);
-                }
-            }
             volta->setEndings(endings);
             // setText required: setEndings alone leaves the bracket blank.
             String voltaText;
@@ -578,11 +589,12 @@ static void coalesceVolta(BuildCtx& ctx, Measure* measure,
             volta->setText(voltaText);
             ctx.score->addElement(volta);
             ctx.activeVolta = volta;
-            ctx.activeVoltaBits = encMeas.repeatAlternative;
+            ctx.activeVoltaBits = rawBits;
         }
     } else {
         ctx.activeVolta = nullptr;
         ctx.activeVoltaBits = 0;
+        ctx.usedVoltaBits = 0;  // Reset for next repeat block
     }
 }
 
