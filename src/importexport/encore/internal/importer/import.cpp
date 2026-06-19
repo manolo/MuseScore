@@ -46,7 +46,6 @@
 #include <QFileInfo>
 #include <QPageSize>
 #include <QRegularExpression>
-#include <QSizeF>
 
 #include "engraving/dom/arpeggio.h"
 #include "engraving/dom/box.h"
@@ -222,32 +221,36 @@ static void applyStaffScale(MasterScore* score, const EncRoot& enc)
 
 // Try to identify the paper size from WINI screen-pixel coordinates.
 // pageWUnits = rightEdge + left, pageHUnits = bottomEdge + top.
-// For a correct match the scale (units/inch) must be consistent on both axes.
-// Some Encore versions store A3/other pages at a slightly inconsistent DPI
-// (different zoom on screen), so we pick the Qt page size that gives the
-// smallest |dpiW - dpiH| among candidates with both DPIs in the plausible range.
+//
+// Iterates over every standard QPageSize (skipping Custom) and picks the one
+// that best satisfies two criteria:
+//   1. Axis consistency: small |dpiW - dpiH| (same number of units per inch on
+//      both axes, as expected for a real paper size).
+//   2. DPI plausibility: average DPI close to the typical Encore screen DPI
+//      (~85 PPI on the era's monitors).  This breaks ties between sizes with the
+//      same aspect ratio at different scales — e.g. A4@85DPI vs C5@110DPI both
+//      have near-zero delta but very different DPIs; the penalty selects A4.
+//
+// Returns false when no standard size matches within tolerance (custom page).
 static bool detectWiniPageSize(int pageWUnits, int pageHUnits,
                                double& outWidthIn, double& outHeightIn)
 {
-    static constexpr double kDpiMin   = 60.0;   // minimum plausible screen DPI
-    static constexpr double kDpiMax   = 135.0;  // maximum plausible screen DPI
-    static constexpr double kMaxDelta = 6.0;    // max allowed |dpiW - dpiH|
+    static constexpr double kDpiMin    = 60.0;   // minimum plausible screen DPI
+    static constexpr double kDpiMax    = 135.0;  // maximum plausible screen DPI
+    static constexpr double kMaxDelta  = 6.0;    // max |dpiW - dpiH|
+    static constexpr double kTypDpi    = 85.0;   // typical Encore-era screen DPI
+    static constexpr double kDpiWeight = 0.5;    // penalty weight for DPI distance
 
-    // Standard page IDs to probe — covers all sizes commonly used in music.
-    static const QPageSize::PageSizeId kPageIds[] = {
-        QPageSize::A4, QPageSize::A3, QPageSize::A5,
-        QPageSize::Letter, QPageSize::Legal,
-        QPageSize::B4, QPageSize::B5,
-        QPageSize::A6, QPageSize::Tabloid,
-    };
-
-    double bestDelta = kMaxDelta;
+    double bestScore = kMaxDelta + 1.0;
     bool found = false;
-    for (const QPageSize::PageSizeId id : kPageIds) {
-        const QSizeF sz = QPageSize::size(id, QPageSize::Inch);
+    for (int id = 0; id <= static_cast<int>(QPageSize::LastPageSize); ++id) {
+        if (id == static_cast<int>(QPageSize::Custom)) {
+            continue;
+        }
+        const QSizeF sz = QPageSize::size(static_cast<QPageSize::PageSizeId>(id), QPageSize::Inch);
         const double w  = sz.width();
         const double h  = sz.height();
-        if (w <= 0 || h <= 0) {
+        if (w <= 0.0 || h <= 0.0) {
             continue;
         }
         const double dpiW = pageWUnits / w;
@@ -256,8 +259,13 @@ static bool detectWiniPageSize(int pageWUnits, int pageHUnits,
             continue;
         }
         const double delta = std::abs(dpiW - dpiH);
-        if (delta < bestDelta) {
-            bestDelta   = delta;
+        if (delta >= kMaxDelta) {
+            continue;
+        }
+        const double avgDpi = (dpiW + dpiH) * 0.5;
+        const double score  = delta + kDpiWeight * std::abs(avgDpi - kTypDpi);
+        if (score < bestScore) {
+            bestScore   = score;
             outWidthIn  = w;
             outHeightIn = h;
             found = true;
