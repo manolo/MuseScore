@@ -754,6 +754,47 @@ TEST_F(Tst_Structure, page_margins_wini_bottom_margin_derived)
     delete score;
 }
 
+// ===========================================================================
+// FIX: WINI screen-pixel format — coordinates in monitor pixels (~84-85 PPI)
+// rather than typographic points (1/72").  Symptom: rightEdge=672 exceeds
+// A4_width_pts=595, causing the old code to clamp the right margin to ~0.03"
+// and the bottom margin to 0 (both wrong).  The fix detects the screen-pixel
+// format (rightEdge > pageWidth_pts), identifies the paper format (A4) via a
+// two-pass QPageSize scan, and computes symmetric margins (~0.33" = 8.4mm).
+// ===========================================================================
+TEST_F(Tst_Structure, page_margins_wini_screen_pixel_a4_detected)
+{
+    // structure_wini_screen_pixel_a4.enc: bazo.enc with WINI patched to
+    // screen-pixel coordinates: top=28, left=28, bEdge=962, rEdge=672.
+    // Expected: A4 page (8.2677" x 11.6929"), all margins ~0.331" (8.4mm).
+    MasterScore* score = readEncoreScore("structure_wini_screen_pixel_a4.enc");
+    ASSERT_NE(score, nullptr);
+
+    // Page dimensions must be detected as A4.
+    const double kA4W = 210.0 / 25.4;   // 8.2677"
+    const double kA4H = 297.0 / 25.4;   // 11.6929"
+    EXPECT_NEAR(score->style().styleD(Sid::pageWidth),  kA4W, 0.01)
+        << "Screen-pixel WINI: page must be detected as A4 width";
+    EXPECT_NEAR(score->style().styleD(Sid::pageHeight), kA4H, 0.01)
+        << "Screen-pixel WINI: page must be detected as A4 height";
+
+    // Margins must be symmetric at ~0.331" = 28 / 84.67 DPI.
+    // (Old code: L=T=0.389", R=0.030", B=0.10" — all wrong.)
+    const double kExpectedM = 28.0 / (700.0 / kA4W);   // ≈ 0.331"
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddLeftMargin),  kExpectedM, 0.005)
+        << "Screen-pixel WINI: left margin must be ~0.33\"";
+    EXPECT_NEAR(score->style().styleD(Sid::pageEvenLeftMargin), kExpectedM, 0.005);
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddTopMargin),   kExpectedM, 0.005)
+        << "Screen-pixel WINI: top margin must be ~0.33\"";
+    // Right margin: symmetric (pageWidth - left - printableWidth ≈ kExpectedM).
+    const double printW = score->style().styleD(Sid::pagePrintableWidth);
+    const double rightM = kA4W - kExpectedM - printW;
+    EXPECT_NEAR(rightM, kExpectedM, 0.01)
+        << "Screen-pixel WINI: right margin must be ~0.33\"";
+
+    delete score;
+}
+
 // Pickup (anacrusis) first measure: timeSig[0]=1/4, timeSig[1]=4/4.
 // The importer should produce a shortened first measure (actual ticks=1/4)
 // that displays the nominal 4/4 time signature. The pickup note is at

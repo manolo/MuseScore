@@ -7544,6 +7544,35 @@ def gen_v0c2_plain_sixteenth_no_spurious_dot():
     return assemble(0xC2, [(meas_hdr(4, 4), e)])
 
 
+# ===========================================================================
+# structure_wini_screen_pixel_a4.enc
+# bazo.enc with the WINI block replaced by screen-pixel A4 coordinates.
+# Encore versions running on ~85 PPI monitors store WINI offsets in screen
+# pixels rather than typographic points: top=28, left=28, bEdge=962, rEdge=672.
+# These values exceed A4 in pts (595×842), so the old code produced wrong
+# margins (R=0.03", B=0.10").  The fixed code detects the screen-pixel format,
+# identifies A4 (210×297mm), and computes correct margins (~0.33" symmetric).
+# ===========================================================================
+def gen_wini_screen_pixel_a4():
+    bazo_path = os.path.join(OUT_DIR, 'bazo.enc')
+    data = bytearray(open(bazo_path, 'rb').read())
+    # Find and patch the WINI block content at the margin offsets.
+    # WINI content layout (after magic+varsize, 42 bytes):
+    #   +0..+23  screen/window data (leave unchanged)
+    #   +24..+27 top margin (int32 LE)
+    #   +28..+31 left margin (int32 LE)
+    #   +32..+35 bottomEdge (int32 LE)
+    #   +36..+39 rightEdge  (int32 LE)
+    wini_off = data.find(b'WINI')
+    assert wini_off >= 0, 'WINI block not found in bazo.enc'
+    content_off = wini_off + 8   # skip magic + varsize
+    struct.pack_into('<i', data, content_off + 24, 28)   # top
+    struct.pack_into('<i', data, content_off + 28, 28)   # left
+    struct.pack_into('<i', data, content_off + 32, 962)  # bottomEdge  (A4 @ ~84.7 DPI)
+    struct.pack_into('<i', data, content_off + 36, 672)  # rightEdge
+    return bytes(data)
+
+
 def gen_v0c2_no_tilde_compact_names_midi():
     hdr = bytearray(512)
     hdr[0:4] = b'SCOW'
@@ -7861,6 +7890,7 @@ if __name__=='__main__':
     write("ornaments_tremolo_r8_r16_r64.enc",              gen_v0c4_tremolo_r8_r16_r64())
     write("ornaments_graphic_line_skipped.enc",            gen_v0c4_graphic_line_skipped())
     write("notes_string_num_orn_no_dup.enc",              gen_v0c4_string_num_orn_no_dup())
+    write("structure_wini_screen_pixel_a4.enc",           gen_wini_screen_pixel_a4())
     write("notes_v0c2_plain_sixteenth_no_spurious_dot.enc", gen_v0c2_plain_sixteenth_no_spurious_dot())
     write("notes_v0c2_full_measure_no_false_dot.enc",      gen_v0c2_full_measure_no_false_dot())
     write("instruments_c2_no_tilde_compact_names_midi.enc", gen_v0c2_no_tilde_compact_names_midi())

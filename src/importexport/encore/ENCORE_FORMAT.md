@@ -1169,19 +1169,50 @@ Block layout (after 8-byte magic + varsize header):
 Total content size: 42 bytes (`varsize = 42`). Some older files have `varsize = 40`
 (the trailing uint16 is absent in some files); both layouts are valid.
 
-Derived values:
+**Units — two variants.** Encore 5.x stores values in typographic points (1/72"). Earlier
+versions (including Encore 4.x and some 3.x) store them in **screen pixels at the monitor
+DPI** (~84-85 PPI on hardware of that era). The unit can be detected at parse time:
+
+> If `rightEdge > pageWidth × 72` (i.e. the right-edge coordinate exceeds the current page
+> width expressed in points), the block is in screen-pixel units, NOT typographic points.
+
+**Derived values (typographic-point variant, rightEdge ≤ pageWidth_pts):**
 
 ```
-topMargin    = top / 72.0                        (inches)
+topMargin    = top / 72.0
 leftMargin   = left / 72.0
 printWidth   = (rightEdge - left) / 72.0
 printHeight  = (bottomEdge - top) / 72.0
-bottomMargin = pageHeight - topMargin - printHeight   (pageHeight from style, default A4)
+bottomMargin = pageHeight - topMargin - printHeight
 ```
+
+**Derived values (screen-pixel variant, rightEdge > pageWidth_pts):**
+
+The page dimensions are NOT stored explicitly; they must be recovered from the symmetry
+of the margin data. Assuming the left and right margins are stored with the same pixel value:
+
+```
+pageWidth_units  = rightEdge + left   (e.g. 700 for A4 at ~84.7 PPI)
+pageHeight_units = bottomEdge + top   (e.g. 990)
+```
+
+Match `pageWidth_units / w` against standard paper sizes (ISO A-series, US Letter/Legal,
+ISO B-series). The candidate where `|dpiW − dpiH|` is minimised is the paper format.
+Compute `scale = pageWidth_units / w_detected`; all four margins follow from the same scale.
+
+**Page-size detection note.** ISO A-series sizes (A0-A10) all share the 1:√2 aspect ratio.
+For any AN page, consecutive sizes differ in DPI by √2 ≈ 1.414×, so at most two A-series
+sizes fall within the plausible DPI range [60, 135] simultaneously. The correct AN is the
+one with the smallest `|dpiW − dpiH|` among those in range. Checking A-series sizes first
+(before envelope or other sizes) avoids false positives from non-document formats that
+accidentally satisfy the delta criterion.
 
 **Encoding quirk.** Encore stores `round(inches × 72)`, then displays
 `floor(pts / 72 × 1000) / 1000`. A user-entered 0.100" stores as 7 pts and
-displays back as 0.097".
+displays back as 0.097". In screen-pixel files Encore displays margins using
+1/72" even though the stored unit is 1/DPI — the importer should match this
+display behaviour (divide by 72 for displayed margins, divide by detected DPI
+for accurate physical margins).
 
 **Zero-margin files.** When all four margin values are 0, accept and skip margin application.
 
