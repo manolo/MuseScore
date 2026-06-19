@@ -223,17 +223,33 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
     if (!ps.hasData) {
         return;
     }
-    // WINI fields are in points (1/72 inch); clamp margins to avoid zero-margin files producing invalid pagePrintableWidth.
+    // WINI fields are nominally in typographic points (1/72 inch), but some
+    // Encore versions store them in screen pixels at the monitor's DPI (~84-85
+    // PPI on older hardware).  Symptom: rightEdge or bottomEdge exceeds the
+    // page dimensions in pts (e.g. rightEdge=672 > A4_width_pts=595).
+    //
+    // Detection: if rightEdge > pageWidth × 72 the coordinates must be in a
+    // finer unit.  Compute the actual scale from the page width:
+    //   scale = (rightEdge + left) / pageWidthIn
+    // (assumes left margin ≈ right margin, which holds for typical Encore files).
+    // For typographic-point files the scale stays at 72.
     static constexpr double kMinLR = 0.03;   // min left/right margin (inches)
     static constexpr double kMinTB = 0.10;   // min top/bottom margin (inches)
     static constexpr double kMaxM  = 0.60;   // max margin (inches)
 
-    double topIn  = ps.top / 72.0;
-    double leftIn = ps.left / 72.0;
-    double printW = (ps.rightEdge - ps.left) / 72.0;
-    double printH = (ps.bottomEdge - ps.top) / 72.0;
     const double pageHIn = score->style().styleD(Sid::pageHeight);
     const double pageWIn = score->style().styleD(Sid::pageWidth);
+
+    const bool screenPixelFmt = (ps.rightEdge > static_cast<qint32>(pageWIn * 72.0))
+                                || (ps.bottomEdge > static_cast<qint32>(pageHIn * 72.0));
+    const double scaleUpi = screenPixelFmt
+                            ? (static_cast<double>(ps.rightEdge + ps.left) / pageWIn)
+                            : 72.0;
+
+    double topIn  = ps.top / scaleUpi;
+    double leftIn = ps.left / scaleUpi;
+    double printW = (ps.rightEdge - ps.left) / scaleUpi;
+    double printH = (ps.bottomEdge - ps.top) / scaleUpi;
 
     topIn  = std::clamp(topIn,  kMinTB, kMaxM);
     leftIn = std::clamp(leftIn, kMinLR, kMaxM);
