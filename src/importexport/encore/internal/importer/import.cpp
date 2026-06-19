@@ -44,7 +44,9 @@
 #include <QDataStream>
 #include <QFile>
 #include <QFileInfo>
+#include <QPageSize>
 #include <QRegularExpression>
+#include <QSizeF>
 
 #include "engraving/dom/arpeggio.h"
 #include "engraving/dom/box.h"
@@ -218,34 +220,36 @@ static void applyStaffScale(MasterScore* score, const EncRoot& enc)
     }
 }
 
-// Common standard paper sizes {width_in, height_in} used to detect page format
-// from WINI screen-pixel coordinates.
-static const std::pair<double, double> kStandardPageSizes[] = {
-    { 8.2677, 11.6929 },   // A4
-    { 11.6929, 16.5354 },  // A3
-    { 5.8268,  8.2677 },   // A5
-    { 8.5,   11.0 },       // US Letter
-    { 8.5,   14.0 },       // US Legal
-    { 9.8425, 13.8976 },   // B4 (ISO)
-    { 6.9291,  9.8425 },   // B5 (ISO)
-};
-
 // Try to identify the paper size from WINI screen-pixel coordinates.
 // pageWUnits = rightEdge + left, pageHUnits = bottomEdge + top.
 // For a correct match the scale (units/inch) must be consistent on both axes.
 // Some Encore versions store A3/other pages at a slightly inconsistent DPI
-// (different zoom on screen), so we pick the standard page that gives the
+// (different zoom on screen), so we pick the Qt page size that gives the
 // smallest |dpiW - dpiH| among candidates with both DPIs in the plausible range.
 static bool detectWiniPageSize(int pageWUnits, int pageHUnits,
                                double& outWidthIn, double& outHeightIn)
 {
-    static constexpr double kDpiMin  = 60.0;   // minimum plausible screen DPI
-    static constexpr double kDpiMax  = 135.0;  // maximum plausible screen DPI
-    static constexpr double kMaxDelta = 6.0;   // max allowed |dpiW - dpiH|
+    static constexpr double kDpiMin   = 60.0;   // minimum plausible screen DPI
+    static constexpr double kDpiMax   = 135.0;  // maximum plausible screen DPI
+    static constexpr double kMaxDelta = 6.0;    // max allowed |dpiW - dpiH|
+
+    // Standard page IDs to probe — covers all sizes commonly used in music.
+    static const QPageSize::PageSizeId kPageIds[] = {
+        QPageSize::A4, QPageSize::A3, QPageSize::A5,
+        QPageSize::Letter, QPageSize::Legal,
+        QPageSize::B4, QPageSize::B5,
+        QPageSize::A6, QPageSize::Tabloid,
+    };
 
     double bestDelta = kMaxDelta;
     bool found = false;
-    for (const auto& [w, h] : kStandardPageSizes) {
+    for (const QPageSize::PageSizeId id : kPageIds) {
+        const QSizeF sz = QPageSize::size(id, QPageSize::Inch);
+        const double w  = sz.width();
+        const double h  = sz.height();
+        if (w <= 0 || h <= 0) {
+            continue;
+        }
         const double dpiW = pageWUnits / w;
         const double dpiH = pageHUnits / h;
         if (dpiW < kDpiMin || dpiW > kDpiMax || dpiH < kDpiMin || dpiH > kDpiMax) {
