@@ -57,7 +57,6 @@ static const QString ENC_DIR(QString(iex_encore_tests_DATA_ROOT) + "/data/");
 
 using namespace mu::engraving;
 
-
 static Measure* measureAt(MasterScore* score, int n)
 {
     int idx = 0;
@@ -559,6 +558,55 @@ TEST_F(Tst_NotesTuplets, v0c2_dotted_eighth_detected_from_tick_pattern)
     EXPECT_EQ(chords[2]->durationType().type(), DurationType::V_HALF);
     EXPECT_EQ(chords[2]->dots(), 0);
 
+    delete score;
+}
+
+// ===========================================================================
+// FIX: fixDottedEighthPattern must not fire on an eighth+sixteenth sequence
+// inside a fully-filled measure. The binary pattern (8th rdur=120 + 16th at
+// tick+120) is ambiguous: it can mean either a dotted-8th anomaly (measure
+// short by 60t) or a genuine 8th followed by a 16th (measure exactly full).
+// Guard: faceSum + 60 == durTicks is required. When the measure is already
+// full (faceSum == durTicks), the fix is blocked, so the first 8th stays plain.
+//
+// Before the fix, the lack of this guard caused tapada.enc m40/m41 (bandurria)
+// to be imported with a spurious dotted 8th at the start instead of plain 8th.
+// ===========================================================================
+TEST_F(Tst_NotesTuplets, v0c2_full_measure_eighth_plus_sixteenth_no_false_dot)
+{
+    // notes_v0c2_full_measure_no_false_dot.enc: v0xC2 4/4 measure.
+    // 8th + 16th + 16th + 8th + 8th = 120+60+60+120+120 = 480 = durTicks.
+    // faceSum (480) + 60 = 540 != 480 = durTicks => fixDottedEighthPattern blocked.
+    // Without the faceSum guard the fix would fire: first 8th -> dotted 8th (90t),
+    // overflowing the measure and misshaping all subsequent notes.
+    MasterScore* score = readEncoreScore("notes_v0c2_full_measure_no_false_dot.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Full measure must pass sanityCheck: " << ret.text();
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->timesig(), Fraction(4, 4));
+
+    std::vector<Chord*> chords;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChord()) {
+            chords.push_back(toChord(e));
+        }
+    }
+    ASSERT_EQ(chords.size(), 5u)
+        << "5 chords expected (8th+16th+16th+8th+8th); spurious dot on first 8th "
+        "would overflow the measure and truncate/reshape later notes";
+    // First chord must be a plain 8th (not dotted), proving the faceSum guard fired.
+    EXPECT_EQ(chords[0]->durationType().type(), DurationType::V_EIGHTH);
+    EXPECT_EQ(chords[0]->dots(), 0) << "First 8th must NOT be dotted (full measure: faceSum guard)";
+    EXPECT_EQ(chords[1]->durationType().type(), DurationType::V_16TH);
+    EXPECT_EQ(chords[1]->dots(), 0);
+    EXPECT_EQ(chords[2]->durationType().type(), DurationType::V_16TH);
+    EXPECT_EQ(chords[2]->dots(), 0);
+    EXPECT_EQ(chords[3]->durationType().type(), DurationType::V_EIGHTH);
+    EXPECT_EQ(chords[4]->durationType().type(), DurationType::V_EIGHTH);
     delete score;
 }
 
@@ -1281,4 +1329,3 @@ TEST_F(Tst_NotesTuplets, triplet_orphan_with_prior_complete_group)
 
     delete score;
 }
-

@@ -868,6 +868,44 @@ The face value nibble is authoritative for the notated duration.
 duration; it is consulted only by `detectImpliedTuplet` to flag
 the note as a tuplet member.
 
+**v0xC2 dotControl interpretation and the bit-0 fallback guard.**
+In v0xC4, `dotControl` at note byte +14 is a dot COUNT (0, 1, 2, 3).
+In v0xC2, the same byte is a layout/display field whose bit meanings are
+less precise: bit 0 is sometimes set as a "dotted" indicator but also
+appears coincidentally on undotted notes (observed with values 0x28, 0x39,
+0x60 in tapada.enc where the notes are plain).
+
+`computeDotCount` resolves dots in priority order:
+1. `calcDots(dotControl, fv)` — treats `dotControl` as a tick value.
+2. `calcDotsSnap(realDuration, fv)` — MIDI tick value within ±1 snap.
+3. Bit-0 fallback (`useBit0Fallback=true`) — forces 1 dot when bit 0 is set.
+
+**Bit-0 fallback guard (ticks.cpp):** the fallback only fires when
+`realDuration > faceValue2ticks(fv)` (rdur exceeds the plain face value).
+When `rdur ≤ faceTicks` the note is plain (exact match) or shortened by
+multi-stream overlap; bit 0 in dotControl is then a spurious layout flag.
+This guard prevents false dotted notes on v0xC2 plain 16ths and 8ths whose
+`dotControl` happens to have bit 0 set (tapada.enc m28 staff 2: five plain
+notes were incorrectly promoted to dotted, overflowing the measure).
+
+**v0xC2 dotted-eighth anomaly (`fixDottedEighthPattern`, readers-v0xc2.cpp):**
+Encore stores the 16th companion of a dotted-8th+16th group at `tick+120`
+(= tick + faceTicks(8th)) instead of `tick+180` (= tick + dotted-8th).
+Detection: 8th with `rdur=120` has a 16th at `tick+120` with `rdur=60`.
+When detected, `EncNote::forceDotted` is set on the 8th; the emitter
+then forces `dots=1` directly, bypassing `computeDotCount` entirely.
+
+**faceSum guard in `fixDottedEighthPattern`:** the 8th+16th@tick+120 binary
+pattern is ambiguous — it also appears in a genuine 8th followed by a 16th
+inside a fully-filled measure. Guard: only apply when `faceSum + 60 == durTicks`
+(the voice group is exactly 60t short — the amount the anomaly steals).
+When `faceSum == durTicks` (full measure) the fix is blocked.
+
+`EncNote::forceDotted` (elem-note.h): bool field set exclusively by
+`fixDottedEighthPattern`. In `emitters-note.cpp`, when `forceDotted=true`
+`dots=1` is assigned before `computeDotCount`, so the bit-0 fallback never
+runs for these notes.
+
 **Triplet `playbackDurTicks` does not override face value.** A
 `playbackDurTicks = 80` (triplet 8th in 240 tpqn) on a notated
 16th must stay a 16th. The earlier code in
