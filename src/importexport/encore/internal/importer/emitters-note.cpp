@@ -525,8 +525,13 @@ static bool resolveNoteDuration(
         }
     } else {
         dt   = realDuration2DurationType(en->realDuration, en->faceValue);
-        // dotControl bit 0 = dotted flag; computeDotCount tries tick-value interpretation first, falls back to bit 0 on MIDI drift.
-        if (en->dotControl > 0) {
+        if (en->forceDotted) {
+            // Explicitly marked dotted by the parser (v0xC2 dotted-eighth tick-pattern fix).
+            // Bypass computeDotCount to avoid the bit-0 fallback, which may fire on raw
+            // binary dotControl values that coincidentally have bit 0 set.
+            dots = 1;
+        } else if (en->dotControl > 0) {
+            // dotControl bit 0 = dotted flag; computeDotCount tries tick-value interpretation first, falls back to bit 0 on MIDI drift.
             dots = computeDotCount(en->dotControl, en->realDuration, en->faceValue,
                                    true /*useBit0Fallback*/);
         } else {

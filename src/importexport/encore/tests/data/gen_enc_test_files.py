@@ -7495,6 +7495,36 @@ def write(name,data):
 # got the name "Guitarra" and [1] got garbage; MIDI was similarly shifted:
 # instrument [0] received entry[1]'s value instead of its own.
 # ===========================================================================
+def note_v0c2_with_dotctrl(tick, voice, staffIdx, fv, pitch, dotCtrl=0):
+    """22-byte v0xC2 note with an explicit dotControl byte."""
+    d = bytearray(19)
+    d[0] = 22; d[1] = staffIdx & 0x3F; d[2] = fv; d[10] = pitch; d[11] = dotCtrl
+    return struct.pack('<H', tick) + bytes([(9 << 4) | (voice & 0xF)]) + bytes(d)
+
+
+# ===========================================================================
+# notes_v0c2_plain_sixteenth_no_spurious_dot.enc
+# v0xC2 4/4 measure: 2 × 16th (dotControl=0x39, bit 0 spuriously set in the
+# binary) + 3 × 8th.  Before the fix, the bit-0 fallback in computeDotCount
+# turned both 16ths into dotted-16ths (90t each), overflowing the measure by
+# 60t and truncating the last 8th.  After the fix the guard blocks bit-0 when
+# rdur == faceTicks, preserving all 5 notes as plain durations.
+# Trigger condition: dotControl has bit 0 set in the binary (e.g. 0x39) on a
+# note whose realDuration == faceValue2ticks(faceValue) (exact plain match).
+# ===========================================================================
+def gen_v0c2_plain_sixteenth_no_spurious_dot():
+    # Two plain 16th notes with dotControl bit-0 set coincidentally (as seen in
+    # tapada.enc m28 bandurria staff), followed by three plain 8th notes.
+    # Total: 60+60+120+120+120 = 480 = 4/4 durTicks.
+    e  = note_v0c2_with_dotctrl(0,   0, 0, fv=5, pitch=71, dotCtrl=0x39)
+    e += note_v0c2_with_dotctrl(60,  0, 0, fv=5, pitch=73, dotCtrl=0x39)
+    e += note_v0c2(120, 0, 0, fv=4, pitch=75)
+    e += note_v0c2(240, 0, 0, fv=4, pitch=75)
+    e += note_v0c2(360, 0, 0, fv=4, pitch=75)
+    e += end_marker()
+    return assemble(0xC2, [(meas_hdr(4, 4), e)])
+
+
 def gen_v0c2_no_tilde_compact_names_midi():
     hdr = bytearray(512)
     hdr[0:4] = b'SCOW'
@@ -7812,6 +7842,7 @@ if __name__=='__main__':
     write("ornaments_tremolo_r8_r16_r64.enc",              gen_v0c4_tremolo_r8_r16_r64())
     write("ornaments_graphic_line_skipped.enc",            gen_v0c4_graphic_line_skipped())
     write("notes_string_num_orn_no_dup.enc",              gen_v0c4_string_num_orn_no_dup())
+    write("notes_v0c2_plain_sixteenth_no_spurious_dot.enc", gen_v0c2_plain_sixteenth_no_spurious_dot())
     write("instruments_c2_no_tilde_compact_names_midi.enc", gen_v0c2_no_tilde_compact_names_midi())
     write("instruments_c2_tilde_primary_block_midi.enc",    gen_v0c2_tilde_primary_block_midi())
     print("Done.")

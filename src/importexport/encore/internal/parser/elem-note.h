@@ -30,12 +30,11 @@
 #include "elem-enums.h"
 
 namespace mu::iex::enc {
-
 // Notes within this many Encore ticks treated as simultaneous (MIDI timing drift).
 inline constexpr int CHORD_CLUSTER_THRESHOLD = 4;   // Encore ticks (~8ms at 120bpm)
 
 // faceValue byte accessors: low nibble = duration (1=whole..8=128th), high nibble = notehead type.
-inline quint8 fvLow(quint8 fv)  { return fv & 0x0F; }            // duration nibble
+inline quint8 fvLow(quint8 fv) { return fv & 0x0F; }             // duration nibble
 inline quint8 fvHigh(quint8 fv) { return static_cast<quint8>((fv >> 4) & 0x0F); } // notehead nibble
 
 // ---------------------------------------------------------------------------
@@ -86,6 +85,10 @@ struct EncNote : EncMeasureElem {
     // (rdur/faceValue mismatch identifies the ratio). Used by computeImpliedTupletMembers so
     // notes with incidental MIDI timing drift in other formats are never misidentified.
     bool isImpliedTupletMember  { false };
+    // Set by fixDottedEighthPattern() (v0xC2): the note is the dotted-eighth in the
+    // dotted-eighth+sixteenth anomaly.  Forces dots=1 in the emitter without relying
+    // on the dotControl bit-0 fallback, which may spuriously fire on raw binary values.
+    bool forceDotted            { false };
 
     using EncMeasureElem::EncMeasureElem;
 
@@ -135,5 +138,4 @@ struct EncGenericElem : EncMeasureElem {
 
 using MeasureElemVec    = std::vector<std::unique_ptr<EncMeasureElem> >;
 using MeasureElemRefVec = std::vector<const EncMeasureElem*>;
-
 } // namespace mu::iex::enc
