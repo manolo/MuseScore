@@ -26,6 +26,8 @@
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/layoutbreak.h"
+#include "engraving/dom/spanner.h"
+#include "engraving/dom/volta.h"
 #include "engraving/dom/rest.h"
 #include "engraving/dom/segment.h"
 #include "engraving/dom/instrument.h"
@@ -274,6 +276,77 @@ TEST_F(Tst_Options, firstMeasure_not_pickup_keeps_full_nominal_duration)
     delete score;
 }
 
+// Regression: when firstMeasureIsPickup=false and underfillMeasureStrategy=IrregularMeasure,
+// buildMeasures advanced currentTick by ts.ticks() (the explicit pickup duration) while
+// setting measure->ticks(nominalTimeSig).  The mismatch made IrregularMeasure shift all
+// subsequent measures by the wrong delta, placing volta brackets mid-measure instead of at
+// barlines.  File: Case A pickup (ts[0]=2/4, nominal=4/4), volta on MEAS[2] and MEAS[3].
+static Volta* findVolta(MasterScore* score, const String& label)
+{
+    for (auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isVolta() && toVolta(sp)->beginText() == label) {
+            return toVolta(sp);
+        }
+    }
+    return nullptr;
+}
+
+static bool isAtImpliedBarline(Volta* volta, MasterScore* score)
+{
+    Fraction cumTick(0, 1);
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        if (cumTick == volta->tick()) {
+            return true;
+        }
+        cumTick += m->ticks();
+    }
+    return false;
+}
+
+TEST_F(Tst_Options, firstMeasure_not_pickup_irregular_volta_at_barline)
+{
+    EncImportOptions opts;
+    opts.firstMeasureIsPickup = false;
+    opts.underfillMeasureStrategy = UnderfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("structure_pickup_casea_volta.enc", opts);
+    ASSERT_NE(score, nullptr);
+
+    Volta* v1 = findVolta(score, String(u"1."));
+    Volta* v2 = findVolta(score, String(u"2."));
+    ASSERT_NE(v1, nullptr) << "score must contain a '1.' volta";
+    ASSERT_NE(v2, nullptr) << "score must contain a '2.' volta";
+
+    EXPECT_TRUE(isAtImpliedBarline(v1, score))
+        << "Volta '1.' tick (" << v1->tick().ticks()
+        << ") must coincide with a measure barline (cumulative durations)";
+    EXPECT_TRUE(isAtImpliedBarline(v2, score))
+        << "Volta '2.' tick (" << v2->tick().ticks()
+        << ") must coincide with a measure barline (cumulative durations)";
+    delete score;
+}
+
+TEST_F(Tst_Options, firstMeasure_pickup_irregular_volta_at_barline)
+{
+    EncImportOptions opts;
+    opts.underfillMeasureStrategy = UnderfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("structure_pickup_casea_volta.enc", opts);
+    ASSERT_NE(score, nullptr);
+
+    Volta* v1 = findVolta(score, String(u"1."));
+    Volta* v2 = findVolta(score, String(u"2."));
+    ASSERT_NE(v1, nullptr) << "score must contain a '1.' volta";
+    ASSERT_NE(v2, nullptr) << "score must contain a '2.' volta";
+
+    EXPECT_TRUE(isAtImpliedBarline(v1, score))
+        << "Volta '1.' tick (" << v1->tick().ticks()
+        << ") must coincide with a measure barline (pickup=true, regression guard)";
+    EXPECT_TRUE(isAtImpliedBarline(v2, score))
+        << "Volta '2.' tick (" << v2->tick().ticks()
+        << ") must coincide with a measure barline (pickup=true, regression guard)";
+    delete score;
+}
+
 // ===========================================================================
 // importSystemLocks
 // ===========================================================================
@@ -308,17 +381,17 @@ TEST_F(Tst_Options, importSystemLocks_false_produces_no_system_locks)
 
 // ===========================================================================
 // importStaffSize
-// All test files in data/ have scoreSize=3, which maps to MAG 0.75.
+// All test files in data/ have scoreSize=3, which maps to MAG 1.00 (100%).
 // ===========================================================================
 
 TEST_F(Tst_Options, importStaffSize_true_applies_encore_scale)
 {
     MasterScore* score = readEncoreScore("bazo.enc");
     ASSERT_NE(score, nullptr);
-    // scoreSize=3 → kScaleBySize[2] = 0.75
+    // scoreSize=3 → kScaleBySize[2] = 1.00 (100%)
     const double mag = score->staff(0)->staffType(Fraction(0, 1))->userMag();
-    EXPECT_DOUBLE_EQ(mag, 0.75)
-        << "importStaffSize=true (default) must apply Encore scoreSize=3 → MAG 0.75";
+    EXPECT_DOUBLE_EQ(mag, 1.00)
+        << "importStaffSize=true (default) must apply Encore scoreSize=3 → MAG 1.00";
     delete score;
 }
 

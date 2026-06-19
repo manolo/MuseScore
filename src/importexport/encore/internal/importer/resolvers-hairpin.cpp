@@ -26,6 +26,7 @@
 #include "engraving/dom/factory.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/dynamic.h"
+#include "engraving/dom/measure.h"
 #include "engraving/dom/segment.h"
 
 using namespace mu::engraving;
@@ -63,7 +64,7 @@ static Fraction resolveHairpinEndByXoffset(
         } else {
             continue;
         }
-        if (em->staffIdx != ph.staffIdx || em->voice != ph.encVoice) {
+        if (em->staffIdx != ph.staffIdx) {
             continue;
         }
         if (xoff <= 0) {
@@ -92,54 +93,98 @@ void resolveHairpins(BuildCtx& ctx)
     MasterScore* score = ctx.score;
     const EncRoot& enc = ctx.enc;
 
-    // Resolve hairpin endpoints: min(next-dynamic tick, xoffset2 snap to note).
-    // xoffset2 encodes the visual tip position; snap to the last note/rest whose xoffset <= xoff2.
-    // If xoff2 is before all notes in the target measure, end at the barline (measure start tick).
-    for (const PendingHairpin& ph : ctx.pendingHairpins) {
-        Fraction endTick = ph.maxEndTick;
+    // Pre-pass: detect same-measure CRESC+DIM swell pairs on the same track.
+    // For each pair, split the measure at its midpoint so both hairpins cover
+    // equal halves — xoffset2 pixel coordinates do not map linearly to ticks when
+    // the measure has empty beats, so a midpoint split better matches Encore's visual.
+    const size_t n = ctx.pendingHairpins.size();
+    std::vector<Fraction> startOverride(n, Fraction(-1, 1)); // -1 = no override
+    std::vector<Fraction> endOverride(n, Fraction(-1, 1));
 
-        // (1) Next Dynamic on track takes priority; handles mf<f>mf chains.
-        bool foundNextDynamic = false;
-        for (Segment* s = score->firstSegment(SegmentType::ChordRest); s; s = s->next1(SegmentType::ChordRest)) {
-            if (s->tick() <= ph.startTick) {
+    for (size_t i = 0; i < n; ++i) {
+        const PendingHairpin& ph1 = ctx.pendingHairpins[i];
+        if (ph1.type != HairpinType::CRESC_HAIRPIN) {
+            continue;
+        }
+        const Measure* m1 = score->tick2measure(ph1.startTick);
+        if (!m1) {
+            continue;
+        }
+        for (size_t j = i + 1; j < n; ++j) {
+            const PendingHairpin& ph2 = ctx.pendingHairpins[j];
+            if (ph2.track != ph1.track) {
                 continue;
             }
-            if (s->tick() > ph.maxEndTick) {
-                break;
+            if (ph2.type != HairpinType::DIM_HAIRPIN) {
+                continue;
             }
-            bool stopHere = false;
-            for (EngravingItem* ann : s->annotations()) {
-                if (ann && ann->isDynamic() && ann->track() == ph.track) {
-                    stopHere = true;
+            const Measure* m2 = score->tick2measure(ph2.startTick);
+            if (m2 != m1) {
+                continue;  // different measures → not a same-measure swell pair
+            }
+            // Both CRESC and DIM start in the same measure: split at midpoint.
+            const Fraction midTick = m1->tick() + m1->ticks() / 2;
+            endOverride[i]   = midTick;                         // CRESC ends at mid
+            startOverride[j] = midTick;                         // DIM starts at mid
+            endOverride[j]   = m1->tick() + m1->ticks();        // DIM ends at barline
+            break;
+        }
+    }
+
+    // Main pass: resolve each hairpin's endTick then create the Hairpin element.
+    for (size_t i = 0; i < n; ++i) {
+        const PendingHairpin& ph = ctx.pendingHairpins[i];
+
+        Fraction startTick = (startOverride[i].numerator() >= 0) ? startOverride[i] : ph.startTick;
+        Fraction endTick   = ph.maxEndTick;
+
+        if (endOverride[i].numerator() >= 0) {
+            // Swell-pair override: use the pre-computed midpoint or barline.
+            endTick = endOverride[i];
+        } else {
+            // (1) Next Dynamic on track takes priority; handles mf<f>mf chains.
+            bool foundNextDynamic = false;
+            for (Segment* s = score->firstSegment(SegmentType::ChordRest); s;
+                 s = s->next1(SegmentType::ChordRest)) {
+                if (s->tick() <= ph.startTick) {
+                    continue;
+                }
+                if (s->tick() > ph.maxEndTick) {
+                    break;
+                }
+                bool stopHere = false;
+                for (EngravingItem* ann : s->annotations()) {
+                    if (ann && ann->isDynamic() && ann->track() == ph.track) {
+                        stopHere = true;
+                        break;
+                    }
+                }
+                if (stopHere) {
+                    endTick = std::min(endTick, s->tick());
+                    foundNextDynamic = true;
                     break;
                 }
             }
-            if (stopHere) {
-                endTick = std::min(endTick, s->tick());
-                foundNextDynamic = true;
-                break;
+
+            // (2) xoffset2 snap: find the last note/rest in the target measure with xoffset <= xoff2.
+            if (!foundNextDynamic
+                && ph.hairpinXoffset2 > 0
+                && ph.endMeasIdx >= 0
+                && ph.endMeasIdx < static_cast<int>(enc.measures.size())
+                && ph.endMeasIdx < static_cast<int>(ctx.measuresByIdx.size())) {
+                Fraction targetMeasTick
+                    = ctx.measuresByIdx[static_cast<size_t>(ph.endMeasIdx)]->tick();
+                endTick = resolveHairpinEndByXoffset(ph, enc, endTick, targetMeasTick);
             }
         }
 
-        // (2) xoffset2 snap: find the last note/rest in the target measure with xoffset <= xoff2.
-        // Mirrors the start-snap logic in snapTickByXoffset (emitters-orn.cpp).
-        // Only when no Dynamic found in step (1) and xoff2 is meaningful (> 0).
-        if (!foundNextDynamic
-            && ph.hairpinXoffset2 > 0
-            && ph.endMeasIdx >= 0
-            && ph.endMeasIdx < static_cast<int>(enc.measures.size())
-            && ph.endMeasIdx < static_cast<int>(ctx.measuresByIdx.size())) {
-            Fraction targetMeasTick = ctx.measuresByIdx[static_cast<size_t>(ph.endMeasIdx)]->tick();
-            endTick = resolveHairpinEndByXoffset(ph, enc, endTick, targetMeasTick);
-        }
-
-        if (endTick <= ph.startTick) {
+        if (endTick <= startTick) {
             continue;
         }
         Hairpin* hp = Factory::createHairpin(score->dummy()->segment());
         hp->setTrack(ph.track);
         hp->setTrack2(ph.track);
-        hp->setTick(ph.startTick);
+        hp->setTick(startTick);
         hp->setTick2(endTick);
         hp->setHairpinType(ph.type);
         score->addElement(hp);

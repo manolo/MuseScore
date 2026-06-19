@@ -31,13 +31,14 @@
 namespace mu::iex::enc {
 
 // Render tempo text. displayBpm is the beat-unit BPM that Encore shows the user.
-// beatTicks=360 means the beat unit is a dotted quarter; beatTicks=240 is a quarter.
+// beatTicks=360 means the beat unit is a dotted quarter; beatTicks=240 is a quarter;
+// beatTicks=120 is an eighth note (e.g. 5/8 felt in eighths).
 String tempoXmlText(int displayBpm, int beatTicks)
 {
     if (beatTicks == 360) {
         return String(u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = %1").arg(displayBpm);
     }
-    return String(u"<sym>metNoteQuarterUp</sym> = %1").arg(displayBpm);
+return String(u"<sym>metNoteQuarterUp</sym> = %1").arg(displayBpm);
 }
 
 // Apply per-measure BPM from MEAS headers as TempoText elements.

@@ -211,6 +211,10 @@ struct BuildCtx
     // Volta being coalesced: equal-bitmask runs collapse into one Volta.
     Volta* activeVolta { nullptr };
     quint8 activeVoltaBits { 0 };
+    // Accumulated bitmask of all volta brackets already emitted in the current repeat block.
+    // Used to suppress endings that were already labelled in an earlier bracket (e.g. "1.-3."
+    // followed by a bitmask of {2,4} → only show "4." for the second bracket, not "2, 4.").
+    quint8 usedVoltaBits { 0 };
 
     std::map<std::pair<int, int>, TupletTracker> tuplets {};
 

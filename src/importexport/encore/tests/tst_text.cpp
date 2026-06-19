@@ -170,6 +170,39 @@ TEST_F(Tst_Text, lyrics_variable_length_with_empty_placeholder)
     delete score;
 }
 
+// Regression: when lyric encTick is slightly after the note encTick (visual offset),
+// the lyric must still attach to the correct note.  The old segEncTick formula
+// (relTick × encTicksPerQuarter × 4) mapped each note to half its actual Encore tick,
+// causing lyrics offset by +50 ticks to miss the correct note.
+// File: text_lyrics.enc with lyric ticks offset by +50 (do→50, re→290, mi→530, fa→770).
+// beatTicks=240, threshold=120; all deltas ≤ 50 → all match. Previous formula:
+// segEncTick(tick=240) = 120, |290-120|=170 > 120 → re unmatched.
+TEST_F(Tst_Text, lyrics_offset_ticks_still_attach_correctly)
+{
+    MasterScore* score = readEncoreScore("text_lyrics_6_8_offset_ticks.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> expected = { u"do", u"re", u"mi", u"fa" };
+    std::vector<String> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) { continue; }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) { continue; }
+            for (Lyrics* ly : toChord(el)->lyrics()) {
+                seen.push_back(ly->plainText());
+            }
+        }
+    }
+    EXPECT_EQ(seen, expected)
+        << "All 4 lyrics must attach to their correct note even when lyric encTick "
+        "is +50 ticks after the note encTick";
+    delete score;
+}
+
 TEST_F(Tst_Text, lyrics_attached_to_chords)
 {
     MasterScore* score = readEncoreScore("text_lyrics.enc");
@@ -598,15 +631,63 @@ TEST(Tst_TempoXmlText, dotted_quarter_beat_sym)
               String(u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = 80"));
 }
 
-TEST(Tst_TempoXmlText, non_dotted_eighth_denominators_use_quarter_sym)
+TEST(Tst_TempoXmlText, non_dotted_beats_use_quarter_sym)
 {
     using namespace mu::iex::enc;
-    // beatTicks=120 (eighth-note beat, e.g. 7/8 with eighth as beat unit): quarter sym
+    // All non-compound beat units (beatTicks != 360) use the quarter note symbol.
+    // The ORN tempo field stores quarter-note BPM regardless of the piece's beatTicks.
     EXPECT_EQ(tempoXmlText(156, 120),
               String(u"<sym>metNoteQuarterUp</sym> = 156"));
-    // Other non-dotted beat values also use quarter sym
+    EXPECT_EQ(tempoXmlText(63, 120),
+              String(u"<sym>metNoteQuarterUp</sym> = 63"));
     EXPECT_EQ(tempoXmlText(120, 240),
               String(u"<sym>metNoteQuarterUp</sym> = 120"));
+    EXPECT_EQ(tempoXmlText(80, 0),
+              String(u"<sym>metNoteQuarterUp</sym> = 80"));
+}
+
+// ===========================================================================
+// Regression: ORN TEMPO with eighth-note beat (beatTicks=120) was suppressed when
+// it disagreed with the MEAS header BPM, even though the two are in different units
+// (ORN in eighth/min, MEAS in quarter/min).  The comparison is meaningless for
+// non-quarter beats; the ORN must be used.
+// File: 5/8, MEAS bpm=160 (quarter/min), ORN TEMPO=63 (eighth/min, "corchea=63").
+// Expected: TempoText "♪ = 63" with BPS = 63 × 0.5 / 60 = 0.525, NOT suppressed.
+// ===========================================================================
+
+TEST_F(Tst_Text, orn_tempo_5_8_not_suppressed_and_uses_quarter_bpm)
+{
+    // text_orn_tempo_eighth_beat_not_suppressed.enc: 5/8, MEAS bpm=160,
+    // ORN TEMPO=63, no subsequent measure with bpm=63.
+    // The ORN tempo field always stores quarter-note BPM even when beatTicks=120 (5/8).
+    // The ORN is genuine (not misplaced) → must create TempoText ♩=63, BPS=63/60.
+    MasterScore* score = readEncoreScore("text_orn_tempo_eighth_beat_not_suppressed.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    TempoText* tt = nullptr;
+    for (MeasureBase* mb = score->first(); mb && !tt; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s && !tt;
+             s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isTempoText()) {
+                    tt = toTempoText(e);
+                    break;
+                }
+            }
+        }
+    }
+    ASSERT_NE(tt, nullptr) << "ORN TEMPO=63 in 5/8 must create a TempoText";
+    EXPECT_NEAR(tt->tempo().val, 63.0 / 60.0, 1e-5)
+        << "ORN tempo=63 is quarter-note BPM regardless of beatTicks=120; BPS=63/60";
+    EXPECT_EQ(tt->xmlText(), String(u"<sym>metNoteQuarterUp</sym> = 63"))
+        << "Display must show quarter note symbol (negra) matching Encore's 'negra = 63'";
+
+    delete score;
 }
 
 // ===========================================================================
@@ -656,24 +737,53 @@ TEST_F(Tst_Text, orn_tempo_3_8_dotted_quarter_bps_correct)
 // Fix: widen guard to scan all segments in the measure.
 // Expected: only ONE TempoText, from ORN TEMPO=63 (not the MEAS BPM=160).
 // ===========================================================================
-TEST_F(Tst_Text, meas_bpm_wins_over_conflicting_orn_tempo_at_later_tick)
+TEST_F(Tst_Text, orn_tempo_wins_over_meas_bpm_when_not_misplaced)
 {
     // text_meas_bpm_suppressed_by_orn_tempo_later_tick.enc: 4/4, MEAS bpm=160,
-    // quarter REST at tick=0, ORN TEMPO=63 at tick=240 (after the rest).
-    // The ORN TEMPO BPM (63) conflicts with the MEAS header BPM (160).
-    // MEAS header BPM is authoritative; ORN TEMPO is a visual annotation and is
-    // suppressed when it disagrees with the header.
-    // Expected: exactly ONE TempoText with BPS=160/60 (from MEAS header).
+    // quarter REST at tick=0, ORN TEMPO=63 at tick=240, no subsequent measure with bpm=63.
+    // The ORN is NOT a misplaced ornament (no subsequent measure has the matching bpm),
+    // so it is the genuine score tempo marking and takes precedence over the MEAS header.
+    // Expected: ONE TempoText from the ORN = ♩=63, BPS=63/60.
     MasterScore* score = readEncoreScore("text_meas_bpm_suppressed_by_orn_tempo_later_tick.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    std::vector<double> bpsValues;
-    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+    TempoText* tt = nullptr;
+    for (MeasureBase* mb = score->first(); mb && !tt; mb = mb->next()) {
         if (!mb->isMeasure()) {
             continue;
         }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s && !tt;
+             s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isTempoText()) {
+                    tt = toTempoText(e);
+                    break;
+                }
+            }
+        }
+    }
+    ASSERT_NE(tt, nullptr) << "ORN TEMPO=63 must create a TempoText";
+    EXPECT_NEAR(tt->tempo().val, 63.0 / 60.0, 1e-5)
+        << "ORN TEMPO=63 (quarter BPM) must give BPS=63/60; "
+        "ORN overrides MEAS header when it is not a misplaced ornament";
+
+    delete score;
+}
+
+// Regression: importTempoTextSemantic=false must suppress ORN TEMPO (visual score
+// marking) just like Italian text; only the MEAS header BPM creates a TempoText.
+TEST_F(Tst_Text, orn_tempo_suppressed_when_semantic_disabled)
+{
+    mu::iex::enc::EncImportOptions opts;
+    opts.importTempoTextSemantic = false;
+    MasterScore* score = readEncoreScoreWithOpts("text_meas_bpm_suppressed_by_orn_tempo_later_tick.enc", opts);
+    ASSERT_NE(score, nullptr);
+
+    std::vector<double> bpsValues;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) { continue; }
         for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s;
              s = s->next(SegmentType::ChordRest)) {
             for (EngravingItem* e : s->annotations()) {
@@ -683,16 +793,11 @@ TEST_F(Tst_Text, meas_bpm_wins_over_conflicting_orn_tempo_at_later_tick)
             }
         }
     }
-
-    EXPECT_EQ(bpsValues.size(), 1u)
-        << "Only ONE TempoText must exist; conflicting ORN TEMPO=63 is suppressed "
-        "when MEAS header BPM=160 disagrees";
-
+    EXPECT_EQ(bpsValues.size(), 1u) << "importTempoTextSemantic=false: ORN TEMPO must be suppressed";
     if (!bpsValues.empty()) {
         EXPECT_NEAR(bpsValues[0], 160.0 / 60.0, 1e-5)
-            << "The surviving TempoText must be the MEAS header BPM (160/60), not the ORN TEMPO (63/60)";
+            << "With semantic=false only MEAS header BPM=160 must apply";
     }
-
     delete score;
 }
 
