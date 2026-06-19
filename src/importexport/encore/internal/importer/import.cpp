@@ -218,6 +218,47 @@ static void applyStaffScale(MasterScore* score, const EncRoot& enc)
     }
 }
 
+// Common standard paper sizes {width_in, height_in} used to detect page format
+// from WINI screen-pixel coordinates.
+static const std::pair<double, double> kStandardPageSizes[] = {
+    { 8.2677, 11.6929 },   // A4
+    { 11.6929, 16.5354 },  // A3
+    { 5.8268,  8.2677 },   // A5
+    { 8.5,   11.0 },       // US Letter
+    { 8.5,   14.0 },       // US Legal
+    { 9.8425, 13.8976 },   // B4 (ISO)
+    { 6.9291,  9.8425 },   // B5 (ISO)
+};
+
+// Try to identify the paper size from WINI screen-pixel coordinates.
+// pageWUnits = rightEdge + left, pageHUnits = bottomEdge + top.
+// For a correct match the scale (units/inch) must be consistent on both axes.
+static bool detectWiniPageSize(int pageWUnits, int pageHUnits,
+                               double& outWidthIn, double& outHeightIn)
+{
+    static constexpr double kDpiMin  = 60.0;   // minimum plausible screen DPI
+    static constexpr double kDpiMax  = 130.0;  // maximum plausible screen DPI
+    static constexpr double kTol     = 0.5;    // tolerance (units/inch)
+
+    double bestDelta = kTol;
+    bool found = false;
+    for (const auto& [w, h] : kStandardPageSizes) {
+        const double dpiW = pageWUnits / w;
+        const double dpiH = pageHUnits / h;
+        if (dpiW < kDpiMin || dpiW > kDpiMax) {
+            continue;
+        }
+        const double delta = std::abs(dpiW - dpiH);
+        if (delta < bestDelta) {
+            bestDelta  = delta;
+            outWidthIn = w;
+            outHeightIn = h;
+            found = true;
+        }
+    }
+    return found;
+}
+
 static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
 {
     if (!ps.hasData) {
@@ -228,23 +269,32 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
     // PPI on older hardware).  Symptom: rightEdge or bottomEdge exceeds the
     // page dimensions in pts (e.g. rightEdge=672 > A4_width_pts=595).
     //
-    // Detection: if rightEdge > pageWidth × 72 the coordinates must be in a
-    // finer unit.  Compute the actual scale from the page width:
-    //   scale = (rightEdge + left) / pageWidthIn
-    // (assumes left margin ≈ right margin, which holds for typical Encore files).
-    // For typographic-point files the scale stays at 72.
+    // When screen-pixel format is detected we derive the page size by pairing
+    // pageWidth_units = rightEdge + left with pageHeight_units = bottomEdge + top
+    // and matching the resulting aspect ratio against standard paper sizes.  The
+    // best match determines both the paper size AND the scale (units/inch).
     static constexpr double kMinLR = 0.03;   // min left/right margin (inches)
     static constexpr double kMinTB = 0.10;   // min top/bottom margin (inches)
     static constexpr double kMaxM  = 0.60;   // max margin (inches)
 
-    const double pageHIn = score->style().styleD(Sid::pageHeight);
-    const double pageWIn = score->style().styleD(Sid::pageWidth);
+    double pageHIn = score->style().styleD(Sid::pageHeight);
+    double pageWIn = score->style().styleD(Sid::pageWidth);
 
     const bool screenPixelFmt = (ps.rightEdge > static_cast<qint32>(pageWIn * 72.0))
                                 || (ps.bottomEdge > static_cast<qint32>(pageHIn * 72.0));
-    const double scaleUpi = screenPixelFmt
-                            ? (static_cast<double>(ps.rightEdge + ps.left) / pageWIn)
-                            : 72.0;
+    double scaleUpi = 72.0;
+    if (screenPixelFmt) {
+        const int pageWUnits = ps.rightEdge + ps.left;
+        const int pageHUnits = ps.bottomEdge + ps.top;
+        double detectedW = 0.0, detectedH = 0.0;
+        if (detectWiniPageSize(pageWUnits, pageHUnits, detectedW, detectedH)) {
+            pageWIn  = detectedW;
+            pageHIn  = detectedH;
+            score->style().set(Sid::pageWidth,  pageWIn);
+            score->style().set(Sid::pageHeight, pageHIn);
+        }
+        scaleUpi = static_cast<double>(pageWUnits) / pageWIn;
+    }
 
     double topIn  = ps.top / scaleUpi;
     double leftIn = ps.left / scaleUpi;
