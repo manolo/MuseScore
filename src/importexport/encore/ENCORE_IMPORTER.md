@@ -1651,36 +1651,61 @@ in Encore; files that were never touched through that dialog have no WINI block.
 
 ### WINI block layout
 
-Magic: `WINI`. Size field: 42 bytes (21 x uint16 LE).
+Magic: `WINI`. Size field: 42 bytes (21 × uint16 LE).
 
 The four margin-related values are stored as int32 LE (pairs of adjacent uint16,
 high word always zero) at byte offsets 24-39 within the block content:
 
 | Offset | Field | Meaning |
 |---|---|---|
-| +24 | top | top margin in typographic points (1/72 in) |
-| +28 | left | left margin in pts |
-| +32 | bottomEdge | page_height_pts - bottom_margin_pts |
-| +36 | rightEdge | page_width_pts - right_margin_pts |
+| +24 | top | top margin |
+| +28 | left | left margin |
+| +32 | bottomEdge | bottom boundary of printable area (from page top) |
+| +36 | rightEdge | right boundary of printable area (from page left) |
 
-Derived values applied to MuseScore style:
+### WINI unit variants
+
+Encore 5.x stores these values in **typographic points (1/72")**.
+Earlier versions (~4.x, some 3.x) store them in **screen pixels at the monitor
+DPI** (~84-85 PPI). Detection in `applyPageMargins` (`import.cpp`):
 
 ```
-topMargin    = top / 72.0                        (inches)
-leftMargin   = left / 72.0
-printWidth   = (rightEdge - left) / 72.0
-printHeight  = (bottomEdge - top) / 72.0
-bottomMargin = pageHeight - topMargin - printHeight
+if rightEdge > pageWidth × 72:   # coordinate exceeds A4 in pts → screen-pixel format
+    scale = (rightEdge + left) / pageWidthIn   # ≈ 84.67 for A4
+else:
+    scale = 72                                 # typographic points
 ```
 
-`printWidth` is set via `Sid::pagePrintableWidth`; `bottomMargin` is computed
-from the current score page height (defaults to A4 = 297 mm / INCH).
+### Page-size detection (`detectWiniPageSize`)
+
+In screen-pixel format, the paper size is not stored explicitly. It is recovered
+by matching `pageWidth_units = rightEdge + left` against all standard
+`QPageSize` sizes in two passes:
+
+**Pass 1 — ISO A-series (A0..A10) only.** All AN sizes share the 1:√2 aspect
+ratio, so within any AN file exactly one AN size falls in the plausible DPI
+range [60, 135] (consecutive sizes differ by √2 ≈ 1.414× in DPI). The in-range
+AN candidate with smallest `|dpiW − dpiH|` is selected. Checking A-series first
+prevents non-document sizes (envelopes, 12"×18" sheet, …) from winning over the
+correct AN via accidentally smaller delta.
+
+**Pass 2 — all other sizes (Letter, Legal, B-series, …).** Reached only when no
+A-series candidate qualifies. Picks smallest `|dpiW − dpiH|` among in-range
+candidates. If neither pass finds a match, returns false and the caller keeps the
+current MuseScore page dimensions (custom page).
+
+When the page is detected, `Sid::pageWidth` and `Sid::pageHeight` are updated
+to the detected dimensions before computing margins, so right/bottom margins
+are always derived from the correct paper size.
 
 ### Encoding quirks
 
-Encore rounds when storing: `round(inches * 72)`. The display in Page Setup
-shows `floor(pts / 72 * 1000) / 1000` so values may differ slightly from what
-the user typed (e.g. 0.100 in stores as 7 pts and displays as 0.097 in).
+Encore rounds when storing: `round(inches × 72)`. The display in Page Setup
+shows `floor(pts / 72 × 1000) / 1000` so values may differ slightly from what
+the user typed (e.g. 0.100 in stores as 7 pts and displays as 0.097 in). In
+screen-pixel files Encore also uses 1/72" for its own margin display, so the
+top/left values it shows (e.g. 0.39") differ slightly from the physical margin
+computed at the correct DPI (e.g. 0.33").
 
 ### Files with no WINI block
 
