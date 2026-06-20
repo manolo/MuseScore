@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Pure lookups from Encore values to MuseScore types: clefs, key/time signatures, dynamics,
+// articulations, tempo terms, instrument-template matching, and the frame/signature builders.
+
 #ifndef MU_IMPORTEXPORT_ENC_IMPORT_MAPPING_H
 #define MU_IMPORTEXPORT_ENC_IMPORT_MAPPING_H
 
@@ -122,13 +125,9 @@ int encArticByteToFingerNumber(quint8 articByte);
 // True when the articulation byte is an open-string marker (importer emits Fingering "0").
 bool encArticByteIsOpenString(quint8 articByte);
 
-// Returns the string number (1..N) for a string-number articulation byte, or 0 if not one.
-int encArticByteToStringNumber(quint8 articByte);
-
-// Returns the string number (1..8) for bytes in the 0x39..0x40 range (= byte - 0x38),
-// or 0 if the byte is not in that range.  These bytes are written by Encore as explicit
-// string-number anchors; when at least one is present in a measure, all notes in that
-// measure with options bit 0 set and no other artic byte also show string numbers.
+// String number (1..8) for the explicit string-number anchor bytes 0x39..0x40 (= byte - 0x38),
+// else 0. When a measure holds at least one, its notes with options bit 0 and no other artic byte
+// also show string numbers.
 int encArticByteToScaleStringNumber(quint8 articByte);
 
 // Returns the trill upper-neighbor interval for artic bytes 0x05/0x06/0x07 (flat/sharp/natural).

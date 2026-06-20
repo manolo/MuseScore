@@ -33,10 +33,13 @@
 #include <utility>
 #include <vector>
 #include <array>
+#include <optional>
 
 namespace mu::engraving {
 class Measure;
 class Note;
+class ChordRest;
+class Tuplet;
 }
 
 namespace mu::iex::enc {
@@ -69,6 +72,10 @@ struct MeasEmitCtx {
     std::multimap<std::tuple<int, int, int>, int8_t> tieStartSet;
     std::set<int> noteTicks;
     std::set<int> voice4NoteTicks;
+    // Staves (raw index) carrying a real voice-0..3 note in this measure. A whole-measure
+    // rest that arrives on Encore's "voice 4" (the silent-voice placeholder) is redundant on
+    // such a staff and would corrupt the bar if merged into voice 0; it is skipped.
+    std::set<int> stavesWithRealNote;
     std::map<int, int> v0NoteCountAtTick;
     std::map<int, int> ornFingCountAtTick;
     int maxVoice0Tick = -1;
@@ -115,12 +122,20 @@ void enqueueLyric(BuildCtx& ctx, const EncLyric* el, mu::engraving::track_idx_t 
 // Attach queued lyrics to the nearest chords in the measure. (emitters-lyrics.cpp)
 void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc);
 
+// Resolved MuseScore destination for an element: staff/voice and the derived track + lookup keys.
+struct RoutedTrack {
+    int staffIdx { 0 };
+    int voice { 0 };
+    int msVoice { 0 };
+    mu::engraving::track_idx_t track { 0 };
+    std::pair<int, int> trackKey;     // (staffIdx, msVoice)
+    std::pair<int, int> encVoiceKey;  // (staffIdx, voice)
+};
+
 // Route an element's raw (staffIdx, voice, staffWithin) to a MuseScore (staffIdx, voice, track).
-// Returns false if the element should be skipped. (emitters.cpp)
-bool routeElementStaffVoice(
-    const EncMeasureElem* e, bool isNoteOrRest, const std::array<int, 256>& lineSlotByRawByte, const MeasEmitCtx& mc, const BuildCtx& ctx,
-    int& staffIdx, int& voice, int& msVoice, mu::engraving::track_idx_t& track, std::pair<int, int>& trackKey, std::pair<int,
-                                                                                                                         int>& encVoiceKey);
+// Returns nullopt if the element should be skipped. (emitters.cpp)
+std::optional<RoutedTrack> routeElementStaffVoice(
+    const EncMeasureElem* e, bool isNoteOrRest, const std::array<int, 256>& lineSlotByRawByte, const MeasEmitCtx& mc, const BuildCtx& ctx);
 
 // Case-B pickup adjustment: shorten measure 0 if loop placed less than its nominal length. (emitters-fill.cpp)
 void adjustPickupMeasure(BuildCtx& ctx, mu::engraving::Measure* measure, int measIdx);
@@ -128,8 +143,20 @@ void adjustPickupMeasure(BuildCtx& ctx, mu::engraving::Measure* measure, int mea
 void fillTrailingGaps(BuildCtx& ctx, mu::engraving::Measure* measure, mu::engraving::Fraction measTick);
 // Fix over/undershoots up to 1/24. (emitters-fill.cpp)
 void correctMeasureLength(BuildCtx& ctx, mu::engraving::Measure* measure);
+// Extend the measure to the max voice content (IrregularMeasure / Stretch fallback). (emitters-fill.cpp)
+void extendMeasureIrregular(BuildCtx& ctx, mu::engraving::Measure* measure);
 // Nuclear hard-cap: remove trailing elements and fill deficit. (emitters-fill.cpp)
 void capMeasureLength(BuildCtx& ctx, mu::engraving::Measure* measure);
+// Resolve overfull voices per the overfill strategy (Remove / Stretch / Irregular). (emitters-overfill.cpp)
+void fitOverfullMeasure(BuildCtx& ctx, mu::engraving::Measure* measure);
+
+// Collect the ordered ChordRests of one track in a measure; returns their total actual ticks. (emitters-overfill.cpp)
+mu::engraving::Fraction collectVoice(mu::engraving::Measure* measure, mu::engraving::track_idx_t tr,
+                                     std::vector<mu::engraving::ChordRest*>& out);
+
+// Dissolve a tuplet whole: detach every member (revert to plain face value), remove the empty
+// tuplet from its parent and delete it. A tuplet is atomic, never leave a partial one. (emitters-overfill.cpp)
+void dissolveTuplet(mu::engraving::Tuplet* t);
 
 // Apply per-measure BPM marks as TempoText elements. (emitters-tempo.cpp)
 void applyMeasureBpmMarks(BuildCtx& ctx);

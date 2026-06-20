@@ -20,18 +20,138 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Adjust measure length: pickup shortening, trailing-gap fill and over/undershoot correction.
+
 #include "emitters-internal.h"
 
 #include <algorithm>
 
 #include "engraving/dom/chord.h"
+#include "engraving/dom/durationtype.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/rest.h"
 #include "engraving/dom/segment.h"
+#include "engraving/dom/sig.h"
 #include "engraving/dom/tuplet.h"
 
 namespace mu::iex::enc {
+// Resize `measure` to `newLen` and propagate the change. Shrinking or extending a measure
+// moves the absolute tick of everything that follows it, so the following measures shift by
+// the signed delta and so does every pending element that caches an absolute tick. Only
+// pending hairpins used to be shifted; pending slurs, ornaments, markers and the rest carry
+// absolute ticks too and were silently corrupted by a measure resize. Forward ticks at or
+// after the measure's content boundary shift; ticks inside the kept content never move.
+static void resizeMeasureAndShift(BuildCtx& ctx, Measure* measure, Fraction newLen)
+{
+    // Store the actual measure duration in lowest terms. Summing triplet content (1/24, 1/12, ...)
+    // leaves the raw fraction unreduced (e.g. 99/96 or 21/24), which is the same duration but a
+    // disproportionate-looking time signature; reduce it to its canonical form (33/32, 7/8) so an
+    // irregular measure reads as a sensible value. reduced() does not change the duration, only its
+    // numerator/denominator, so the shift arithmetic below is unaffected.
+    newLen = newLen.reduced();
+    const Fraction oldLen = measure->ticks();
+    const Fraction delta = newLen - oldLen;
+    if (delta == Fraction(0, 1)) {
+        return;
+    }
+    const Fraction measTick = measure->tick();
+    // Content boundary: positions before it are inside the kept part of the measure and never
+    // move; positions at/after it belong to following measures and shift by delta. Shrinking
+    // removes the [newEnd, oldEnd) span, so a tick exactly at the new end stays put (strict >);
+    // extending inserts space at the old end, so a tick there is the next downbeat and moves (>=).
+    const bool shrinking = delta < Fraction(0, 1);
+    const Fraction boundary = measTick + std::min(oldLen, newLen);
+
+    measure->setTicks(newLen);
+    for (Measure* m = measure->nextMeasure(); m; m = m->nextMeasure()) {
+        m->setTick(m->tick() + delta);
+    }
+
+    auto shift = [&](Fraction& t) {
+        const bool past = shrinking ? (t > boundary) : (t >= boundary);
+        if (past) {
+            t += delta;
+        }
+    };
+
+    for (PendingHairpin& p : ctx.pendingHairpins) {
+        shift(p.startTick);
+        shift(p.maxEndTick);
+    }
+    for (PendingSlur& p : ctx.pendingSlurs) {
+        shift(p.startTick);
+    }
+    for (PendingArpeggio& p : ctx.pendingArpeggios) {
+        shift(p.tick);
+    }
+    for (PendingOrnTremolo& p : ctx.pendingOrnTremolos) {
+        shift(p.tick);
+        shift(p.measTick);
+    }
+    for (PendingTrill& p : ctx.pendingTrills) {
+        shift(p.tick);
+    }
+    for (auto& [tr, ends] : ctx.pendingTrillEnds) {
+        for (Fraction& e : ends) {
+            shift(e);
+        }
+    }
+    for (PendingStaccato& p : ctx.pendingStaccatos) {
+        shift(p.tick);
+    }
+    for (PendingFermata& p : ctx.pendingFermatas) {
+        shift(p.tick);
+    }
+    for (PendingBreath& p : ctx.pendingBreaths) {
+        shift(p.tick);
+    }
+    for (PendingMeasureRepeat& p : ctx.pendingMeasureRepeats) {
+        shift(p.measTick);
+    }
+    for (PendingBowing& p : ctx.pendingBowings) {
+        shift(p.tick);
+    }
+    for (PendingOrnFingering& p : ctx.pendingOrnFingerings) {
+        shift(p.tick);
+    }
+    for (PendingOttava& p : ctx.pendingOttavas) {
+        shift(p.startTick);
+    }
+    for (PendingMarker& p : ctx.pendingMarkers) {
+        shift(p.tick);
+    }
+}
+
+// Fill a gap of length `len` at absolute tick `fillTick` in `track` with rests of exact rhythmic
+// value, split per the measure's time signature (as Measure::fillGap does), instead of one
+// whole-measure rest. A V_MEASURE-typed rest renders as a centered whole rest whatever its actual
+// duration, which is wrong for a partial gap; a rhythmic split shows the correct values (and is
+// what a visible filler should look like). `makeGap` marks the rests as invisible gap rests.
+// No-op if the first segment is already occupied.
+static void addGapRests(Measure* measure, const Fraction& fillTick, const Fraction& len,
+                        track_idx_t track, bool makeGap)
+{
+    if (len <= Fraction(0, 1)) {
+        return;
+    }
+    const Fraction rtick = fillTick - measure->tick();
+    Fraction pos = fillTick;
+    for (const TDuration& d : toRhythmicDurationList(len, true /*isRest*/, rtick,
+                                                     measure->timesig(), measure, 0 /*maxDots*/)) {
+        Segment* seg = measure->getSegment(SegmentType::ChordRest, pos);
+        if (seg->element(track)) {
+            break;
+        }
+        Rest* r = Factory::createRest(seg, d);
+        r->setTicks(d.isMeasure() ? measure->ticks() : d.fraction());
+        r->setTrack(track);
+        r->setGap(makeGap);
+        seg->add(r);
+        pos += r->actualTicks();
+    }
+}
+
 // Case B pickup adjustment: if measure 0 has the same timesig as measure 1 but
 // the note loop placed less content than the full measure, shorten it to the
 // actual cumTick. Update all subsequent measures' tick positions accordingly.
@@ -44,7 +164,7 @@ void adjustPickupMeasure(BuildCtx& ctx, Measure* measure, int measIdx)
         return;
     }
     Fraction maxCumTick { 0, 1 };
-    for (auto& [key, ct] : ctx.cumTick) {
+    for (auto& [key, ct] : ctx.scratch.cumTick) {
         if (ct > maxCumTick) {
             maxCumTick = ct;
         }
@@ -52,19 +172,7 @@ void adjustPickupMeasure(BuildCtx& ctx, Measure* measure, int measIdx)
     if (maxCumTick <= Fraction(0, 1) || maxCumTick >= measure->ticks()) {
         return;
     }
-    const Fraction delta = measure->ticks() - maxCumTick;
-    measure->setTicks(maxCumTick);
-    for (Measure* m = measure->nextMeasure(); m; m = m->nextMeasure()) {
-        m->setTick(m->tick() - delta);
-    }
-    // Any PendingHairpin whose maxEndTick reaches past the shortened measure 0 must
-    // be adjusted by the same delta so resolution searches the correct range.
-    const Fraction m0End = measure->tick() + maxCumTick;
-    for (PendingHairpin& ph : ctx.pendingHairpins) {
-        if (ph.maxEndTick > m0End) {
-            ph.maxEndTick -= delta;
-        }
-    }
+    resizeMeasureAndShift(ctx, measure, maxCumTick);
 }
 
 // Pre-fill trailing silence with rests so checkMeasure does not add its own.
@@ -81,10 +189,10 @@ void fillTrailingGaps(BuildCtx& ctx, Measure* measure, Fraction measTick)
     for (int si = 0; si < ctx.totalStaves; ++si) {
         for (voice_idx_t v = 0; v < VOICES; ++v) {
             const auto key = std::make_pair(si, static_cast<int>(v));
-            if (!ctx.cumTick.count(key)) {
+            if (!ctx.scratch.cumTick.count(key)) {
                 continue;
             }
-            const Fraction voicePos = ctx.cumTick.at(key);
+            const Fraction voicePos = ctx.scratch.cumTick.at(key);
             if (voicePos <= Fraction(0, 1)) {
                 continue;
             }
@@ -97,14 +205,7 @@ void fillTrailingGaps(BuildCtx& ctx, Measure* measure, Fraction measTick)
             }
             const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
             const Fraction fillTick = measTick + voicePos;
-            Segment* seg = measure->getSegment(SegmentType::ChordRest, fillTick);
-            if (!seg->element(tr)) {
-                Rest* r = Factory::createRest(seg, TDuration(DurationType::V_MEASURE));
-                r->setTicks(remaining);
-                r->setTrack(tr);
-                r->setGap(makeGap);
-                seg->add(r);
-            }
+            addGapRests(measure, fillTick, remaining, tr, makeGap);
         }
     }
 
@@ -121,8 +222,8 @@ void fillTrailingGaps(BuildCtx& ctx, Measure* measure, Fraction measTick)
             Fraction staffLen { 0, 1 };
             for (voice_idx_t v = 0; v < VOICES; ++v) {
                 const auto k = std::make_pair(si, static_cast<int>(v));
-                if (ctx.cumTick.count(k) && ctx.cumTick.at(k) > staffLen) {
-                    staffLen = ctx.cumTick.at(k);
+                if (ctx.scratch.cumTick.count(k) && ctx.scratch.cumTick.at(k) > staffLen) {
+                    staffLen = ctx.scratch.cumTick.at(k);
                 }
             }
             if (staffLen <= Fraction(0, 1)) {
@@ -132,16 +233,7 @@ void fillTrailingGaps(BuildCtx& ctx, Measure* measure, Fraction measTick)
             }
         }
         if (!anyStaffSilent && maxPos > Fraction(0, 1) && maxPos < measure->ticks()) {
-            const Fraction delta = measure->ticks() - maxPos;
-            measure->setTicks(maxPos);
-            for (Measure* m = measure->nextMeasure(); m; m = m->nextMeasure()) {
-                m->setTick(m->tick() - delta);
-            }
-            for (PendingHairpin& ph : ctx.pendingHairpins) {
-                if (ph.maxEndTick > measTick + maxPos) {
-                    ph.maxEndTick -= delta;
-                }
-            }
+            resizeMeasureAndShift(ctx, measure, maxPos);
         }
     }
 }
@@ -160,24 +252,16 @@ void correctMeasureLength(BuildCtx& ctx, Measure* measure)
     for (int si = 0; si < ctx.totalStaves; ++si) {
         for (voice_idx_t v = 0; v < VOICES; ++v) {
             track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
-            Fraction voiceSum(0, 1);
-            bool hasContent = false;
-            std::vector<Rest*> gapRests;
-            for (Segment* seg = measure->first(SegmentType::ChordRest);
-                 seg; seg = seg->next(SegmentType::ChordRest)) {
-                EngravingItem* el = seg->element(tr);
-                if (!el) {
-                    continue;
-                }
-                hasContent = true;
-                ChordRest* cr = toChordRest(el);
-                voiceSum += cr->actualTicks();
-                if (el->isRest() && toRest(el)->isGap()) {
-                    gapRests.push_back(toRest(el));
-                }
+            std::vector<ChordRest*> crs;
+            Fraction voiceSum = collectVoice(measure, tr, crs);
+            if (crs.empty()) {
+                continue;   // no content in this voice
             }
-            if (!hasContent) {
-                continue;
+            std::vector<Rest*> gapRests;
+            for (ChordRest* cr : crs) {
+                if (cr->isRest() && toRest(cr)->isGap()) {
+                    gapRests.push_back(toRest(cr));
+                }
             }
             // Overshoot: remove gap rests smallest-first.
             // Skip for IrregularMeasure overfill, capMeasureLength will extend instead.
@@ -198,18 +282,47 @@ void correctMeasureLength(BuildCtx& ctx, Measure* measure)
                     delete gr;
                 }
             }
-            // Undershoot: add exact V_MEASURE rest for residual
+            // Undershoot: fill the residual with exact-valued rests.
             const Fraction deficit = mLen - voiceSum;
             if (deficit > Fraction(0, 1) && deficit <= maxDelta) {
-                const Fraction fillTick = measure->tick() + voiceSum;
-                Segment* fillSeg = measure->getSegment(SegmentType::ChordRest, fillTick);
-                if (!fillSeg->element(tr)) {
-                    Rest* r = Factory::createRest(fillSeg, TDuration(DurationType::V_MEASURE));
-                    r->setTicks(deficit);
-                    r->setTrack(tr);
-                    r->setGap(makeGap);
-                    fillSeg->add(r);
+                addGapRests(measure, measure->tick() + voiceSum, deficit, tr, makeGap);
+            }
+        }
+    }
+}
+
+// Extend the measure to the maximum voice content (IrregularMeasure behavior), shifting
+// later measures and pending hairpins, and filling short voices with a visible rest.
+// Used by the IrregularMeasure strategy and as the Stretch fallback when a tuplet cannot
+// be compressed enough to be musical.
+void extendMeasureIrregular(BuildCtx& ctx, Measure* measure)
+{
+    const Fraction mLen = measure->ticks();
+    const Fraction measTick = measure->tick();
+
+    std::vector<ChordRest*> crs;
+    Fraction maxVoiceSum { 0, 1 };
+    for (int si = 0; si < ctx.totalStaves; ++si) {
+        for (voice_idx_t v = 0; v < VOICES; ++v) {
+            const Fraction voiceSum = collectVoice(measure, static_cast<track_idx_t>(si * VOICES + v), crs);
+            if (voiceSum > maxVoiceSum) {
+                maxVoiceSum = voiceSum;
+            }
+        }
+    }
+    if (maxVoiceSum > mLen) {
+        resizeMeasureAndShift(ctx, measure, maxVoiceSum);
+        // Fill all voices that fall short of the extended measure length.
+        // Staves whose content stopped at the original measure length now sit
+        // inside a longer measure; a visible rest covers the added time.
+        for (int si = 0; si < ctx.totalStaves; ++si) {
+            for (voice_idx_t v = 0; v < VOICES; ++v) {
+                const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
+                const Fraction voiceSum = collectVoice(measure, tr, crs);
+                if (voiceSum <= Fraction(0, 1) || voiceSum >= maxVoiceSum) {
+                    continue;
                 }
+                addGapRests(measure, measTick + voiceSum, maxVoiceSum - voiceSum, tr, false);
             }
         }
     }
@@ -224,66 +337,9 @@ void capMeasureLength(BuildCtx& ctx, Measure* measure)
 {
     const bool makeGap = (ctx.opts.underfillMeasureStrategy != UnderfillStrategy::VisibleRests);
     const Fraction mLen = measure->ticks();
-    const Fraction measTick = measure->tick();
 
     if (ctx.opts.overfillMeasureStrategy == OverfillStrategy::IrregularMeasure) {
-        Fraction maxVoiceSum { 0, 1 };
-        for (int si = 0; si < ctx.totalStaves; ++si) {
-            for (voice_idx_t v = 0; v < VOICES; ++v) {
-                const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
-                Fraction voiceSum { 0, 1 };
-                for (Segment* seg = measure->first(SegmentType::ChordRest);
-                     seg; seg = seg->next(SegmentType::ChordRest)) {
-                    EngravingItem* el = seg->element(tr);
-                    if (el) {
-                        voiceSum += toChordRest(el)->actualTicks();
-                    }
-                }
-                if (voiceSum > maxVoiceSum) {
-                    maxVoiceSum = voiceSum;
-                }
-            }
-        }
-        if (maxVoiceSum > mLen) {
-            const Fraction delta = maxVoiceSum - mLen;
-            measure->setTicks(maxVoiceSum);
-            for (Measure* m = measure->nextMeasure(); m; m = m->nextMeasure()) {
-                m->setTick(m->tick() + delta);
-            }
-            for (PendingHairpin& ph : ctx.pendingHairpins) {
-                if (ph.maxEndTick >= measTick + mLen) {
-                    ph.maxEndTick += delta;
-                }
-            }
-            // Fill all voices that fall short of the extended measure length.
-            // Staves whose content stopped at the original measure length now sit
-            // inside a longer measure; a visible rest covers the added time.
-            for (int si = 0; si < ctx.totalStaves; ++si) {
-                for (voice_idx_t v = 0; v < VOICES; ++v) {
-                    const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
-                    Fraction voiceSum { 0, 1 };
-                    for (Segment* seg = measure->first(SegmentType::ChordRest);
-                         seg; seg = seg->next(SegmentType::ChordRest)) {
-                        EngravingItem* el = seg->element(tr);
-                        if (el) {
-                            voiceSum += toChordRest(el)->actualTicks();
-                        }
-                    }
-                    if (voiceSum <= Fraction(0, 1) || voiceSum >= maxVoiceSum) {
-                        continue;
-                    }
-                    const Fraction fillTick = measTick + voiceSum;
-                    Segment* fillSeg = measure->getSegment(SegmentType::ChordRest, fillTick);
-                    if (!fillSeg->element(tr)) {
-                        Rest* r = Factory::createRest(fillSeg, TDuration(DurationType::V_MEASURE));
-                        r->setTicks(maxVoiceSum - voiceSum);
-                        r->setTrack(tr);
-                        r->setGap(false);
-                        fillSeg->add(r);
-                    }
-                }
-            }
-        }
+        extendMeasureIrregular(ctx, measure);
         return;
     }
 
@@ -291,27 +347,19 @@ void capMeasureLength(BuildCtx& ctx, Measure* measure)
         for (voice_idx_t v = 0; v < VOICES; ++v) {
             const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
             std::vector<ChordRest*> crs;
-            Fraction voiceSum(0, 1);
-            for (Segment* seg = measure->first(SegmentType::ChordRest);
-                 seg; seg = seg->next(SegmentType::ChordRest)) {
-                EngravingItem* el = seg->element(tr);
-                if (!el) {
-                    continue;
-                }
-                ChordRest* cr = toChordRest(el);
-                crs.push_back(cr);
-                voiceSum += cr->actualTicks();
-            }
+            Fraction voiceSum = collectVoice(measure, tr, crs);
             if (voiceSum <= mLen || crs.empty()) {
                 continue;
             }
             while (voiceSum > mLen && !crs.empty()) {
                 ChordRest* last = crs.back();
-                // A tuplet is atomic: stop trimming at its boundary rather than removing a
-                // single member and leaving an invalid partial tuplet behind. Overfull
-                // tuplets are dissolved whole by fitOverfullMeasure's removeExtraNotes path.
+                // A tuplet is atomic: dissolve it whole (members revert to plain face value)
+                // rather than removing one member and leaving an invalid partial tuplet, then
+                // re-collect and keep trimming the now-plain notes.
                 if (last->tuplet()) {
-                    break;
+                    dissolveTuplet(last->tuplet());
+                    voiceSum = collectVoice(measure, tr, crs);
+                    continue;
                 }
                 crs.pop_back();
                 voiceSum -= last->actualTicks();
@@ -321,15 +369,7 @@ void capMeasureLength(BuildCtx& ctx, Measure* measure)
             }
             const Fraction deficit = mLen - voiceSum;
             if (deficit > Fraction(0, 1)) {
-                const Fraction fillTick = measure->tick() + voiceSum;
-                Segment* fillSeg = measure->getSegment(SegmentType::ChordRest, fillTick);
-                if (!fillSeg->element(tr)) {
-                    Rest* r = Factory::createRest(fillSeg, TDuration(DurationType::V_MEASURE));
-                    r->setTicks(deficit);
-                    r->setTrack(tr);
-                    r->setGap(makeGap);
-                    fillSeg->add(r);
-                }
+                addGapRests(measure, measure->tick() + voiceSum, deficit, tr, makeGap);
             }
         }
     }
