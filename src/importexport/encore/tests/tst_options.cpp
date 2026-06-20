@@ -305,6 +305,43 @@ TEST_F(Tst_Options, underfill_visible_rests_produces_no_gap_rests)
     delete score;
 }
 
+// A partial gap must be filled with exact-valued rests, not a whole-measure (V_MEASURE) rest:
+// a V_MEASURE rest renders as a centered whole rest whatever its real duration, which is wrong
+// next to notes. A fully empty measure may still hold a whole-measure rest, so only measures
+// that contain a note are checked.
+TEST_F(Tst_Options, visible_rests_use_exact_durations_not_whole_measure)
+{
+    EncImportOptions opts;
+    opts.underfillMeasureStrategy = UnderfillStrategy::VisibleRests;
+    MasterScore* score = readEncoreScoreWithOpts("structure_pickup_casea_sparse.enc", opts);
+    ASSERT_NE(score, nullptr);
+
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        bool hasNote = false;
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (track_idx_t t = 0; t < score->ntracks(); ++t) {
+                const EngravingItem* e = s->element(t);
+                if (e && e->isChord()) {
+                    hasNote = true;
+                }
+            }
+        }
+        if (!hasNote) {
+            continue;
+        }
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (track_idx_t t = 0; t < score->ntracks(); ++t) {
+                const EngravingItem* e = s->element(t);
+                if (e && e->isRest()) {
+                    EXPECT_NE(toRest(e)->durationType().type(), DurationType::V_MEASURE)
+                        << "partial-gap fill must use exact rest durations, not a whole-measure rest";
+                }
+            }
+        }
+    }
+    delete score;
+}
+
 // ===========================================================================
 // firstMeasureIsPickup
 // ===========================================================================
@@ -552,6 +589,63 @@ TEST_F(Tst_Options, overfill_stretch_last_note_does_not_crash)
     opts.overfillMeasureStrategy = OverfillStrategy::StretchLastNote;
     MasterScore* score = readEncoreScoreWithOpts("bazo.enc", opts);
     ASSERT_NE(score, nullptr) << "StretchLastNote strategy must not crash during import";
+    delete score;
+}
+
+TEST_F(Tst_Options, stretch_compresses_tuplet_keeps_all_notes)
+{
+    // notes_capped_tuplet_note.enc: 4/4 with 3 plain quarters + a 3:2 quarter triplet
+    // that overflows. "Stretch last notes" preserves ALL three triplet notes by
+    // compressing the tuplet bracket from a half (480) down to a quarter (240): the
+    // members become eighths in a 3:2 group filling the last beat. The tuplet stays
+    // intact (3 members) and the measure remains a standard 4/4.
+    EncImportOptions opts;
+    opts.overfillMeasureStrategy = OverfillStrategy::StretchLastNote;
+    MasterScore* score = readEncoreScoreWithOpts("notes_capped_tuplet_note.enc", opts);
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "Stretch-compressed measure must pass sanity check";
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->ticks(), m->timesig()) << "Compression keeps a standard 4/4 measure";
+    Fraction sum(0, 1);
+    int tupletMembers = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChordRest()) {
+            ChordRest* cr = toChordRest(e);
+            sum += cr->actualTicks();
+            if (cr->tuplet()) {
+                ++tupletMembers;
+            }
+        }
+    }
+    EXPECT_EQ(tupletMembers, 3) << "All three triplet notes preserved inside the tuplet";
+    EXPECT_EQ(sum, Fraction(4, 4)) << "Voice 0 sums to exactly 4/4";
+    delete score;
+}
+
+TEST_F(Tst_Options, stretch_falls_back_to_irregular_for_tiny_bracket)
+{
+    // notes_stretch_irregular_fallback.enc: 3 plain quarters + a 3:2 HALF-note triplet
+    // (natural bracket = a whole note). Only a quarter of space is left, so the largest
+    // bracket that fits is < half the natural span: Stretch declines to compress and
+    // falls back to IrregularMeasure, extending the bar and keeping all three members.
+    EncImportOptions opts;
+    opts.overfillMeasureStrategy = OverfillStrategy::StretchLastNote;
+    MasterScore* score = readEncoreScoreWithOpts("notes_stretch_irregular_fallback.enc", opts);
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "Stretch irregular fallback must pass sanity check";
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_GT(m->ticks(), m->timesig()) << "Fallback extends the measure past 4/4";
+    int tupletMembers = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChordRest() && toChordRest(e)->tuplet()) {
+            ++tupletMembers;
+        }
+    }
+    EXPECT_EQ(tupletMembers, 3) << "All three half-note-triplet members preserved";
     delete score;
 }
 

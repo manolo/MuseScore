@@ -71,6 +71,7 @@ target_sources(iex_encore PRIVATE
     internal/importer/emitters-rest.cpp
     internal/importer/emitters-chords.cpp
     internal/importer/emitters-fill.cpp
+    internal/importer/emitters-overfill.cpp
     internal/importer/emitters-lyrics.cpp
     internal/importer/emitters-orn.cpp
     internal/importer/emitters-note-grace.cpp

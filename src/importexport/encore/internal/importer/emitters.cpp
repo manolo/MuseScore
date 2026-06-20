@@ -24,6 +24,7 @@
 #include "import.h"
 #include "emitters-internal.h"
 #include "../parser/elem.h"
+#include "../parser/readers.h"
 #include "mappers.h"
 #include "../parser/ticks.h"
 #include "emitters-tuplets.h"
@@ -134,8 +135,8 @@ void MeasEmitCtx::closeTupletWithFill(BuildCtx& ctx, TupletTracker& tt,
             while (tt.placedTicks < expectedTup && safety-- > 0
                    && (static_cast<int>(tt.currentTuplet->elements().size()) < tt.actualN
                        || (faceShort && tt.faceTicks < tt.fullFaceSum))
-                   && ctx.cumTick[trackKey] + perNote <= measure->ticks()) {
-                Fraction restTick = measure->tick() + ctx.cumTick[trackKey];
+                   && ctx.scratch.cumTick[trackKey] + perNote <= measure->ticks()) {
+                Fraction restTick = measure->tick() + ctx.scratch.cumTick[trackKey];
                 Segment* seg = measure->getSegment(SegmentType::ChordRest, restTick);
                 if (!seg) {
                     break;
@@ -152,7 +153,7 @@ void MeasEmitCtx::closeTupletWithFill(BuildCtx& ctx, TupletTracker& tt,
                 tt.currentTuplet->add(rest);
                 seg->add(rest);
                 tt.placedTicks += perNote;
-                ctx.cumTick[trackKey] += perNote;
+                ctx.scratch.cumTick[trackKey] += perNote;
             }
         }
     }
@@ -295,6 +296,7 @@ static void scanMeasureMetadata(const MeasureElemRefVec& sortedElems, MeasEmitCt
             } else {
                 mc.v0NoteCountAtTick[static_cast<int>(em->tick)]++;
                 mc.maxVoice0Tick = std::max(mc.maxVoice0Tick, static_cast<int>(em->tick));
+                mc.stavesWithRealNote.insert(static_cast<int>(em->staffIdx));
             }
             // Detect scale string number anchors (au in 0x39..0x40)
             const EncNote* enPre = static_cast<const EncNote*>(em);
@@ -340,26 +342,20 @@ static bool shouldIncludeElement(const EncMeasureElem* e, const EncMeasure& encM
 
 // Returns false if the element should be skipped (staffIdx out of range or voice invalid).
 // On success, fills staffIdx, voice, msVoice, track, trackKey, encVoiceKey.
-bool routeElementStaffVoice(
+std::optional<RoutedTrack> routeElementStaffVoice(
     const EncMeasureElem* e,
     bool isNoteOrRest,
     const std::array<int, 256>& lineSlotByRawByte,
     const MeasEmitCtx& mc,
-    const BuildCtx& ctx,
-    int& staffIdx,
-    int& voice,
-    int& msVoice,
-    track_idx_t& track,
-    std::pair<int, int>& trackKey,
-    std::pair<int, int>& encVoiceKey)
+    const BuildCtx& ctx)
 {
     const EncRoot& enc = ctx.enc;
     const int nLineStaves = mc.nLineStaves;
     const std::vector<int>& lineStaffInstrIdx = *mc.lineStaffInstrIdx;
     const std::vector<int>& lineStaffWithin   = *mc.lineStaffWithin;
 
-    staffIdx = static_cast<int>(e->staffIdx);
-    voice    = static_cast<int>(e->voice);
+    int staffIdx = static_cast<int>(e->staffIdx);
+    int voice    = static_cast<int>(e->voice);
 
     // Translate rawStaff byte (staffWithin<<6)|instrIdx to LINE slot; apply case-B voice remap when origStaffWithin > 0.
     const quint8 rawNoteStaff = e->rawStaffByte();
@@ -377,7 +373,11 @@ bool routeElementStaffVoice(
     }
 
     if (staffIdx >= ctx.totalStaves) {
-        return false;
+        // The element references a staff the score does not have. This is almost always orphan
+        // data from a staff deleted in Encore (its index is not reused, and Encore does not show
+        // it). Count it; emitMeasures reports the total once instead of one line per element.
+        ++ctx.scratch.droppedByMissingStaff[staffIdx];
+        return std::nullopt;
     }
     // Multi-staff routing:
     // (A) voice >= VOICES: route to staffIdx+1, voice=0.
@@ -413,14 +413,19 @@ bool routeElementStaffVoice(
         }
     }
 
-    encVoiceKey = std::make_pair(staffIdx, voice);
-    msVoice = voice;
+    const int msVoice = voice;
     if (msVoice >= static_cast<int>(VOICES)) {
-        return false;  // voice out of range
+        ++ctx.scratch.droppedByBadVoice;
+        return std::nullopt;  // voice out of range
     }
-    track    = static_cast<track_idx_t>(staffIdx * VOICES + msVoice);
-    trackKey = std::make_pair(staffIdx, msVoice);
-    return true;
+    RoutedTrack r;
+    r.staffIdx    = staffIdx;
+    r.voice       = voice;
+    r.msVoice     = msVoice;
+    r.track       = static_cast<track_idx_t>(staffIdx * VOICES + msVoice);
+    r.trackKey    = std::make_pair(staffIdx, msVoice);
+    r.encVoiceKey = std::make_pair(staffIdx, voice);
+    return r;
 }
 
 // Returns the MuseScore tick where this element should be placed.
@@ -440,7 +445,7 @@ static Fraction computeElementTick(
     constexpr int CHORD_MIDI_THRESHOLD = 2 * CHORD_CLUSTER_THRESHOLD;  // = 8
     const EncElemType et = static_cast<EncElemType>(e->type);
     if (isChordExt) {
-        return ctx.lastChordPos.count(trackKey) ? ctx.lastChordPos.at(trackKey) : measTick;
+        return ctx.scratch.lastChordPos.count(trackKey) ? ctx.scratch.lastChordPos.at(trackKey) : measTick;
     }
 
     // Gap-snap: when binary tick is on the face grid and gap > CHORD_MIDI_THRESHOLD, advance cumTick
@@ -459,17 +464,17 @@ static Fraction computeElementTick(
         // Suppress gap-snap: (a) grace pending (v0xA6 ticks on face grid but no real time),
         // (b) inside active tuplet (apparent gap is tuplet-internal timing artifact),
         // (c) gap equals stolen grace ticks (grace-displaced note must not fire spurious rest).
-        const bool gracePending = !ctx.pendingGraces[trackKey].empty();
-        const bool inActiveTuplet = ctx.tuplets.count(trackKey)
-                                    && ctx.tuplets.at(trackKey).inTuplet();
-        const int stolenTicks = ctx.graceStolenTicks.count(trackKey)
-                                ? ctx.graceStolenTicks.at(trackKey) : 0;
+        const bool gracePending = !ctx.scratch.pendingGraces[trackKey].empty();
+        const bool inActiveTuplet = ctx.scratch.tuplets.count(trackKey)
+                                    && ctx.scratch.tuplets.at(trackKey).inTuplet();
+        const int stolenTicks = ctx.scratch.graceStolenTicks.count(trackKey)
+                                ? ctx.scratch.graceStolenTicks.at(trackKey) : 0;
         if (onFaceGrid && !gracePending && !inActiveTuplet) {
             // Use kEncWholeTicks: the beatTicks*timeSigDen formula breaks for
             // non-standard beatTicks (e.g. 2/2 with beatTicks=240 gives 480).
             const Fraction encTickFrac((int)e->tick, kEncWholeTicks);
-            if (encTickFrac > ctx.cumTick[trackKey]) {
-                const Fraction gap = encTickFrac - ctx.cumTick[trackKey];
+            if (encTickFrac > ctx.scratch.cumTick[trackKey]) {
+                const Fraction gap = encTickFrac - ctx.scratch.cumTick[trackKey];
                 const int gapEncTicks
                     = (gap.numerator() * kEncWholeTicks)
                       / std::max(1, gap.denominator());
@@ -477,20 +482,21 @@ static Fraction computeElementTick(
                     = (stolenTicks > 0 && gapEncTicks <= stolenTicks);
                 if (gapEncTicks > CHORD_MIDI_THRESHOLD && !gapIsGraceArtifact
                     && encTickFrac < measure->ticks()) {
-                    ctx.cumTick[trackKey] = encTickFrac;
+                    ctx.scratch.cumTick[trackKey] = encTickFrac;
                 }
             }
         }
     }
 
-    const Fraction elemTick = measTick + ctx.cumTick[trackKey];
+    const Fraction elemTick = measTick + ctx.scratch.cumTick[trackKey];
     if (isNoteOrRest) {
-        ctx.lastChordPos[trackKey] = elemTick;
+        ctx.scratch.lastChordPos[trackKey] = elemTick;
     }
     // Rests don't set prevMidiTick: a note after a rest is a fresh cluster.
     if (et == EncElemType::NOTE) {
-        ctx.prevMidiTick[trackKey] = e->tick;
-        ctx.prevEncVoice[trackKey] = voice;
+        ctx.scratch.prevMidiTick[trackKey] = e->tick;
+        ctx.scratch.prevEncVoice[trackKey] = voice;
+        ctx.scratch.prevXoffset[trackKey] = static_cast<int>(e->xoffset);
         // Record note xoffset for bowing-mark cluster resolution.
         const auto* en = static_cast<const EncNote*>(e);
         auto& vec = ctx.noteXoffByMeasStaff[{ mc.measIdx, staffIdx }];
@@ -507,7 +513,7 @@ static Fraction computeElementTick(
             vec.push_back({ encTick, xoff });
         }
     } else if (et == EncElemType::REST) {
-        ctx.prevRestTick[trackKey] = static_cast<int>(e->tick);
+        ctx.scratch.prevRestTick[trackKey] = static_cast<int>(e->tick);
     }
     return elemTick;
 }
@@ -546,9 +552,16 @@ static void fillExpandedMrestMeasure(Measure* vm, int totalStaves)
 static void coalesceVolta(BuildCtx& ctx, Measure* measure,
                           const EncMeasure& encMeas, Fraction measTick)
 {
+    // A volta ends "closed" (an end hook that turns down) only when its last measure
+    // carries a repeat-end barline, i.e. the repeat jumps back after this ending. The
+    // terminal ending of a repeat group has no repeat barline and must be drawn open, or
+    // Encore's "2." bracket imports as a closed second box instead of an open final volta.
+    const bool voltaClosed = (encMeas.endBarline() == EncBarlineType::REPEATEND);
     if (encMeas.repeatAlternative != 0) {
         if (ctx.activeVolta && ctx.activeVoltaBits == encMeas.repeatAlternative) {
             ctx.activeVolta->setTick2(measTick + measure->ticks());
+            // The volta now ends at this later measure; its hook follows that measure's barline.
+            ctx.activeVolta->setVoltaType(voltaClosed ? Volta::Type::CLOSED : Volta::Type::OPEN);
         } else {
             // Accumulate the bits from the bracket we are closing so the next bracket
             // can filter out already-labelled endings (e.g. "1.-3." then raw bits {2,4}
@@ -568,7 +581,7 @@ static void coalesceVolta(BuildCtx& ctx, Measure* measure,
                 }
             }
             Volta* volta = Factory::createVolta(ctx.score->dummy());
-            volta->setVoltaType(Volta::Type::CLOSED);
+            volta->setVoltaType(voltaClosed ? Volta::Type::CLOSED : Volta::Type::OPEN);
             volta->setTrack(0);
             volta->setTrack2(0);
             volta->setTick(measTick);
@@ -597,34 +610,34 @@ static void coalesceVolta(BuildCtx& ctx, Measure* measure,
 
 static void resetPerMeasureState(BuildCtx& ctx, int measIdx)
 {
-    for (auto& [key, tt] : ctx.tuplets) {
+    for (auto& [key, tt] : ctx.scratch.tuplets) {
         if (tt.inTuplet()) {
             tt.closeTuplet();
         }
     }
-    ctx.tuplets.clear();
-    for (auto& [key, tt] : ctx.innerTuplets) {
+    ctx.scratch.tuplets.clear();
+    for (auto& [key, tt] : ctx.scratch.innerTuplets) {
         if (tt.inTuplet()) {
             tt.closeTuplet();
         }
     }
-    ctx.innerTuplets.clear();
-    ctx.cumTick.clear();
-    ctx.prevMidiTick.clear();
-    ctx.prevEncVoice.clear();
-    ctx.lastChordPos.clear();
-    ctx.prevRestTick.clear();
-    ctx.graceStolenTicks.clear();
+    ctx.scratch.innerTuplets.clear();
+    ctx.scratch.cumTick.clear();
+    ctx.scratch.prevMidiTick.clear();
+    ctx.scratch.prevEncVoice.clear();
+    ctx.scratch.lastChordPos.clear();
+    ctx.scratch.prevRestTick.clear();
+    ctx.scratch.graceStolenTicks.clear();
 
     // Unattached grace chords are not in the score tree and need explicit deletion.
-    for (auto& [key, vec] : ctx.pendingGraces) {
+    for (auto& [key, vec] : ctx.scratch.pendingGraces) {
         for (PendingGrace& g : vec) {
             LOGW() << "Encore import: discarding dangling grace chord at measure " << measIdx
                    << " (staff " << key.first << ", voice " << key.second << ")";
             delete g.gc;
         }
     }
-    ctx.pendingGraces.clear();
+    ctx.scratch.pendingGraces.clear();
 }
 
 static void buildNestedTupletMaps(MeasEmitCtx& mc,
@@ -767,7 +780,7 @@ static void finalizeMeasureAfterNoteLoop(BuildCtx& ctx, MeasEmitCtx& mc,
                                          int& measSkip, size_t& msIdxCounter,
                                          const EncRoot& enc)
 {
-    for (auto& [key, tt] : ctx.tuplets) {
+    for (auto& [key, tt] : ctx.scratch.tuplets) {
         mc.closeTupletWithFill(ctx, tt, key);
     }
     attachPendingLyrics(ctx, mc);
@@ -777,12 +790,189 @@ static void finalizeMeasureAfterNoteLoop(BuildCtx& ctx, MeasEmitCtx& mc,
         measure->checkMeasure(static_cast<staff_idx_t>(si));
     }
     correctMeasureLength(ctx, measure);
-    capMeasureLength(ctx, measure);
+    fitOverfullMeasure(ctx, measure);
     const EncMeasure* prevMeas = (measIdx > 0) ? &enc.measures[measIdx - 1] : nullptr;
     measSkip = measDisplayCount(encMeas, prevMeas) - 1;
     ++msIdxCounter;
 }
 
+// Flush key changes that were deferred from rest-only measures onto the first later measure
+// that has notes (placing a KeySig in an MMRest-eligible measure breaks condensation).
+static void flushPendingKeySigs(MasterScore* score, Measure* measure, Fraction measTick,
+                                const EncMeasure& encMeas,
+                                std::vector<DeferredKeySig>& pendingKeySigs)
+{
+    if (pendingKeySigs.empty() || !hasPitchedNotes(encMeas)) {
+        return;
+    }
+    for (const DeferredKeySig& dks : pendingKeySigs) {
+        placeKeySig(score, measure, measTick, dks.staffIdx,
+                    dks.staffIdx * VOICES, dks.concertKey, dks.writtenKey);
+    }
+    pendingKeySigs.clear();
+}
+
+// Sort the measure's elements and compute the per-measure tuplet/tie/metadata state the
+// element emit loop reads from mc.
+static void prepareMeasureContext(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasure& encMeas,
+                                  MeasureElemRefVec& sortedElems)
+{
+    // Sort: tick asc, ORNs before notes, tuplet notes before non-tuplet (ensures tup note sets duration at shared tick).
+    sortMeasureElements(encMeas, sortedElems);
+    // Collect TIE-START positions using routed (staffIdx, voice) so bit6-encoded second-staff notes resolve correctly.
+    collectTieStartPositions(sortedElems, *mc.lineSlotByRawByte, ctx.totalStaves, mc);
+    mc.overrideGroupRatios.clear();
+    mc.validTupletGroupMember
+        = computeImpliedTupletMembers(sortedElems, encMeas, ctx.totalStaves,
+                                      &mc.partialEndGroup, &mc.nestedInfos,
+                                      &mc.overrideGroupRatios);
+    buildNestedTupletMaps(mc, sortedElems);
+    scanMeasureMetadata(sortedElems, mc);
+}
+
+// Route one measure element to its (staff, voice, tick) and dispatch it to the type handler.
+static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureElem* e,
+                               std::vector<DeferredKeySig>& pendingKeySigs)
+{
+    Measure* measure = mc.measure;
+    const Fraction measTick = mc.measTick;
+    const EncMeasure& encMeas = *mc.encMeas;
+    const std::array<int, 256>& lineSlotByRawByte = *mc.lineSlotByRawByte;
+
+    const EncElemType et = static_cast<EncElemType>(e->type);
+    const bool isNoteOrRest = (et == EncElemType::NOTE || et == EncElemType::REST);
+
+    // Let notes/rests past durTicks through for every overfill strategy so an
+    // overshooting tuplet's later members still arrive; non-tuplet overflow is
+    // re-dropped below (the "voice full" guard), and the post-pass resolves the
+    // rest. (Only note/rest are let through; other element gating is unchanged.)
+    if (!shouldIncludeElement(e, encMeas) && !isNoteOrRest) {
+        return;
+    }
+
+    std::optional<RoutedTrack> routed = routeElementStaffVoice(e, isNoteOrRest, lineSlotByRawByte, mc, ctx);
+    if (!routed) {
+        return;
+    }
+    const int staffIdx = routed->staffIdx;
+    const int voice = routed->voice;
+    const int msVoice = routed->msVoice;
+    const track_idx_t track = routed->track;
+    const std::pair<int, int> trackKey = routed->trackKey;
+    const std::pair<int, int> encVoiceKey = routed->encVoiceKey;
+
+    // Encore's "voice 4" is a silent-voice placeholder that routing folds into voice 0. When
+    // it is a rest and the staff already carries a real note, that rest is redundant: merging
+    // it into voice 0 collides with the notes and prepends a spurious rest that pushes the
+    // content past the barline (an otherwise-4/4 bar imports as 9/8). Drop it here.
+    if (et == EncElemType::REST && e->voice >= static_cast<int>(VOICES)
+        && mc.stavesWithRealNote.count(staffIdx)) {
+        return;
+    }
+
+    // Near-simultaneous notes (< CHORD_MIDI_THRESHOLD) extend the chord; same Encore voice required.
+    constexpr int CHORD_MIDI_THRESHOLD = 2 * CHORD_CLUSTER_THRESHOLD;  // = 8
+    // Two notes close in time but in different notated columns (xoffset) are sequential events,
+    // not one chord: tightly played tuplet members can land a few ticks apart yet belong to
+    // distinct triplet positions. Adjacent columns sit at least COLUMN_SEPARATION_MIN pixels apart,
+    // while a chord's members share a column (equal xoffset, or a few pixels of notehead offset for
+    // a cluster), so only a gap at or beyond that separation marks a genuine column change. Applied
+    // only for formats that store the column (see EncFormatReader::clustersChordsByXoffset).
+    constexpr int COLUMN_SEPARATION_MIN = 8;
+    const bool columnAware = ctx.enc.fmt && ctx.enc.fmt->clustersChordsByXoffset();
+    const bool differentColumn = columnAware && e->xoffset != 0
+                                 && ctx.scratch.prevXoffset.count(trackKey)
+                                 && ctx.scratch.prevXoffset.at(trackKey) != 0
+                                 && std::abs(ctx.scratch.prevXoffset.at(trackKey) - static_cast<int>(e->xoffset))
+                                 >= COLUMN_SEPARATION_MIN;
+    bool isChordExt = isNoteOrRest && !differentColumn
+                      && ctx.scratch.prevMidiTick.count(trackKey)
+                      && ctx.scratch.prevEncVoice.count(trackKey)
+                      && ctx.scratch.prevEncVoice.at(trackKey) == voice
+                      && (int)e->tick - (int)ctx.scratch.prevMidiTick.at(trackKey) >= 0
+                      && (int)e->tick - (int)ctx.scratch.prevMidiTick.at(trackKey)
+                      < CHORD_MIDI_THRESHOLD;
+    // REST-REST dedup: two Encore voices routing to the same MuseScore voice at the same tick; second REST would double-advance cumTick.
+    if (!isChordExt && et == EncElemType::REST
+        && ctx.scratch.prevRestTick.count(trackKey)
+        && ctx.scratch.prevRestTick.at(trackKey) == static_cast<int>(e->tick)) {
+        return;
+    }
+
+    // Drop overflow notes when voice is full; MIDI artifacts must not spill to the next MuseScore voice.
+    // Only Truncate ("remove extra notes") drops here. IrregularMeasure keeps them (capMeasureLength
+    // extends the bar), and StretchLastNote keeps them too so the post-pass can reclaim preceding
+    // rests (robRestsToFit) to fit the extra notes into a regular-length bar instead of losing them.
+    // Open tuplet: keep placing members so the whole tuplet lands intact; the post-pass
+    // (fitOverfullMeasure) resolves an overshooting tuplet atomically.
+    const bool inOpenTuplet = ctx.scratch.tuplets.count(trackKey) && ctx.scratch.tuplets.at(trackKey).inTuplet();
+    if (isNoteOrRest && !isChordExt && ctx.scratch.cumTick[trackKey] >= measure->ticks()
+        && ctx.opts.overfillMeasureStrategy == OverfillStrategy::Truncate
+        && !inOpenTuplet) {
+        return;
+    }
+
+    const int savedPrevMidiTick = ctx.scratch.prevMidiTick.count(trackKey)
+                                  ? ctx.scratch.prevMidiTick.at(trackKey) : -1;
+    const bool hadLastChordPos = ctx.scratch.lastChordPos.count(trackKey);
+    const Fraction savedLastChordPos = hadLastChordPos
+                                       ? ctx.scratch.lastChordPos.at(trackKey) : Fraction(-1, 1);
+
+    const Fraction elemTick = computeElementTick(e, isNoteOrRest, isChordExt, voice,
+                                                 staffIdx, trackKey, measure, measTick,
+                                                 ctx, mc);
+
+    NoteElemCtx ec;
+    ec.e = e;
+    ec.et = et;
+    ec.staffIdx = staffIdx;
+    ec.voice = voice;
+    ec.msVoice = msVoice;
+    ec.track = track;
+    ec.trackKey = trackKey;
+    ec.encVoiceKey = encVoiceKey;
+    ec.isChordExt = isChordExt;
+    ec.isNoteOrRest = isNoteOrRest;
+    ec.elemTick = elemTick;
+    ec.savedPrevMidiTick = savedPrevMidiTick;
+    ec.hadLastChordPos = hadLastChordPos;
+    ec.savedLastChordPos = savedLastChordPos;
+
+    switch (et) {
+    case EncElemType::NOTE:      handleNote(ctx, mc, ec);
+        break;
+    case EncElemType::REST:      handleRest(ctx, mc, ec);
+        break;
+    case EncElemType::CHORD:     handleChordSym(ctx, mc, ec);
+        break;
+    case EncElemType::LYRIC:     enqueueLyric(ctx, static_cast<const EncLyric*>(e), track);
+        break;
+    case EncElemType::ORNAMENT:  handleOrnament(ctx, mc, ec);
+        break;
+    case EncElemType::KEYCHANGE: handleKeyChange(ctx, mc, ec, e, pendingKeySigs);
+        break;
+    case EncElemType::CLEF:     handleClefChange(ctx, mc, ec, e);
+        break;
+    default: break;
+    }
+}
+
+// Unattached grace chords are not in the score tree and need explicit deletion.
+static void discardDanglingGraces(BuildCtx& ctx)
+{
+    for (auto& [key, vec] : ctx.scratch.pendingGraces) {
+        for (PendingGrace& g : vec) {
+            LOGW() << "Encore import: discarding dangling grace chord at end of score"
+                   << " (staff " << key.first << ", voice " << key.second << ")";
+            delete g.gc;
+        }
+    }
+    ctx.scratch.pendingGraces.clear();
+}
+
+// Main emit phase: walk every parsed measure, route and dispatch each element to its type
+// handler (notes/rests/ornaments/lyrics/...), and run the per-measure fill/overfull passes.
+// The resolver post-pass (spanners, etc.) runs afterwards from buildScore.
 void emitMeasures(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
@@ -849,115 +1039,14 @@ void emitMeasures(BuildCtx& ctx)
         // Consecutive measures with equal repeatAlternative bitmask coalesce into one Volta.
         coalesceVolta(ctx, measure, encMeas, measTick);
 
-        if (!pendingKeySigs.empty() && hasPitchedNotes(encMeas)) {
-            for (const DeferredKeySig& dks : pendingKeySigs) {
-                placeKeySig(score, measure, measTick, dks.staffIdx,
-                            dks.staffIdx * VOICES, dks.concertKey, dks.writtenKey);
-            }
-            pendingKeySigs.clear();
-        }
+        flushPendingKeySigs(score, measure, measTick, encMeas, pendingKeySigs);
 
-        // Sort: tick asc, ORNs before notes, tuplet notes before non-tuplet (ensures tup note sets duration at shared tick).
         MeasureElemRefVec sortedElems;
-        sortMeasureElements(encMeas, sortedElems);
-
-        // Collect TIE-START positions using routed (staffIdx, voice) so bit6-encoded second-staff notes resolve correctly.
-        collectTieStartPositions(sortedElems, lineSlotByRawByte, ctx.totalStaves, mc);
-
-        mc.overrideGroupRatios.clear();
-        mc.validTupletGroupMember
-            = computeImpliedTupletMembers(sortedElems, encMeas, ctx.totalStaves,
-                                          &mc.partialEndGroup, &mc.nestedInfos,
-                                          &mc.overrideGroupRatios);
-        buildNestedTupletMaps(mc, sortedElems);
-
-        scanMeasureMetadata(sortedElems, mc);
+        prepareMeasureContext(ctx, mc, encMeas, sortedElems);
 
         for (const EncMeasureElem* e : sortedElems) {
-            EncElemType et = static_cast<EncElemType>(e->type);
-            const bool isNoteOrRest = (et == EncElemType::NOTE || et == EncElemType::REST);
-
-            // IrregularMeasure: allow notes past durTicks through so capMeasureLength can extend the measure.
-            if (!shouldIncludeElement(e, encMeas)
-                && !(isNoteOrRest
-                     && ctx.opts.overfillMeasureStrategy == OverfillStrategy::IrregularMeasure)) {
-                continue;
-            }
-
-            int staffIdx = 0, voice = 0, msVoice = 0;
-            track_idx_t track = 0;
-            std::pair<int, int> trackKey, encVoiceKey;
-            if (!routeElementStaffVoice(e, isNoteOrRest, lineSlotByRawByte, mc, ctx,
-                                        staffIdx, voice, msVoice, track, trackKey, encVoiceKey)) {
-                continue;
-            }
-
-            // Near-simultaneous notes (< CHORD_MIDI_THRESHOLD) extend the chord; same Encore voice required.
-            constexpr int CHORD_MIDI_THRESHOLD = 2 * CHORD_CLUSTER_THRESHOLD;  // = 8
-            bool isChordExt = isNoteOrRest && ctx.prevMidiTick.count(trackKey)
-                              && ctx.prevEncVoice.count(trackKey)
-                              && ctx.prevEncVoice.at(trackKey) == voice
-                              && (int)e->tick - (int)ctx.prevMidiTick.at(trackKey) >= 0
-                              && (int)e->tick - (int)ctx.prevMidiTick.at(trackKey)
-                              < CHORD_MIDI_THRESHOLD;
-            // REST-REST dedup: two Encore voices routing to the same MuseScore voice at the same tick; second REST would double-advance cumTick.
-            if (!isChordExt && et == EncElemType::REST
-                && ctx.prevRestTick.count(trackKey)
-                && ctx.prevRestTick.at(trackKey) == static_cast<int>(e->tick)) {
-                continue;
-            }
-
-            // Drop overflow notes when voice is full; MIDI artifacts must not spill to the next MuseScore voice.
-            // IrregularMeasure: skip the cap so capMeasureLength can extend the measure to hold all notes.
-            if (isNoteOrRest && !isChordExt && ctx.cumTick[trackKey] >= measure->ticks()
-                && ctx.opts.overfillMeasureStrategy != OverfillStrategy::IrregularMeasure) {
-                continue;
-            }
-
-            const int savedPrevMidiTick = ctx.prevMidiTick.count(trackKey)
-                                          ? ctx.prevMidiTick.at(trackKey) : -1;
-            const bool hadLastChordPos = ctx.lastChordPos.count(trackKey);
-            const Fraction savedLastChordPos = hadLastChordPos
-                                               ? ctx.lastChordPos.at(trackKey) : Fraction(-1, 1);
-
-            const Fraction elemTick = computeElementTick(e, isNoteOrRest, isChordExt, voice,
-                                                         staffIdx, trackKey, measure, measTick,
-                                                         ctx, mc);
-
-            NoteElemCtx ec;
-            ec.e = e;
-            ec.et = et;
-            ec.staffIdx = staffIdx;
-            ec.voice = voice;
-            ec.msVoice = msVoice;
-            ec.track = track;
-            ec.trackKey = trackKey;
-            ec.encVoiceKey = encVoiceKey;
-            ec.isChordExt = isChordExt;
-            ec.isNoteOrRest = isNoteOrRest;
-            ec.elemTick = elemTick;
-            ec.savedPrevMidiTick = savedPrevMidiTick;
-            ec.hadLastChordPos = hadLastChordPos;
-            ec.savedLastChordPos = savedLastChordPos;
-
-            switch (static_cast<EncElemType>(e->type)) {
-            case EncElemType::NOTE:      handleNote(ctx, mc, ec);
-                break;
-            case EncElemType::REST:      handleRest(ctx, mc, ec);
-                break;
-            case EncElemType::CHORD:     handleChordSym(ctx, mc, ec);
-                break;
-            case EncElemType::LYRIC:     enqueueLyric(ctx, static_cast<const EncLyric*>(e), track);
-                break;
-            case EncElemType::ORNAMENT:  handleOrnament(ctx, mc, ec);
-                break;
-            case EncElemType::KEYCHANGE: handleKeyChange(ctx, mc, ec, e, pendingKeySigs);
-                break;
-            case EncElemType::CLEF:     handleClefChange(ctx, mc, ec, e);
-                break;
-            default: break;
-            }
-        }  // end element for-loop
+            emitMeasureElement(ctx, mc, e, pendingKeySigs);
+        }
 
         finalizeMeasureAfterNoteLoop(ctx, mc, measure, encMeas, measTick, measIdx,
                                      measSkip, msIdxCounter, enc);
@@ -965,15 +1054,26 @@ void emitMeasures(BuildCtx& ctx)
     }
 
     applyMeasureBpmMarks(ctx);
+    discardDanglingGraces(ctx);
 
-    // Dangling graces after the final measure have no score-tree parent; delete explicitly.
-    for (auto& [key, vec] : ctx.pendingGraces) {
-        for (PendingGrace& g : vec) {
-            LOGW() << "Encore import: discarding dangling grace chord at end of score"
-                   << " (staff " << key.first << ", voice " << key.second << ")";
-            delete g.gc;
+    // One-line summary of elements that could not be placed (they reference a staff/voice the
+    // score does not have), instead of a debug line per dropped element.
+    if (!ctx.scratch.droppedByMissingStaff.empty() || ctx.scratch.droppedByBadVoice > 0) {
+        int total = ctx.scratch.droppedByBadVoice;
+        std::string byStaff;
+        for (const auto& [staffIdx, count] : ctx.scratch.droppedByMissingStaff) {
+            total += count;
+            if (!byStaff.empty()) {
+                byStaff += ", ";
+            }
+            byStaff += "staff " + std::to_string(staffIdx) + ": " + std::to_string(count);
         }
+        LOGD() << "Encore import: dropped " << total << " element(s) the score has no place for"
+               << " (" << ctx.totalStaves << " staves built"
+               << (byStaff.empty() ? std::string() : "; missing-staff refs: " + byStaff)
+               << (ctx.scratch.droppedByBadVoice ? "; out-of-range voice: "
+                   + std::to_string(ctx.scratch.droppedByBadVoice) : std::string())
+               << "). These usually come from staves deleted in Encore (not shown there).";
     }
-    ctx.pendingGraces.clear();
 }
 } // namespace mu::iex::enc
