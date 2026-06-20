@@ -29,6 +29,8 @@ target_sources(iex_encore PRIVATE
     internal/notationencreader.cpp
     internal/notationencreader.h
     internal/importer/import.cpp
+    internal/importer/page-layout.h
+    internal/importer/page-layout.cpp
     internal/importer/import.h
     internal/importer/import-options.h
     internal/parser/parsers-encoding.h

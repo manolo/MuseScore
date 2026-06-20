@@ -56,6 +56,38 @@ protected:
 };
 
 // ===========================================================================
+// importPageLayout
+// ===========================================================================
+
+TEST_F(Tst_Options, importPageLayout_false_keeps_ms_default_top_margin)
+{
+    MasterScore* ref = compat::ScoreAccess::createMasterScoreWithBaseStyle(nullptr);
+    const double defaultTop = ref->style().styleD(Sid::pageOddTopMargin);
+    delete ref;
+
+    EncImportOptions opts;
+    opts.importPageLayout = false;
+    MasterScore* score = readEncoreScoreWithOpts("bazo.enc", opts);
+    ASSERT_NE(score, nullptr);
+    EXPECT_DOUBLE_EQ(score->style().styleD(Sid::pageOddTopMargin), defaultTop);
+    delete score;
+}
+
+TEST_F(Tst_Options, importPageLayout_true_overrides_default_top_margin)
+{
+    // bazo_top_100 encodes top margin = 100 pt; this must differ from any reasonable default.
+    MasterScore* ref = compat::ScoreAccess::createMasterScoreWithBaseStyle(nullptr);
+    const double defaultTop = ref->style().styleD(Sid::pageOddTopMargin);
+    delete ref;
+
+    MasterScore* score = readEncoreScore("bazo_top_100.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_NE(score->style().styleD(Sid::pageOddTopMargin), defaultTop)
+        << "bazo_top_100 must produce a top margin different from the MS default";
+    delete score;
+}
+
+// ===========================================================================
 // importPageBreaks
 // structure_page_break.enc: 2 LINE blocks, both pageIdx=0 → page break after
 // the last measure of the first system.

@@ -20,10 +20,13 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Top-level file walk: scan block magics and dispatch to each block reader; page/print setup.
+
 #include "elem.h"
 
 #include <algorithm>
-#include <limits>
+
+#include <QRegularExpression>
 
 #include "readers.h"
 
@@ -32,28 +35,28 @@ namespace mu::iex::enc {
 // EncRoot - top-level container
 // ---------------------------------------------------------------------------
 
-// Skip a file-supplied block size, clamped to the bytes actually remaining on the device.
-// The size comes from an untrusted file: a value larger than INT_MAX would wrap negative when
-// passed to QDataStream::skipRawData(int) (silently skipping nothing and desyncing the stream),
-// and any value past EOF must not seek beyond the device. Returns false when the requested size
-// exceeds what remains, so the caller can stop reading further blocks.
-static bool skipBlock(QDataStream& ds, qint64 size)
+// WINI page-setup block: page margins in typographic points (1/72 inch). Layout and field offsets
+// in ENCORE_FORMAT.md §WINI block.
+void EncPageSetup::read(QDataStream& ds, quint32 varSize)
 {
-    QIODevice* dev = ds.device();
-    const qint64 remaining = dev->size() - dev->pos();
-    if (size < 0 || size > remaining) {
-        return false;
+    if (varSize < 40) {
+        skipBlock(ds, varSize);
+        return;
     }
-    qint64 left = size;
-    while (left > 0) {
-        const int chunk = static_cast<int>(std::min<qint64>(left, std::numeric_limits<int>::max()));
-        const int n = ds.skipRawData(chunk);
-        if (n <= 0) {
-            return false;
-        }
-        left -= n;
+    qint32 t = 0, l = 0, b = 0, r = 0;
+    ds.skipRawData(24);   // skip fields 0..11 (window/screen data)
+    ds >> t >> l >> b >> r;
+    // The four margins come from an attacker-controlled block at a magic offset;
+    // only trust them when the reads stayed within the stream.
+    const bool ok = (ds.status() == QDataStream::Ok);
+    skipBlock(ds, static_cast<qint64>(varSize) - 40);
+    if (ok && b > 0 && r > 0 && b > t && r > l) {
+        hasData    = true;
+        top        = t;
+        left       = l;
+        bottomEdge = b;
+        rightEdge  = r;
     }
-    return true;
 }
 
 bool isInstrumentMagic(const QString& magic)
@@ -66,7 +69,7 @@ bool isInstrumentMagic(const QString& magic)
 bool isKnownMagic(const QString& magic)
 {
     return magic == "LINE" || magic == "MEAS" || magic == "TITL" || magic == "TEXT"
-           || magic == "WINI" || isInstrumentMagic(magic);
+           || magic == "WINI" || magic == "PREC" || isInstrumentMagic(magic);
 }
 
 QString findNextKnownMagic(QDataStream& ds)
@@ -91,6 +94,121 @@ QString findNextKnownMagic(QDataStream& ds)
         magic.clear();
     }
     return magic;
+}
+
+// Parse a Windows DEVMODE (the PREC block) into page orientation, paper size and notation
+// scale. The device-name prefix is 32 bytes for an ANSI DEVMODE and 64 bytes (UTF-16) for a
+// Unicode one; the fixed fields follow at the same relative offsets. Detect the variant by
+// trying both bases and keeping the one whose dmOrientation is a valid 1 (portrait) or 2
+// (landscape); range-check the rest so a wrong base or an unusual driver blob is ignored.
+// See ENCORE_FORMAT.md §PREC block.
+static void parsePrecDevmode(const QByteArray& buf, EncPrintSetup& out)
+{
+    auto s16 = [&](int off) -> int {
+        if (off < 0 || off + 2 > buf.size()) {
+            return -1;
+        }
+        return static_cast<qint16>(static_cast<quint8>(buf[off])
+                                   | (static_cast<quint8>(buf[off + 1]) << 8));
+    };
+    for (int base : { 32, 64 }) {
+        const int orient = s16(base + 12);
+        const int paper  = s16(base + 14);
+        const int scale  = s16(base + 20);
+        if ((orient != 1 && orient != 2) || paper < 0) {
+            continue;
+        }
+        out.hasData     = true;
+        out.orientation = orient;
+        out.paperSize   = paper;
+        out.paperLength = s16(base + 16);
+        out.paperWidth  = s16(base + 18);
+        out.scale       = (scale > 0 && scale <= 400) ? scale : 0;
+        return;
+    }
+}
+
+// SCO5 (macOS Encore 5) stores the PREC page setup as an NSPrintInfo XML plist
+// rather than a Windows DEVMODE. Pull orientation, paper size and notation scale
+// from it; the page margins are NOT in this block (the plist only carries the
+// printer's imageable rects, not Encore's document margins).
+bool parsePrecPlist(const QByteArray& buf, EncPrintSetup& out)
+{
+    const QString s = QString::fromUtf8(buf);
+    if (!s.contains("PMOrientation") && !s.contains("PaperName")) {
+        return false;
+    }
+    auto firstMatch = [&](const QString& pattern) -> QString {
+        QRegularExpression re(pattern);
+        QRegularExpressionMatch m = re.match(s);
+        return m.hasMatch() ? m.captured(1) : QString();
+    };
+
+    // Value entries put the data tag immediately after the key (the dict wrappers do not).
+    const int orient = firstMatch(QStringLiteral("PMOrientation</key>\\s*<integer>(-?\\d+)</integer>")).toInt();
+    const double scaling = firstMatch(QStringLiteral("PMScaling</key>\\s*<real>([-0-9.]+)</real>")).toDouble();
+    QString paper = firstMatch(QStringLiteral("PMTiogaPaperName</key>\\s*<string>([^<]+)</string>"));
+    if (paper.isEmpty()) {
+        paper = firstMatch(QStringLiteral("PMPaperName</key>\\s*<string>([^<]+)</string>"));
+    }
+
+    const QString p = paper.toLower();
+    int paperCode = 0;
+    if (p.contains("a4")) {
+        paperCode = 9;
+    } else if (p.contains("a3")) {
+        paperCode = 8;
+    } else if (p.contains("a5")) {
+        paperCode = 11;
+    } else if (p.contains("legal")) {
+        paperCode = 5;
+    } else if (p.contains("letter")) {
+        paperCode = 1;
+    }
+
+    if (paperCode == 0 && orient != 1 && orient != 2) {
+        return false;
+    }
+    out.hasData     = true;
+    out.orientation = (orient == 1 || orient == 2) ? orient : 1;
+    out.paperSize   = paperCode;
+    out.paperLength = 0;
+    out.paperWidth  = 0;
+    // PMScaling is a fraction (1.2 = 120%); store as a percent like dmScale.
+    out.scale       = (scaling > 0.0 && scaling <= 4.0)
+                      ? static_cast<int>(scaling * 100.0 + 0.5) : 0;
+    return true;
+}
+
+// PREC carries page orientation, paper size and notation scale. SCOW stores it as a Windows
+// DEVMODE; SCO5 (macOS Encore 5) stores it as an NSPrintInfo XML plist. Detect by content.
+static void readPrintSetup(QDataStream& ds, quint32 varSize, EncPrintSetup& out)
+{
+    // varSize is untrusted: a huge value (e.g. 0x40000000) would request ~1 GB and a value above
+    // INT_MAX casts to a negative int (UB/abort in QByteArray). A PREC block is a Windows DEVMODE
+    // (~220 bytes) or a small NSPrintInfo plist; clamp to a few KB and to the bytes actually left.
+    constexpr qint64 kMaxPrecBytes = 64 * 1024;
+    const qint64 startPos = ds.device()->pos();
+    const qint64 remaining = ds.device()->size() - startPos;
+    qint64 want = static_cast<qint64>(varSize);
+    if (want < 0) {
+        want = 0;
+    }
+    want = std::min({ want, remaining, kMaxPrecBytes });
+    QByteArray buf(static_cast<int>(want), '\0');
+    const int n = (want > 0) ? ds.readRawData(buf.data(), static_cast<int>(want)) : 0;
+    // Always advance to the declared block end so the next magic scan stays aligned even when we
+    // only read (or trusted) a clamped prefix.
+    skipToBlockEnd(ds, startPos, static_cast<qint64>(varSize));
+    if (n <= 0) {
+        return;
+    }
+    buf.resize(n);
+    if (buf.startsWith("<?xml") || buf.contains("<plist")) {
+        parsePrecPlist(buf, out);
+    } else {
+        parsePrecDevmode(buf, out);
+    }
 }
 
 void addSpannerEnds(std::vector<EncMeasure>& measures)
@@ -182,34 +300,14 @@ bool EncRoot::read(QDataStream& ds)
             // block, so keep the first non-empty block and skip later ones
             // (mirrors the TITL handling above).
             EncTextBlock tmp;
-            tmp.read(ds, varSize);
+            tmp.read(ds, varSize, fmt->textBlockEntryTextOffset(), fmt->textBlockEntryHasRunHeader());
             if (textBlock.entries.empty()) {
                 textBlock = std::move(tmp);
             }
         } else if (nextId == "WINI") {
-            // WINI: page setup block. Layout: 21 uint16 LE values (42 bytes).
-            // Margins as int32 LE (two adjacent uint16s, high word always 0):
-            //   [12,13] = top margin, [14,15] = left margin,
-            //   [16,17] = page_height_pts - bottom_margin, [18,19] = page_width_pts - right_margin.
-            // All values in typographic points (1/72 inch).
-            if (varSize >= 40) {
-                qint32 top = 0, left = 0, bottomEdge = 0, rightEdge = 0;
-                ds.skipRawData(24);   // skip fields 0..11 (window/screen data)
-                ds >> top >> left >> bottomEdge >> rightEdge;
-                // The four margins come from an attacker-controlled block at a magic offset;
-                // only trust them when the reads stayed within the stream.
-                const bool ok = (ds.status() == QDataStream::Ok);
-                skipBlock(ds, static_cast<qint64>(varSize) - 40);
-                if (ok && bottomEdge > 0 && rightEdge > 0 && bottomEdge > top && rightEdge > left) {
-                    pageSetup.hasData    = true;
-                    pageSetup.top        = top;
-                    pageSetup.left       = left;
-                    pageSetup.bottomEdge = bottomEdge;
-                    pageSetup.rightEdge  = rightEdge;
-                }
-            } else {
-                skipBlock(ds, varSize);
-            }
+            pageSetup.read(ds, varSize);
+        } else if (nextId == "PREC") {
+            readPrintSetup(ds, varSize, printSetup);
         } else if (isInstrumentMagic(nextId)) {
             EncInstrument instr;
             instr.contentFilePos = ds.device()->pos();
