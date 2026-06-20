@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include "../internal/parser/ticks.h"
+#include "../internal/parser/elem.h"
 
 using namespace mu::engraving;
 using namespace mu::iex::enc;
@@ -246,4 +247,46 @@ TEST(Tst_EncoreRhythm, dottedAdvance)
     // Quarter base.
     EXPECT_EQ(dottedAdvance(DurationType::V_QUARTER, 0), Fraction(1, 4));
     EXPECT_EQ(dottedAdvance(DurationType::V_QUARTER, 1), Fraction(3, 8));
+}
+
+// ===========================================================================
+// SCO5 (macOS Encore 5) stores the PREC page setup as an NSPrintInfo XML plist,
+// not a Windows DEVMODE. parsePrecPlist must extract orientation, paper size and
+// notation scale from it (margins are not present in this block).
+// ===========================================================================
+TEST(Tst_EncorePrecPlist, letter_portrait_scale_120)
+{
+    const QByteArray plist
+        ="<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+         "<plist version=\"1.0\"><dict>\n"
+         "<key>com.apple.print.PageFormat.PMOrientation</key><integer>1</integer>\n"
+         "<key>com.apple.print.PageFormat.PMScaling</key><real>1.2</real>\n"
+         "<key>PMTiogaPaperName</key><string>na-letter</string>\n"
+         "</dict></plist>\n";
+    EncPrintSetup ps;
+    EXPECT_TRUE(parsePrecPlist(plist, ps));
+    EXPECT_TRUE(ps.hasData);
+    EXPECT_EQ(ps.orientation, 1);     // portrait
+    EXPECT_EQ(ps.paperSize, 1);       // Letter (dmPaper code)
+    EXPECT_EQ(ps.scale, 120);         // 1.2 -> 120%
+}
+
+TEST(Tst_EncorePrecPlist, a4_landscape)
+{
+    const QByteArray plist
+        ="<?xml version=\"1.0\"?><plist><dict>\n"
+         "<key>com.apple.print.PageFormat.PMOrientation</key><integer>2</integer>\n"
+         "<key>PMTiogaPaperName</key><string>iso-a4</string>\n"
+         "</dict></plist>\n";
+    EncPrintSetup ps;
+    EXPECT_TRUE(parsePrecPlist(plist, ps));
+    EXPECT_EQ(ps.orientation, 2);     // landscape
+    EXPECT_EQ(ps.paperSize, 9);       // A4
+}
+
+TEST(Tst_EncorePrecPlist, rejects_non_plist)
+{
+    EncPrintSetup ps;
+    EXPECT_FALSE(parsePrecPlist(QByteArray("not a plist at all"), ps));
+    EXPECT_FALSE(ps.hasData);
 }
