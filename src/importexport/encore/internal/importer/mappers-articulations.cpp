@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Map Encore articulation/ornament bytes to MuseScore SymIds, finger numbers and string numbers.
+
 #include "mappers.h"
 
 using namespace mu::engraving;
@@ -58,8 +60,7 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x20:
     case 0x21: return { SymId::fermataAbove };
     // Combined-articulation bytes come in (below, above) pairs, one pair per glyph.
-    // Verified in Encore 5 against "Accidentals Marks and others" m11-m16. Placement
-    // is taken from the note articulation slot; subtype() normalises Below->Above.
+    // Placement is taken from the note articulation slot; subtype() normalises Below->Above.
     case 0x22:                                                // tenuto + accent (below)
     case 0x23: return { SymId::articTenutoAccentAbove };      // tenuto + accent (above)
     case 0x24:                                                // tenuto + staccato (portato, below)
@@ -76,7 +77,7 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x30: return { SymId::brassMuteHalfClosed };   // technical/stopped (tick/half stopped)
     // String markings (m3, m4, m18): 0x1E/0x1F=harmonic, 0x44/0x45=thumb-position.
     // 0x46=open-string: handled in encArticByteIsOpenString() (no SymId; uses Fingering "0").
-    // 0x47=string-1: handled in encArticByteToStringNumber().
+    // 0x47=stick (drumstick technique): not a string number, left unmapped.
     case 0x1E:
     case 0x1F: return { SymId::stringsHarmonic };
     case 0x44:
@@ -103,14 +104,6 @@ bool encArticByteIsOpenString(quint8 articByte)
 {
     // 0x46=open-string; emitted as Fingering "0" (STRING_NUMBER style).
     return articByte == 0x46;
-}
-
-int encArticByteToStringNumber(quint8 articByte)
-{
-    // Open string (0x46) is handled separately as plain Fingering "0".
-    // 0x47 is "stick" (drumstick technique), not a string number; left unmapped.
-    (void)articByte;
-    return 0;
 }
 
 // Scale string-number artic bytes: 0x39-0x40 encode string numbers 1-8 as (byte - kStringArticBase).

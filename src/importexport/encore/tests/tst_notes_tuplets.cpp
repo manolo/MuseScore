@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Tuplet import: ratio and actual-tick reconstruction, nested/irregular groups, and orphan-member repair.
+// See ENCORE_IMPORTER.md §Rhythm: face value, dots, tuplets.
+
 #include <gtest/gtest.h>
 
 #include "engraving/dom/arpeggio.h"
@@ -156,8 +159,7 @@ TEST_F(Tst_NotesTuplets, tuplet_measure_fills_correctly)
 
 TEST_F(Tst_NotesTuplets, tuplet_ticks_not_zero)
 {
-    // Before fix: Tuplet::ticks() returned Fraction(0,1) because setTicks() was
-    // never called.  checkMeasure then saw duration=0 and added extra rests.
+    // Tuplet::ticks() must be non-zero (setTicks called), or checkMeasure sees duration 0 and adds rests.
     MasterScore* score = readEncoreScore("notes_triplets.enc");
     ASSERT_NE(score, nullptr);
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
@@ -176,12 +178,8 @@ TEST_F(Tst_NotesTuplets, tuplet_ticks_not_zero)
 
 TEST_F(Tst_NotesTuplets, tuplet_state_cleared_between_measures)
 {
-    // Before fix: tuplets map was never cleared between measures.  A triplet opened
-    // in measure N would still be "active" in N+1, giving non-tuplet notes a 2/3
-    // duration and causing sanityCheck to fail.
-    // Fix: tuplets.clear() at the start of each measure in buildScore.
-    // Measure 2 of notes_triplets has plain quarter notes (no tuplet byte).
-    // Without the fix, those quarters would be appended to the stale triplet group.
+    // Tuplet state must be cleared between measures, or a triplet opened in one measure stays active in the
+    // next and wrongly absorbs its plain notes.
     MasterScore* score = readEncoreScore("notes_triplets.enc");
     ASSERT_NE(score, nullptr);
 
@@ -228,9 +226,7 @@ TEST_F(Tst_NotesTuplets, tuplet_note_sorts_before_non_tuplet_at_same_tick)
 
 TEST_F(Tst_NotesTuplets, no_degenerate_tuplet_ratios)
 {
-    // Before fix: tuplet=0xFF gave a 15:15 tuplet (reduces to 1:1).
-    // After fix: such tuplets are skipped. No tuplet should have ratio 1:1.
-    // Test on Beethoven which has tuplet=0xFF corruption.
+    // A degenerate tuplet byte (0xFF -> 15:15) must be skipped; no tuplet may reduce to 1:1.
     MasterScore* score = readEncoreScore("notes_corrupted.enc");
     ASSERT_NE(score, nullptr);
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
@@ -317,8 +313,7 @@ TEST_F(Tst_NotesTuplets, whole_rest_in_partial_measure)
     // notes_whole_rest_2_4.enc: 2/4 measure with a single rest (faceValue=1).
     // Encore encodes a whole-measure rest as fv=1 regardless of the time signature.
     // realDuration2DurationType(480, 1) must return V_HALF (not V_WHOLE) because
-    // rdur=480 = one half-note in MuseScore's 480 ticks/quarter.
-    // Before fix: faceValue2DurationType(1) returned V_WHOLE → rest filled 1/1 > 2/4 mLen.
+    // A whole-measure rest in 2/4 must import as a half rest (from rdur), not a whole rest that overfills.
     MasterScore* score = readEncoreScore("notes_whole_rest_2_4.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -326,7 +321,6 @@ TEST_F(Tst_NotesTuplets, whole_rest_in_partial_measure)
     Measure* m = measureAt(score, 0);
     ASSERT_NE(m, nullptr);
     EXPECT_EQ(m->timesig(), Fraction(2, 4)) << "Time signature should be 2/4";
-    // The rest in voice 0 should have V_HALF duration (not V_WHOLE)
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* e = s->element(0);
         if (e && e->isRest()) {
@@ -340,17 +334,13 @@ TEST_F(Tst_NotesTuplets, whole_rest_in_partial_measure)
 
 TEST_F(Tst_NotesTuplets, explicit_tuplet_facevalue_not_rdur)
 {
-    // notes_explicit_tup_rdur_truncated.enc: 6/8 measure with 3 explicit
-    // 3:2 triplet 8th notes (tup=0x32). The 3rd note at tick=630 has rdur=30 because
-    // the following rest starts at tick=660 (30 Encore ticks later).
-    // Without fix: realDuration2DurationType(30, 4) = V_32ND → wrong dt → measure corrupted.
-    // With fix: isStandardExplicit notes use faceValue2DurationType(4) = V_EIGHTH regardless.
+    // Explicitly-marked tuplet notes must take their duration from the face value, not a truncated rdur
+    // (a following rest can shorten the last member's rdur and wrongly demote it).
     MasterScore* score = readEncoreScore("notes_explicit_tup_rdur_truncated.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Explicit triplet with truncated rdur should pass sanityCheck: " << ret.text();
 
-    // All 3 triplet notes must be V_EIGHTH (face value), not V_32ND (from rdur=30).
     Measure* m = measureAt(score, 0);
     ASSERT_NE(m, nullptr);
     int tupletEighthCount = 0;
@@ -372,11 +362,8 @@ TEST_F(Tst_NotesTuplets, explicit_tuplet_facevalue_not_rdur)
 
 TEST_F(Tst_NotesTuplets, partial_explicit_group_treated_as_plain)
 {
-    // notes_partial_explicit_group.enc: 4/4 measure with 4 notes having
-    // tup=0x32, then a plain Q. The first 3 form a valid complete 3:2 triplet group.
-    // Note 4 (isolated tup=0x32) is NOT in validTupletGroupMember → treated as plain Q.
-    // Without fix: note 4 starts a partial tuplet → checkMeasure overshoot → sum ≠ 4/4.
-    // With fix: note 4 is plain Q → sum = 3*(1/6) + 1/4 + 1/4 = 1 = 4/4. PASS.
+    // A 4th note carrying the tuplet byte after a complete 3:2 group is not a valid group member and must
+    // be treated as a plain note, or it starts a partial tuplet and the measure overshoots 4/4.
     MasterScore* score = readEncoreScore("notes_partial_explicit_group.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -384,7 +371,6 @@ TEST_F(Tst_NotesTuplets, partial_explicit_group_treated_as_plain)
 
     Measure* m = measureAt(score, 0);
     ASSERT_NE(m, nullptr);
-    // Collect all chords and check tuplet membership
     std::vector<Chord*> chords;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* e = s->element(0);
@@ -393,7 +379,6 @@ TEST_F(Tst_NotesTuplets, partial_explicit_group_treated_as_plain)
         }
     }
     ASSERT_EQ(chords.size(), 5u) << "Should have 5 chords";
-    // Chords 1-3: in tuplet
     EXPECT_NE(chords[0]->tuplet(), nullptr) << "Note 1 should be in tuplet";
     EXPECT_NE(chords[1]->tuplet(), nullptr) << "Note 2 should be in tuplet";
     EXPECT_NE(chords[2]->tuplet(), nullptr) << "Note 3 should be in tuplet";
@@ -448,14 +433,8 @@ TEST_F(Tst_NotesTuplets, dotted_note_capped_to_remaining_space)
 
 TEST_F(Tst_NotesTuplets, dotted_note_dotctrl_bit0_with_rdur_drift)
 {
-    // notes_dotted_ctrl_bit0_drift.enc: 2/4 measure with four notes.
-    // Note 0 (fv=E): rdur=163 instead of 180 (17-tick MIDI drift), dotControl=0x1D
-    // (bit 0 = 1, Encore's "dotted" flag). calcDotsSnap(163, E) returns 0 because
-    // 17 ticks exceeds the ±1 snap tolerance. Without the fix, note 0 imports as a
-    // plain eighth note and a phantom 16th rest appears at the end of the measure.
-    //
-    // Fix: when calcDots and calcDotsSnap both return 0, trust bit 0 of dotControl
-    // and force dots=1. Note 0 must be a dotted eighth; measure must be clean.
+    // When MIDI drift exceeds the snap tolerance (calcDots and calcDotsSnap both return 0), the dotControl
+    // bit-0 flag must still force the dot, or a dotted eighth imports plain and leaves a phantom rest.
     MasterScore* score = readEncoreScore("notes_dotted_ctrl_bit0_drift.enc");
     ASSERT_NE(score, nullptr) << "Failed to load notes_dotted_ctrl_bit0_drift.enc";
     muse::Ret ret = score->sanityCheck();
@@ -465,7 +444,6 @@ TEST_F(Tst_NotesTuplets, dotted_note_dotctrl_bit0_with_rdur_drift)
     ASSERT_NE(m, nullptr);
     EXPECT_EQ(m->timesig(), Fraction(2, 4));
 
-    // Collect chords (no rests expected, measure must be clean)
     std::vector<Chord*> chords;
     std::vector<Rest*> rests;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
@@ -485,12 +463,10 @@ TEST_F(Tst_NotesTuplets, dotted_note_dotctrl_bit0_with_rdur_drift)
     ASSERT_EQ(chords.size(), 4u) << "Measure must have exactly 4 chords";
     EXPECT_EQ(rests.size(), 0u) << "No phantom rests: measure must fill exactly 2/4";
 
-    // First chord: dotted-eighth (fv=E, dotControl bit 0 forces dots=1 despite drift)
     EXPECT_EQ(chords[0]->durationType().type(), DurationType::V_EIGHTH)
         << "Note 0 base type must be eighth";
     EXPECT_EQ(chords[0]->dots(), 1)
         << "Note 0 must have 1 dot (dotControl bit 0 = dotted flag)";
-    // Remaining chords: plain durations (no dot)
     EXPECT_EQ(chords[1]->durationType().type(), DurationType::V_16TH);
     EXPECT_EQ(chords[1]->dots(), 0);
     EXPECT_EQ(chords[2]->durationType().type(), DurationType::V_EIGHTH);
@@ -502,19 +478,9 @@ TEST_F(Tst_NotesTuplets, dotted_note_dotctrl_bit0_with_rdur_drift)
 
 TEST_F(Tst_NotesTuplets, v0c2_dotted_eighth_detected_from_tick_pattern)
 {
-    // notes_v0c2_dotted_eighth.enc: v0xC2 3/4 measure.
-    // E@0 (dotControl=0x60, bit 0 = 0), S@120, H@180.
-    //
-    // In Encore v0xC2 the sixteenth in a dotted-eighth+sixteenth group is
-    // stored at tick+faceValue(eighth)=tick+120, NOT tick+dotted(eighth)=
-    // tick+180.  realDuration of the eighth = 120 = plain eighth gap.
-    // dotControl=0x60 has bit 0 = 0 (unlike v0xC4 which uses 0x1D).
-    //
-    // Without fix: plain-E(120) + S(60) + H(480) = 660 ≠ 720 → trailing
-    //   16th rest generated; sanityCheck fails or measure is wrong.
-    // With fix (E@tick → S@tick+120 pattern): dotControl|=1 set on the
-    //   eighth → bit-0 fallback gives 1 dot → dotted-E(180)+S(60)+H(480)
-    //   = 720 → clean measure, 3 chords, no phantom rest.
+    // In v0xC2 the sixteenth of a dotted-eighth+sixteenth pair is stored at tick+plain-eighth, and the
+    // eighth's dotControl lacks the dotted bit. The E->S@tick+120 pattern must be detected and the eighth
+    // marked dotted, or the measure comes up short and generates a phantom rest.
     MasterScore* score = readEncoreScore("notes_v0c2_dotted_eighth.enc");
     ASSERT_NE(score, nullptr) << "Failed to load notes_v0c2_dotted_eighth.enc";
     muse::Ret ret = score->sanityCheck();
@@ -561,24 +527,10 @@ TEST_F(Tst_NotesTuplets, v0c2_dotted_eighth_detected_from_tick_pattern)
     delete score;
 }
 
-// ===========================================================================
-// FIX: fixDottedEighthPattern must not fire on an eighth+sixteenth sequence
-// inside a fully-filled measure. The binary pattern (8th rdur=120 + 16th at
-// tick+120) is ambiguous: it can mean either a dotted-8th anomaly (measure
-// short by 60t) or a genuine 8th followed by a 16th (measure exactly full).
-// Guard: faceSum + 60 == durTicks is required. When the measure is already
-// full (faceSum == durTicks), the fix is blocked, so the first 8th stays plain.
-//
-// Before the fix, the lack of this guard caused tapada.enc m40/m41 (bandurria)
-// to be imported with a spurious dotted 8th at the start instead of plain 8th.
-// ===========================================================================
+// The dotted-eighth pattern fix must not fire in an already-full measure: the 8th+16th binary pattern is
+// ambiguous, so it only applies when faceSum + 60 == durTicks (measure short by an eighth's dot).
 TEST_F(Tst_NotesTuplets, v0c2_full_measure_eighth_plus_sixteenth_no_false_dot)
 {
-    // notes_v0c2_full_measure_no_false_dot.enc: v0xC2 4/4 measure.
-    // 8th + 16th + 16th + 8th + 8th = 120+60+60+120+120 = 480 = durTicks.
-    // faceSum (480) + 60 = 540 != 480 = durTicks => fixDottedEighthPattern blocked.
-    // Without the faceSum guard the fix would fire: first 8th -> dotted 8th (90t),
-    // overflowing the measure and misshaping all subsequent notes.
     MasterScore* score = readEncoreScore("notes_v0c2_full_measure_no_false_dot.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -598,7 +550,6 @@ TEST_F(Tst_NotesTuplets, v0c2_full_measure_eighth_plus_sixteenth_no_false_dot)
     ASSERT_EQ(chords.size(), 5u)
         << "5 chords expected (8th+16th+16th+8th+8th); spurious dot on first 8th "
         "would overflow the measure and truncate/reshape later notes";
-    // First chord must be a plain 8th (not dotted), proving the faceSum guard fired.
     EXPECT_EQ(chords[0]->durationType().type(), DurationType::V_EIGHTH);
     EXPECT_EQ(chords[0]->dots(), 0) << "First 8th must NOT be dotted (full measure: faceSum guard)";
     EXPECT_EQ(chords[1]->durationType().type(), DurationType::V_16TH);
@@ -612,16 +563,8 @@ TEST_F(Tst_NotesTuplets, v0c2_full_measure_eighth_plus_sixteenth_no_false_dot)
 
 TEST_F(Tst_NotesTuplets, mixed_value_tuplet_exact_ticks_and_isolated_partial)
 {
-    // notes_mixed_value_tuplet.enc: 4/4 measure with a 3:2 triplet
-    // containing mixed note values (Q, Q, 8th), followed by an isolated 8th
-    // (tup=0x32), a plain Q, and a Q rest.
-    //
-    // With face-value-sum grouping (4.6), the 4 notes {Q,Q,8th,8th} with tup=0x32
-    // form ONE complete group: face sum = 1/4+1/4+1/8+1/8 = 3/4 = threshold (3×1/4).
-    // The group closes after 4 notes; exact-ticks correction sets ticks=5/12 so
-    // checkMeasure does not break on the following plain notes.
-    //
-    // Expected sum: 5/12 (group) + cascade fills + micro = 1/2 = 2/4. PASS.
+    // A mixed-value tuplet group (Q,Q,8th,8th with tup=0x32) is grouped by face-value sum reaching the
+    // threshold, closing as one complete group; exact-ticks correction keeps the following plain notes valid.
     MasterScore* score = readEncoreScore("notes_mixed_value_tuplet.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -630,7 +573,6 @@ TEST_F(Tst_NotesTuplets, mixed_value_tuplet_exact_ticks_and_isolated_partial)
     ASSERT_NE(m, nullptr);
     EXPECT_EQ(m->timesig(), Fraction(2, 4));
 
-    // All 4 chords (Q,Q,8th,8th) should be in the same tuplet (one complete group).
     std::vector<Chord*> chords;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* e = s->element(0);
@@ -651,18 +593,8 @@ TEST_F(Tst_NotesTuplets, mixed_value_tuplet_exact_ticks_and_isolated_partial)
 
 TEST_F(Tst_NotesTuplets, implied_group_boundary_no_spurious_new_group)
 {
-    // notes_v0c2_implied_group_boundary.enc: v0xC2 2/4 measure.
-    // Notes at rdurs: 120, 60, 60, 40, 40, 40 (complete 3:2 group), 40 (isolated), 80.
-    //
-    // Bug: after the complete implied 3:2 group closes (groupFull=true), the
-    // next note (rdur=40, NOT in impliedGroupMember) passed the guard because
-    // tt.inTuplet()=true at detection time.  It started a new unvalidated group,
-    // giving it a 1/24 advance instead of 1/16, pushing cumTick past mLen and
-    // triggering cascading fills that overflowed 2/4.
-    //
-    // Fix: add !tt.groupFull() to the implied detection guard. The isolated note
-    // is then treated as a plain 16th. Sum = 1/8+1/16+1/16+3*(1/24)+1/16+1/16
-    //                                       = 24/48 = 2/4 = PASS.
+    // Once a complete implied tuplet group closes, an isolated note right after it must not start a new
+    // unvalidated group (guarded by groupFull); it must be a plain note so the measure does not overflow.
     MasterScore* score = readEncoreScore("notes_v0c2_implied_group_boundary.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -690,56 +622,90 @@ TEST_F(Tst_NotesTuplets, implied_group_boundary_no_spurious_new_group)
     delete score;
 }
 
-TEST_F(Tst_NotesTuplets, capped_tuplet_note_removed_from_tuplet)
+TEST_F(Tst_NotesTuplets, truncate_overfull_tuplet_no_partial_tuplet)
 {
     // notes_capped_tuplet_note.enc: 4/4 measure with 3 plain quarters
-    // (cumTick=3/4) followed by 3 explicit 3:2 triplet quarters (tup=0x32).
-    // 1st triplet Q advance = (1/4)*(2/3) = 1/6. cumTick=3/4+1/6=11/12.
-    // 2nd triplet Q: remaining=1/12 < 1/6 → advance capped. Note removed from tuplet.
+    // (cumTick=3/4) followed by 3 explicit 3:2 triplet quarters (tup=0x32). The full
+    // content overflows 4/4.
     //
-    // Bug: without removal, chord stays in tuplet with ticks=1/4 (face value).
-    //   actualTicks = 1/6 > 1/12 (capped advance). Sum overshoots mLen → corrupted.
-    // Fix: capped note removed. Its ticks = capped value → actualTicks ≤ advance ≤
-    //   remaining → sum stays within mLen.
+    // Default overfill strategy is "Remove extra notes" (Truncate): a tuplet is atomic, so
+    // the trailing tuplet is DISSOLVED to plain quarters, then trailing notes are removed
+    // until the bar is filled, and the last survivor is dotted to fill exactly (here the
+    // 3 originals + 1 dissolved quarter fill 4/4 exactly, so no dots and no rest).
+    //
+    // Regression: the old note-loop cap ripped one note out of the tuplet, leaving an
+    // INVALID partial tuplet (3:2 with <3 members) that broke copy/paste with
+    // "Tuplet cannot cross barlines". The measure must contain NO tuplet at all.
     MasterScore* score = readEncoreScore("notes_capped_tuplet_note.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
-    EXPECT_TRUE(ret) << "Capped tuplet note should not overshoot mLen: " << ret.text();
+    EXPECT_TRUE(ret) << "Truncated measure must pass sanity check: " << ret.text();
     Measure* m = measureAt(score, 0);
     ASSERT_NE(m, nullptr);
     EXPECT_EQ(m->timesig(), Fraction(4, 4));
-    std::vector<Chord*> chords;
+    EXPECT_EQ(m->ticks(), Fraction(4, 4)) << "Truncate keeps a standard 4/4 measure";
+    Fraction sum(0, 1);
+    int tupletChords = 0;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* e = s->element(0);
-        if (e && e->isChord()) {
-            chords.push_back(toChord(e));
+        if (e && e->isChordRest()) {
+            ChordRest* cr = toChordRest(e);
+            sum += cr->actualTicks();
+            if (cr->tuplet()) {
+                ++tupletChords;
+            }
         }
     }
-    ASSERT_GE(chords.size(), 4u);
-    EXPECT_EQ(chords[0]->tuplet(), nullptr) << "Plain Q 1 no tuplet";
-    EXPECT_EQ(chords[1]->tuplet(), nullptr) << "Plain Q 2 no tuplet";
-    EXPECT_EQ(chords[2]->tuplet(), nullptr) << "Plain Q 3 no tuplet";
-    EXPECT_NE(chords[3]->tuplet(), nullptr) << "First triplet Q in tuplet";
-    if (chords.size() >= 5) {
-        EXPECT_EQ(chords[4]->tuplet(), nullptr)
-            << "Capped 2nd triplet Q removed from tuplet";
+    EXPECT_EQ(tupletChords, 0) << "Truncate must leave NO tuplet (no partial tuplet)";
+    EXPECT_EQ(sum, Fraction(4, 4)) << "Voice 0 must sum to exactly 4/4";
+    delete score;
+}
+
+TEST_F(Tst_NotesTuplets, truncate_overfull_messy_precontent_fills_to_4_4)
+{
+    // notes_overfull_messy_precontent_tuplet.enc mirrors a real overfull measure: 4/4 with
+    // 17/32 of pre-content (16th+32nd+16th+dotted-quarter) then a 3:2 quarter triplet,
+    // total 33/32. Default Truncate must dissolve the triplet, drop trailing notes, dot
+    // the survivor, and leave an EXACT 4/4 (no underfull gap, no partial tuplet).
+    MasterScore* score = readEncoreScore("notes_overfull_messy_precontent_tuplet.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "Truncated messy measure must pass sanity check";
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->ticks(), Fraction(4, 4)) << "Truncate keeps a standard 4/4 measure";
+    Fraction sum(0, 1);
+    int tupletChords = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChordRest()) {
+            ChordRest* cr = toChordRest(e);
+            sum += cr->actualTicks();
+            if (cr->tuplet()) {
+                ++tupletChords;
+            }
+        }
     }
+    EXPECT_EQ(tupletChords, 0) << "No partial tuplet left";
+    EXPECT_EQ(sum, Fraction(4, 4)) << "Voice 0 must fill exactly 4/4 (no underfull gap)";
+    delete score;
+}
+
+TEST_F(Tst_NotesTuplets, truncate_overfull_tuplet_with_slur_no_crash)
+{
+    // notes_overfull_tuplet_with_slur.enc: overfull 4/4 with a 3:2 quarter triplet and a
+    // SLURSTART spanning into it. Truncate dissolves and removes tuplet members; a slur
+    // whose endpoint resolves into the modified region must not leave a dangling reference
+    // that crashes during layout or at score teardown.
+    MasterScore* score = readEncoreScore("notes_overfull_tuplet_with_slur.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
     delete score;
 }
 
 TEST_F(Tst_NotesTuplets, mixed_duration_tuplet_boundary_fill)
 {
-    // notes_mixed_duration_tuplet_boundary_fill.enc: 4/4 measure.
-    // {half} + {qtr/3:2, qtr/3:2, 8th/3:2, [8th/3:2 omitted at tick=960]}.
-    //
-    // Encore omits the final note of a tuplet group when it falls at durTicks
-    // (measure boundary). The group needs face sum=3Q=3/4 but only 3 notes are
-    // present (face sum=5/8). closeTupletWithFill must detect faceTicks < fullFaceSum
-    // and add an invisible 8th fill rest so the measure sums to 4/4.
-    //
-    // Without fix: elements.size()(3) < actualN(3) is false; no fill rest added;
-    //   cumTick stays at 11/12; sanityCheck fails.
-    // With fix: faceShort path adds invisible 8th rest; cumTick reaches 12/12=1.
+    // Encore omits a tuplet group's final note when it lands on the measure boundary; closeTupletWithFill
+    // must add an invisible fill rest for the missing face duration so the measure sums correctly.
     MasterScore* score = readEncoreScore("notes_mixed_duration_tuplet_boundary_fill.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -779,23 +745,8 @@ TEST_F(Tst_NotesTuplets, mixed_duration_tuplet_boundary_fill)
 
 TEST_F(Tst_NotesTuplets, partial_triplet_at_measure_end_no_voice_overflow)
 {
-    // notes_partial_triplet_measure_end.enc: 2/4 measure with 3 plain eighths
-    // (filling ticks 0-360) followed by a 2-note partial 3:2 triplet at the end.
-    //
-    // Notes at ticks 360 and 440 both have tup=0x32 (3:2) and fv=4 (eighth).
-    //   rdur(tick=360) = 80  (2 triplet slots: displayed as eighth in the bracket)
-    //   rdur(tick=440) = 40  (1 triplet slot:  displayed as sixteenth in the bracket)
-    //   startTick(360) + rdurSum(120) = 480 = durTicks  -> rdur fills measure
-    //   startTick(360) + faceTickSum(240) = 600 > 480   -> face values would overflow
-    //
-    // Fix: the partial group is marked (Fix 1). A V_16TH baseLen bracket is
-    // started (Fix 3: remaining=1/8 / normalN=2 = 1/16). The second note's dt
-    // is reduced V_EIGHTH -> V_16TH to fit the remaining 1/24 slot (Fix 2).
-    //
-    // Without fix: the plain V_EIGHTH face-value advance at tick=360 fills the
-    // remaining 1/8, causing tick=440 to overflow into voice 1. This produced
-    // a phantom note at beat 1 (voice-1 note placed at cumTick=0) and an
-    // unresolved tie in similar multi-staff files (e.g. the POLCA regression).
+    // A 2-note partial 3:2 triplet at the measure end must fit the remaining space (bracket shortened, the
+    // last member reduced to a 16th) rather than advancing by full face value and overflowing into voice 1.
     MasterScore* score = readEncoreScore("notes_partial_triplet_measure_end.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1006,7 +957,6 @@ TEST_F(Tst_NotesTuplets, mixed_value_tuplet_ticks_corrected_for_overshoot)
     Measure* m = measureAt(score, 0);
     ASSERT_NE(m, nullptr);
 
-    // Find the first tuplet in the measure and check its ticks
     Tuplet* firstTuplet = nullptr;
     for (EngravingItem* e : m->el()) {
         if (e->isTuplet()) {
@@ -1042,7 +992,6 @@ TEST_F(Tst_NotesTuplets, no_spurious_rests_inside_active_tuplet_gapsnap_suppress
     Measure* m = measureAt(score, 0);
     ASSERT_NE(m, nullptr);
 
-    // Collect all chords and rests in voice 0
     int chordCount = 0;
     bool anyVisibleRestInsideTriplet = false;
     Tuplet* activeTup = nullptr;
@@ -1077,7 +1026,6 @@ TEST_F(Tst_NotesTuplets, segment_override_15notes_becomes_15_8)
     Measure* m = measureAt(score, 0);
     ASSERT_NE(m, nullptr);
 
-    // Collect chords in voice 0
     std::vector<Chord*> chords;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
@@ -1151,7 +1099,6 @@ TEST_F(Tst_NotesTuplets, segment_override_does_not_fire_for_clean_multiple)
     Measure* m = measureAt(score, 0);
     ASSERT_NE(m, nullptr);
 
-    // Collect all chords and their Tuplets
     std::vector<Chord*> chords;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
@@ -1312,7 +1259,6 @@ TEST_F(Tst_NotesTuplets, triplet_orphan_with_prior_complete_group)
     Measure* m0 = measureAt(score, 0);
     ASSERT_NE(m0, nullptr);
 
-    // Collect tuplets.
     std::vector<Tuplet*> tuplets;
     for (EngravingItem* e : m0->el()) {
         if (e->isTuplet()) {
@@ -1424,26 +1370,8 @@ TEST_F(Tst_NotesTuplets, v0c4_4to3_quadruplet_correct_advance)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: two interacting bugs in the nested-tuplet detection path:
-//
-// Bug 1 (emitters-tuplets-groups.cpp): the peek-ahead check that generates
-// NestedTupletInfo fired when innerGroupStartIdx=1, producing a spurious
-// nested-tuplet structure for a plain {Q,E} 3:2 group followed by three
-// consecutive 3:2 eighths. Fix: require innerGroupStartIdx >= 2.
-//
-// Bug 2 (emitters.cpp): buildNestedTupletMaps iterated ALL sorted elements
-// between innerFirst and innerLast regardless of staff, adding drum notes
-// (staffIdx=1) to innerGroupMembers. Those notes then got the doubly-nested
-// tick-advance formula, corrupting all subsequent drum placements.
-// Fix: filter innerGroupMembers to elements with the same staffIdx as innerFirst.
-//
-// Fixture: 2-staff 4/4 measure.
-//   Staff 0: {Q,E} in 3:2 + {REST,E,E} in 3:2 + half rest (fill).
-//   Staff 1: 12 eighth notes forming 4 consecutive 3:2 triplet brackets.
-// Without the fix, staff 1 tuplet brackets are corrupted and
-// sanityCheck() fails (or drum notes fall outside measure bounds).
-// ===========================================================================
+// Nested-tuplet detection must not spuriously fire on a plain 3:2 group, and it must not pull another
+// staff's notes into an inner group (both corrupted the drum staff's brackets and overflowed the measure).
 TEST_F(Tst_NotesTuplets, cross_staff_false_nesting_and_drum_corruption)
 {
     MasterScore* score = readEncoreScore("notes_cross_staff_false_nesting.enc");
@@ -1457,7 +1385,6 @@ TEST_F(Tst_NotesTuplets, cross_staff_false_nesting_and_drum_corruption)
     Measure* m = score->firstMeasure();
     ASSERT_NE(m, nullptr);
 
-    // Collect all non-gap chords on staff 1 (drum part) across all voices.
     std::vector<Chord*> drumChords;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         for (int v = 0; v < static_cast<int>(VOICES); ++v) {
