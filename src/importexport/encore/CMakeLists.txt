@@ -26,74 +26,70 @@ target_sources(iex_encore PRIVATE
     ienc-importconfiguration.h
     internal/enc-importconfiguration.h
     internal/enc-importconfiguration.cpp
-    internal/notationencreader.cpp
-    internal/notationencreader.h
-    internal/importer/import.cpp
-    internal/importer/page-layout.h
-    internal/importer/page-layout.cpp
-    internal/importer/import.h
-    internal/importer/import-options.h
+    internal/parser/parsers-note.cpp
+    internal/parser/parsers-chord.cpp
+    internal/parser/parsers-ornament.cpp
+    internal/parser/parsers-lyric-tie.cpp
+    internal/parser/parsers-measure.cpp
+    internal/parser/parsers-metadata.cpp
+    internal/parser/parsers-text.cpp
+    internal/parser/parsers-root.cpp
     internal/parser/parsers-encoding.h
     internal/parser/parsers-encoding.cpp
-    internal/parser/ticks.h
-    internal/parser/ticks.cpp
-    internal/parser/elem.h
-    internal/parser/elem-enums.h
-    internal/parser/elem-note.h
-    internal/parser/elem-ornament.h
-    internal/parser/elem-text.h
-    internal/parser/elem-measure.h
-    internal/parser/elem-root.h
     internal/parser/readers.h
     internal/parser/readers.cpp
     internal/parser/readers-v0xa6.h
     internal/parser/readers-v0xa6.cpp
-    internal/parser/readers-v0xc2.h
-    internal/parser/readers-v0xc2.cpp
     internal/parser/readers-v0xc4-base.h
     internal/parser/readers-v0xc4-base.cpp
+    internal/parser/readers-v0xc2.h
+    internal/parser/readers-v0xc2.cpp
     internal/parser/readers-v0xc4.h
     internal/parser/readers-v0xc4.cpp
-    internal/parser/parsers-root.cpp
-    internal/parser/parsers-measure.cpp
-    internal/parser/parsers-note.cpp
-    internal/parser/parsers-chord.cpp
-    internal/parser/parsers-ornament.cpp
-    internal/parser/parsers-text.cpp
-    internal/parser/parsers-lyric-tie.cpp
-    internal/parser/parsers-metadata.cpp
-    internal/importer/ctx.h
-    internal/importer/builders.h
-    internal/importer/builders-parts.cpp
-    internal/importer/builders-measures.cpp
-    internal/importer/emitters.cpp
-    internal/importer/emitters-note.cpp
-    internal/importer/emitters-rest.cpp
-    internal/importer/emitters-chords.cpp
-    internal/importer/emitters-fill.cpp
-    internal/importer/emitters-overfill.cpp
-    internal/importer/emitters-lyrics.cpp
-    internal/importer/emitters-orn.cpp
-    internal/importer/emitters-note-grace.cpp
-    internal/importer/emitters-note-artic.cpp
-    internal/importer/emitters-tempo.cpp
-    internal/importer/emitters-internal.h
-    internal/importer/emitters-tuplets.h
-    internal/importer/emitters-tuplets.cpp
-    internal/importer/emitters-tuplets-groups.cpp
-    internal/importer/resolvers.h
-    internal/importer/resolvers.cpp
-    internal/importer/resolvers-ornaments.cpp
-    internal/importer/resolvers-hairpin.cpp
-    internal/importer/resolvers-slur.cpp
-    internal/importer/resolvers-fingering.cpp
-    internal/importer/resolvers-ottava.cpp
-    internal/importer/mappers.h
+    internal/parser/elem.h
     internal/importer/mappers-clefs.cpp
     internal/importer/mappers-title.cpp
     internal/importer/mappers-instruments.cpp
     internal/importer/mappers-tempo.cpp
     internal/importer/mappers-articulations.cpp
+    internal/importer/mappers.h
+    internal/parser/ticks.cpp
+    internal/parser/ticks.h
+    internal/importer/emitters-tuplets.cpp
+    internal/importer/emitters-tuplets-groups.cpp
+    internal/importer/emitters-tuplets.h
+    internal/notationencreader.cpp
+    internal/notationencreader.h
+    internal/importer/import.cpp
+    internal/importer/page-layout.h
+    internal/importer/page-layout.cpp
+    internal/importer/ctx.h
+    internal/importer/builders.h
+    internal/importer/builders-parts.cpp
+    internal/importer/builders-measures.cpp
+    internal/importer/emitters-internal.h
+    internal/importer/coords.h
+    internal/importer/coords.cpp
+    internal/importer/emitters-note.cpp
+    internal/importer/emitters-note-grace.cpp
+    internal/importer/emitters-note-artic.cpp
+    internal/importer/emitters-rest.cpp
+    internal/importer/emitters-orn.cpp
+    internal/importer/emitters-chords.cpp
+    internal/importer/emitters-lyrics.cpp
+    internal/importer/emitters-tempo.cpp
+    internal/importer/emitters-fill.cpp
+    internal/importer/emitters-overfill.cpp
+    internal/importer/emitters.cpp
+    internal/importer/resolvers.h
+    internal/importer/resolvers.cpp
+    internal/importer/resolvers-slur.cpp
+    internal/importer/resolvers-hairpin.cpp
+    internal/importer/resolvers-ornaments.cpp
+    internal/importer/resolvers-fingering.cpp
+    internal/importer/resolvers-ottava.cpp
+    internal/importer/import.h
+    internal/importer/import-options.h
 )
 
 target_link_libraries(iex_encore PRIVATE engraving)
