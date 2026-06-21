@@ -20,8 +20,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Post-pass: place pending fingerings and bowing/string marks on their chords.
+
 #include "resolvers.h"
 #include "../parser/elem.h"
+#include "../parser/ticks.h"
 #include "engraving/dom/chord.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/fingering.h"
@@ -32,12 +35,12 @@
 #include "engraving/dom/articulation.h"
 
 #include <map>
+#include <optional>
 
 using namespace mu::engraving;
 
 namespace mu::iex::enc {
-// Scan `m` for the first chord on preferTrack, falling back to fallbackTrack.
-// Sets *outTrack to the track used; returns nullptr if neither is found.
+// First chord in m on preferTrack, else on fallbackTrack; *outTrack reports which was used.
 static Chord* findFirstChordInMeasure(Measure* m, track_idx_t preferTrack,
                                       track_idx_t fallbackTrack,
                                       track_idx_t* outTrack)
@@ -79,57 +82,47 @@ static Chord* findFirstChordInMeasure(Measure* m, track_idx_t preferTrack,
     return nullptr;
 }
 
-static void correctBowingTickFromXoffset(
-    PendingBowing& pb,
-    const std::vector<PendingBowing>& allBowings,
-    const BuildCtx& ctx)
+// True when the ORN's own staff has a note at its raw Encore tick. That tick is an explicit,
+// reliable anchor, whereas the xoffset heuristic misfires because ornXoffset and note xoffset use
+// different origins; so xoffset correction is only worthwhile when no note sits on the raw tick.
+static bool bowingHasNoteAtRawTick(const PendingBowing& pb, const BuildCtx& ctx)
 {
-    // When xoffset == 0 the ornament has no visual displacement data, it is
-    // already tagged at its correct note tick, so no correction is needed.
-    if (pb.ornXoffset == 0) {
-        return;
+    const int staffIdx = static_cast<int>(pb.track / VOICES);
+    auto it = ctx.noteXoffByMeasStaff.find({ pb.measIdx, staffIdx });
+    if (it == ctx.noteXoffByMeasStaff.end()) {
+        return false;
     }
-    // Pre-check: if there is a note on the ORN's own staff at the ORN's raw
-    // Encore tick, that tick directly names the beat the mark sits on, trust it
-    // and skip all correction.  The raw enc tick is an explicit per-ORN value and
-    // is a far more reliable anchor than the xoffset heuristic: ornXoffset and
-    // note xoffset use different horizontal origins (in real files the offset
-    // between them is a per-file constant, not zero), so an xoffset-proximity
-    // test misfires and snaps a first-beat mark onto a later note.  Correction is
-    // only useful when the ORN's own staff has no note at its raw tick (the beat
-    // is empty, so the stored tick cannot be taken literally).
-    static constexpr int BOW_XOFF_CLUSTER = 6;
-    {
-        const int staffIdx2 = static_cast<int>(pb.track / VOICES);
-        auto noteIt = ctx.noteXoffByMeasStaff.find({ pb.measIdx, staffIdx2 });
-        if (noteIt != ctx.noteXoffByMeasStaff.end()) {
-            for (const auto& np : noteIt->second) {
-                if (np.first == pb.encTickRaw) {
-                    return;  // a note exists at the ORN's own beat: trust the raw tick
-                }
-            }
+    for (const auto& np : it->second) {
+        if (np.first == pb.encTickRaw) {
+            return true;
         }
     }
-    // Phase 1: anchor from same-measure ORN with matching xoffset.
-    bool fixed = false;
+    return false;
+}
+
+// Phase 1: borrow the tick of a same-measure bowing ORN whose xoffset clusters with this one.
+static std::optional<Fraction> bowingTickFromMatchingOrn(const PendingBowing& pb,
+                                                         const std::vector<PendingBowing>& allBowings)
+{
+    static constexpr int BOW_XOFF_CLUSTER = 6;
     for (const PendingBowing& anchor : allBowings) {
         if (&anchor == &pb || anchor.measIdx != pb.measIdx || anchor.encTickRaw == 0) {
             continue;
         }
         if (std::abs(anchor.ornXoffset - pb.ornXoffset) <= BOW_XOFF_CLUSTER) {
-            pb.tick = anchor.tick;
-            fixed = true;
-            break;
+            return anchor.tick;
         }
     }
-    if (fixed) {
-        return;
-    }
-    // Phase 2: match via closest note xoffset on the same staff.
+    return std::nullopt;
+}
+
+// Phase 2: snap to the note whose xoffset is the closest one at or left of the ORN's xoffset.
+static std::optional<Fraction> bowingTickFromNoteXoffset(const PendingBowing& pb, const BuildCtx& ctx)
+{
     const int staffIdx = static_cast<int>(pb.track / VOICES);
     auto it = ctx.noteXoffByMeasStaff.find({ pb.measIdx, staffIdx });
     if (it == ctx.noteXoffByMeasStaff.end()) {
-        return;
+        return std::nullopt;
     }
     int bestTick = -1;
     int bestDiff = INT_MAX;
@@ -140,25 +133,64 @@ static void correctBowingTickFromXoffset(
             bestTick = p.first;
         }
     }
-    if (bestTick >= 0) {
-        static constexpr int wholeTicks = 960;  // emitMeasures uses 960 ticks/whole
-        const Measure* m = (pb.measIdx >= 0 && pb.measIdx < static_cast<int>(ctx.measuresByIdx.size()))
-                           ? ctx.measuresByIdx[pb.measIdx] : nullptr;
-        if (m) {
-            pb.tick = m->tick() + Fraction(bestTick, wholeTicks);
-        }
+    if (bestTick < 0) {
+        return std::nullopt;
+    }
+    const Measure* m = (pb.measIdx >= 0 && pb.measIdx < static_cast<int>(ctx.measuresByIdx.size()))
+                       ? ctx.measuresByIdx[pb.measIdx] : nullptr;
+    if (!m) {
+        return std::nullopt;
+    }
+    return m->tick() + Fraction(bestTick, kEncWholeTicks);  // bowing snaps to the 960-tick note grid
+}
+
+static void correctBowingTickFromXoffset(
+    PendingBowing& pb,
+    const std::vector<PendingBowing>& allBowings,
+    const BuildCtx& ctx,
+    bool multiAtRawTick)
+{
+    // xoffset == 0 means no visual displacement: the mark is already at its correct note tick.
+    if (pb.ornXoffset == 0) {
+        return;
+    }
+    // Trust the raw tick when a note sits on the ORN's beat, unless several marks share that beat
+    // with distinct xoffsets: Encore stores such a run all at the downbeat and spreads it only by
+    // xoffset, so fall through to xoffset placement to land each on its own note.
+    if (!multiAtRawTick && bowingHasNoteAtRawTick(pb, ctx)) {
+        return;
+    }
+    if (std::optional<Fraction> t = bowingTickFromMatchingOrn(pb, allBowings)) {
+        pb.tick = *t;
+        return;
+    }
+    if (std::optional<Fraction> t = bowingTickFromNoteXoffset(pb, ctx)) {
+        pb.tick = *t;
     }
 }
 
 static void applyPendingBowings(BuildCtx& ctx, MasterScore* score)
 {
+    // Count marks sharing the same measure/staff/raw-tick so a run of articulations
+    // stored at one downbeat (distinguished only by xoffset) is spread across notes.
+    std::map<std::tuple<int, int, int>, int> marksAtRawTick;
+    for (const PendingBowing& pb : ctx.pendingBowings) {
+        if (pb.crossMeasure) {
+            continue;
+        }
+        const int staffIdx = static_cast<int>(pb.track / VOICES);
+        ++marksAtRawTick[{ pb.measIdx, staffIdx, pb.encTickRaw }];
+    }
+
     // Tick correction: Encore sometimes stores ORN enc tick=0 when the mark visually
     // falls on a later beat. Correct before attachment.
     for (PendingBowing& pb : ctx.pendingBowings) {
         if (pb.crossMeasure || pb.encTickRaw > 0) {
             continue;
         }
-        correctBowingTickFromXoffset(pb, ctx.pendingBowings, ctx);
+        const int staffIdx = static_cast<int>(pb.track / VOICES);
+        const bool multi = marksAtRawTick[{ pb.measIdx, staffIdx, pb.encTickRaw }] > 1;
+        correctBowingTickFromXoffset(pb, ctx.pendingBowings, ctx, multi);
     }
 
     // Bowing marks: crossMeasure means Encore misplaced the ORN in the previous measure.
@@ -178,29 +210,10 @@ static void applyPendingBowings(BuildCtx& ctx, MasterScore* score)
                 Segment* seg = m->findSegment(SegmentType::ChordRest, pb.tick);
                 if (seg) {
                     // ORN is always voice 0; scan all voices of own staff before sibling.
-                    const track_idx_t staffBase = (pb.track / VOICES) * VOICES;
-                    for (track_idx_t v = 0; v < VOICES && !c; ++v) {
-                        if (!validTrack(score, staffBase + v)) {
-                            break;
-                        }
-                        EngravingItem* el = seg->element(staffBase + v);
-                        if (el && el->isChord()) {
-                            c = toChord(el);
-                            useTrack = staffBase + v;
-                        }
-                    }
+                    const int ownStaff = static_cast<int>(pb.track / VOICES);
+                    c = firstChordVoiceAt(score, seg, ownStaff, useTrack);
                     if (!c) {
-                        const track_idx_t sibBase = staffBase + VOICES;
-                        for (track_idx_t v = 0; v < VOICES && !c; ++v) {
-                            if (!validTrack(score, sibBase + v)) {
-                                break;
-                            }
-                            EngravingItem* el = seg->element(sibBase + v);
-                            if (el && el->isChord()) {
-                                c = toChord(el);
-                                useTrack = sibBase + v;
-                            }
-                        }
+                        c = firstChordVoiceAt(score, seg, ownStaff + 1, useTrack);
                     }
                 }
             }
@@ -252,9 +265,27 @@ static void applyPendingFingeringOrns(BuildCtx& ctx, MasterScore* score)
                         if (ownEl && ownEl->isChord()) {
                             c = toChord(ownEl);
                             useTrack = pf.track;
-                        } else if (sibEl && sibEl->isChord()) {
-                            c = toChord(sibEl);
-                            useTrack = sibTrack;
+                        } else {
+                            // A fingering stored on voice 0 may belong to a note in another voice of
+                            // the SAME staff (Encore keeps all fingerings on voice 0). Prefer such a
+                            // note over the second staff, so a finger over a voice-2 note is not
+                            // misrouted to the bass sibling.
+                            const track_idx_t staffBase = (pf.track / VOICES) * VOICES;
+                            for (track_idx_t v = staffBase; v < staffBase + VOICES; ++v) {
+                                if (v == pf.track) {
+                                    continue;
+                                }
+                                EngravingItem* vEl = validTrack(score, v) ? seg->element(v) : nullptr;
+                                if (vEl && vEl->isChord()) {
+                                    c = toChord(vEl);
+                                    useTrack = v;
+                                    break;
+                                }
+                            }
+                            if (!c && sibEl && sibEl->isChord()) {
+                                c = toChord(sibEl);
+                                useTrack = sibTrack;
+                            }
                         }
                     }
                 }

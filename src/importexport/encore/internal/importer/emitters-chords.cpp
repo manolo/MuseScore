@@ -20,21 +20,22 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Emit chord symbols (Harmony) from Encore CHORD elements.
+
 #include "emitters-internal.h"
 
+#include "../parser/ticks.h"
 #include "engraving/dom/factory.h"
+#include "engraving/dom/fret.h"
 #include "engraving/dom/harmony.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/segment.h"
 
 namespace mu::iex::enc {
-
-// Create a Harmony (chord symbol) for an EncChordSym element and attach it to the
-// measure. CHD elements often carry a MIDI timing offset from the note they annotate.
-// Strategy: floor the CHD tick to the beat start, then attach to the first ChordRest
-// segment within [beatStart, chdTick]. This prevents near-miss snapping to a
-// subdivision note when a later note is closer than the beat the chord belongs to.
+// CHD elements often carry a MIDI timing offset from the note they annotate, so floor the CHD tick
+// to the beat start and attach to the first ChordRest segment in [beatStart, chdTick]; this avoids
+// near-miss snapping to a subdivision note. See ENCORE_IMPORTER.md §Chord symbol (harmony) import.
 void handleChordSym(BuildCtx& ctx, const MeasEmitCtx& mc, const NoteElemCtx& ec)
 {
     const EncChordSym* ecs = static_cast<const EncChordSym*>(ec.e);
@@ -42,7 +43,7 @@ void handleChordSym(BuildCtx& ctx, const MeasEmitCtx& mc, const NoteElemCtx& ec)
     if (raw.isEmpty()) {
         return;
     }
-    static constexpr int wt = 960;   // Encore whole note = 960 ticks
+    const int wt = kEncWholeTicks;
     const int bt = static_cast<int>(mc.encMeas->beatTicks ? mc.encMeas->beatTicks : 240);
     const int chdEncTick = static_cast<int>(ec.e->tick);
     const int beatStart  = (chdEncTick / bt) * bt;
@@ -78,7 +79,21 @@ void handleChordSym(BuildCtx& ctx, const MeasEmitCtx& mc, const NoteElemCtx& ec)
     Harmony* h = Factory::createHarmony(ctx.score->dummy()->segment());
     h->setTrack(ec.track);
     h->setHarmony(String(raw));
+
+    // Encore records per chord symbol whether a guitar frame is drawn above it (tipo bit 2). Only
+    // then wrap the harmony in a FretDiagram (segment annotation with the Harmony as its child);
+    // chords without the flag, or whose name the database cannot resolve, keep the plain text symbol.
+    if (ecs->hasFretDiagram) {
+        FretDiagram* fd = Factory::createFretDiagram(ctx.score->dummy()->segment());
+        fd->setTrack(ec.track);
+        fd->updateDiagram(h->harmonyName());
+        if (!fd->isClear()) {
+            seg->add(fd);
+            fd->add(h);
+            return;
+        }
+        delete fd;
+    }
     seg->add(h);
 }
-
 } // namespace mu::iex::enc
