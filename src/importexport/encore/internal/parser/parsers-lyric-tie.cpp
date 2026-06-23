@@ -24,7 +24,6 @@
 #include "parsers-encoding.h"
 
 namespace mu::iex::enc {
-
 bool EncLyric::read(QDataStream& ds)
 {
     EncMeasureElem::read(ds);   // consumed: size + staffIdx (5 bytes from elemStart)
@@ -68,18 +67,26 @@ bool EncTie::read(QDataStream& ds)
     isTieStart = ((dirByte & 0x80) != 0) || ((startFlag & 0x80) != 0) || ((dirByte & 0x02) != 0);
 
     if (static_cast<int>(size) >= 18) {
-        // Read arc x-positions at offsets +10 and +12. When arcX1 == arcX2 the arc has
-        // zero horizontal extent. Two cases share this pattern:
-        //   (a) intra-chord decorative arc (Encore connects two chord notes vertically,
-        //       startFlag = 0x00) - must NOT become a forward tie.
-        //   (b) cross-measure tie where the destination is in the next measure and Encore
-        //       stores arcX2 = arcX1 as a placeholder (startFlag = 0x80) - IS a real tie.
-        // Override isTieStart only when startFlag bit 7 is NOT set (case a).
+        // Read arc x-positions at offsets +10 and +12. The arc span is the authoritative
+        // forward-tie signal when the element carries it (18-byte form):
+        //   - arcX1 <  arcX2: genuine left-to-right horizontal span - a real forward tie,
+        //       regardless of the +5 byte. Byte +5 is a signed arc-curvature value
+        //       (0x02/0x04 curve down, 0xFC/0xFE curve up), NOT a bitfield; the old
+        //       (+5 & 0x80) || (+5 & 0x02) rule caught 0x02/0xFC/0xFE but silently
+        //       dropped the equally-valid 0x04 ties.
+        //   - arcX1 == arcX2: zero horizontal extent. Two cases share this pattern:
+        //       (a) intra-chord decorative arc (Encore connects two chord notes vertically,
+        //           startFlag = 0x00) - must NOT become a forward tie.
+        //       (b) cross-measure tie where the destination is in the next measure and
+        //           Encore stores arcX2 = arcX1 as a placeholder (startFlag = 0x80) - a
+        //           real tie. Override isTieStart only when startFlag bit 7 is NOT set (a).
         ds.skipRawData(3);          // skip offsets +7,+8,+9
         ds >> arcX1;                // offset +10
         ds.skipRawData(1);          // skip offset +11
         ds >> arcX2;                // offset +12
-        if (arcX1 == arcX2 && (startFlag & 0x80) == 0) {
+        if (arcX1 < arcX2) {
+            isTieStart = true;
+        } else if (arcX1 == arcX2 && (startFlag & 0x80) == 0) {
             isTieStart = false;
         }
         // Byte +13 unused; byte +14 = staff position of source note (see ENCORE_FORMAT.md §TIE element).
@@ -100,5 +107,4 @@ bool EncTie::read(QDataStream& ds)
     }
     return true;
 }
-
 } // namespace mu::iex::enc
