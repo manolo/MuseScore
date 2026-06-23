@@ -101,6 +101,19 @@ bool EncKeyChange::read(QDataStream& ds)
     return true;
 }
 
+bool EncClefChange::read(QDataStream& ds)
+{
+    EncMeasureElem::read(ds);
+    qint8 ct;
+    ds >> ct;
+    clefType = static_cast<EncClefType>(ct);
+    int toSkip = static_cast<int>(size) - 5 - 1;
+    if (toSkip > 0) {
+        ds.skipRawData(toSkip);
+    }
+    return true;
+}
+
 bool EncGenericElem::read(QDataStream& ds)
 {
     EncMeasureElem::read(ds);

@@ -63,8 +63,9 @@ static std::unique_ptr<EncMeasureElem> createMeasureElement(
         LOGD() << QString("Encore: MIDI CC event (UNKNOWN2/MIDI-CC) at tick %1")
                       .arg(static_cast<int>(tick));
         return std::make_unique<EncGenericElem>(tick, tp, vo);
-    case EncElemType::NONE:
     case EncElemType::CLEF:
+        return std::make_unique<EncClefChange>(tick, tp, vo);
+    case EncElemType::NONE:
     case EncElemType::BEAM:
     default:
         return std::make_unique<EncGenericElem>(tick, tp, vo);
@@ -72,10 +73,14 @@ static std::unique_ptr<EncMeasureElem> createMeasureElement(
 }
 
 // Phase 1: set realDuration from MIDI tick gaps (with optional grace time-borrowing).
+// boundaryTicks: sorted non-note ticks (CLEF, KEYCHANGE) that cap the gap even when no
+// note follows. Prevents a lonely quarter rest from being stretched to fill the whole measure
+// when a mid-measure clef change is the next event at that voice/staff.
 static void computeElementDurations(
     std::vector<EncMeasureElem*>& elems,
     qint16 durTicks,
-    bool hasGraceTimeBorrowing)
+    bool hasGraceTimeBorrowing,
+    const std::vector<qint16>& boundaryTicks = {})
 {
     for (size_t i = 0; i < elems.size(); ++i) {
         size_t j = i + 1;
@@ -88,6 +93,11 @@ static void computeElementDurations(
             ++j;
         }
         qint16 nextTick = (j < elems.size()) ? elems[j]->tick : durTicks;
+        for (qint16 bt : boundaryTicks) {
+            if (bt > elems[i]->tick && bt < nextTick) {
+                nextTick = bt;
+            }
+        }
         qint16 dur = nextTick - elems[i]->tick;
         // v0xA6 grace time-borrowing: grace notes shorten next note's gap; see ENCORE_FORMAT.md §v0xA6 grace note time-borrowing.
         const EncNote* enCur = dynamic_cast<const EncNote*>(elems[i]);
@@ -219,6 +229,18 @@ bool EncMeasure::read(QDataStream& ds, const quint32 vs, const EncFormatReader& 
 
 void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, const EncFormatReader& fmt)
 {
+    // Collect per-staff boundary ticks from non-note elements (CLEF, KEYCHANGE).
+    // These cap the MIDI-gap duration of a preceding rest so it doesn't stretch to fill
+    // the whole measure when the next event is a clef or key change rather than a note.
+    std::map<int, std::vector<qint16>> boundaryByStaff;
+    for (auto& elem : elements) {
+        const EncElemType et = static_cast<EncElemType>(elem->type);
+        if ((et == EncElemType::CLEF || et == EncElemType::KEYCHANGE)
+            && elem->tick > 0 && elem->tick < durTicks) {
+            boundaryByStaff[elem->staffIdx].push_back(elem->tick);
+        }
+    }
+
     std::map<std::pair<int, int>, std::vector<EncMeasureElem*> > groups;
     for (auto& elem : elements) {
         EncMeasureElem* e = elem.get();
@@ -233,7 +255,10 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, const EncFor
         std::sort(elems.begin(), elems.end(), [](const EncMeasureElem* a, const EncMeasureElem* b) {
             return a->tick < b->tick;
         });
-        computeElementDurations(elems, durTicks, hasGraceTimeBorrowing);
+        const auto bIt = boundaryByStaff.find(key.first);
+        const std::vector<qint16>& boundaries
+            = (bIt != boundaryByStaff.end()) ? bIt->second : std::vector<qint16>{};
+        computeElementDurations(elems, durTicks, hasGraceTimeBorrowing, boundaries);
         fmt.postProcessVoiceGroup(elems, durTicks);
     }
 }
