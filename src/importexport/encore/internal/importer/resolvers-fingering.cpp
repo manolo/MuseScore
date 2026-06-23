@@ -88,8 +88,30 @@ static void correctBowingTickFromXoffset(
     if (pb.ornXoffset == 0) {
         return;
     }
-    // Phase 1: anchor from same-measure ORN with matching xoffset.
+    // Pre-check: if there is a note at the ORN's original Encore tick whose
+    // xoffset is within the cluster threshold of the ORN's own xoffset, the
+    // mark is already at its target chord — skip all correction.
+    // Rationale: ornXoffset is relative to the note head (not absolute on the
+    // page), so two marks on different chords can share the same value even when
+    // they are visually far apart.  Confirming that a note at pb.encTickRaw has
+    // a similar xoffset is a reliable anchor that does not misfire.
     static constexpr int BOW_XOFF_CLUSTER = 6;
+    {
+        const int staffIdx2 = static_cast<int>(pb.track / VOICES);
+        auto noteIt = ctx.noteXoffByMeasStaff.find({ pb.measIdx, staffIdx2 });
+        if (noteIt != ctx.noteXoffByMeasStaff.end()) {
+            for (const auto& np : noteIt->second) {
+                if (np.first != pb.encTickRaw) {
+                    continue;
+                }
+                if (std::abs(pb.ornXoffset - np.second) <= BOW_XOFF_CLUSTER) {
+                    return;  // ORN is already at its correct chord
+                }
+                break;
+            }
+        }
+    }
+    // Phase 1: anchor from same-measure ORN with matching xoffset.
     bool fixed = false;
     for (const PendingBowing& anchor : allBowings) {
         if (&anchor == &pb || anchor.measIdx != pb.measIdx || anchor.encTickRaw == 0) {
@@ -151,7 +173,6 @@ static void applySystemLocksFromLines(BuildCtx& ctx)
         const int firstMsIdx = static_cast<int>(enc2ms[static_cast<size_t>(firstBlock)]);
         // Last MuseScore measure = first of the last MEAS block's range, plus however
         // many MuseScore measures that block produces (gap to next block, or to end).
-        const int lastBlockMs = static_cast<int>(enc2ms[static_cast<size_t>(lastBlock)]);
         // Last MS measure = first MS index of last block's range plus the block's span.
         const int nextBlockMs = (lastBlock + 1 < static_cast<int>(enc2ms.size()))
                                 ? static_cast<int>(enc2ms[static_cast<size_t>(lastBlock + 1)])

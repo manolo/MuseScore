@@ -2018,3 +2018,63 @@ TEST_F(Tst_Ornaments, encore_symbols_full_coverage)
     delete score;
 }
 
+TEST_F(Tst_Ornaments, accent_orn_tick0_stays_on_note1_when_same_xoffset_as_later_accent)
+{
+    MasterScore* score = readEncoreScore("ornaments_accent_tick0_xoffset.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    // Collect all chords in the measure and their accent counts.
+    struct ChordInfo {
+        Fraction tick;
+        int accents { 0 };
+    };
+    std::vector<ChordInfo> chords;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        ChordInfo ci;
+        ci.tick = s->tick();
+        for (Articulation* a : toChord(el)->articulations()) {
+            if (a->symId() == SymId::articAccentAbove
+                || a->symId() == SymId::articAccentBelow) {
+                ++ci.accents;
+            }
+        }
+        chords.push_back(ci);
+    }
+
+    ASSERT_GE(chords.size(), 2u)
+        << "Measure must have at least 2 chords (note 1 and note 3)";
+
+    // Exactly 2 accents total.
+    int totalAccents = 0;
+    for (const auto& ci : chords) {
+        totalAccents += ci.accents;
+    }
+    EXPECT_EQ(totalAccents, 2)
+        << "Expected exactly 2 accent marks total (one on note 1 and one on note 3)";
+
+    // Note 1 (earliest tick) must carry exactly 1 accent.
+    EXPECT_EQ(chords.front().accents, 1)
+        << "Note 1 (enc-tick=0) must carry exactly 1 accent; "
+           "without fix both accents land on note 3 (enc-tick=480)";
+
+    // No chord should carry 2 accents.
+    for (const auto& ci : chords) {
+        EXPECT_LE(ci.accents, 1)
+            << "Chord at MuseScore tick "
+            << ci.tick.toString().toStdString()
+            << " carries " << ci.accents
+            << " accents; max 1 expected (regression: Phase 1 xoffset cluster match moved tick-0 ORN)";
+    }
+
+    delete score;
+}
+
