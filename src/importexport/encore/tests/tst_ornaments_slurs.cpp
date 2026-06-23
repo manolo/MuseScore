@@ -123,11 +123,21 @@ TEST_F(Tst_OrnamentsSlurs, multi_measure_slur_resolved_from_almezuro)
 
 TEST_F(Tst_OrnamentsSlurs, v0xc2_cross_measure_slur_ends_in_next_measure)
 {
-    // XEQUEABU.ENC is a v0xC2 file with slurs on staff 2 that span from the first
-    // note of a measure to the first note of the NEXT measure. Before the fix the
-    // same-measure xoffset heuristic picked the last note of the start measure
-    // because targetEndXoff exceeded all xoffsets in that measure; the correct
-    // endpoint is in the following measure.
+    // Reproduces the XEQUEABU.ENC pattern: a v0xC2 slur whose arc (xoffset=1,
+    // xoffset2=5) starts before the first note of the measure (xoff=3) and extends
+    // beyond all same-measure notes (maxXoffInMeas=4, targetEndXoff=7).
+    //
+    // Measure 0: note@0(xoff=3) + SLURSTART(xoff=1,xoff2=5) + note@240(xoff=2)
+    //            + note@480(xoff=3) + note@720(xoff=4)
+    // Measure 1: note@0(xoff=7)   ← correct endpoint (dist=0)
+    //
+    // Bug (before fix): bestEncTick=720 >= 0 and resolved=true after finding the
+    // last same-measure note (dist=3). The cross-measure extension condition had
+    // !resolved && bestEncTick<0, so it was skipped and the slur landed on tick=720
+    // (last note of measure 0) instead of the first note of measure 1.
+    //
+    // Fix: remove !resolved and bestEncTick<0; replace with !usedTinyPixelSpan &&
+    // (targetEndXoff>maxXoffInMeas || bestEncTick<0), excluding grace-to-main slurs.
     MasterScore* score = readEncoreScore("ornaments_v0c2_cross_measure_slur.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
