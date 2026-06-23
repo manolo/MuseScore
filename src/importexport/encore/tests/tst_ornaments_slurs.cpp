@@ -52,6 +52,7 @@
 #include "engraving/dom/breath.h"
 #include "engraving/dom/measurerepeat.h"
 #include "engraving/dom/ornament.h"
+#include "engraving/dom/ottava.h"
 #include "engraving/dom/trill.h"
 
 #include "testbase.h"
@@ -768,6 +769,37 @@ TEST_F(Tst_OrnamentsSlurs, cross_measure_slur_endpoint_precision)
     const int endPitch = toChord(crossSlur->endElement())->notes().back()->pitch();
     EXPECT_EQ(endPitch, 62)
         << "slurXoffset2=15 must select D4 (pitch=62, xoff=15), not F4 (last note, xoff=35)";
+
+    delete score;
+}
+
+// Two ottava spanners: 8va in m0, 8vb in m1.
+// resolveOttavas pins each endpoint to the next ottava's startTick, or scoreEnd.
+TEST_F(Tst_OrnamentsSlurs, v0c4_ottava_two_spanners)
+{
+    MasterScore* score = readEncoreScore("ornaments_ottava_two_spanners.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load ornaments_ottava_two_spanners.enc";
+
+    std::vector<Ottava*> ottavas;
+    for (const auto& kv : score->spanner()) {
+        Spanner* sp = kv.second;
+        if (sp && sp->isOttava()) {
+            ottavas.push_back(toOttava(sp));
+        }
+    }
+    ASSERT_EQ(ottavas.size(), 2u) << "expected exactly 2 ottava spanners";
+
+    std::sort(ottavas.begin(), ottavas.end(), [](Ottava* a, Ottava* b) {
+        return a->tick() < b->tick();
+    });
+
+    EXPECT_EQ(ottavas[0]->ottavaType(), OttavaType::OTTAVA_8VA);
+    EXPECT_EQ(ottavas[0]->tick(),  Fraction(0, 1));
+    EXPECT_EQ(ottavas[0]->tick2(), Fraction(1, 1));
+
+    EXPECT_EQ(ottavas[1]->ottavaType(), OttavaType::OTTAVA_8VB);
+    EXPECT_EQ(ottavas[1]->tick(),  Fraction(1, 1));
+    EXPECT_EQ(ottavas[1]->tick2(), Fraction(6, 1));
 
     delete score;
 }

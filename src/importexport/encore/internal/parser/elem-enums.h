@@ -98,6 +98,9 @@ enum class EncRepeatType : quint8 {
 
 enum class EncOrnamentType : quint8 {
     NONE       = 0,
+    // 0x10 / 0x12: ottava lines. Size=16. Endpoint resolved in post-pass to next ottava on same staff.
+    OTTAVA_ALTA  = 0x10,  // 8va above staff
+    OTTAVA_BASSA = 0x12,  // 8vb below staff
     // 0x1C: user-placed graphic line (Encore Graphics palette); no musical meaning; skip silently.
     GRAPHIC_LINE = 0x1C,
     WEDGESTART = 0x1D,
