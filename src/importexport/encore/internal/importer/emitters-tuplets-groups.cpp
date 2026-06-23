@@ -417,7 +417,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
 
                     // Nested-tuplet: group closed via no-downdate reduction, and the next (actualN-1)
                     // notes also share innerBaseLen -> record NestedTupletInfo for the emitters.
-                    if (nestedInfos && innerGroupStartIdx >= 0
+                    if (nestedInfos && innerGroupStartIdx >= 2
                         && innerBaseLen > Fraction(0, 1)
                         && innerBaseLen < originalBaseLen) {
                         int peekAhead = actualN - (i - innerGroupStartIdx);  // remaining notes needed to complete inner group
