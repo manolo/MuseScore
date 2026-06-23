@@ -134,7 +134,11 @@ void attachPendingLyrics(BuildCtx& ctx, Measure* measure,
                 continue;
             }
             int segEncTick;
-            if (noteTickList && noteTickIdx < noteTickList->size()) {
+            ChordRest* cr = toChordRest(el);
+            // Only advance noteTickIdx for chords, not for rests. Otherwise rests
+            // consume encTick entries intended for notes, causing all subsequent notes
+            // to have incorrect encTick values and lyrics to mismatch.
+            if (cr->isChord() && noteTickList && noteTickIdx < noteTickList->size()) {
                 segEncTick = (*noteTickList)[noteTickIdx++];
             } else {
                 // Fallback for rests or when Encore note list is exhausted: estimate
@@ -144,22 +148,35 @@ void attachPendingLyrics(BuildCtx& ctx, Measure* measure,
                 segEncTick = (relTick.numerator() * durTicks)
                              / std::max(1, relTick.denominator());
             }
-            crTickPairs.emplace_back(segEncTick, toChordRest(el));
+            crTickPairs.emplace_back(segEncTick, cr);
         }
 
         std::vector<bool> crConsumed(crTickPairs.size(), false);
         for (const auto& pl : entries) {
-            // First pass: find nearest chord within the threshold.
+            // First pass: find nearest chord within the threshold, with two-tier preference:
+            // Tier 1: prefer notes where note_tick <= lyric_tick (lyric comes after note start).
+            // Tier 2: within tier, prefer the closest note by absolute distance.
+            // This prevents lyrics from matching a later note simply because it is
+            // absolutely closer (e.g., when lyric and note are not perfectly aligned).
             int bestIdx = -1;
             int bestDelta = matchThreshold + 1;
+            bool bestIsAfter = false;  // true if best match has note_tick > lyric_tick
             for (size_t ni = 0; ni < crTickPairs.size(); ++ni) {
                 if (crConsumed[ni] || !crTickPairs[ni].second->isChord()) {
                     continue;
                 }
                 const int delta = std::abs(crTickPairs[ni].first - pl.encTick);
-                if (delta < bestDelta) {
+                if (delta > matchThreshold) {
+                    continue;
+                }
+                const bool isAfter = (crTickPairs[ni].first > pl.encTick);
+                // Prefer not-after over after; within same tier, prefer smaller delta.
+                if (bestIdx < 0
+                    || (!isAfter && bestIsAfter)
+                    || (isAfter == bestIsAfter && delta < bestDelta)) {
                     bestDelta = delta;
                     bestIdx = static_cast<int>(ni);
+                    bestIsAfter = isAfter;
                 }
             }
             // Fallback: attach to the nearest rest in the measure.
