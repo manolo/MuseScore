@@ -104,16 +104,11 @@ bool EncTextBlock::read(QDataStream& ds, quint32 varSize)
             const quint8 b14 = static_cast<quint8>(payload[14]);
             const quint8 b15 = static_cast<quint8>(payload[15]);
             const bool isUtf16 = (b14 >= 0x20 && b14 < 0x7F && b15 == 0x00);
-            // Scan for the `04 00` terminator starting at offset 14.
-            int textEnd = entrySize;
-            for (int i = 14; i + 1 < entrySize; ++i) {
-                if (static_cast<quint8>(payload[i]) == 0x04
-                    && static_cast<quint8>(payload[i + 1]) == 0x00) {
-                    textEnd = i;
-                    break;
-                }
-            }
-            const int textBytes = textEnd - 14;
+            // Decode the whole text region from +14, then post-process. Multi-line
+            // comments separate lines with U+0004 and terminate the string with a
+            // U+0000 null. The previous code stopped at the first U+0004, truncating
+            // every line but the first; see ENCORE_FORMAT.md §TEXT block.
+            const int textBytes = entrySize - 14;
             if (textBytes > 0) {
                 if (isUtf16) {
                     text = QString::fromUtf16(
@@ -122,9 +117,17 @@ bool EncTextBlock::read(QDataStream& ds, quint32 varSize)
                 } else {
                     text = QString::fromLatin1(payload.constData() + 14, textBytes);
                 }
+                // Truncate at the U+0000 null terminator.
                 int nullIdx = text.indexOf(QChar(QChar::Null));
                 if (nullIdx >= 0) {
                     text = text.left(nullIdx);
+                }
+                // U+0004 separates lines within a comment; convert to newline.
+                text.replace(QChar(0x0004), QChar(u'\n'));
+                // Each line (including the last) is followed by U+0004, leaving a
+                // trailing newline after conversion; drop trailing newlines.
+                while (text.endsWith(QChar(u'\n'))) {
+                    text.chop(1);
                 }
             }
         }
