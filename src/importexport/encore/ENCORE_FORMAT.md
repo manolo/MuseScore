@@ -854,17 +854,21 @@ would otherwise shift every following note by one position.
 
 ### v0xC2 (size = 22 or 24)
 
-The v0xC2 note layout is more compact than v0xC4. Implied-tuplet detection is used instead of
-an explicit tuplet byte. **Two pitch-storage sub-variants exist** (distinguishable at runtime by
-the value at offset +13):
+The v0xC2 note layout is more compact than v0xC4. **Two pitch-storage sub-variants exist**,
+distinguished by whether the `semiTonePitch` slot at offset +15 is empty:
 
-- **Sub-variant A** (`+13 != 0`): MIDI pitch is at offset +13, same slot where v0xC4 keeps its
-  tuplet byte. Swap it before use: `semiTonePitch = byte[+13]; byte[+13] = 0`.
-- **Sub-variant B** (`+13 == 0`): MIDI pitch is already at offset +15 (the standard
-  `semiTonePitch` slot). The swap must NOT fire; leave `semiTonePitch` unchanged.
+- **Sub-variant A** (`+15 == 0`): MIDI pitch is at offset +13, the same slot where v0xC4 keeps its
+  tuplet byte. Swap it before use: `semiTonePitch = byte[+13]; byte[+13] = 0`. These files have no
+  explicit tuplet byte; tuplets are recovered by implied-tuplet detection.
+- **Sub-variant B** (`+15 != 0`): MIDI pitch is already at offset +15 (the standard `semiTonePitch`
+  slot, like v0xC4). The swap must NOT fire. In these files offset +13 carries a genuine tuplet
+  ratio (high nibble = actualN, low nibble = normalN, e.g. 0x32 = 3:2) and must be preserved.
 
-Sub-variant B is produced by some Encore 4.x builds and is identified by `byte[+13] == 0`
-combined with a non-zero `byte[+15]`.
+The discriminator is `byte[+15]` (the pitch slot), NOT `byte[+13]`. Using `byte[+13] == 0` is wrong:
+a sub-variant B triplet has a non-zero tuplet ratio there, and treating that ratio as the pitch
+imports every triplet note at the ratio value (0x32 -> MIDI 50) and drops the tuplet. Sub-variant B
+is produced by some Encore 4.x builds; re-saving such a file in Encore 5 rewrites it to a form that
+no longer triggers the ambiguity.
 
 **size = 22** (no articulation):
 
