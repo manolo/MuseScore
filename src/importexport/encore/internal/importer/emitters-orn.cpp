@@ -41,7 +41,7 @@ using namespace mu::engraving;
 // Snap a dynamic/ORN tick to the chord-rest whose xoffset matches its drawn position.
 // ORN xoffset < chord xoffset means the glyph belongs to the preceding chord.
 // Scans all voices so ORNs on staves whose notes are in voice=1+ are placed correctly.
-static Fraction snapTickByXoffset(Fraction defaultTick, int dynEncTick,
+static Fraction snapTickByXoffset(Fraction defaultTick, int /*dynEncTick*/,
                                   const EncMeasure& encMeas, int staffIdx,
                                   const EncOrnament* eo, Fraction measTick)
 {
@@ -112,9 +112,9 @@ static Fraction snapTickByXoffset(Fraction defaultTick, int dynEncTick,
     return measTick + Fraction(bestTick, wholeTicks2);
 }
 
-static void handleDynamicOrnament(BuildCtx& ctx, MeasEmitCtx& mc,
+static void handleDynamicOrnament(BuildCtx& /*ctx*/, MeasEmitCtx& mc,
                                   NoteElemCtx& ec, const EncOrnament* eo,
-                                  Measure* measure, MasterScore* score)
+                                  Measure* measure, MasterScore* /*score*/)
 {
     const EncMeasure& encMeas = *mc.encMeas;
     const Fraction measTick = mc.measTick;
@@ -407,7 +407,6 @@ static void handleWedgeStart(BuildCtx& ctx, const MeasEmitCtx& mc,
 void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
 {
     MasterScore* score = ctx.score;
-    const EncRoot& enc = ctx.enc;
     Measure* measure = mc.measure;
     const EncMeasure& encMeas = *mc.encMeas;
     const Fraction measTick = mc.measTick;
@@ -642,6 +641,14 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         const int sn = static_cast<int>(eo->ornType())
                        - static_cast<int>(EncOrnamentType::STRING_NUMBER_2) + 2;
         ctx.pendingOrnFingerings.push_back({ elemTick, track, sn, measIdx, false, false, true });
+        break;
+    }
+    case EncOrnamentType::OTTAVA_ALTA:
+    case EncOrnamentType::OTTAVA_BASSA: {
+        const OttavaType ot = (eo->ornType() == EncOrnamentType::OTTAVA_ALTA)
+                              ? OttavaType::OTTAVA_8VA
+                              : OttavaType::OTTAVA_8VB;
+        ctx.pendingOttavas.push_back({ elemTick, track, staffIdx, ot });
         break;
     }
     case EncOrnamentType::GRAPHIC_LINE:

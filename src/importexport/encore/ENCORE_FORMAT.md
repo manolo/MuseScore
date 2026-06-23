@@ -554,6 +554,8 @@ Type 5. Variable size. Offsets from element start:
 
 | Tipo  | Name | Notation output |
 |-------|------|-------------------|
+| 0x10  | OTTAVA_ALTA | 8va line above staff. Size=16 ORN; no explicit endpoint stored (byte+14 is the visual right edge of the "8va" text box, a cosmetic constant ~12 px). alMezuro (+18) falls outside the element and reads garbage from the next element's typeVoice byte, producing large values that clamp to end of score. Endpoint resolved in post-pass: start of the next ottava on the same staff, or end of score when no successor exists. |
+| 0x12  | OTTAVA_BASSA | 8vb line below staff. Same size/endpoint rules as OTTAVA_ALTA. |
 | 0x1C  | GRAPHIC_LINE | User-drawn graphic line (Encore Graphics palette); no musical meaning; skip silently |
 | 0x28  | GUITAR_BEND | Guitar bend, curved arrow up (size=28 spanner); no standard notation equivalent — skip |
 | 0x29  | GUITAR_BEND_2 | Guitar bend, curved arrow (size=28 spanner); no standard notation equivalent — skip |

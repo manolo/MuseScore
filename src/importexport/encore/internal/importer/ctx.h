@@ -44,6 +44,7 @@
 #include "engraving/dom/arpeggio.h"
 #include "engraving/dom/ornament.h"
 #include "engraving/dom/marker.h"
+#include "engraving/dom/ottava.h"
 
 using namespace mu::engraving;
 
@@ -151,6 +152,14 @@ struct PendingOrnFingering {
     bool isStringNum  = false;   // true → render as STRING_NUMBER (circled), not FINGERING
 };
 
+// Ottava lines (tipo 0x10=8va, 0x12=8vb). Endpoint = next ottava on same staff or scoreEnd.
+struct PendingOttava {
+    Fraction startTick;
+    track_idx_t track;
+    int staffIdx;
+    mu::engraving::OttavaType ottavaType;
+};
+
 // Segno/Coda markers (tipo 0xA2/0xA6).
 struct PendingMarker {
     Fraction tick;
@@ -205,6 +214,7 @@ struct BuildCtx
     // (measIdx, staffIdx) → list of (enc_tick, note.xoffset) for bowing xoffset clustering.
     std::map<std::pair<int, int>, std::vector<std::pair<int, int> > > noteXoffByMeasStaff {};
     std::vector<PendingOrnFingering> pendingOrnFingerings {};
+    std::vector<PendingOttava> pendingOttavas {};
     std::vector<PendingMarker> pendingMarkers {};
     std::map<track_idx_t, std::vector<PendingLyric> > pendingLyrics {};
 

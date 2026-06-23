@@ -35,6 +35,7 @@ void resolveSlurs(BuildCtx& ctx);
 void resolveHairpins(BuildCtx& ctx);
 void resolveOrnaments(BuildCtx& ctx);
 void resolveFingeringAndBowing(BuildCtx& ctx);
+void resolveOttavas(BuildCtx& ctx);
 
 // Tick → measure → ChordRest segment → Chord lookup; shared by all resolver files.
 inline mu::engraving::Chord* findChordAt(mu::engraving::MasterScore* score,

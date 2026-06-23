@@ -833,6 +833,24 @@ keeps every ORNAMENT up to and including `tick == durTicks` and
 only excludes ones strictly beyond it. The chord/note filter
 remains a strict `>= durTicks`.
 
+## Ottava lines (tipos 0x10 / 0x12)
+
+Encore encodes 8va and 8vb as size-16 ORN elements. The binary does not store an
+endpoint; it is computed in a post-pass.
+
+| tipo | Line |
+|------|------|
+| 0x10 | 8va above staff |
+| 0x12 | 8vb below staff |
+
+**Endpoint rule.** `resolveOttavas` sorts all pending ottavas by
+`(staffIdx, startTick)` and assigns:
+- tick2 = startTick of the next ottava on the same staff, if one exists.
+- tick2 = `lastMeasure->endTick()` (score end) for the last ottava on a staff.
+
+Both tick and tick2 use the MuseScore `SEGMENT` anchor. The ottava is created via
+`Factory::createOttava` and added with `score->addElement`.
+
 ## Multi-staff routing: staffWithin and out-of-range voice
 
 Encore encodes which staff of a multi-staff instrument an element belongs to using
