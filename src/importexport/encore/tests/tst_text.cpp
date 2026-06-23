@@ -983,3 +983,45 @@ TEST_F(Tst_Text, lyrics_rest_does_not_shift_note_assignment)
 
     delete score;
 }
+
+TEST_F(Tst_Text, empty_second_titl_block_preserves_first_block_data)
+{
+    MasterScore* score = readEncoreScore("text_titl_empty_second_block.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    // The fixture has TITL1 = {title="Multi TITL First", author="Real Author"};
+    // TITL2 is completely empty. The first block's data must survive.
+    EXPECT_EQ(score->metaTag(u"workTitle"), u"Multi TITL First")
+        << "empty second TITL block must not overwrite the title from the first block";
+    EXPECT_EQ(score->metaTag(u"composer"), u"Real Author")
+        << "empty second TITL block must not overwrite the author from the first block";
+    delete score;
+}
+
+TEST_F(Tst_Text, staff_text_uses_first_text_block)
+{
+    MasterScore* score = readEncoreScore("text_staff_text_first_block_wins.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    String seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isStaffText()) {
+                    seen = toStaffText(e)->plainText();
+                }
+            }
+        }
+    }
+    EXPECT_EQ(seen, String(u"Alpha"))
+        << "tind=0 must resolve against the FIRST TEXT block ('Alpha'), not the last ('Beta')";
+    delete score;
+}

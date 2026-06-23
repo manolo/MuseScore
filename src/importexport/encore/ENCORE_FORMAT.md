@@ -1121,6 +1121,14 @@ Type 4. Explicit beaming per level:
 ## TEXT block
 
 Carries text payloads for STAFFTEXT ornaments (subtype `0x1E`).
+
+**Multiple blocks.** A file may contain several TEXT blocks: the first is the score's
+text table, and each later block is a part-view copy holding the same strings in a
+different order and count. The ORN `tind` index is relative to the FIRST (score) block
+only. Resolving a `tind` against a later block returns the wrong string (e.g. "Presto"
+read as "Xilo."). Use the first non-empty TEXT block and ignore the rest, the same way
+duplicate TITL blocks are handled.
+
 Block layout (after 8-byte magic + varsize):
 
 | Offset   | Size   | Description           |
@@ -1184,7 +1192,10 @@ Each slot is independently NUL-terminated; bytes after the NUL are prior-edit de
 
 ### Duplicate TITL blocks
 
-Some files write TITL twice (identical content). Treat idempotently — do not concatenate slots.
+Encore writes one TITL block per page. Page 2+ blocks are often entirely empty (all content bytes
+zero). When multiple TITL blocks are present, use the first one that has non-empty content and
+ignore subsequent empty ones. If two blocks both have content (identical copies are common in
+single-page files), the second replaces the first to avoid duplicating lines.
 
 ---
 

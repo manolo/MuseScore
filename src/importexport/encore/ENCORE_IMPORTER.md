@@ -1442,6 +1442,18 @@ BMP code unit) and silently drops the second half of every byte
 on a modern UTF-16 file when the heuristic guesses the other
 direction.
 
+## Multiple TEXT blocks (first one wins)
+
+A multi-part file writes one TEXT block per part view. They hold the same
+strings in different order and count; the ORN `tind` index is relative to the
+first (score) block only. `parsers-root.cpp` reads each TEXT block into a temp
+and keeps it only while `textBlock` is still empty, so the first non-empty block
+wins and later part-view blocks are ignored (same pattern as duplicate TITL
+blocks). Overwriting with the last block (the previous behaviour) resolved every
+`tind` against a reordered table, so staff text came out wrong (e.g. "Presto"
+read as "Xilo.") and some marks were dropped entirely. Exercised by
+`Tst_Text.staff_text_uses_first_text_block`.
+
 ## TEXT block per-entry encoding probe
 
 The TEXT block carries the payload of every STAFFTEXT ornament.

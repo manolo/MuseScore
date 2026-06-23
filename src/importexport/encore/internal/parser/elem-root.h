@@ -106,6 +106,23 @@ struct EncTitle {
     std::vector<QString> copyright;
 
     bool read(QDataStream& ds, quint32 vs, EncCharSize cs);
+
+    bool hasContent() const
+    {
+        if (!title.isEmpty()) {
+            return true;
+        }
+        auto anyNonEmpty = [](const std::vector<QString>& v) {
+            for (const auto& s : v) { if (!s.isEmpty()) { return true; } }
+            return false;
+        };
+        auto anyHFNonEmpty = [](const std::vector<EncHeaderFooter>& v) {
+            for (const auto& hf : v) { if (!hf.text.isEmpty()) { return true; } }
+            return false;
+        };
+        return anyNonEmpty(subtitle) || anyNonEmpty(instruction) || anyNonEmpty(author)
+               || anyHFNonEmpty(header) || anyHFNonEmpty(footer) || anyNonEmpty(copyright);
+    }
 };
 
 // ---------------------------------------------------------------------------

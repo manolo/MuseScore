@@ -132,9 +132,24 @@ bool EncRoot::read(QDataStream& ds)
             }
             measures.push_back(std::move(meas));
         } else if (nextId == "TITL") {
-            titleBlock.read(ds, varSize, charsize);
+            EncTitle tmp;
+            tmp.read(ds, varSize, charsize);
+            // Encore writes one TITL block per page; page 2+ blocks are often
+            // blank. Keep the first block that has non-empty content and ignore
+            // subsequent empty ones.
+            if (tmp.hasContent() || !titleBlock.hasContent()) {
+                titleBlock = std::move(tmp);
+            }
         } else if (nextId == "TEXT") {
-            textBlock.read(ds, varSize);
+            // Multi-part files write one TEXT block per part view, with the same
+            // strings reordered. ORN tind indices match only the first (score)
+            // block, so keep the first non-empty block and skip later ones
+            // (mirrors the TITL handling above).
+            EncTextBlock tmp;
+            tmp.read(ds, varSize);
+            if (textBlock.entries.empty()) {
+                textBlock = std::move(tmp);
+            }
         } else if (nextId == "WINI") {
             // WINI: page setup block. Layout: 21 uint16 LE values (42 bytes).
             // Margins as int32 LE (two adjacent uint16s, high word always 0):
