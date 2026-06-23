@@ -1025,3 +1025,29 @@ TEST_F(Tst_Text, staff_text_uses_first_text_block)
         << "tind=0 must resolve against the FIRST TEXT block ('Alpha'), not the last ('Beta')";
     delete score;
 }
+
+TEST_F(Tst_Text, staff_text_multiline_preserved)
+{
+    MasterScore* score = readEncoreScore("text_staff_text_multiline.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    String seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isStaffText()) {
+                    seen = toStaffText(e)->plainText();
+                }
+            }
+        }
+    }
+    EXPECT_EQ(seen, String(u"Notes + change duration\n(third quarter to half)"))
+        << "multi-line staff text must keep both lines (was truncated at first U+0004)";
+    delete score;
+}

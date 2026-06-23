@@ -649,7 +649,7 @@ Walk backwards on the same (staffIdx, voice) for the latest NOTE/REST with
 | TK block instrument name   | byte 0 in 0x20–0x7E (printable ASCII) and byte 1 == 0x00 → UTF-16 LE; otherwise Latin-1 |
 | TK fallback (NAME_BASE)    | same probe; falls back to Latin-1                           |
 | LYRIC element              | byte 0/1 probe at text start                                |
-| TEXT block entries         | byte 14/15 probe; length bounded by `0x04 0x00` terminator  |
+| TEXT block entries         | byte 14/15 probe; lines split on `0x04 0x00`, string ends at null |
 | CHORD-symbol text          | byte 0/1 probe                                              |
 | TITL block                 | varsize < 5000 → Latin-1; varsize ≥ 10000 → UTF-16          |
 
@@ -1144,10 +1144,18 @@ Each entry:
 |-------------|--------|-------------------------------------------------------------------|
 | +0          | 2      | payload size                                                      |
 | +2          | 14     | header (partially decoded)                                        |
-| +16..term   | var    | text (UTF-16 LE or Latin-1); ends at first `0x04 0x00` terminator |
-| term..+3    | 4      | `0x04 0x00 0x00 0x00` terminator (may be followed by padding)     |
+| +16..       | var    | text (UTF-16 LE or Latin-1); lines separated by `0x04 0x00`       |
+| (end)       | 2+     | `0x00 0x00` null terminator (may be followed by padding)          |
 
-Text length is bounded by the terminator, **not** by `payload_size - 14 - 4`
+**Line separators.** `0x04 0x00` (U+0004) separates lines within a single comment;
+it is NOT the text terminator. Each line, including the last, is followed by a
+`0x04 0x00`, and the whole string ends at a `0x00 0x00` null. A single-line entry
+therefore ends with `0x04 0x00 0x00 0x00`. To recover the text, decode from +16 up to
+the null, replace each U+0004 with a newline, and drop the resulting trailing newline.
+Reading the text as ending at the first `0x04 0x00` truncates a multi-line comment to
+its first line.
+
+Text length is bounded by the null terminator, **not** by `payload_size - 14 - 4`
 (some entries carry padding after the terminator).
 Dynamic marks use their own ornament subtypes — they are NOT in the TEXT block.
 

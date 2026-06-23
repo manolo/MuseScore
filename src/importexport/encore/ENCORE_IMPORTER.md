@@ -1430,7 +1430,7 @@ correctly without manual hints:
 | TK block instrument name          | `EncInstrument::read`                     | byte 0 printable + byte 1 == 0x00 -> UTF-16; printable b0 + non-NUL printable b1 -> Latin-1 |
 | TK block name recovery (NAME_BASE)| `EncFile::read` formula-offset fallback   | same as TK name; iterates per instrument |
 | LYRIC element                     | `EncLyric::read`                          | byte 0/1 probe at payload start |
-| TEXT block entry                  | `EncTextBlock::read`                      | byte 14/15 probe (header offset); reads until `0x04 0x00` terminator |
+| TEXT block entry                  | `EncTextBlock::read`                      | byte 14/15 probe (header offset); reads until null, `0x04 0x00` = line break |
 | CHORD-symbol text                 | `EncChordSym::read`                       | byte 0/1 probe across 36-byte slot |
 | TITL block (title, subtitle, ...) | `EncTitle::read`                          | varsize gates: <5000 -> ONE_BYTE, >=10000 -> TWO_BYTES |
 
@@ -1467,10 +1467,18 @@ looking gibberish (sirena.enc m21 "la 1ª vez" becomes
 `EncTextBlock::read` probes bytes 14 and 15 of each entry: a
 printable ASCII byte followed by `0x00` means UTF-16 LE; anything
 else (e.g. accented Latin-1 bytes like `0xAA` for `ª`) means
-Latin-1. The text byte range is bounded by the first `0x04 0x00`
-terminator inside the entry payload, NOT by `payload_size - 14 - 4`;
-some entries carry trailing padding after the terminator and the
-old length formula clipped the last character of those entries.
+Latin-1.
+
+The decoded text runs from offset 14 up to the first `0x00 0x00`
+null, NOT to the first `0x04 0x00`. `0x04 0x00` (U+0004) is a line
+separator inside a multi-line comment, not the string terminator:
+each line, including the last, is followed by a U+0004, and the
+whole string ends at a null. The reader decodes the full region,
+truncates at the null, converts each U+0004 to a newline, and drops
+the resulting trailing newline. Stopping at the first U+0004 (the
+previous behaviour) truncated multi-line comments to their first
+line. Trailing padding after the null is ignored.
+Exercised by `Tst_Text.staff_text_multiline_preserved`.
 
 ## End-of-measure dynamics and staff text
 
