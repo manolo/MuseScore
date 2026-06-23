@@ -2028,3 +2028,36 @@ TEST_F(Tst_Notes, v0c2_plain_sixteenth_with_spurious_dotctrl_bit0_no_dot)
     EXPECT_EQ(chords[4]->durationType().type(), DurationType::V_EIGHTH);
     delete score;
 }
+
+TEST_F(Tst_Notes, inflated_rdur_eighth_chord_keeps_face_value)
+{
+    // notes_chord_inflated_rdur_keeps_eighth.enc: 4/4 with F4(q)+chord(G4,A4)(e)+B4(q)+C5(q).
+    // G4 and A4 are at tick=240 with fv=4 (eighth).  B4 is at tick=480 (original quarter position,
+    // not shifted to 360 after the duration change), so realDur[G4]=240.  The chord must import as
+    // eighth (V_EIGHTH), not quarter.
+    MasterScore* score = readEncoreScore("notes_chord_inflated_rdur_keeps_eighth.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    Chord* chordAtQ1 = nullptr;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) {
+            Chord* c = toChord(el);
+            if (c->tick() == m->tick() + Fraction(1, 4)) {
+                chordAtQ1 = c;
+                break;
+            }
+        }
+    }
+    ASSERT_NE(chordAtQ1, nullptr) << "Chord at beat 2 (tick=1/4) not found";
+    EXPECT_EQ(chordAtQ1->durationType().type(), DurationType::V_EIGHTH)
+        << "fv=4 (eighth) must win over rdur=240 (inflated by trailing gap); chord must be eighth";
+    EXPECT_EQ(chordAtQ1->notes().size(), 2u)
+        << "G4 and A4 at same tick must merge into one chord";
+    delete score;
+}

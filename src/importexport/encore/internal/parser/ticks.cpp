@@ -75,6 +75,12 @@ DurationType realDuration2DurationType(qint16 realDur, quint8 fv)
     if (faceTicks > 0 && realDur < faceTicks) {
         return faceValue2DurationType(fv);
     }
+    // When rdur exceeds faceTicks but is NOT a dotted augmentation of faceValue, the excess is a
+    // trailing gap to the next event (rest or next note held at its original position after a
+    // duration change). Trust the written face value. calcDots == 0 identifies this case.
+    if (inflatedDottedPromotion(realDur, fv)) {
+        return faceValue2DurationType(fv);
+    }
     switch (realDur) {
     case 960: return DurationType::V_WHOLE;
     case 480: return DurationType::V_HALF;
@@ -83,11 +89,11 @@ DurationType realDuration2DurationType(qint16 realDur, quint8 fv)
     case  60: return DurationType::V_16TH;
     case  30: return DurationType::V_32ND;
     case  15: return DurationType::V_64TH;
-    case 720: return inflatedDottedPromotion(720, fv) ? faceValue2DurationType(fv) : DurationType::V_HALF;
-    case 360: return inflatedDottedPromotion(360, fv) ? faceValue2DurationType(fv) : DurationType::V_QUARTER;
-    case 180: return inflatedDottedPromotion(180, fv) ? faceValue2DurationType(fv) : DurationType::V_EIGHTH;
-    case  90: return inflatedDottedPromotion(90,  fv) ? faceValue2DurationType(fv) : DurationType::V_16TH;
-    case  45: return inflatedDottedPromotion(45,  fv) ? faceValue2DurationType(fv) : DurationType::V_32ND;
+    case 720: return DurationType::V_HALF;
+    case 360: return DurationType::V_QUARTER;
+    case 180: return DurationType::V_EIGHTH;
+    case  90: return DurationType::V_16TH;
+    case  45: return DurationType::V_32ND;
     // Triplet rdur (160/80/40...) falls through; detectImpliedTuplet handles them.
     // Mapping to longer type misrepresents notes not in a tuplet context.
     default:  return faceValue2DurationType(fv);
