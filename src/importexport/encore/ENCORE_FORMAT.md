@@ -967,6 +967,8 @@ Each byte holds one or two glyphs:
 
 Where a single combined SMuFL glyph exists for the combination, use it. Otherwise produce two separate articulation symbols.
 
+The combined-articulation range 0x22-0x2D is laid out in consecutive (below, above) pairs, one pair per glyph: 0x22/0x23 tenuto+accent, 0x24/0x25 tenuto+staccato, 0x26/0x27 tenuto+heavy-accent (marcato+tenuto), 0x28/0x29 staccatissimo, 0x2A/0x2B heavy-accent+staccatissimo, 0x2C/0x2D tenuto+staccatissimo. "Heavy accent" is the wedge (∨) Encore writes as marcato. Verified in Encore 5 against the "Accidentals Marks and others" reference score.
+
 | Value        | Glyphs | Notation output |
 |--------------|--------|-------------------|
 | 0x04         | trill (plain) | `ornamentTrill` |
@@ -995,13 +997,11 @@ Where a single combined SMuFL glyph exists for the combination, use it. Otherwis
 | 0x1D         | staccato (`.`) | `articStaccatoAbove` |
 | 0x1E, 0x1F   | harmonic | `stringsHarmonic` |
 | 0x20, 0x21   | fermata; **on tuplet note means "tuplet bracket above/below" (not a fermata)** | `fermataAbove` |
-| 0x22, 0x23   | tenuto + staccato (portato) | `articTenutoStaccatoAbove` (single glyph) |
-| 0x24         | tenuto + staccato (portato) | `articTenutoStaccatoAbove` (single glyph) |
-| 0x25, 0x27   | marcato + tenuto | `articMarcatoTenutoAbove` (single glyph) |
-| 0x26         | tenuto + heavy accent (∨) | `articMarcatoTenutoBelow` (single glyph) |
+| 0x22, 0x23   | tenuto + accent | `articTenutoAccentAbove` (single glyph) |
+| 0x24, 0x25   | tenuto + staccato (portato) | `articTenutoStaccatoAbove` (single glyph) |
+| 0x26, 0x27   | tenuto + heavy accent (∨) (marcato + tenuto) | `articMarcatoTenutoBelow` / `articMarcatoTenutoAbove` (single glyph) |
 | 0x28, 0x29   | staccatissimo | `articStaccatissimoAbove` |
-| 0x2A         | staccatissimo + accent | `articStaccatissimoAbove` + `articAccentAbove` (two elements) |
-| 0x2B         | accent + staccatissimo | `articAccentAbove` + `articStaccatissimoAbove` (two elements) |
+| 0x2A, 0x2B   | heavy accent (∨) + staccatissimo | `articMarcatoAbove` + `articStaccatissimoAbove` (two elements) |
 | 0x2C, 0x2D   | tenuto + staccatissimo | `articTenutoAbove` + `articStaccatissimoAbove` (two elements) |
 | 0x2E         | inverted turn | `ornamentTurnInverted` |
 | 0x30         | half-stopped horn (circle-plus) | `brassMuteHalfClosed` |

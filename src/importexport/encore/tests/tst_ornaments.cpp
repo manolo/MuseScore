@@ -196,24 +196,29 @@ TEST_F(Tst_Ornaments, articulation_combos_expand_to_two_glyphs)
         default:                                return K::Other;
         }
     };
+    // Palette pairs (below-byte, above-byte), verified in Encore 5 against
+    // "Accidentals Marks and others": 0x22/0x23 tenuto-accent, 0x24/0x25
+    // tenuto-staccato, 0x26/0x27 marcato-tenuto (= tenuto + heavy-accent),
+    // 0x2A/0x2B heavy-accent + staccatissimo, 0x2C/0x2D tenuto + staccatissimo.
     // m1: 0x24 TenutoStaccato, 0x17 AccentStaccato, 0x27 MarcatoTenuto, 0x15 MarcatoStaccato.
-    // m2: 0x23 TenutoStaccato (portato), 0x2D Tenuto+Staccatissimo, 0x2B Accent+Staccatissimo, 0x24 TenutoStaccato.
+    // m2: 0x23 TenutoAccent, 0x2D Tenuto+Staccatissimo, 0x2B Marcato+Staccatissimo, 0x24 TenutoStaccato.
     // m3: 0x14 MarcatoStaccatoBelow, 0x26 MarcatoTenutoBelow.
-    // m4: 0x25 MarcatoTenuto, 0x2A Staccatissimo+Accent, 0x2C Tenuto+Staccatissimo.
+    // m4: 0x25 TenutoStaccato, 0x2A Marcato+Staccatissimo, 0x2C Tenuto+Staccatissimo, 0x22 TenutoAccent.
     const std::vector<std::set<K> > expected = {
-        { K::TenutoStaccato },           // 0x24 → articTenutoStaccatoAbove
-        { K::AccentStaccato },           // 0x17 → articAccentStaccatoAbove
-        { K::MarcatoTenuto },            // 0x27 → articMarcatoTenutoAbove
-        { K::MarcatoStaccato },          // 0x15 → articMarcatoStaccatoAbove
-        { K::TenutoStaccato },           // 0x23 → articTenutoStaccatoAbove (portato, same as 0x22)
-        { K::Tenuto, K::Staccatissimo }, // 0x2D (no single glyph)
-        { K::Accent, K::Staccatissimo }, // 0x2B (no single glyph)
-        { K::TenutoStaccato },           // 0x24 again
-        { K::MarcatoStaccato },          // 0x14 → articMarcatoStaccatoBelow
-        { K::MarcatoTenuto },            // 0x26 → articMarcatoTenutoBelow
-        { K::MarcatoTenuto },            // 0x25 → articMarcatoTenutoAbove
-        { K::Accent, K::Staccatissimo }, // 0x2A (no single glyph)
-        { K::Tenuto, K::Staccatissimo }, // 0x2C (no single glyph)
+        { K::TenutoStaccato },            // 0x24 → articTenutoStaccatoAbove
+        { K::AccentStaccato },            // 0x17 → articAccentStaccatoAbove
+        { K::MarcatoTenuto },             // 0x27 → articMarcatoTenutoAbove
+        { K::MarcatoStaccato },           // 0x15 → articMarcatoStaccatoAbove
+        { K::TenutoAccent },              // 0x23 → articTenutoAccentAbove
+        { K::Tenuto, K::Staccatissimo },  // 0x2D (no single glyph)
+        { K::Marcato, K::Staccatissimo }, // 0x2B heavy accent + staccatissimo
+        { K::TenutoStaccato },            // 0x24 again
+        { K::MarcatoStaccato },           // 0x14 → articMarcatoStaccatoBelow
+        { K::MarcatoTenuto },             // 0x26 → articMarcatoTenutoBelow
+        { K::TenutoStaccato },            // 0x25 → articTenutoStaccatoAbove
+        { K::Marcato, K::Staccatissimo }, // 0x2A heavy accent + staccatissimo
+        { K::Tenuto, K::Staccatissimo },  // 0x2C (no single glyph)
+        { K::TenutoAccent },              // 0x22 → articTenutoAccentAbove
     };
     std::vector<std::set<K> > seen;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
@@ -1862,6 +1867,154 @@ TEST_F(Tst_Ornaments, graphic_line_orn_silently_skipped)
         }
     }
     EXPECT_EQ(articCount, 0) << "GRAPHIC_LINE ORN must not add any articulation to the chord";
+    delete score;
+}
+
+TEST_F(Tst_Ornaments, encore_symbols_full_coverage)
+{
+    MasterScore* score = readEncoreScore("encore_symbols.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int dynamics = 0;
+    int fermatas = 0;
+    int markers = 0;
+    int jumps = 0;
+    int staccatos = 0;
+    int tenutos = 0;
+    int accents = 0;
+    int marcatos = 0;
+    int staccatissimos = 0;
+    int trills = 0;
+    int mordents = 0;
+    int fingerings = 0;
+    int arpeggios = 0;
+    int tremolos = 0;
+    int hairpins = 0;
+    int dotted_barlines = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        Measure* m = toMeasure(mb);
+        for (EngravingItem* e : m->el()) {
+            if (e && e->isMarker()) {
+                ++markers;
+            }
+            if (e && e->isJump()) {
+                ++jumps;
+            }
+        }
+        Segment* endBar = m->findSegment(SegmentType::EndBarLine, m->endTick());
+        if (endBar) {
+            for (size_t s = 0; s < score->nstaves(); ++s) {
+                EngravingItem* el = endBar->element(s * VOICES);
+                if (el && el->isBarLine() && toBarLine(el)->barLineType() == BarLineType::DOTTED) {
+                    ++dotted_barlines;
+                    break;
+                }
+            }
+        }
+        for (Segment* s = m->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isDynamic()) {
+                    ++dynamics;
+                }
+                if (e && e->isFermata()) {
+                    ++fermatas;
+                }
+            }
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            Chord* c = toChord(el);
+            if (c->arpeggio()) {
+                ++arpeggios;
+            }
+            if (c->tremoloSingleChord()) {
+                ++tremolos;
+            }
+            for (Articulation* a : c->articulations()) {
+                using mu::engraving::SymId;
+                switch (a->symId()) {
+                case SymId::articStaccatoAbove: case SymId::articStaccatoBelow:
+                    ++staccatos;
+                    break;
+                case SymId::articTenutoAbove: case SymId::articTenutoBelow:
+                    ++tenutos;
+                    break;
+                case SymId::articAccentAbove: case SymId::articAccentBelow:
+                    ++accents;
+                    break;
+                case SymId::articMarcatoAbove: case SymId::articMarcatoBelow:
+                    ++marcatos;
+                    break;
+                case SymId::articStaccatissimoAbove: case SymId::articStaccatissimoBelow:
+                    ++staccatissimos;
+                    break;
+                case SymId::articMarcatoStaccatoAbove: case SymId::articMarcatoStaccatoBelow:
+                    ++marcatos; ++staccatos;
+                    break;
+                case SymId::articMarcatoTenutoAbove: case SymId::articMarcatoTenutoBelow:
+                    ++marcatos; ++tenutos;
+                    break;
+                case SymId::articAccentStaccatoAbove: case SymId::articAccentStaccatoBelow:
+                    ++accents; ++staccatos;
+                    break;
+                case SymId::articTenutoStaccatoAbove: case SymId::articTenutoStaccatoBelow:
+                    ++tenutos; ++staccatos;
+                    break;
+                case SymId::articTenutoAccentAbove: case SymId::articTenutoAccentBelow:
+                    ++tenutos; ++accents;
+                    break;
+                case SymId::ornamentTrill:
+                    ++trills;
+                    break;
+                case SymId::ornamentShortTrill:
+                case SymId::ornamentTremblement:
+                case SymId::ornamentMordent:
+                case SymId::ornamentPrallMordent:
+                    ++mordents;
+                    break;
+                default: break;
+                }
+            }
+            for (Note* n : c->notes()) {
+                for (EngravingItem* nel : n->el()) {
+                    if (nel && nel->isFingering()) {
+                        ++fingerings;
+                    }
+                }
+            }
+        }
+    }
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (sp->isTrill()) {
+            ++trills;
+        }
+        if (sp->isHairpin()) {
+            ++hairpins;
+        }
+    }
+    EXPECT_GE(dynamics,      13) << "all 13 Encore dynamics expected";
+    EXPECT_GE(fermatas,       2);
+    EXPECT_GE(markers,        3) << "Segno + Coda(s) + To Coda + Fine";
+    EXPECT_GE(jumps,          1) << "at least one D.C. / D.S. variant";
+    EXPECT_GE(staccatos,      7);
+    EXPECT_GE(tenutos,        9);
+    EXPECT_GE(accents,        5);
+    EXPECT_GE(marcatos,       6);
+    EXPECT_GE(staccatissimos, 6);
+    EXPECT_GE(trills,         6) << "trill-marks from per-note bytes + ORN 0x36/0x37";
+    EXPECT_GE(mordents,       4) << "mordent + inverted-mordent";
+    EXPECT_GE(fingerings,     6) << "fingering 1..5 + open-string";
+    EXPECT_GE(arpeggios,      1);
+    EXPECT_GE(tremolos,       4);
+    EXPECT_GE(hairpins,       2);
+    EXPECT_GE(dotted_barlines, 1);
     delete score;
 }
 

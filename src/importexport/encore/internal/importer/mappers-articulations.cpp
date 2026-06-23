@@ -57,18 +57,21 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x1D: return { SymId::articStaccatoAbove };
     case 0x20:
     case 0x21: return { SymId::fermataAbove };
-    case 0x22: return { SymId::articTenutoStaccatoAbove };     // tenuto + staccato (portato) as single glyph
-    case 0x23: return { SymId::articTenutoStaccatoAbove };
-    case 0x24: return { SymId::articTenutoStaccatoAbove };    // tenuto + staccato (portato) as single glyph
-    case 0x25: return { SymId::articMarcatoTenutoAbove };     // marcato + tenuto as single glyph
-    case 0x26: return { SymId::articMarcatoTenutoBelow };     // tenuto + heavy accent (∨) as single glyph
-    case 0x27: return { SymId::articMarcatoTenutoAbove };     // marcato + tenuto as single glyph
+    // Combined-articulation bytes come in (below, above) pairs, one pair per glyph.
+    // Verified in Encore 5 against "Accidentals Marks and others" m11-m16. Placement
+    // is taken from the note articulation slot; subtype() normalises Below->Above.
+    case 0x22:                                                // tenuto + accent (below)
+    case 0x23: return { SymId::articTenutoAccentAbove };      // tenuto + accent (above)
+    case 0x24:                                                // tenuto + staccato (portato, below)
+    case 0x25: return { SymId::articTenutoStaccatoAbove };    // tenuto + staccato (portato, above)
+    case 0x26: return { SymId::articMarcatoTenutoBelow };     // tenuto + heavy accent (∨) below
+    case 0x27: return { SymId::articMarcatoTenutoAbove };     // tenuto + heavy accent (above)
     case 0x28:
     case 0x29: return { SymId::articStaccatissimoAbove };
-    case 0x2A: return { SymId::articStaccatissimoAbove, SymId::articAccentAbove };  // staccatissimo + accent
-    case 0x2B: return { SymId::articAccentAbove, SymId::articStaccatissimoAbove };
-    case 0x2C: return { SymId::articTenutoAbove, SymId::articStaccatissimoAbove };  // tenuto + staccatissimo
-    case 0x2D: return { SymId::articTenutoAbove, SymId::articStaccatissimoAbove };
+    case 0x2A:                                                                       // heavy accent (∨) + staccatissimo (below)
+    case 0x2B: return { SymId::articMarcatoAbove, SymId::articStaccatissimoAbove };   // heavy accent + staccatissimo (above)
+    case 0x2C:                                                                       // tenuto + staccatissimo (below)
+    case 0x2D: return { SymId::articTenutoAbove, SymId::articStaccatissimoAbove };    // tenuto + staccatissimo (above)
     case 0x1B: return { SymId::brassMuteClosed };        // technical/stopped (+)
     case 0x30: return { SymId::brassMuteHalfClosed };   // technical/stopped (tick/half stopped)
     // String markings (m3, m4, m18): 0x1E/0x1F=harmonic, 0x44/0x45=thumb-position.
