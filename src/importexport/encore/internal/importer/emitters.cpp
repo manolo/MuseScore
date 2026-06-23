@@ -837,7 +837,10 @@ void emitMeasures(BuildCtx& ctx)
             EncElemType et = static_cast<EncElemType>(e->type);
             const bool isNoteOrRest = (et == EncElemType::NOTE || et == EncElemType::REST);
 
-            if (!shouldIncludeElement(e, encMeas)) {
+            // IrregularMeasure: allow notes past durTicks through so capMeasureLength can extend the measure.
+            if (!shouldIncludeElement(e, encMeas)
+                && !(isNoteOrRest
+                     && ctx.opts.overfillMeasureStrategy == OverfillStrategy::IrregularMeasure)) {
                 continue;
             }
 
@@ -865,7 +868,9 @@ void emitMeasures(BuildCtx& ctx)
             }
 
             // Drop overflow notes when voice is full; MIDI artifacts must not spill to the next MuseScore voice.
-            if (isNoteOrRest && !isChordExt && ctx.cumTick[trackKey] >= measure->ticks()) {
+            // IrregularMeasure: skip the cap so capMeasureLength can extend the measure to hold all notes.
+            if (isNoteOrRest && !isChordExt && ctx.cumTick[trackKey] >= measure->ticks()
+                && ctx.opts.overfillMeasureStrategy != OverfillStrategy::IrregularMeasure) {
                 continue;
             }
 
