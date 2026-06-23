@@ -261,10 +261,11 @@ void resolveSlurs(BuildCtx& ctx)
                 const int pixelSpan = ps.slurXoffset2 - ps.slurXoffset;
                 // Tiny pixelSpan (0-2) with note before arc start: firstNoteXoff+pixelSpan ≈ 0 matches a decoy.
                 // Use slurXoffset2 directly as the arc-end target instead.
-                const int targetEndXoff
-                    =(pixelSpan >= 0 && pixelSpan <= 2 && firstNoteXoff < ps.slurXoffset)
-                      ? ps.slurXoffset2
-                      : firstNoteXoff + pixelSpan;
+                const bool usedTinyPixelSpan = (pixelSpan >= 0 && pixelSpan <= 2
+                                                && firstNoteXoff < ps.slurXoffset);
+                const int targetEndXoff = usedTinyPixelSpan
+                                          ? ps.slurXoffset2
+                                          : firstNoteXoff + pixelSpan;
                 // Single pass: find best later-note endpoint + detect grace/regular co-location for grace-to-main shortcut.
                 {
                     int bestDist = std::numeric_limits<int>::max();
@@ -341,11 +342,14 @@ void resolveSlurs(BuildCtx& ctx)
                         }
                         resolved = true;
                     }
-                    // Cross-measure extension when alMezuro is unreliable: targetEndXoff exceeds all
-                    // same-measure xoffsets and no same-measure note found → search up to 2 measures forward.
-                    if (!resolved && !ps.alMezuroValid && bestDist > 0
-                        && targetEndXoff > maxXoffInMeas
-                        && bestEncTick < 0) {
+                    // Cross-measure extension when alMezuro is unreliable and the arc endpoint clearly
+                    // exceeds the start measure. Excluded for tiny-pixelspan slurs (ornament placed after
+                    // first note) because their targetEndXoff is slurXoffset2, which may be in the next
+                    // measure's coordinate space and would produce a false positive. Also excluded when
+                    // the same-measure search already resolved to a zero-span (grace-to-main) endpoint.
+                    if (!ps.alMezuroValid && !usedTinyPixelSpan && bestDist > 0
+                        && (targetEndXoff > maxXoffInMeas || bestEncTick < 0)
+                        && !(resolved && endTick == ps.startTick)) {
                         for (int nextMIdx = ps.startMeasIdx + 1;
                              nextMIdx <= ps.startMeasIdx + 2
                              && nextMIdx < static_cast<int>(enc.measures.size())
