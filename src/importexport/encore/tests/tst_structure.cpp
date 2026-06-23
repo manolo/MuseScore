@@ -717,27 +717,6 @@ TEST_F(Tst_Structure, page_margins_wini_custom_left)
     delete score;
 }
 
-// File with WINI top=0 left=0 (zero margins, full-page printable area).
-// ornaments_fingering_grandstaff.enc: top=0 left=0 bEdge=842 rEdge=595.
-// Zero margins are clamped to the minimum safe values so staves stay within the page.
-TEST_F(Tst_Structure, page_margins_wini_zero_margins_clamped)
-{
-    MasterScore* score = readEncoreScore("ornaments_fingering_grandstaff.enc");
-    ASSERT_NE(score, nullptr);
-
-    // Margins clamped to minimums: LR=0.03", TB=0.10".
-    EXPECT_NEAR(score->style().styleD(Sid::pageOddTopMargin),    0.10, 0.001);
-    EXPECT_NEAR(score->style().styleD(Sid::pageEvenTopMargin),   0.10, 0.001);
-    EXPECT_NEAR(score->style().styleD(Sid::pageOddLeftMargin),   0.03, 0.001);
-    EXPECT_NEAR(score->style().styleD(Sid::pageEvenLeftMargin),  0.03, 0.001);
-    EXPECT_NEAR(score->style().styleD(Sid::pageOddBottomMargin), 0.10, 0.001);
-    // printableWidth capped to pageWidth - leftMargin - minRightMargin.
-    const double pageWIn = score->style().styleD(Sid::pageWidth);
-    EXPECT_NEAR(score->style().styleD(Sid::pagePrintableWidth), pageWIn - 0.03 - 0.03, 0.01);
-
-    delete score;
-}
-
 // Verify bottom margin is correctly derived from bottomEdge.
 // bazo.enc: top=18 left=18 bEdge=824 rEdge=577 on A4 (842 pts high).
 // bottomMargin = (842 - 824) / 72 = 18 / 72 = 0.25"
@@ -1041,5 +1020,38 @@ TEST_F(Tst_Structure, old_format_v0c2_triplet_pitch_in_semitone)
     EXPECT_EQ(pitches[2], 67) << "triplet note 3 must be G4 (67)";
     EXPECT_EQ(pitches[3], 72) << "quarter note must be C5 (72)";
     EXPECT_TRUE(foundTriplet) << "explicit 3:2 tuplet must survive the pitch fix";
+    delete score;
+}
+
+TEST_F(Tst_Structure, page_size_detected_from_wini_pts_format)
+{
+    MasterScore* score = readEncoreScore("ornaments_fingering_grandstaff.enc");
+    ASSERT_NE(score, nullptr);
+
+    const double kA4W = 210.0 / 25.4;   // 8.2677"
+    const double kA4H = 297.0 / 25.4;   // 11.6929"
+    EXPECT_NEAR(score->style().styleD(Sid::pageWidth),  kA4W, 0.01)
+        << "pts-format WINI with A4 boundary values must set A4 page width";
+    EXPECT_NEAR(score->style().styleD(Sid::pageHeight), kA4H, 0.01)
+        << "pts-format WINI with A4 boundary values must set A4 page height";
+
+    delete score;
+}
+
+TEST_F(Tst_Structure, page_margins_wini_zero_margins)
+{
+    MasterScore* score = readEncoreScore("ornaments_fingering_grandstaff.enc");
+    ASSERT_NE(score, nullptr);
+
+    // WINI has all-zero margins: all four margins should be 0.
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddTopMargin),    0.0, 0.005);
+    EXPECT_NEAR(score->style().styleD(Sid::pageEvenTopMargin),   0.0, 0.005);
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddLeftMargin),   0.0, 0.005);
+    EXPECT_NEAR(score->style().styleD(Sid::pageEvenLeftMargin),  0.0, 0.005);
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddBottomMargin), 0.0, 0.005);
+    // printableWidth equals full page width when both side margins are 0.
+    const double pageWIn = score->style().styleD(Sid::pageWidth);
+    EXPECT_NEAR(score->style().styleD(Sid::pagePrintableWidth), pageWIn, 0.01);
+
     delete score;
 }

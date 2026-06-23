@@ -1282,6 +1282,13 @@ for accurate physical margins).
 
 **Zero-margin files.** When all four margin values are 0, accept and skip margin application.
 
+**Encore UI and printer margins.** Encore's Page Setup dialog may display a non-zero margin for
+a side that has a zero stored value. The displayed value is the printer driver's hardware
+non-printable zone, read from the active printer at display time. It varies by printer and
+computer, and is not stored in the WINI block. A document with `rEdge = A4_width_pts` and
+`rightEdge_margin = 0` may show R = 0.236" on one machine and a different value on another.
+The stored WINI value is the authoritative document margin; the UI value is informational only.
+
 ---
 
 ## Parsing rules

@@ -219,6 +219,46 @@ static void applyStaffScale(MasterScore* score, const EncRoot& enc)
     }
 }
 
+// Detect standard paper size from typographic-point WINI coordinates.
+// rightEdge and bottomEdge are the right/bottom edges of the printable area
+// in pts (1/72 inch); the full page is at least that large.  Returns the
+// smallest standard size (by area) that contains the printable area.
+// Returns false when no standard size fits (custom page or rightEdge exceeds
+// all known widths, which signals screen-pixel format instead).
+//
+// 1 pt tolerance: ISO metric page heights (e.g. A4 297mm = 841.89pt) are
+// stored as integers in the WINI block, so bottomEdge may be 1pt larger than
+// the QPageSize fractional value.  Without tolerance, A4 files with
+// bottomEdge=842 fall through to a non-A4 page (wrong size and margins).
+static bool detectPtsPageSize(qint32 rightEdge, qint32 bottomEdge,
+                               double& outWidthIn, double& outHeightIn)
+{
+    static constexpr double kTol = 1.0;   // pts tolerance for metric rounding
+    double bestArea = 1e18;
+    bool found = false;
+    for (int id = 0; id <= static_cast<int>(QPageSize::LastPageSize); ++id) {
+        if (id == static_cast<int>(QPageSize::Custom)) {
+            continue;
+        }
+        const QSizeF sz = QPageSize::size(static_cast<QPageSize::PageSizeId>(id),
+                                          QPageSize::Inch);
+        const double wPts = sz.width()  * 72.0;
+        const double hPts = sz.height() * 72.0;
+        if (wPts + kTol < static_cast<double>(rightEdge)
+            || hPts + kTol < static_cast<double>(bottomEdge)) {
+            continue;
+        }
+        const double area = wPts * hPts;
+        if (area < bestArea) {
+            bestArea    = area;
+            outWidthIn  = sz.width();
+            outHeightIn = sz.height();
+            found       = true;
+        }
+    }
+    return found;
+}
+
 // Try to identify the paper size from WINI screen-pixel coordinates.
 // pageWUnits = rightEdge + left, pageHUnits = bottomEdge + top.
 //
@@ -312,19 +352,20 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
     // PPI on older hardware).  Symptom: rightEdge or bottomEdge exceeds the
     // page dimensions in pts (e.g. rightEdge=672 > A4_width_pts=595).
     //
-    // When screen-pixel format is detected we derive the page size by pairing
-    // pageWidth_units = rightEdge + left with pageHeight_units = bottomEdge + top
-    // and matching the resulting aspect ratio against standard paper sizes.  The
-    // best match determines both the paper size AND the scale (units/inch).
-    static constexpr double kMinLR = 0.03;   // min left/right margin (inches)
-    static constexpr double kMinTB = 0.10;   // min top/bottom margin (inches)
-    static constexpr double kMaxM  = 0.60;   // max margin (inches)
+    // For pts format: detectPtsPageSize picks the smallest standard page that
+    // contains the printable area, which is locale-independent.
+    // For screen-pixel format: detectWiniPageSize matches via DPI ratio.
+    static constexpr double kMaxM = 0.60;   // max margin (inches)
 
     double pageHIn = score->style().styleD(Sid::pageHeight);
     double pageWIn = score->style().styleD(Sid::pageWidth);
 
-    const bool screenPixelFmt = (ps.rightEdge > static_cast<qint32>(pageWIn * 72.0))
-                                || (ps.bottomEdge > static_cast<qint32>(pageHIn * 72.0));
+    // 1 pt tolerance mirrors detectPtsPageSize: metric page heights convert to
+    // fractional pts (A4 297mm = 841.89pt → stored as 842) so the integer
+    // WINI value can exceed floor(pageH*72) by 1 without being screen-pixels.
+    static constexpr double kPixelTol = 1.0;
+    const bool screenPixelFmt = (ps.rightEdge  > static_cast<qint32>(pageWIn * 72.0 + kPixelTol))
+                                || (ps.bottomEdge > static_cast<qint32>(pageHIn * 72.0 + kPixelTol));
     double scaleUpi = 72.0;
     if (screenPixelFmt) {
         const int pageWUnits = ps.rightEdge + ps.left;
@@ -337,6 +378,15 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
             score->style().set(Sid::pageHeight, pageHIn);
         }
         scaleUpi = static_cast<double>(pageWUnits) / pageWIn;
+    } else {
+        double detectedW = 0.0, detectedH = 0.0;
+        if (detectPtsPageSize(ps.rightEdge, ps.bottomEdge, detectedW, detectedH)) {
+            pageWIn  = detectedW;
+            pageHIn  = detectedH;
+            score->style().set(Sid::pageWidth,  pageWIn);
+            score->style().set(Sid::pageHeight, pageHIn);
+        }
+        // scaleUpi stays 72.0 (pts = 1/72 inch by definition)
     }
 
     double topIn  = ps.top / scaleUpi;
@@ -344,16 +394,31 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
     double printW = (ps.rightEdge - ps.left) / scaleUpi;
     double printH = (ps.bottomEdge - ps.top) / scaleUpi;
 
-    topIn  = std::clamp(topIn,  kMinTB, kMaxM);
-    leftIn = std::clamp(leftIn, kMinLR, kMaxM);
+    LOGD() << "  enc margins (in): T=" << QString::number(topIn,  'f', 3).toStdString()
+           << "  L=" << QString::number(leftIn, 'f', 3).toStdString()
+           << "  R=" << QString::number(pageWIn - leftIn - printW, 'f', 3).toStdString()
+           << "  B=" << QString::number(pageHIn - topIn  - printH, 'f', 3).toStdString()
+           << "  paper=" << QString::number(pageWIn * 25.4, 'f', 1).toStdString()
+           << "x" << QString::number(pageHIn * 25.4, 'f', 1).toStdString() << "mm"
+           << (screenPixelFmt ? "  [pixels]" : "  [pts]");
 
-    const double maxPrintW = pageWIn - leftIn - kMinLR;
+    topIn  = std::clamp(topIn,  0.0, kMaxM);
+    leftIn = std::clamp(leftIn, 0.0, kMaxM);
+
+    const double maxPrintW = pageWIn - leftIn;
     if (printW > maxPrintW) {
         printW = maxPrintW;
     }
 
     double bottomIn = std::max(0.0, pageHIn - topIn - printH);
-    bottomIn = std::clamp(bottomIn, kMinTB, kMaxM);
+    bottomIn = std::min(bottomIn, kMaxM);
+
+    LOGD() << "  applied (in):     T=" << QString::number(topIn,   'f', 3).toStdString()
+           << "  L=" << QString::number(leftIn,   'f', 3).toStdString()
+           << "  R=" << QString::number(pageWIn - leftIn - printW, 'f', 3).toStdString()
+           << "  B=" << QString::number(bottomIn, 'f', 3).toStdString()
+           << "  paper=" << QString::number(pageWIn * 25.4, 'f', 1).toStdString()
+           << "x" << QString::number(pageHIn * 25.4, 'f', 1).toStdString() << "mm";
 
     score->style().set(Sid::pageOddTopMargin,     topIn);
     score->style().set(Sid::pageEvenTopMargin,    topIn);
@@ -398,6 +463,7 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     buildInitialSignatures(ctx);
     emitMeasures(ctx);
 
+    LOGD() << "  importPageLayout=" << (ctx.opts.importPageLayout ? "true" : "false");
     if (ctx.opts.importPageLayout) {
         applyPageMargins(score, enc.pageSetup);
     }
