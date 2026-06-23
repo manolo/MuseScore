@@ -120,18 +120,22 @@ void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& d
         return readEncodedStringRemaining(ds, remaining);
     };
 
-    // No-~~~~-block compact format: all instruments sit in a linear table at
-    // NAME_BASE + n * COMPACT_NAME_STEP (step=112, not 2158).  Detect this by
-    // confirming there are no TK blocks (all contentFilePos<0) AND no ~~~~block.
+    // No-~~~~-block format: all instruments sit in a linear table.
+    // Two sub-layouts detected by firstBlockOff vs. the large-TK MIDI base (2278):
+    //   large-TK: step=2158 (file has no TK blocks but uses the large-TK name table)
+    //   compact:  step=112  (e.g. tapada.enc, older files without the large table)
     const bool noTkBlocks = instruments.empty()
                             || std::all_of(instruments.begin(), instruments.end(),
                                            [](const EncInstrument& i){ return i.contentFilePos < 0; });
     if (noTkBlocks && findTildeBlockOffset(ds) < 0) {
+        const qint64 firstBlockOff = findFirstBlockOffset(ds, /*includePageBlock=*/ true);
+        const bool useLargeTk = (firstBlockOff > 2278);
+        const qint64 step = useLargeTk ? NAME_STEP : COMPACT_NAME_STEP;
         for (size_t n = 0; n < instruments.size(); ++n) {
             if (!instruments[n].name.isEmpty()) {
                 continue;
             }
-            const qint64 off = NAME_BASE + static_cast<qint64>(n) * COMPACT_NAME_STEP;
+            const qint64 off = NAME_BASE + static_cast<qint64>(n) * step;
             instruments[n].name = tryReadName(off);
         }
         return;

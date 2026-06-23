@@ -152,9 +152,13 @@ starts and whether a `~~~~` compact-table marker is present:
 **Name recovery for no-TK files.** The read position for instrument names depends on the
 sub-layout (see above). The canonical constant `NAME_BASE = 202` is the name offset for
 instrument 0 in both Variant B (202 = entry_base 176 + name_off 26) and in the large-TK /
-primary-probe path. `NAME_STEP = 2158` is only correct for large-TK or Variant A files
-where TK-block-sized spacing is expected; do NOT use it for Variant B compact files
-(step must be 112 there).
+primary-probe path. The step between consecutive instrument names is resolved at runtime
+using the same `firstBlockOff > 2278` test that applies to MIDI/Key reading:
+- `firstBlockOff > 2278`: step=2158 (large-TK or primary-probe layout)
+- otherwise: step=112 (Variant B compact layout)
+
+This applies only to the no-TK-no-tilde branch of `recoverMissingNames`. Files with a
+`~~~~` marker (Variant A) follow the compact table path regardless of `firstBlockOff`.
 
 **Percussion quirk.** Percussion tracks always report MIDI program 1 (GM Grand Piano);
 infer the actual kit from the track name.
