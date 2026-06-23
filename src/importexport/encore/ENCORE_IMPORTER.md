@@ -1356,17 +1356,23 @@ differ.
 The v0xC2 pitch-swap (`semiTonePitch = byte[+13]; byte[+13] = 0`) was
 introduced to handle notes where Encore stores pitch in the tuplet slot
 (+13).  A second sub-variant exists in some Encore 4.x files where the
-pitch is already in the standard `semiTonePitch` slot (+15) and the
-tuplet slot contains 0.
+pitch is already in the standard `semiTonePitch` slot (+15).
 
-The importer guards the swap with `if (en->tuplet > 0)` in
-`postProcessElement` (`readers-v0xc2.cpp`): when `tuplet == 0` the swap
-is skipped and `semiTonePitch` is preserved as-is.
+The importer guards the swap with `if (en->tuplet > 0 && en->semiTonePitch == 0)`
+in `postProcessElement` (`readers-v0xc2.cpp`): the swap fires only when the
+pitch slot (+15) is empty. The discriminator is the pitch slot, not the
+tuplet slot. An earlier guard of `if (en->tuplet > 0)` was wrong for
+sub-variant B triplets: there the tuplet slot (+13) holds a genuine tuplet
+ratio (e.g. 0x32 = 3:2), so the swap copied the ratio byte into the pitch,
+importing every triplet note as MIDI 50 and discarding the ratio. With the
+corrected guard the pitch at +15 is preserved and the explicit tuplet byte
+survives so the 3:2 bracket is built.
 
-Without this guard all notes in sub-variant B files (e.g. TUVEHAMB.ENC)
-imported as MIDI note 0 (C-1) — same pitch, far below the staff.
+Without any guard, sub-variant B non-tuplet notes imported as MIDI note 0
+(C-1), far below the staff.
 
-Exercised by `Tst_Notes.notes_v0c2_size24_semitone_pitch`.
+Exercised by `Tst_Notes.notes_v0c2_size24_semitone_pitch` and
+`Tst_Structure.old_format_v0c2_triplet_pitch_in_semitone`.
 
 ## Multi-measure rest expansion when successor is not a note measure
 

@@ -176,10 +176,12 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
         if (!en) {
             return false;
         }
-        // v0xC2: MIDI pitch occupies the tuplet slot (+13); swap into semiTonePitch.
-        // When tuplet==0 the pitch is already in semiTonePitch (some Encore 4.x files).
-        // See ENCORE_FORMAT.md §Note element.
-        if (en->tuplet > 0) {
+        // v0xC2: MIDI pitch usually occupies the tuplet slot (+13) with semiTonePitch
+        // (+15) empty; swap it across. But some Encore 4.x files store the pitch directly
+        // in semiTonePitch, in which case the tuplet slot holds a genuine tuplet ratio
+        // (e.g. 0x32 = 3:2) that must be preserved, not mistaken for the pitch. Only swap
+        // when semiTonePitch is empty. See ENCORE_FORMAT.md §Note element.
+        if (en->tuplet > 0 && en->semiTonePitch == 0) {
             en->semiTonePitch = en->tuplet;
             en->tuplet = 0;
         }

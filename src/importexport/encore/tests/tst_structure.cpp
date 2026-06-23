@@ -1000,3 +1000,46 @@ TEST_F(Tst_Structure, mid_measure_clef_change_imported)
         << "mid-measure CLEF(C4L) at enc-tick 240 must produce SegmentType::Clef at beat-2 offset";
     delete score;
 }
+
+TEST_F(Tst_Structure, old_format_v0c2_triplet_pitch_in_semitone)
+{
+    // Some Encore 4.x files store the MIDI pitch directly in semiTonePitch (+15)
+    // rather than the tuplet slot (+13). For a genuine triplet, +13 holds the real
+    // tuplet ratio (0x32 = 3:2). The pitch-swap heuristic used to fire whenever the
+    // tuplet slot was non-zero, copying the ratio byte (0x32 = 50) into the pitch and
+    // importing every triplet note as MIDI 50 with the ratio lost. The swap must only
+    // happen when semiTonePitch is empty.
+    // Fixture: 2/4 bar, triplet C4/E4/G4 (eighths) then a C5 quarter.
+    MasterScore* score = readEncoreScore("structure_v0c2_triplet_pitch_in_semitone.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<int> pitches;
+    bool foundTriplet = false;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (EngravingItem* e : toMeasure(mb)->el()) {
+            if (e->isTuplet() && toTuplet(e)->ratio() == Fraction(3, 2)) {
+                foundTriplet = true;
+            }
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->elist()) {
+                if (e && e->isChord()) {
+                    for (Note* n : toChord(e)->notes()) {
+                        pitches.push_back(n->pitch());
+                    }
+                }
+            }
+        }
+    }
+    ASSERT_EQ(pitches.size(), 4u) << "Should have 4 notes";
+    EXPECT_EQ(pitches[0], 60) << "triplet note 1 must be C4 (60), not the tuplet byte 50";
+    EXPECT_EQ(pitches[1], 64) << "triplet note 2 must be E4 (64)";
+    EXPECT_EQ(pitches[2], 67) << "triplet note 3 must be G4 (67)";
+    EXPECT_EQ(pitches[3], 72) << "quarter note must be C5 (72)";
+    EXPECT_TRUE(foundTriplet) << "explicit 3:2 tuplet must survive the pitch fix";
+    delete score;
+}
