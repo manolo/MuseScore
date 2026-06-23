@@ -956,3 +956,30 @@ TEST_F(Tst_Text, lyrics_compound_meter_all_syllables_matched)
 
     delete score;
 }
+
+TEST_F(Tst_Text, lyrics_rest_does_not_shift_note_assignment)
+{
+    // Regression test for two bugs in attachPendingLyrics (emitters-lyrics.cpp):
+    //
+    // Bug 1: REST elements consumed noteTickList entries, shifting all note encTick
+    // assignments. Without fix: REST at tick 0 gets encTick=120 (first NOTE's tick),
+    // NOTE@120 gets encTick=240 (second NOTE's tick), and LYRIC@140 matches the
+    // wrong note.
+    //
+    // Bug 2: Lyric proximity matching used pure absolute distance, leading to
+    // incorrect matches when a lyric tick is closer to a later note than the correct
+    // one. Correct behavior: prefer notes where note_tick <= lyric_tick (lyric
+    // comes after note start).
+    //
+    // Fixture: v0xC2 6/8, 1 measure with REST@0, NOTE@120, NOTE@240, LYRIC@140.
+    // Expected: LYRIC "ma" attached to NOTE@120 (correct note, within threshold).
+    // Before fix: LYRIC would match NOTE@240 or be unmatched.
+    MasterScore* score = readEncoreScore("lyrics_rest_does_not_shift_notes.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<String> all = collectAllLyrics(score);
+    ASSERT_GE(all.size(), 1u) << "fixture must have at least one lyric";
+    EXPECT_EQ(all[0], u"ma") << "lyric text must be 'ma'";
+
+    delete score;
+}

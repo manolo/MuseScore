@@ -987,9 +987,25 @@ The previous approach (`cumTick × encTicksPerQuarter × 4`) was unreliable beca
 - Using Encore NOTE encTicks directly avoids the conversion step: the kth MuseScore
   ChordRest corresponds to the kth NOTE element in `encMeas.elements`.
 
+**Rests do not consume NOTE encTicks.** The positional assignment advances the NOTE
+encTick cursor only for chord segments, never for rest segments. A measure that begins
+with a rest (common in 6/8 where the first beat is an eighth rest) would otherwise hand
+the first NOTE's encTick to the rest, shifting every subsequent note's reference tick by
+one position. The visible symptom was syllables rotated onto the wrong notes and a
+trailing syllable lost entirely (e.g. "rue da de mo" rendered as "rue de mo  da" with a
+gap). Rest segments fall back to the beat-grid estimate instead.
+
+**Two-tier proximity preference.** When matching a syllable to the nearest unclaimed
+chord, a note whose encTick is at or before the syllable's tick (the syllable starts on
+or after the note) is preferred over a note that starts later, even if the later note is
+closer in absolute distance. Within the same tier the smallest absolute distance wins.
+Pure nearest-distance matching mis-assigned syllables whose layout offset placed them
+slightly closer to the following note than to their own.
+
 Exercised by `Tst_Text.lyrics_offset_ticks_still_attach_correctly` (lyric ticks
-offset by +50 from their note ticks) and `Tst_Text.lyrics_compound_meter_all_syllables_matched`
-(v0xC2 6/8, `beatTicks=360`).
+offset by +50 from their note ticks), `Tst_Text.lyrics_compound_meter_all_syllables_matched`
+(v0xC2 6/8, `beatTicks=360`), and `Tst_Text.lyrics_rest_does_not_shift_note_assignment`
+(leading rest plus offset syllable).
 
 **Multi-verse.** Each LYRIC element's `voice` field maps to the
 resulting `Lyrics::verse()` value (0-indexed). Every verse

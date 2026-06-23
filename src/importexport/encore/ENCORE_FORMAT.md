@@ -815,6 +815,10 @@ Match each lyric to the nearest note by tick within a half-beat window:
 
 Match lyrics in tick order; each lyric claims the nearest unclaimed note (lyrics-first assignment).
 If note-first assignment were used, a later syllable could steal the note intended for an earlier one.
+A note at or before the syllable tick is preferred over a later note, even if the later note is
+absolutely closer, so a syllable nudged forward by its layout offset still lands on its own note.
+Rests are never counted when assigning a note's reference tick; a measure beginning with a rest
+would otherwise shift every following note by one position.
 
 ---
 
