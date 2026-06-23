@@ -96,7 +96,7 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
     }
 
     // Names < 4 chars (e.g. SATB labels "S","A","T","B") match too broadly; skip.
-    if (encName.trimmed().size() < static_cast<size_t>(kMinInstrNameLen)) {
+    if (encName.trimmed().size() < static_cast<qsizetype>(kMinInstrNameLen)) {
         return nullptr;
     }
 
@@ -202,7 +202,7 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
 // Find best drumset template by name score (exact match only, no substring).
 const InstrumentTemplate* findDrumsetTemplate(const QString& encName)
 {
-    if (encName.trimmed().size() < static_cast<size_t>(kMinInstrNameLen)) {
+    if (encName.trimmed().size() < static_cast<qsizetype>(kMinInstrNameLen)) {
         return nullptr;
     }
 
