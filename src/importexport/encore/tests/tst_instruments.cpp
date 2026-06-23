@@ -729,3 +729,25 @@ TEST_F(Tst_Instruments, c2_tilde_primary_block_midi_read_from_offset_60)
         << "Primary-block MIDI=25 at block+60 must be read; Grand Piano means midiProgram stayed 0";
     delete score;
 }
+
+TEST_F(Tst_Instruments, no_tk_blocks_large_tk_layout_reads_all_instrument_names)
+{
+    // instruments_no_tk_large_tk_two_names.enc: no TK blocks, LINE block at offset 2386
+    // (firstBlockOff > 2278 triggers large-TK stride=2158 in recoverMissingNames).
+    // "Oboe" (UTF-16 LE) at NAME_BASE=202; "Cello" (UTF-16 LE) at 202+2158=2360.
+    //
+    // Before fix: recoverMissingNames always used step=112 for no-TK-no-tilde files,
+    // so instrument 1 read from 202+112=314 (zero bytes) and fell back to "Part 2".
+    // With fix: large-TK detection mirrors readMidiProgramsNoTk, step=2158 is used.
+    MasterScore* score = readEncoreScore("instruments_no_tk_large_tk_two_names.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_GE(static_cast<int>(score->parts().size()), 2)
+        << "File declares 2 instruments; both must appear as parts";
+    const QString name0 = score->parts()[0]->longName().toQString();
+    const QString name1 = score->parts()[1]->longName().toQString();
+    EXPECT_EQ(name0, QString("Oboe"))
+        << "Instrument 0 name must be read from NAME_BASE=202 with step=2158";
+    EXPECT_EQ(name1, QString("Cello"))
+        << "Instrument 1 name must be read from NAME_BASE+2158=2360 (not 202+112=314)";
+    delete score;
+}
