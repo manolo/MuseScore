@@ -413,8 +413,10 @@ static bool advanceCumulativeTick(
     }
 
     // Cap advance to remaining space; remove tuplet membership to avoid sanityCheck overshoot.
+    // IrregularMeasure: skip the cap so cumTick can exceed measure ticks and capMeasureLength extends it.
     Fraction remaining = measure->ticks() - ctx.cumTick[trackKey];
-    if (advance > remaining && remaining > Fraction(0, 1)) {
+    if (advance > remaining && remaining > Fraction(0, 1)
+        && ctx.opts.overfillMeasureStrategy != OverfillStrategy::IrregularMeasure) {
         advance = TDuration(remaining, true).fraction();
         if (advance.numerator() == 0) {
             // Remaining smaller than any standard duration; chord would become zero-tick. Remove it.
@@ -569,7 +571,8 @@ static bool resolveNoteDuration(
             Fraction remaining = measure->ticks() - ctx.cumTick[trackKey];
             TDuration fullDur(dt);  // must include dots; TDuration(dt) alone misses the dotted extension
             fullDur.setDots(dots);
-            if (remaining > Fraction(0, 1) && fullDur.fraction() > remaining) {
+            if (remaining > Fraction(0, 1) && fullDur.fraction() > remaining
+                && ctx.opts.overfillMeasureStrategy != OverfillStrategy::IrregularMeasure) {
                 TDuration capped(remaining, true);
                 // 1/3072-type residual: no valid TDuration; zero-tick chord breaks sanityCheck.
                 if (capped.fraction().numerator() == 0) {
@@ -685,10 +688,7 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
 
 void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
 {
-    MasterScore* score = ctx.score;
     Measure* measure = mc.measure;
-    const std::set<const EncMeasureElem*>& validTupletGroupMember = mc.validTupletGroupMember;
-    const std::set<const EncMeasureElem*>& partialEndGroup = mc.partialEndGroup;
     const std::set<const EncMeasureElem*>& impliedGroupMember = mc.validTupletGroupMember;
     std::set<std::tuple<int, int, int> >& filteredTieSenderPitches = mc.filteredTieSenderPitches;
     const EncMeasureElem* e = ec.e;
@@ -696,16 +696,11 @@ void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
     const bool isInnerLast   = mc.nestedByInnerLast.count(e) > 0;
     const bool isInnerMember = mc.innerGroupMembers.count(e) > 0;
     int staffIdx = ec.staffIdx;
-    int voice = ec.voice;
-    int msVoice = ec.msVoice;
     track_idx_t track = ec.track;
     auto trackKey = ec.trackKey;
     bool isChordExt = ec.isChordExt;
     Fraction elemTick = ec.elemTick;
     int savedPrevMidiTick = ec.savedPrevMidiTick;
-    bool hadLastChordPos = ec.hadLastChordPos;
-    Fraction savedLastChordPos = ec.savedLastChordPos;
-    auto isTieStart = [&](int si, int v, int t, int pos = -1) { return mc.isTieStartAt(si, v, t, pos); };
 
     const EncNote* en = static_cast<const EncNote*>(e);
 

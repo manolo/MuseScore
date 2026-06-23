@@ -243,6 +243,34 @@ void capMeasureLength(BuildCtx& ctx, Measure* measure)
                     ph.maxEndTick += delta;
                 }
             }
+            // Fill all voices that fall short of the extended measure length.
+            // Staves whose content stopped at the original measure length now sit
+            // inside a longer measure; a visible rest covers the added time.
+            for (int si = 0; si < ctx.totalStaves; ++si) {
+                for (voice_idx_t v = 0; v < VOICES; ++v) {
+                    const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
+                    Fraction voiceSum { 0, 1 };
+                    for (Segment* seg = measure->first(SegmentType::ChordRest);
+                         seg; seg = seg->next(SegmentType::ChordRest)) {
+                        EngravingItem* el = seg->element(tr);
+                        if (el) {
+                            voiceSum += toChordRest(el)->actualTicks();
+                        }
+                    }
+                    if (voiceSum <= Fraction(0, 1) || voiceSum >= maxVoiceSum) {
+                        continue;
+                    }
+                    const Fraction fillTick = measTick + voiceSum;
+                    Segment* fillSeg = measure->getSegment(SegmentType::ChordRest, fillTick);
+                    if (!fillSeg->element(tr)) {
+                        Rest* r = Factory::createRest(fillSeg, TDuration(DurationType::V_MEASURE));
+                        r->setTicks(maxVoiceSum - voiceSum);
+                        r->setTrack(tr);
+                        r->setGap(false);
+                        fillSeg->add(r);
+                    }
+                }
+            }
         }
         return;
     }
