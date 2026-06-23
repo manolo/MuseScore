@@ -404,6 +404,30 @@ Indices 16, 20, 23, 28-31, 39 are undefined; treat as major (empty quality suffi
 
 ---
 
+## CLEF element
+
+Type 1. Variable size (typically 16 bytes). Encodes a mid-measure clef change on a staff.
+
+Byte +5 holds the clef type using the same encoding as the LINE staff entry byte at content offset +14 (see LINE block above):
+
+| Value | Clef |
+|-------|------|
+| 0     | G (treble) |
+| 1     | F (bass) |
+| 2     | C3 (alto) |
+| 3     | C4 (tenor) |
+| 4     | G8va |
+| 5     | G8vb |
+| 6     | F8vb |
+| 7     | Percussion |
+| 8     | Tab |
+
+The clef element applies to the staff indicated by its `staffIdx` field (low 6 bits of byte +4). Bytes +6 onward are padding; skip using the `size` field.
+
+A CLEF element's tick position acts as a duration boundary for any preceding rest on the same staff: a rest that would otherwise fill the measure gap is capped at the CLEF's tick.
+
+---
+
 ## KEYCHANGE element
 
 Type 2. Size 6 bytes. Byte at +5 = key index into the fifths table:

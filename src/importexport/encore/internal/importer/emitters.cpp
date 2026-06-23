@@ -661,6 +661,21 @@ static void buildNestedTupletMaps(MeasEmitCtx& mc,
     }
 }
 
+static void handleClefChange(BuildCtx& ctx, const MeasEmitCtx& mc,
+                             const NoteElemCtx& ec, const EncMeasureElem* e)
+{
+    const EncClefChange* ecc = static_cast<const EncClefChange*>(e);
+    if (ec.staffIdx < 0 || ec.staffIdx >= ctx.totalStaves) {
+        return;
+    }
+    const ClefType ct = encClef2MuseScore(ecc->clefType);
+    Segment* seg = mc.measure->getSegment(SegmentType::Clef, ec.elemTick);
+    Clef* clef = Factory::createClef(seg);
+    clef->setTrack(static_cast<track_idx_t>(ec.staffIdx) * VOICES);
+    clef->setClefType(ct);
+    seg->add(clef);
+}
+
 static void handleKeyChange(BuildCtx& ctx, const MeasEmitCtx& mc,
                             const NoteElemCtx& ec, const EncMeasureElem* e,
                             std::vector<DeferredKeySig>& pendingKeySigs)
@@ -892,6 +907,8 @@ void emitMeasures(BuildCtx& ctx)
             case EncElemType::ORNAMENT:  handleOrnament(ctx, mc, ec);
                 break;
             case EncElemType::KEYCHANGE: handleKeyChange(ctx, mc, ec, e, pendingKeySigs);
+                break;
+            case EncElemType::CLEF:     handleClefChange(ctx, mc, ec, e);
                 break;
             default: break;
             }
