@@ -421,3 +421,42 @@ TEST_F(Tst_NotesTies, sf_tiestart_not_filtered_by_rdur)
     delete score;
 }
 
+TEST_F(Tst_NotesTies, tie_direction_04_forward_creates_tie)
+{
+    // notes_tie_dir_04_forward.enc: 18-byte TIE@0 with +5=0x04, +6=0x00,
+    // arcX1=56, arcX2=112 (genuine forward horizontal span). Byte +5 is a
+    // signed arc-curvature value, not a bitfield: 0x04 curves down just like
+    // 0xFC curves up; both are real ties. C4@tick=0 must tie to C4@tick=480.
+    //
+    // Bug (before fix): the bit-based rule (+5&0x80 || +5&0x02 || +6&0x80)
+    //   classified 0x04 as not-a-start and dropped the tie. In a real
+    //   multi-staff score this silently lost ties on every staff whose arc
+    //   curved down (+5=0x04) while staves with +5=0xFC kept theirs.
+    // Fix: arcX1 < arcX2 marks a forward tie regardless of the +5 sign.
+    MasterScore* score = readEncoreScore("notes_tie_dir_04_forward.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int tieCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Note* n : toChord(el)->notes()) {
+                if (n->tieFor()) {
+                    ++tieCount;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(tieCount, 1) << "expected one forward tie from the +5=0x04 (arcX1<arcX2) TIE element";
+    delete score;
+}
+

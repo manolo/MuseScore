@@ -443,22 +443,24 @@ Value 0 is a legitimate change (naturals cancel prior accidentals).
 
 Type 3. Size 16 or 18 bytes.
 
-Byte +5 encodes arc direction and outgoing status; byte +6 is an additional tie-start flag.
+Byte +5 is a signed arc-curvature value (the vertical bow of the slur arc), NOT a bitfield;
+byte +6 is a tie-start flag.
 
-| Byte +5        | Arc direction   | Tie-start?                         |
-|----------------|-----------------|------------------------------------|
-| `0xFE` / `0x80`+ | arc above     | yes (bit 7 set)                    |
-| `0x02`         | arc below       | yes (bit 1 set, no high bit)       |
-| `0x03`         | arc below       | yes (bits 0+1: incoming + outgoing)|
-| `0x01`         | incoming only   | no                                 |
-| `0x04`         | incoming only   | no                                 |
+| Byte +5  | Signed value | Arc curvature |
+|----------|--------------|---------------|
+| `0x02`   | +2           | curve down    |
+| `0x04`   | +4           | curve down    |
+| `0xFE`   | -2           | curve up      |
+| `0xFC`   | -4           | curve up      |
 
-**Tie-start rule:** an element is a tie-start when `(+5 & 0x80) || (+5 & 0x02) || (+6 & 0x80)`.
-Values `0x02` and `0x03` encode the arc-below outgoing direction; they do NOT set bit 7
-but bit 1 carries the same "outgoing" semantic.
+All four values mark a real outgoing tie. Treating +5 as a bitfield is wrong: a rule like
+`(+5 & 0x80) || (+5 & 0x02)` happens to catch `0x02`, `0xFC`, and `0xFE` but silently drops
+the equally-valid `0x04` (which sets neither bit 7 nor bit 1). In a multi-staff chord, staves
+whose ties curve down (`0x04`) lost their ties while staves curving up (`0xFC`) kept theirs.
 
 **Arc x-positions (18-byte elements only).** For size ≥ 18, two additional bytes encode the
-visual x-positions of the arc endpoints:
+visual x-positions of the arc endpoints, and these, not the +5 curvature, are the
+authoritative forward-tie signal:
 
 | Offset   | Size   | Description                                                         |
 |----------|--------|---------------------------------------------------------------------|
@@ -466,14 +468,21 @@ visual x-positions of the arc endpoints:
 | +12      | 1      | `arcX2` — x-position of arc end                                    |
 | +14      | 1      | `sourcePosition` — staff position of the source note (matches `EncNote::position`); disambiguates which note in a multi-note chord carries the tie |
 
-**Intra-chord arc detection.** When `arcX1 == arcX2`, both endpoints are at the same visual
-column — the arc connects two notes of the same chord vertically with zero horizontal extent.
-This is a decorative mark in Encore (not a forward tie). The tie-start flag is overridden to
-`false` — no tie is created. Such elements often appear in groups of 2–4 identical
-copies at the same tick (one per chord note) and always carry `dirByte = 0x02`.
+**Forward-tie rule (18-byte form).**
 
-When `arcX1 != arcX2`, the arc spans notes at genuinely different time positions: the
-tie-start flag stands, and a normal forward tie is created.
+- `arcX1 < arcX2`: genuine left-to-right horizontal span, a real forward tie, regardless of
+  the +5 curvature value.
+- `arcX1 == arcX2`: zero horizontal extent. This is an intra-chord decorative mark (Encore
+  connects two notes of the same chord vertically) and is NOT a forward tie, unless byte +6
+  has bit 7 set, which marks a cross-measure tie whose destination lives in the next measure
+  and for which Encore stores `arcX2 = arcX1` as a placeholder. Intra-chord arcs often appear
+  in groups of 2 to 4 identical copies at the same tick (one per chord note).
+
+**Tie-start flag (byte +6).** Bit 7 set marks a tie-start explicitly; it overrides the
+`arcX1 == arcX2` intra-chord suppression (the cross-measure placeholder case above).
+
+**16-byte form.** When no arc x-positions are stored, tie-start falls back to the byte-level
+signal `(+5 & 0x80) || (+5 & 0x02) || (+6 & 0x80)`.
 
 ---
 
