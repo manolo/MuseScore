@@ -1329,3 +1329,54 @@ TEST_F(Tst_NotesTuplets, triplet_orphan_with_prior_complete_group)
 
     delete score;
 }
+
+TEST_F(Tst_NotesTuplets, cross_staff_false_nesting_and_drum_corruption)
+{
+    MasterScore* score = readEncoreScore("notes_cross_staff_false_nesting.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load notes_cross_staff_false_nesting.enc";
+
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Drum staff corruption or false nesting caused measure overflow: " << ret.text();
+
+    ASSERT_GE(score->nstaves(), 2) << "Fixture must have at least 2 staves";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    // Collect all non-gap chords on staff 1 (drum part) across all voices.
+    std::vector<Chord*> drumChords;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        for (int v = 0; v < static_cast<int>(VOICES); ++v) {
+            EngravingItem* e = s->element(static_cast<track_idx_t>(1 * VOICES + v));
+            if (e && e->isChord()) {
+                Chord* c = toChord(e);
+                if (!c->isRest() || !toRest(c)->isGap()) {
+                    drumChords.push_back(c);
+                }
+            }
+        }
+    }
+
+    EXPECT_EQ(drumChords.size(), 12u)
+        << "Staff 1 must have 12 eighth notes (4 triplets x 3); "
+        "drum corruption shifts notes outside measure, reducing the count";
+
+    // All 12 drum chords must be in tuplets.
+    for (size_t i = 0; i < drumChords.size(); ++i) {
+        EXPECT_NE(drumChords[i]->tuplet(), nullptr)
+            << "Drum chord " << i << " must be in a 3:2 tuplet";
+    }
+
+    // There must be exactly 4 distinct tuplet objects on staff 1.
+    std::set<Tuplet*> drumTuplets;
+    for (Chord* c : drumChords) {
+        if (c->tuplet()) {
+            drumTuplets.insert(c->tuplet());
+        }
+    }
+    EXPECT_EQ(drumTuplets.size(), 4u)
+        << "Staff 1 must form 4 independent 3:2 triplet brackets; "
+        "cross-staff contamination collapses them into fewer groups";
+
+    delete score;
+}

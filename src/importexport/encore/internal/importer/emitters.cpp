@@ -650,7 +650,7 @@ static void buildNestedTupletMaps(MeasEmitCtx& mc,
                 if (em2 == ni.innerFirst) {
                     inInner = true;
                 }
-                if (inInner) {
+                if (inInner && em2->staffIdx == ni.innerFirst->staffIdx) {
                     mc.innerGroupMembers.insert(em2);
                 }
                 if (em2 == ni.innerLast) {
