@@ -31,6 +31,7 @@
 #include "engraving/dom/segment.h"
 #include "engraving/dom/spanner.h"
 #include "engraving/dom/staff.h"
+#include "engraving/dom/stafftype.h"
 #include "engraving/dom/tuplet.h"
 
 #include "engraving/dom/instrtemplate.h"
@@ -77,6 +78,39 @@ TEST_F(Tst_Instruments, v0xa6_reads_midi_program_from_tk_block)
     ASSERT_NE(inst, nullptr);
     EXPECT_NE(inst->drumset(), nullptr)
         << "v0xA6 MIDI 119 (>=113) must be read from TK+52 and route to a drumset, not Grand Piano";
+    delete score;
+}
+
+// ===========================================================================
+// FIX: a name/MIDI match may land on a tablature template variant ("Classical
+// Guitar (tablature)"), but Encore stores a normal clef. The importer must swap
+// to the standard-notation sibling so the staff is a normal pitched staff.
+// ===========================================================================
+TEST_F(Tst_Instruments, tab_template_swapped_to_standard_when_clef_not_tab)
+{
+    MasterScore* score = readEncoreScore("instruments_tab_template_forced_standard.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->staves().empty());
+    const StaffType* st = score->staff(0)->staffType(Fraction(0, 1));
+    ASSERT_NE(st, nullptr);
+    EXPECT_NE(st->group(), StaffGroup::TAB)
+        << "Encore stores a normal clef, so the tablature template must be swapped to standard notation";
+    delete score;
+}
+
+// ===========================================================================
+// FIX: when Encore stores EncClefType::TAB the importer must swap a standard
+// "Classical Guitar" match to the tablature sibling so the staff is tablature.
+// ===========================================================================
+TEST_F(Tst_Instruments, standard_template_swapped_to_tablature_when_clef_tab)
+{
+    MasterScore* score = readEncoreScore("instruments_tab_clef_keeps_tablature.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->staves().empty());
+    const StaffType* st = score->staff(0)->staffType(Fraction(0, 1));
+    ASSERT_NE(st, nullptr);
+    EXPECT_EQ(st->group(), StaffGroup::TAB)
+        << "EncClefType::TAB must select the tablature template variant";
     delete score;
 }
 

@@ -74,6 +74,13 @@ const mu::engraving::InstrumentTemplate* findDrumsetTemplate(const QString& encN
 // MIDI-only lookup among non-drumset templates; prefers "common" genre when multiple share the same program.
 const mu::engraving::InstrumentTemplate* findTemplateByMidi(int encMidiProgram0indexed);
 
+// Given a matched template, return its standard-notation or tablature sibling (e.g.
+// "Classical Guitar" <-> "Classical Guitar (tablature)"). Returns the input if it already
+// matches wantTab, or nullptr when no sibling exists. Siblings are matched by shared
+// musicXmlId, then by track name with any trailing "(...)" variant suffix removed.
+const mu::engraving::InstrumentTemplate* findInstrumentVariant(
+    const mu::engraving::InstrumentTemplate* base, bool wantTab);
+
 // Return BPS if text is a standard Italian tempo term (Allegro, Andante, ...).
 // Return 0 for relative marks (a tempo, Tempo I). Return -1 if not a tempo mark.
 double encTextToTempoBps(const QString& text);

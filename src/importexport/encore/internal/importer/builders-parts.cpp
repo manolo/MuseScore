@@ -63,6 +63,7 @@
 #include "engraving/dom/segment.h"
 #include "engraving/dom/slur.h"
 #include "engraving/dom/staff.h"
+#include "engraving/dom/stafftype.h"
 #include "engraving/dom/stafftext.h"
 #include "engraving/dom/tempotext.h"
 #include "engraving/dom/text.h"
@@ -121,6 +122,7 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
                                                      const EncInstrument& instr,
                                                      bool isPercByClef,
                                                      bool isRhythm,
+                                                     bool encWantsTab,
                                                      InstrumentSearchMode searchMode)
 {
     // Piano mode: skip all matching and go straight to fallback.
@@ -203,6 +205,17 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         }
     }
 
+    // Encore stores the staff's notation/tablature choice in the clef; a name/MIDI match may
+    // land on the wrong variant (e.g. "Classical Guitar (tablature)" when Encore uses a normal
+    // clef). Swap to the standard or tablature sibling to match Encore's clef.
+    if (tmpl && !isRhythm && (tmpl->staffGroup == StaffGroup::TAB) != encWantsTab) {
+        if (const InstrumentTemplate* variant = findInstrumentVariant(tmpl, encWantsTab)) {
+            LOGD() << "  instrument \"" << instr.name.toStdString() << "\": clef-driven variant "
+                   << (encWantsTab ? "tablature" : "standard") << " -> " << variant->trackName.toStdString();
+            tmpl = variant;
+        }
+    }
+
     applyInstrumentOrFallback(part, tmpl, instr, matchStep);
     return tmpl;
 }
@@ -222,8 +235,14 @@ void buildParts(BuildCtx& ctx)
         const bool isRhythm = !enc.lines.empty()
                               && cumStaffIdx < static_cast<int>(enc.lines[0].staffData.size())
                               && enc.lines[0].staffData[cumStaffIdx].staffType == EncStaffType::RHYTHM;
+        // Tablature only when Encore explicitly marks it (clef==TAB or staffType==TAB). v0xA6
+        // has no per-staff clef in the LINE block, so it defaults to standard notation.
+        const bool encWantsTab = !enc.lines.empty()
+                                 && cumStaffIdx < static_cast<int>(enc.lines[0].staffData.size())
+                                 && (enc.lines[0].staffData[cumStaffIdx].clef == EncClefType::TAB
+                                     || enc.lines[0].staffData[cumStaffIdx].staffType == EncStaffType::TAB);
         const InstrumentTemplate* tmpl = applyBestInstrument(part, instr, isPercByClef, isRhythm,
-                                                             ctx.opts.instrumentSearchMode);
+                                                             encWantsTab, ctx.opts.instrumentSearchMode);
 
         const bool showFromLine = enc.lines.empty()
                                   || cumStaffIdx >= static_cast<int>(enc.lines[0].staffData.size())
@@ -269,6 +288,13 @@ void buildParts(BuildCtx& ctx)
                 // bracket the template may have set to avoid spurious cross-part brackets.
                 staff->setBracketType(0, BracketType::NO_BRACKET);
                 staff->setBracketSpan(0, 0);
+                // Safety net: if no standard sibling template was found above and the staff is
+                // still tablature though Encore stores standard notation, force a standard staff.
+                if (!encWantsTab && staff->staffType(Fraction(0, 1))->group() == StaffGroup::TAB) {
+                    if (const StaffType* stdType = StaffType::getDefaultPreset(StaffGroup::STANDARD)) {
+                        staff->setStaffType(Fraction(0, 1), *stdType);
+                    }
+                }
             }
             ctx.staffPitchOffset.push_back(pitchOffset);
             ClefType cClef = ClefType::INVALID;
