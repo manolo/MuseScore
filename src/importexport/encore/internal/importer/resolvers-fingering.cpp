@@ -88,26 +88,24 @@ static void correctBowingTickFromXoffset(
     if (pb.ornXoffset == 0) {
         return;
     }
-    // Pre-check: if there is a note at the ORN's original Encore tick whose
-    // xoffset is within the cluster threshold of the ORN's own xoffset, the
-    // mark is already at its target chord — skip all correction.
-    // Rationale: ornXoffset is relative to the note head (not absolute on the
-    // page), so two marks on different chords can share the same value even when
-    // they are visually far apart.  Confirming that a note at pb.encTickRaw has
-    // a similar xoffset is a reliable anchor that does not misfire.
+    // Pre-check: if there is a note on the ORN's own staff at the ORN's raw
+    // Encore tick, that tick directly names the beat the mark sits on — trust it
+    // and skip all correction.  The raw enc tick is an explicit per-ORN value and
+    // is a far more reliable anchor than the xoffset heuristic: ornXoffset and
+    // note xoffset use different horizontal origins (in real files the offset
+    // between them is a per-file constant, not zero), so an xoffset-proximity
+    // test misfires and snaps a first-beat mark onto a later note.  Correction is
+    // only useful when the ORN's own staff has no note at its raw tick (the beat
+    // is empty, so the stored tick cannot be taken literally).
     static constexpr int BOW_XOFF_CLUSTER = 6;
     {
         const int staffIdx2 = static_cast<int>(pb.track / VOICES);
         auto noteIt = ctx.noteXoffByMeasStaff.find({ pb.measIdx, staffIdx2 });
         if (noteIt != ctx.noteXoffByMeasStaff.end()) {
             for (const auto& np : noteIt->second) {
-                if (np.first != pb.encTickRaw) {
-                    continue;
+                if (np.first == pb.encTickRaw) {
+                    return;  // a note exists at the ORN's own beat: trust the raw tick
                 }
-                if (std::abs(pb.ornXoffset - np.second) <= BOW_XOFF_CLUSTER) {
-                    return;  // ORN is already at its correct chord
-                }
-                break;
             }
         }
     }

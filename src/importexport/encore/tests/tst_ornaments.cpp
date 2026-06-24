@@ -1729,13 +1729,23 @@ TEST_F(Tst_Ornaments, new_artic_types_from_orns)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    enum class K { Marcato, MarcatoStaccato, Tenuto, Mordent, Other };
+    enum class K {
+        Marcato, MarcatoStaccato, Tenuto, Mordent, Other
+    };
     auto kindOf = [](Articulation* a) -> K {
         SymId s = SymId(a->subtype());
-        if (s == SymId::articMarcatoAbove || s == SymId::articMarcatoBelow) { return K::Marcato; }
-        if (s == SymId::articMarcatoStaccatoAbove || s == SymId::articMarcatoStaccatoBelow) { return K::MarcatoStaccato; }
-        if (s == SymId::articTenutoAbove || s == SymId::articTenutoBelow) { return K::Tenuto; }
-        if (s == SymId::ornamentMordent || s == SymId::ornamentPrallMordent) { return K::Mordent; }
+        if (s == SymId::articMarcatoAbove || s == SymId::articMarcatoBelow) {
+            return K::Marcato;
+        }
+        if (s == SymId::articMarcatoStaccatoAbove || s == SymId::articMarcatoStaccatoBelow) {
+            return K::MarcatoStaccato;
+        }
+        if (s == SymId::articTenutoAbove || s == SymId::articTenutoBelow) {
+            return K::Tenuto;
+        }
+        if (s == SymId::ornamentMordent || s == SymId::ornamentPrallMordent) {
+            return K::Mordent;
+        }
         return K::Other;
     };
 
@@ -1835,7 +1845,7 @@ TEST_F(Tst_Ornaments, tremolo_orn_r16_and_string_numbers)
         }
     }
     // Only 0xEE produces a tremolo (R16).
-    EXPECT_EQ(tremolos, std::vector<TremoloType>{ TremoloType::R16 });
+    EXPECT_EQ(tremolos, std::vector<TremoloType> { TremoloType::R16 });
     // 0xE6 and 0xE9 produce string numbers (2 and 5).
     EXPECT_EQ(stringNumCount, 2) << "0xE6 and 0xE9 must produce STRING_NUMBER fingerings, not tremolos";
     delete score;
@@ -1956,19 +1966,24 @@ TEST_F(Tst_Ornaments, encore_symbols_full_coverage)
                     ++staccatissimos;
                     break;
                 case SymId::articMarcatoStaccatoAbove: case SymId::articMarcatoStaccatoBelow:
-                    ++marcatos; ++staccatos;
+                    ++marcatos;
+                    ++staccatos;
                     break;
                 case SymId::articMarcatoTenutoAbove: case SymId::articMarcatoTenutoBelow:
-                    ++marcatos; ++tenutos;
+                    ++marcatos;
+                    ++tenutos;
                     break;
                 case SymId::articAccentStaccatoAbove: case SymId::articAccentStaccatoBelow:
-                    ++accents; ++staccatos;
+                    ++accents;
+                    ++staccatos;
                     break;
                 case SymId::articTenutoStaccatoAbove: case SymId::articTenutoStaccatoBelow:
-                    ++tenutos; ++staccatos;
+                    ++tenutos;
+                    ++staccatos;
                     break;
                 case SymId::articTenutoAccentAbove: case SymId::articTenutoAccentBelow:
-                    ++tenutos; ++accents;
+                    ++tenutos;
+                    ++accents;
                     break;
                 case SymId::ornamentTrill:
                     ++trills;
@@ -2064,7 +2079,7 @@ TEST_F(Tst_Ornaments, accent_orn_tick0_stays_on_note1_when_same_xoffset_as_later
     // Note 1 (earliest tick) must carry exactly 1 accent.
     EXPECT_EQ(chords.front().accents, 1)
         << "Note 1 (enc-tick=0) must carry exactly 1 accent; "
-           "without fix both accents land on note 3 (enc-tick=480)";
+        "without fix both accents land on note 3 (enc-tick=480)";
 
     // No chord should carry 2 accents.
     for (const auto& ci : chords) {
@@ -2078,3 +2093,65 @@ TEST_F(Tst_Ornaments, accent_orn_tick0_stays_on_note1_when_same_xoffset_as_later
     delete score;
 }
 
+// ===========================================================================
+// BUG FIX: A bowing ORN at enc-tick=0 must stay on note 1 even when its
+// ornXoffset does not match note 1's xoffset. In real Encore files the ORN
+// xoffset and the note xoffset use different horizontal origins, so the tight
+// |ornXoffset - noteXoffset| <= 6 pre-check is not satisfied for a bow that
+// genuinely belongs to the first note.
+//
+// Without fix: the tick-0 up-bow (ornXoffset=69) skips the pre-check
+// (|69-9|=60 > 6), then Phase 2 of correctBowingTickFromXoffset snaps it to the
+// closest note xoffset <= 69 (note 3, xoffset=57 at enc-tick=480), moving the
+// up-bow off note 1.
+//
+// With fix: a note exists on the ORN's own staff at its raw enc-tick=0, so the
+// raw tick is trusted unconditionally and the up-bow stays on note 1.
+//
+// Fixture: 4/4 measure, 4 quarter notes at ticks 0/240/480/720
+// (note xoffsets 9/33/57/81); up-bow ORN at tick=0 (ornXoffset=69),
+// down-bow ORN at tick=480 (ornXoffset=120).
+// ===========================================================================
+TEST_F(Tst_Ornaments, bowing_tick0_stays_on_note1_when_xoffset_mismatches)
+{
+    MasterScore* score = readEncoreScore("ornaments_bowing_tick0_xoffset_mismatch.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    // Collect, per chord, the bowing symbols it carries (in tick order).
+    std::vector<std::pair<Fraction, std::vector<SymId> > > perChord;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        std::vector<SymId> bows;
+        for (Articulation* a : toChord(el)->articulations()) {
+            if (a->symId() == SymId::stringsUpBow || a->symId() == SymId::stringsDownBow) {
+                bows.push_back(a->symId());
+            }
+        }
+        perChord.push_back({ s->tick(), bows });
+    }
+
+    ASSERT_GE(perChord.size(), 3u) << "Measure must have at least 3 chords";
+
+    // Note 1 (earliest tick) must carry exactly the up-bow.
+    EXPECT_EQ(perChord.front().second, std::vector<SymId> { SymId::stringsUpBow })
+        << "Note 1 (enc-tick=0) must keep its up-bow; without fix the up-bow is "
+        "snapped onto a later note by the xoffset correction";
+
+    // No chord may carry more than one bowing mark (the relocated up-bow would
+    // otherwise pile onto the down-bow note).
+    for (const auto& cinfo : perChord) {
+        EXPECT_LE(cinfo.second.size(), 1u)
+            << "Chord at MuseScore tick " << cinfo.first.toString().toStdString()
+            << " carries " << cinfo.second.size() << " bowing marks; max 1 expected";
+    }
+
+    delete score;
+}
