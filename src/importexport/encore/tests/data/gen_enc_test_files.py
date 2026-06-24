@@ -2857,6 +2857,45 @@ def gen_v0c4_bowing_orn():
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
 
+# ===========================================================================
+# ornaments_bowing_tick0_xoffset_mismatch.enc
+# 4/4 measure, 4 quarter notes at ticks 0/240/480/720 with note xoffsets
+# 9/33/57/81 (increasing across the measure). Two bowing ORNs:
+#   UPBOW   (0xC4) at enc-tick=0   with ornXoffset=69
+#   DOWNBOW (0xC5) at enc-tick=480 with ornXoffset=120
+# This mirrors real Encore files where the ORN xoffset and the note xoffset use
+# different horizontal origins (here the up-bow's xoffset 69 is far from note 1's
+# xoffset 9, even though the up-bow belongs to note 1 by its enc tick=0).
+#
+# Without fix: the tick-0 up-bow has a non-zero xoffset and the |69-9|=60 > 6
+# pre-check fails, so correctBowingTickFromXoffset runs Phase 2 and snaps the
+# up-bow to the closest note xoffset <= 69 (note 3, xoffset 57, enc-tick=480),
+# moving the up-bow off note 1.
+# With fix: a note exists on the ORN's own staff at its raw enc-tick=0, so the
+# raw tick is trusted and the up-bow stays on note 1.
+# Expected: note 1 (enc-tick=0) carries the up-bow; note 3 (enc-tick=480)
+# carries the down-bow; note 1 keeps its up-bow.
+# ===========================================================================
+def gen_v0c4_bowing_tick0_xoffset_mismatch():
+    def orn_bow_xoff(tick, tipo, xoff, staffIdx=0, voice=0):
+        """16-byte bowing ORN (tipo 0xC4 up-bow / 0xC5 down-bow) with xoffset."""
+        d = bytearray(13)
+        d[0] = 16
+        d[1] = staffIdx & 0x3F
+        d[2] = tipo
+        d[7] = xoff & 0xFF
+        return struct.pack('<H', tick) + bytes([(5 << 4) | (voice & 0xF)]) + bytes(d)
+
+    e  = orn_bow_xoff(  0, 0xC4, 69)   # up-bow on note 1 (raw tick=0)
+    e += note_v0c4_xoff(  0, 0, 0, fv=3, pitch=60, xoff=9)
+    e += note_v0c4_xoff(240, 0, 0, fv=3, pitch=62, xoff=33)
+    e += orn_bow_xoff(480, 0xC5, 120)  # down-bow on note 3 (raw tick=480)
+    e += note_v0c4_xoff(480, 0, 0, fv=3, pitch=64, xoff=57)
+    e += note_v0c4_xoff(720, 0, 0, fv=3, pitch=65, xoff=81)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
 def gen_v0c4_fingering_orn():
     # Stand-alone size-16 ORN tipos 0xB9..0xBD placed before the chord.
     # tipo = 0xB8 + finger_number (1..5). The importer attaches a Fingering
@@ -7813,6 +7852,7 @@ if __name__=='__main__':
     write("ornaments_trill_cross_measure.enc",    gen_v0c4_trill_cross_measure())
     write("ornaments_staccato_orn.enc",           gen_v0c4_staccato_orn())
     write("ornaments_bowing.enc",                 gen_v0c4_bowing_orn())
+    write("ornaments_bowing_tick0_xoffset_mismatch.enc",    gen_v0c4_bowing_tick0_xoffset_mismatch())
     write("ornaments_fingering_orn.enc",          gen_v0c4_fingering_orn())
     write("structure_system_break.enc",           gen_v0c4_system_break())
     write("structure_section_markers.enc",        gen_v0c4_section_markers())
