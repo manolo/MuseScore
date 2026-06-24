@@ -51,18 +51,19 @@ bool EncHeader::read(QDataStream& ds, const EncFormatReader& fmt)
     ds.skipRawData(0x28 - 5);
     ds >> chuVersio >> nekon1 >> fiksa1 >> lineCount >> pageCount;
     ds >> instrumentCount >> staffPerSystem >> measureCount;
-    // Staff-size selector at header offset 0x52 (1=small … 4=default).
-    // Present in v0xC2, v0xC4 and v0xC5; may be absent in v0xA6 (shorter header).
-    if (fmt.headerEnd() > 0x52) {
-        ds.skipRawData(0x52 - 0x36);           // skip from 0x36 to 0x51
+    // Global staff-size selector (1=small … 4=default). v0xC2/C4/C5 store it at 0x52;
+    // v0xA6 stores it at 0x8D (byte 0x52 is an unrelated field there). Offset from fmt.
+    const qint64 szOff = fmt.scoreSizeOffset();
+    if (fmt.headerEnd() > szOff) {
+        ds.skipRawData(static_cast<int>(szOff - 0x36));   // skip from 0x36 to the size byte
         quint8 sz;
         ds >> sz;
         if (sz >= 1 && sz <= 4) {
             scoreSize = sz;
         }
-        ds.skipRawData(fmt.headerEnd() - 0x53); // skip from 0x53 to header end
+        ds.skipRawData(static_cast<int>(fmt.headerEnd() - szOff - 1)); // skip to header end
     } else {
-        ds.skipRawData(fmt.headerEnd() - 0x36);
+        ds.skipRawData(static_cast<int>(fmt.headerEnd() - 0x36));
     }
     return true;
 }

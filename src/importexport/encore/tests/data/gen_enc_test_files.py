@@ -523,6 +523,13 @@ def gen_v0xa6_midi_program():
     m = _meas_a6([(0, 0, 0, 4, 0)])
     return build_v0xa6([('Voz', 119, 0)], [m], staff_size=1)
 
+# structure_v0xa6_score_size.enc
+# v0xA6 stores the global staff size at header byte 0x8D, NOT 0x52. staff_size=1
+# must yield 60% for every staff.
+def gen_v0xa6_score_size():
+    m = _meas_a6([(0, 0, 0, 4, 0), (0, 0, 1, 4, 7)])
+    return build_v0xa6([('Vz1', 0, 0), ('Vz2', 0, 0)], [m], staff_size=1)
+
 # ---------------------------------------------------------------------------
 # File generators — new set (replacing Encore 5 example files)
 # ---------------------------------------------------------------------------
@@ -7805,6 +7812,7 @@ if __name__=='__main__':
     write("importer_counter_bytes.enc", gen_v0c4_counter_bytes())
     write("structure_v0xa6_basic.enc",        gen_v0xa6_basic())
     write("instruments_v0xa6_midi_program.enc",   gen_v0xa6_midi_program())
+    write("structure_v0xa6_score_size.enc",       gen_v0xa6_score_size())
     write("notes_corrupted.enc",     gen_v0c4_corrupted())
     write("notes_swing.enc",         gen_v0c4_swing())
     write("notes_grace.enc",             gen_v0c4_grace())

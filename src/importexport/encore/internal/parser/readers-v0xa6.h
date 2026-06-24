@@ -43,6 +43,8 @@ struct EncFormatReader_V0xA6 final : EncFormatReader
 
     bool probeInstrumentEncoding() const override { return false; }
 
+    qint64 scoreSizeOffset() const override { return 0x8D; }
+
     bool readInstrumentMeta(std::vector<EncInstrument>& instruments, QDataStream& ds, const EncRoot& file) const override;
 
     void readKeyFromTKBlock(EncInstrument& instr, QDataStream& ds, qint64 contentStart) const override;
