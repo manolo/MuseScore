@@ -488,6 +488,16 @@ authoritative forward-tie signal:
 **16-byte form.** When no arc x-positions are stored, tie-start falls back to the byte-level
 signal `(+5 & 0x80) || (+5 & 0x02) || (+6 & 0x80)`.
 
+**Receiver resolution.** A TIE element marks only the start note; the format has no
+matching tie-stop element. The receiver is the next note of the same pitch in the same
+staff and voice. Because that match is by pitch alone, a tie-start whose intended
+neighbour is missing (for example a tie-start written on a note that is not actually
+followed by the same pitch) would otherwise pair with a far-away later note and draw an
+arc spanning several measures. A genuine tie always joins consecutive notes: the receiver
+must be the first note that follows the start note in that voice, with only rests allowed
+in between. When any other note (of any pitch) sits between the start note and the
+same-pitch candidate, the tie-start is spurious and produces no tie.
+
 ---
 
 ## Ornament element

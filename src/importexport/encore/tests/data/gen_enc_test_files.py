@@ -2508,6 +2508,33 @@ def gen_v0c4_tie_crossmeasure_arcxx_equal():
 
 
 # ===========================================================================
+# notes_tie_spurious_far_receiver.enc
+# BUG FIX: a tie-start whose immediately-following note is a DIFFERENT pitch
+# must NOT be completed against a much-later note of the same pitch. A real
+# Encore tie always connects a note to the consecutive note (the receiver
+# begins exactly where the tie-start note ends). When no consecutive same-pitch
+# note exists, the tie-start is spurious and must be dropped.
+#
+# Without fix: pendingTieNote persists keyed only by (staff, voice, pitch), so
+# C4@0 completes against C4@720 → a tie arcing across the whole measure.
+# With fix: the receiver's onset (720) does not match the tie-start note's end
+# tick (240) → no tie created.
+#
+# Fixture: one 4/4 measure with four quarters. C4@0 carries a real forward TIE
+# (arcX1<arcX2). The next note is D4@240 (different pitch), then D4@480, then
+# C4@720 (same pitch as the tie-start, but far away). Expected: zero ties.
+# ===========================================================================
+def gen_v0c4_tie_spurious_far_receiver():
+    e  = tie_v0c4_18byte(0, 0, 0, direction=0x02, arcX1=12, arcX2=50)  # real forward tie-start on C4@0
+    e += note_v0c4(  0, 0, 0, fv=3, pitch=60)   # C4 quarter (tie-start)
+    e += note_v0c4(240, 0, 0, fv=3, pitch=62)   # D4 quarter (consecutive, different pitch)
+    e += note_v0c4(480, 0, 0, fv=3, pitch=62)   # D4 quarter
+    e += note_v0c4(720, 0, 0, fv=3, pitch=60)   # C4 quarter (far same-pitch decoy receiver)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+# ===========================================================================
 # ornaments_articulations.enc
 #
 # 4/4 measure with quarter notes carrying staccato (0x1D), accent (0x12),
@@ -7769,6 +7796,7 @@ if __name__=='__main__':
     write("notes_tie_intra_chord_arc_no_spurious.enc", gen_v0c4_tie_intra_chord_arc_no_spurious())
     write("notes_tie_18byte_real_forward.enc", gen_v0c4_tie_18byte_real_forward())
     write("notes_tie_crossmeasure_arcxx_equal.enc", gen_v0c4_tie_crossmeasure_arcxx_equal())
+    write("notes_tie_spurious_far_receiver.enc", gen_v0c4_tie_spurious_far_receiver())
     write("structure_keychange_to_c.enc",          gen_v0c4_keychange_to_c())
     write("text_staff_text.enc",              gen_v0c4_staff_text())
     write("ornaments_arpeggio.enc",                gen_v0c4_arpeggio())
