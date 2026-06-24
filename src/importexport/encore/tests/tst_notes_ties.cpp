@@ -344,6 +344,47 @@ TEST_F(Tst_NotesTies, tie_crossmeasure_arcxx_equal_with_startflag)
     delete score;
 }
 
+TEST_F(Tst_NotesTies, tie_spurious_far_receiver_dropped)
+{
+    // notes_tie_spurious_far_receiver.enc: one 4/4 measure, four quarters.
+    // C4@0 carries a real forward TIE (arcX1<arcX2 -> isTieStart). The next note
+    // is D4@240 (different pitch), then D4@480, then C4@720 (same pitch, but far).
+    //
+    // Bug (before fix): the pending tie keyed only by (staff, voice, pitch)
+    //   persisted until the next same-pitch note and completed C4@0 -> C4@720,
+    //   producing a tie arcing across the whole measure (the cross-measure
+    //   "ligaduras" the user saw spanning many bars).
+    // Fix: a tie completes only when the receiver begins exactly where the
+    //   tie-start note ends (the consecutive note). C4@720 starts at 720 but
+    //   C4@0 ends at 240 -> no consecutive same-pitch note -> tie dropped.
+    MasterScore* score = readEncoreScore("notes_tie_spurious_far_receiver.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "spurious far-receiver test must produce clean score: " << ret.text();
+
+    int tieCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Note* n : toChord(el)->notes()) {
+                if (n->tieFor()) {
+                    ++tieCount;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(tieCount, 0)
+        << "tie-start with no consecutive same-pitch note must not arc to a far receiver";
+    delete score;
+}
+
 TEST_F(Tst_NotesTies, tie_element_creates_mscore_tie)
 {
     // C4 quarter at tick=0 and C4 quarter at tick=240 with TIE element: must link via a Tie.

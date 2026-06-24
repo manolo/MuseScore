@@ -151,11 +151,37 @@ static void completePendingTie(BuildCtx& ctx,
     auto it = ctx.pendingTieNote.find(tieKey);
     if (it != ctx.pendingTieNote.end()) {
         Note* startNote = it->second;
-        Tie* tie = Factory::createTie(startNote);
-        tie->setStartNote(startNote);
-        tie->setEndNote(note);
-        tie->setTrack(startNote->track());
-        startNote->add(tie);
+        // A real Encore tie connects a note to the next note in its own voice; a
+        // rest may sit between them but another note may not. The .enc format has
+        // no SLURSTOP, so the receiver is found by matching (staff, voice, pitch)
+        // against later notes -- which would otherwise let a spurious tie-start
+        // jump across many measures to the next same-pitch note (the cross-bar
+        // "ligaduras" the user saw). Notes are emitted in tick order, so by the
+        // time the receiver is reached every chord between it and the tie-start is
+        // already in the score: walk forward from the tie-start and require the
+        // receiver to be the first chord found on that track. Intervening chords
+        // (any pitch) void the tie; rests are skipped.
+        bool consecutive = true;
+        Chord* startChord = startNote->chord();
+        if (startChord && startChord->segment() && note->chord()) {
+            consecutive = false;
+            const track_idx_t trk = startNote->track();
+            for (Segment* s = startChord->segment()->next1(SegmentType::ChordRest);
+                 s; s = s->next1(SegmentType::ChordRest)) {
+                EngravingItem* el = s->element(trk);
+                if (el && el->isChord()) {
+                    consecutive = (toChord(el) == note->chord());
+                    break;
+                }
+            }
+        }
+        if (consecutive) {
+            Tie* tie = Factory::createTie(startNote);
+            tie->setStartNote(startNote);
+            tie->setEndNote(note);
+            tie->setTrack(startNote->track());
+            startNote->add(tie);
+        }
         ctx.pendingTieNote.erase(it);
     }
 }
