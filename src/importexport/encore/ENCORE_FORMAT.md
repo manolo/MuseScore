@@ -1485,6 +1485,12 @@ final:     chd_tick itself
   position); element body starts at MEAS offset 0x1A (not 0x36); TK blocks are 64 bytes wide;
   key transposition at TK content +42; header ends at 0xA6; consecutive identical REST pairs
   should deduplicate to one rest.
+- **v0xA6 note with one articulation (size 11).** A NOTE that carries a single articulation is
+  written as size 11 (a 22-byte slot) instead of size 10. The layout is otherwise identical to
+  size 10: the MIDI pitch is still at +11 and the tuplet byte at +7. The one articulation byte
+  lives at +18 (size-10 notes always have 0 there); 0x20 at +18 is a fermata above. The pitch
+  must be read from +11 just as for size 10; a reader that only special-cases size 10 falls
+  through to the generic note layout (pitch at +15) and yields a garbage pitch with no fermata.
 - **v0xA6 grace note time-borrowing.** Grace notes occupy real ticks, pushing subsequent notes
   forward. See "v0xA6 grace note time-borrowing" section for the detection rule.
 - **Percussion MIDI program.** Percussion tracks always carry MIDI program 1 regardless of the
