@@ -108,6 +108,18 @@ field of each TK block):
   Key  offset = contentFilePos[n] + 42    (single byte, matches v0xA6 TK layout)
   ```
   Confirmed on VEREDA.ENC (app_version=775, Encore 4.x): 6 instruments, MIDI programs 49,50,41,42,41,34.
+- **v0xA6** (Encore 2.x/4.0 legacy): each TK block is 64 bytes total (`varSize = 64`, 56-byte
+  content). MIDI and Key live inside that content:
+  ```
+  contentFilePos = TK_block_start + 8
+  stride between blocks = varSize (total, = 64)
+  MIDI offset = contentFilePos[n] + 52    (block offset 60; single byte, 1-indexed GM)
+  Key  offset = contentFilePos[n] + 42    (block offset 50; signed int8, octave-only: 0/±12/±24)
+  ```
+  Note the MIDI byte is at content +52 here, NOT +60 as in the 112-byte 4.x total-size
+  variant above. Confirmed across the 10 instruments of a reference v0xA6 score
+  (MIDI 49,64,75,66,67,67,58,58,119,59). A value of 119 (≥113, GM percussive range) routes
+  the instrument to a drumset.
 
 **Key transposition.** At `base - 23 + n * step` (large-TK/no-TK), or `contentFilePos + varSize + 53`
 (small-TK 5.x) / `contentFilePos + 42` (small-TK 4.x total-size variant): signed `int8` semitones

@@ -470,6 +470,60 @@ def gen_v0xa6_basic():
     return bytes(pre)+m1+m2+SKELETON_POST
 
 # ---------------------------------------------------------------------------
+# Genuine v0xA6 builder (Encore 2.x/4.0): real 0xA6 header with the global
+# staff-size selector at byte 0x8D, plus 64-byte TK blocks with MIDI at
+# content+52. Reproduces the on-disk v0xA6 instrument/header layout.
+# ---------------------------------------------------------------------------
+def build_v0xa6(instruments, meas_list, staff_size=1):
+    """instruments: list of (name:str, midi_1indexed:int, key_signed:int).
+    staff_size: global 1-4 selector at header 0x8D (1=60%, 2=75%, 3=100%, 4=130%)."""
+    n = len(instruments)
+    hdr = bytearray(0xA6)
+    hdr[0:4] = b'SCOW'
+    hdr[4] = 0xA6
+    struct.pack_into('<H', hdr, 0x28, 592)      # chuVersio
+    struct.pack_into('<h', hdr, 0x2E, 1)        # lineCount
+    struct.pack_into('<h', hdr, 0x30, 1)        # pageCount
+    hdr[0x32] = n                               # instrumentCount
+    hdr[0x33] = 0                               # staffPerSystem (v0xA6 stores 0)
+    struct.pack_into('<h', hdr, 0x34, len(meas_list))   # measureCount
+    hdr[0x52] = 8                               # 0x52 is unrelated in v0xA6 (invalid 8)
+    hdr[0x8D] = staff_size & 0xFF               # global staff-size selector (v0xA6)
+    tks = b''
+    for i, (name, midi, key) in enumerate(instruments):
+        content = bytearray(56)
+        nm = name.encode('latin1')[:40]
+        content[0:len(nm)] = nm                 # name, NUL-terminated by zero fill
+        content[42] = key & 0xFF                # Key/octave transpose (content+42)
+        content[52] = midi & 0xFF               # MIDI program (content+52 == block+60)
+        magic = ('TK%02d' % i).encode('ascii')
+        tks += magic + struct.pack('<I', 64) + bytes(content)
+    line = bytearray(28)                        # minimal LINE (no per-staff size in v0xA6)
+    struct.pack_into('<H', line, 10, 0)         # start
+    line[12] = len(meas_list) & 0xFF            # measureCount
+    line_block = b'LINE' + struct.pack('<I', len(line)) + bytes(line)
+    body = b''.join(meas_list)
+    return bytes(hdr) + tks + line_block + body
+
+def _mhdr_a6(tsNum, tsDen, bpm=100):
+    h = bytearray(0x1A)
+    struct.pack_into('<H', h, 0, bpm)
+    struct.pack_into('<HH', h, 4, 240, 240 * tsNum * 4 // tsDen)
+    h[8], h[9] = tsNum, tsDen
+    return bytes(h)
+
+def _meas_a6(note_specs, tsNum=2, tsDen=4):
+    e = b''.join(note_v0xa6(t, v, s, fv, p) for (t, v, s, fv, p) in note_specs) + end_marker()
+    return b'MEAS' + struct.pack('<I', len(e)) + _mhdr_a6(tsNum, tsDen) + e
+
+# instruments_v0xa6_midi_program.enc
+# v0xA6 stores the MIDI program at TK content+52. MIDI=119 (>=113) must route to a
+# drumset. Name "Voz" is <4 chars so only the MIDI path can trigger the match.
+def gen_v0xa6_midi_program():
+    m = _meas_a6([(0, 0, 0, 4, 0)])
+    return build_v0xa6([('Voz', 119, 0)], [m], staff_size=1)
+
+# ---------------------------------------------------------------------------
 # File generators — new set (replacing Encore 5 example files)
 # ---------------------------------------------------------------------------
 
@@ -7750,6 +7804,7 @@ if __name__=='__main__':
     write("notes_tuplet_sort.enc",   gen_v0c4_tuplet_sort())
     write("importer_counter_bytes.enc", gen_v0c4_counter_bytes())
     write("structure_v0xa6_basic.enc",        gen_v0xa6_basic())
+    write("instruments_v0xa6_midi_program.enc",   gen_v0xa6_midi_program())
     write("notes_corrupted.enc",     gen_v0c4_corrupted())
     write("notes_swing.enc",         gen_v0c4_swing())
     write("notes_grace.enc",             gen_v0c4_grace())

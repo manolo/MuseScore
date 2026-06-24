@@ -27,7 +27,6 @@
 #include "elem.h"
 
 namespace mu::iex::enc {
-
 // v0xA6 inner-grace detection: after a leading grace note (grace1 & 0x30 == 0x20),
 // subsequent NORMAL notes with (grace1 & 0x30) == 0x10 and a strictly larger faceValue
 // (shorter duration) are inner graces routed through the grace path in the emitters.
@@ -57,6 +56,7 @@ static void markInnerGraces(std::vector<EncMeasureElem*>& elems)
         leadingFv = 0;
     }
 }
+
 // v0xA6 NOTE layouts: size=10 (pitch at +11, tuplet at +7), size=22 (pitch in tuplet slot),
 // size<27 (artic bytes lie beyond boundary, zero them). See ENCORE_FORMAT.md §Note element.
 bool EncFormatReader_V0xA6::postProcessElement(EncMeasureElem* elem,
@@ -126,6 +126,29 @@ void EncFormatReader_V0xA6::postProcessVoiceGroup(
     std::vector<EncMeasureElem*>& elems, qint16) const
 {
     markInnerGraces(elems);
+}
+
+// v0xA6 MIDI program: byte +52 of the TK content (block start + 60), 1-indexed GM.
+bool EncFormatReader_V0xA6::readInstrumentMeta(std::vector<EncInstrument>& instruments,
+                                               QDataStream& ds,
+                                               const EncRoot& /*file*/) const
+{
+    const qint64 savedPos = ds.device()->pos();
+    for (EncInstrument& instr : instruments) {
+        if (instr.contentFilePos < 0) {
+            continue;
+        }
+        if (!ds.device()->seek(instr.contentFilePos + 52)) {
+            continue;
+        }
+        quint8 prg = 0;
+        ds >> prg;
+        if (prg >= 1 && prg <= 128) {
+            instr.midiProgram = static_cast<int>(prg);
+        }
+    }
+    ds.device()->seek(savedPos);
+    return true;
 }
 
 void EncFormatReader_V0xA6::readKeyFromTKBlock(EncInstrument& instr,
