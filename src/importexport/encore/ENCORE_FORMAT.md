@@ -869,20 +869,25 @@ would otherwise shift every following note by one position.
 ### v0xC2 (size = 22 or 24)
 
 The v0xC2 note layout is more compact than v0xC4. **Two pitch-storage sub-variants exist**,
-distinguished by whether the `semiTonePitch` slot at offset +15 is empty:
+distinguished by whether offset +15 holds a plausible MIDI pitch:
 
-- **Sub-variant A** (`+15 == 0`): MIDI pitch is at offset +13, the same slot where v0xC4 keeps its
-  tuplet byte. Swap it before use: `semiTonePitch = byte[+13]; byte[+13] = 0`. These files have no
-  explicit tuplet byte; tuplets are recovered by implied-tuplet detection.
-- **Sub-variant B** (`+15 != 0`): MIDI pitch is already at offset +15 (the standard `semiTonePitch`
-  slot, like v0xC4). The swap must NOT fire. In these files offset +13 carries a genuine tuplet
+- **Sub-variant A** (+15 is empty or a small stray flag): MIDI pitch is at offset +13, the same slot
+  where v0xC4 keeps its tuplet byte. Move it before use: the pitch becomes byte +13 and the tuplet
+  slot is cleared. These files have no explicit tuplet byte; tuplets are recovered by implied-tuplet
+  detection.
+- **Sub-variant B** (+15 holds a plausible pitch): MIDI pitch is already at offset +15 (the standard
+  pitch slot, like v0xC4). The move must NOT fire. In these files offset +13 carries a genuine tuplet
   ratio (high nibble = actualN, low nibble = normalN, e.g. 0x32 = 3:2) and must be preserved.
 
-The discriminator is `byte[+15]` (the pitch slot), NOT `byte[+13]`. Using `byte[+13] == 0` is wrong:
-a sub-variant B triplet has a non-zero tuplet ratio there, and treating that ratio as the pitch
-imports every triplet note at the ratio value (0x32 -> MIDI 50) and drops the tuplet. Sub-variant B
-is produced by some Encore 4.x builds; re-saving such a file in Encore 5 rewrites it to a form that
-no longer triggers the ambiguity.
+The discriminator is whether offset +15 holds a plausible MIDI pitch, not merely whether it is
+non-zero. A bare `+15 != 0` test is wrong in both directions. Treating any non-zero +13 as the pitch
+imports a sub-variant B triplet at its ratio value (0x32 -> MIDI 50) and drops the tuplet. But some
+Encore 3.x/4.x files also leave a small stray value (observed 1 or 3) in the +15 slot of
+sub-variant A notes; that value is a flag, not a pitch. Treating it as the pitch imports the note as
+MIDI 1 (C#-1), several octaves too low, and collapses any chord whose members all carry the flag into
+a single note once they share that pitch. Because a value below C0 (MIDI 12) cannot be a real note,
++15 counts as the pitch only when it is at least C0; otherwise the pitch comes from +13. Re-saving an
+ambiguous file in Encore 5 rewrites it to a form that no longer triggers the issue.
 
 **size = 22** (no articulation):
 
@@ -892,9 +897,9 @@ no longer triggers the ambiguity.
 | +6       | 1      | grace1                                                                           |
 | +7       | 1      | grace2                                                                           |
 | +10      | 2      | layout x-position                                                                |
-| +13      | 1      | **MIDI pitch** (sub-variant A: non-zero) or 0 (sub-variant B: pitch is at +15)  |
+| +13      | 1      | **MIDI pitch** (sub-variant A: non-zero) or a tuplet ratio (sub-variant B: pitch is at +15)  |
 | +14      | 1      | dotControl — layout/display byte. Bit 0 sometimes indicates a dotted note but **may be coincidentally set on undotted notes** (observed: 0x28, 0x30, 0x39, 0x60 on plain 16ths and 8ths in v0xC2 files such as tapada.enc). Parsers must NOT treat bit 0 as a reliable dotted indicator when `realDuration ≤ faceValue2ticks(fv)`. See v0xC2 dotted-eighth anomaly note below. |
-| +15      | 1      | **MIDI pitch** (sub-variant B only); 0 in sub-variant A                          |
+| +15      | 1      | **MIDI pitch** (sub-variant B only); in sub-variant A this is 0 or a small stray flag (e.g. 1 or 3), never a pitch |
 | +16      | 2      | playback duration in ticks                                                       |
 | +19      | 1      | velocity                                                                         |
 | +20      | 1      | options                                                                          |

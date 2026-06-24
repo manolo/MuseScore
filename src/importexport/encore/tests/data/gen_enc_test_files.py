@@ -324,6 +324,18 @@ def note_v0c2_ext(tick, voice, staffIdx, fv, pitch, grace1=0, dotControl=0):
     d[11]=dotControl          # elemStart+14 = dotControl
     return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)
 
+def note_v0c2_spurious_semitone(tick, voice, staffIdx, fv, pitch, flag=1):
+    """22-byte v0xC2 sub-variant A note (pitch at +13) where the semiTonePitch
+    slot (+15) carries a small non-zero flag (1 or 3) instead of 0. Some Encore
+    3.x/4.x files leave a stray value there; it is NOT a MIDI pitch. The importer
+    must still read the pitch from +13 and must not mistake the flag for the pitch
+    (which would import the note as MIDI 1 = C#-1, several octaves too low)."""
+    d = bytearray(19)
+    d[0]=22; d[1]=staffIdx&0x3F; d[2]=fv
+    d[10]=pitch               # elemStart+13 = real MIDI pitch
+    d[12]=flag                # elemStart+15 = spurious flag, not a pitch
+    return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)
+
 def note_v0xa6(tick, voice, staffIdx, fv, pitch_offset):
     """v0xA6 note: size=10, slot=20 bytes. MIDI pitch lives at elemStart+11
     (= file offset within the 20-byte slot, NOT within the 10-byte d
@@ -399,6 +411,19 @@ def gen_v0c2_triplets():
     e = b''.join(note_v0c2(i*80,0,0,4,p) for i,p in enumerate([67,69,71,67,64,62]))
     e += end_marker()
     return assemble(0xC2,[(meas_hdr(2,4),e)],fill_ts=(2,4))
+
+def gen_v0c2_spurious_semitone_flag():
+    # v0xC2 sub-variant A (pitch at +13) where +15 holds a small spurious flag (1).
+    # A chord C4/E4/G4 (quarter) at tick 0, all three notes carrying +15 == 1, then a
+    # plain C5 quarter. Bug: the swap heuristic treated +15 != 0 as "pitch is at +15"
+    # and imported every flagged note as MIDI 1 (C#-1); the three chord notes, now
+    # sharing pitch 1, collapsed into a single note. The pitch must come from +13.
+    e  = note_v0c2_spurious_semitone(  0, 0, 0, 3, 60, flag=1)   # C4
+    e += note_v0c2_spurious_semitone(  0, 0, 0, 3, 64, flag=1)   # E4 (same tick: chord)
+    e += note_v0c2_spurious_semitone(  0, 0, 0, 3, 67, flag=1)   # G4 (same tick: chord)
+    e += note_v0c2_spurious_semitone(480, 0, 0, 3, 72, flag=3)   # C5, +15 == 3
+    e += end_marker()
+    return assemble(0xC2, [(meas_hdr(4, 4), e)])
 
 def gen_v0c2_snap():
     e = b''.join(note_v0c2(i*80,0,0,4,p) for i,p in enumerate([67,69,71,67,64,62]))
@@ -7680,6 +7705,7 @@ if __name__=='__main__':
     write("notes_v0c2_common_time_glyph.enc",         gen_v0c2_common_time_glyph())
     write("notes_v0c2_common_time_glyph_uc.enc",     gen_v0c2_common_time_glyph_uppercase())
     write("structure_v0c2_triplets.enc",      gen_v0c2_triplets())
+    write("structure_v0c2_spurious_semitone_flag.enc", gen_v0c2_spurious_semitone_flag())
     write("importer_v0c2_snap.enc",          gen_v0c2_snap())
     write("notes_triplets.enc",      gen_v0c4_triplets())
     write("notes_tuplet_sort.enc",   gen_v0c4_tuplet_sort())

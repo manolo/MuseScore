@@ -179,9 +179,17 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
         // v0xC2: MIDI pitch usually occupies the tuplet slot (+13) with semiTonePitch
         // (+15) empty; swap it across. But some Encore 4.x files store the pitch directly
         // in semiTonePitch, in which case the tuplet slot holds a genuine tuplet ratio
-        // (e.g. 0x32 = 3:2) that must be preserved, not mistaken for the pitch. Only swap
-        // when semiTonePitch is empty. See ENCORE_FORMAT.md §Note element.
-        if (en->tuplet > 0 && en->semiTonePitch == 0) {
+        // (e.g. 0x32 = 3:2) that must be preserved, not mistaken for the pitch.
+        //
+        // The discriminator is whether +15 holds a plausible MIDI pitch, not merely
+        // whether it is non-zero: some Encore 3.x/4.x files leave a small stray flag
+        // (observed 1 or 3) in the semiTonePitch slot of sub-variant A notes. Treating
+        // that flag as the pitch imported the note as MIDI 1 (C#-1), several octaves too
+        // low, and collapsed chords whose members all carried it. A value below C0 cannot
+        // be a real note, so the pitch still comes from +13 in that case. See
+        // ENCORE_FORMAT.md §Note element.
+        static constexpr quint8 kMinPlausiblePitch = 12; // C0; below this is not a MIDI note
+        if (en->tuplet > 0 && en->semiTonePitch < kMinPlausiblePitch) {
             en->semiTonePitch = en->tuplet;
             en->tuplet = 0;
         }
