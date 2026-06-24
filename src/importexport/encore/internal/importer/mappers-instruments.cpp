@@ -261,6 +261,61 @@ const InstrumentTemplate* findDrumsetTemplate(const QString& encName)
     return best;
 }
 
+// Strip a trailing parenthetical variant suffix: "Classical Guitar (tablature)" -> "Classical Guitar".
+static QString stripVariantSuffix(const QString& trackName)
+{
+    QString s = trackName.trimmed();
+    const int paren = s.lastIndexOf(u'(');
+    if (paren > 0) {
+        s = s.left(paren).trimmed();
+    }
+    return normalizeForCompare(s);
+}
+
+const InstrumentTemplate* findInstrumentVariant(const InstrumentTemplate* base, bool wantTab)
+{
+    if (!base) {
+        return nullptr;
+    }
+    const bool baseIsTab = (base->staffGroup == StaffGroup::TAB);
+    if (baseIsTab == wantTab) {
+        return base;   // already the requested kind
+    }
+    const String baseXmlId = base->musicXmlId;
+    const QString baseName = stripVariantSuffix(base->trackName.toQString());
+
+    const InstrumentTemplate* best = nullptr;
+    bool bestIsCommon = false;
+    for (const InstrumentGroup* g : instrumentGroups) {
+        for (const InstrumentTemplate* it : g->instrumentTemplates) {
+            if (it->useDrumset) {
+                continue;
+            }
+            if ((it->staffGroup == StaffGroup::TAB) != wantTab) {
+                continue;
+            }
+            const bool sameByXmlId = !baseXmlId.isEmpty() && it->musicXmlId == baseXmlId;
+            const bool sameByName = !baseName.isEmpty()
+                                    && stripVariantSuffix(it->trackName.toQString()) == baseName;
+            if (!sameByXmlId && !sameByName) {
+                continue;
+            }
+            bool isCommon = false;
+            for (const InstrumentGenre* gen : it->genres) {
+                if (gen && gen->id == "common") {
+                    isCommon = true;
+                    break;
+                }
+            }
+            if (!best || (isCommon && !bestIsCommon)) {
+                best = it;
+                bestIsCommon = isCommon;
+            }
+        }
+    }
+    return best;
+}
+
 const InstrumentTemplate* findTemplateByMidi(int encMidiProgram0indexed)
 {
     if (encMidiProgram0indexed < 0) {

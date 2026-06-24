@@ -3736,6 +3736,31 @@ def gen_v0c4_instr_laud_accent():
     return pre + body + SKELETON_POST
 
 
+# instruments_tab_template_forced_standard.enc
+# Name "Classical Guitar (tablature)" matches a tablature template, but Encore stores a
+# normal clef (no TAB). The importer must swap to the standard-notation sibling.
+def gen_v0c4_tab_template_forced_standard():
+    name = 'Classical Guitar (tablature)'.encode('utf-16-le') + b'\x00\x00'
+    pre  = _patch_tk00(name)
+    e    = end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
+# instruments_tab_clef_keeps_tablature.enc
+# Name "Classical Guitar" matches the standard template, but Encore stores EncClefType::TAB;
+# the importer must swap to the tablature sibling.
+def gen_v0c4_tab_clef_keeps_tablature():
+    name = 'Classical Guitar'.encode('utf-16-le') + b'\x00\x00'
+    pre  = _patch_tk00(name)
+    pre  = _set_staff_clef(pre, 0x08)       # EncClefType::TAB
+    e    = end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
 # ===========================================================================
 # notes_rdur_80_stays_16th.enc
 # Two consecutive 16th notes (fv=5) 80 ticks apart in a 4/4 measure. The
@@ -7888,6 +7913,8 @@ if __name__=='__main__':
     write("instruments_instr_perc_clef_drumset.enc",    gen_v0c4_instr_perc_clef_drumset())
     write("instruments_instr_drums_name_drumset.enc",   gen_v0c4_instr_drums_name_drumset())
     write("instruments_instr_laud_accent.enc",          gen_v0c4_instr_laud_accent())
+    write("instruments_tab_template_forced_standard.enc", gen_v0c4_tab_template_forced_standard())
+    write("instruments_tab_clef_keeps_tablature.enc",     gen_v0c4_tab_clef_keeps_tablature())
     write("instruments_instr_clarinet_midi72_key0.enc",         gen_v0c4_instr_clarinet_midi72_key0())
     write("instruments_instr_empty_name_midi_clarinet.enc",     gen_v0c4_instr_empty_name_midi_clarinet())
     write("instruments_instr_clarinet_midi72_key_neg2.enc",     gen_v0c4_instr_clarinet_midi72_key_neg2())
