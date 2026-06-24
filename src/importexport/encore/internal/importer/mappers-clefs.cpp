@@ -175,15 +175,14 @@ static int clefGlyphFamily(ClefType ct)
     }
 }
 
-ClefType pickStaffClef(EncClefType encClef, ClefType /*concertClef*/, ClefType /*transposingClef*/,
-                       int keyOffsetSemitones)
+// When Key is +-12 or +-24 semitones, return the matching octave-decorated clef in the same
+// glyph family (so the octave-shifted pitch displays at the written octave). Other offsets and
+// families with no octave variant return the base clef unchanged.
+ClefType applyOctaveToClef(ClefType base, int keyOffsetSemitones)
 {
-    const ClefType base = encClef2MuseScore(encClef);
     if (keyOffsetSemitones == 0 || clefGlyphFamily(base) == 0) {
         return base;
     }
-    // When Key is +-12 or +-24 semitones, pick the matching octave-decorated clef
-    // in the same glyph family. Other offsets fall back to plain base clef.
     static const std::array<ClefType, 8> kCandidates = {
         ClefType::G8_VB, ClefType::G8_VA,
         ClefType::G15_MB, ClefType::G15_MA,
@@ -197,6 +196,12 @@ ClefType pickStaffClef(EncClefType encClef, ClefType /*concertClef*/, ClefType /
         }
     }
     return base;
+}
+
+ClefType pickStaffClef(EncClefType encClef, ClefType /*concertClef*/, ClefType /*transposingClef*/,
+                       int keyOffsetSemitones)
+{
+    return applyOctaveToClef(encClef2MuseScore(encClef), keyOffsetSemitones);
 }
 
 void addInitialClef(MasterScore* score, int staffIdx, EncClefType ct)

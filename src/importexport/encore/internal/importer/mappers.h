@@ -48,6 +48,10 @@ mu::engraving::ClefType encClef2MuseScore(EncClefType ct);
 mu::engraving::ClefType pickStaffClef(EncClefType encClef, mu::engraving::ClefType concertClef, mu::engraving::ClefType transposingClef,
                                       int keyOffsetSemitones);
 
+// Return the octave-decorated variant of an already-resolved MuseScore clef for an octave Key
+// (±12/±24). Returns the input clef when the offset is non-octave or the clef has no variant.
+mu::engraving::ClefType applyOctaveToClef(mu::engraving::ClefType base, int keyOffsetSemitones);
+
 int encKeyToFifths(quint8 key);
 
 void addTitleFrame(mu::engraving::MasterScore* score, const EncTitle& titleBlock);
