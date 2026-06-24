@@ -57,7 +57,8 @@ static void markInnerGraces(std::vector<EncMeasureElem*>& elems)
     }
 }
 
-// v0xA6 NOTE layouts: size=10 (pitch at +11, tuplet at +7), size=22 (pitch in tuplet slot),
+// v0xA6 NOTE layouts: size=10 (pitch at +11, tuplet at +7), size=11 (same layout plus one
+// articulation byte at +18, e.g. fermata 0x20), size=22 (pitch in tuplet slot),
 // size<27 (artic bytes lie beyond boundary, zero them). See ENCORE_FORMAT.md §Note element.
 bool EncFormatReader_V0xA6::postProcessElement(EncMeasureElem* elem,
                                                QDataStream& ds,
@@ -68,7 +69,7 @@ bool EncFormatReader_V0xA6::postProcessElement(EncMeasureElem* elem,
         return false;
     }
 
-    if (en->size == 10) {
+    if (en->size == 10 || en->size == 11) {
         const qint64 savedPos = ds.device()->pos();
         ds.device()->seek(rawElemStart + 11);
         quint8 pitchByte;
@@ -89,6 +90,17 @@ bool EncFormatReader_V0xA6::postProcessElement(EncMeasureElem* elem,
     if (en->size < 27) {
         en->articulationUp   = 0;
         en->articulationDown = 0;
+        // A size-11 note carries one articulation byte at +18 (size-10 notes never do);
+        // 0x20 there is a fermata. The base read pulls articulations from beyond the
+        // element boundary, so read the real slot explicitly.
+        if (en->size == 11) {
+            const qint64 savedPos = ds.device()->pos();
+            ds.device()->seek(rawElemStart + 18);
+            quint8 articByte;
+            ds >> articByte;
+            en->articulationUp = articByte;
+            ds.device()->seek(savedPos);
+        }
     }
 
     return false;

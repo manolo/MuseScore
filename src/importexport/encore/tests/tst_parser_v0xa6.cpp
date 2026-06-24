@@ -249,6 +249,40 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_triplet_byte_at_offset_7)
     delete score;
 }
 
+// Regression: a v0xA6 NOTE with size 11 carries one articulation byte at +18 (0x20 = fermata).
+// The reader must still take the pitch from +11 (the +15 slot holds a decoy here) and must emit
+// the fermata. Before the fix both notes imported as MIDI 127 (G9) with no fermata, because the
+// size-11 case fell through to the v0xC4 base read (pitch at +15) and the articulation was zeroed.
+TEST_F(Tst_ImporterV0xa6, v0xa6_note_size11_fermata_pitch_and_glyph)
+{
+    MasterScore* score = readEncoreScore("structure_v0xa6_fermata.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load structure_v0xa6_fermata.enc";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    std::vector<int> pitches;
+    int fermataCount = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        for (EngravingItem* ann : s->annotations()) {
+            if (ann && ann->isFermata()) {
+                ++fermataCount;
+            }
+        }
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord()) {
+            for (Note* nt : toChord(el)->notes()) {
+                pitches.push_back(nt->pitch());
+            }
+        }
+    }
+    const std::vector<int> expected{ 64, 67 };
+    EXPECT_EQ(pitches, expected) << "size-11 NOTE pitch comes from +11, not the +15 decoy";
+    EXPECT_EQ(fermataCount, 2) << "the +18 articulation byte 0x20 must import as a fermata";
+
+    delete score;
+}
+
 // Regression: v0xA6 can store two byte-identical REST elements at the same tick; importer must deduplicate.
 TEST_F(Tst_ImporterV0xa6, v0xa6_duplicate_rest_collapse)
 {

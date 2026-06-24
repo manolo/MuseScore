@@ -4552,6 +4552,39 @@ def gen_v0xa6_triplet_byte_at_offset_7():
     return pre + body + SKELETON_POST
 
 
+def gen_v0xa6_note_fermata_size11():
+    def mhdr_a6(tsNum, tsDen, bpm=100):
+        h = bytearray(0x1A)
+        struct.pack_into('<H', h, 0, bpm)
+        beatTicks = 120   # 8th in x/8 meters
+        durTicks  = beatTicks * tsNum
+        struct.pack_into('<HH', h, 4, beatTicks, durTicks)
+        h[8], h[9] = tsNum, tsDen
+        return bytes(h)
+    # v0xA6 NOTE with size=11 (slot = 22 bytes): same layout as size=10 (pitch at +11,
+    # tuplet at +7) plus a single articulation byte at +18. 0x20 there is a fermata-above.
+    # A decoy 0x7F sits at +15 (where the v0xC4 base read would wrongly pick up the pitch),
+    # so a reader that does not special-case size 11 yields MIDI 127 and no fermata.
+    def note_a6_fermata(tick, fv, midi):
+        d = bytearray(7)
+        d[0] = 11        # size -> slot = 22 bytes
+        d[1] = 0         # staffIdx
+        d[2] = fv        # face value
+        # d[4] (= element +7) stays 0 -> tuplet 0, so the fermata is not suppressed
+        pad = bytearray(12)   # 3 prefix + 7 d + 12 pad = 22 = size*2
+        pad[1] = midi    # element +11 -> real MIDI pitch
+        pad[5] = 0x7F    # element +15 -> decoy the unfixed base read would take
+        pad[8] = 0x20    # element +18 -> fermata-above articulation
+        return struct.pack('<H', tick) + bytes([0x90]) + bytes(d) + bytes(pad)
+    e  = note_a6_fermata(  0, fv=4, midi=64)   # E4 + fermata
+    e += note_a6_fermata(120, fv=4, midi=67)   # G4 + fermata
+    e += end_marker()
+    pre  = set_chumagio(0xA6)
+    body = b'MEAS' + struct.pack('<I', len(e)) + mhdr_a6(2, 8) + e
+    body += b'MEAS' + struct.pack('<I', 2) + mhdr_a6(2, 8) + b'\xff\xff'
+    return pre + body + SKELETON_POST
+
+
 def gen_v0xa6_duplicate_rest_collapse():
     def mhdr_a6(tsNum, tsDen, bpm=100):
         h = bytearray(0x1A)
@@ -7983,6 +8016,7 @@ if __name__=='__main__':
     write("importer_v0xa6_header_ends_at_0xa6.enc",             gen_v0xa6_header_ends_at_0xa6())
     write("importer_v0xa6_duplicate_rest_collapse.enc",         gen_v0xa6_duplicate_rest_collapse())
     write("importer_v0xa6_triplet_byte_at_offset_7.enc",        gen_v0xa6_triplet_byte_at_offset_7())
+    write("structure_v0xa6_fermata.enc",                        gen_v0xa6_note_fermata_size11())
     write("importer_v0xa6_boda_like.enc",                       gen_v0xa6_boda_like())
     write("instruments_compact_tk_ignores_key_byte.enc",     gen_v0c4_compact_tk_ignores_key_byte())
     write("instruments_compact_short_header_no_midi.enc",   gen_v0c4_compact_short_header_no_midi())
