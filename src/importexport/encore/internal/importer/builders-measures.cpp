@@ -254,6 +254,36 @@ void buildInitialSignatures(BuildCtx& ctx)
         }
     }
 
+    // Files without per-staff LINE clef data (v0xA6): the initial clef comes from the
+    // instrument template, which does not reflect an octave Key. The note pitches are already
+    // octave-shifted by the Key, so apply the matching octave-decorated clef to bring the
+    // display back to the written octave — mirroring what pickStaffClef does for v0xC4.
+    const bool haveLineClefs = !enc.lines.empty() && !enc.lines[0].staffData.empty();
+    if (!haveLineClefs) {
+        for (int si = 0; si < ctx.totalStaves; ++si) {
+            const int keyOffset = si < static_cast<int>(ctx.staffPitchOffset.size())
+                                  ? ctx.staffPitchOffset[si] : 0;
+            if (keyOffset == 0 || keyOffset % 12 != 0) {
+                continue;   // only pure-octave Keys need a compensating clef
+            }
+            const Staff* st = score->staff(static_cast<staff_idx_t>(si));
+            const bool hasDrumset = st && st->part() && st->part()->instrument()
+                                    && st->part()->instrument()->drumset();
+            if (hasDrumset) {
+                continue;   // percussion has no octave clef
+            }
+            const ClefType base = si < static_cast<int>(ctx.staffTemplateConcertClef.size())
+                                  ? ctx.staffTemplateConcertClef[si] : ClefType::INVALID;
+            if (base == ClefType::INVALID) {
+                continue;
+            }
+            const ClefType oct = applyOctaveToClef(base, keyOffset);
+            if (oct != base) {
+                addInitialClef(score, si, oct);
+            }
+        }
+    }
+
     // Emit TimeSig elements at change points. Use identical() not operator==: Fraction(6,8)
     // == Fraction(3,4) via cross-multiplication, so operator== would miss 6/8 ↔ 3/4 changes.
     Fraction prevTs = ctx.nominalTimeSig;
