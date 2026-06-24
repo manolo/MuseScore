@@ -1023,6 +1023,43 @@ TEST_F(Tst_Structure, old_format_v0c2_triplet_pitch_in_semitone)
     delete score;
 }
 
+TEST_F(Tst_Structure, old_format_v0c2_spurious_semitone_flag_uses_pitch_at_13)
+{
+    // v0xC2 sub-variant A: the MIDI pitch lives at +13, with the semiTonePitch slot
+    // (+15) normally empty. Some Encore 3.x/4.x files leave a small stray flag there
+    // (observed 1 or 3) that is NOT a pitch. The old discriminator treated any non-zero
+    // +15 as "pitch is at +15", so these notes imported as MIDI 1 (C#-1), several octaves
+    // too low; a chord whose members all carried the flag collapsed to a single note once
+    // they shared pitch 1. The pitch must be read from +13; +15 is a pitch only when it
+    // holds a plausible MIDI value.
+    // Fixture: 4/4 bar, chord C4/E4/G4 (quarter) at tick 0 with +15 == 1, then C5 with +15 == 3.
+    MasterScore* score = readEncoreScore("structure_v0c2_spurious_semitone_flag.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<int> pitches;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->elist()) {
+                if (e && e->isChord()) {
+                    for (Note* n : toChord(e)->notes()) {
+                        pitches.push_back(n->pitch());
+                    }
+                }
+            }
+        }
+    }
+    ASSERT_EQ(pitches.size(), 4u) << "Chord must keep all three notes, not collapse to one";
+    EXPECT_EQ(pitches[0], 60) << "chord note 1 must be C4 (60), not the +15 flag";
+    EXPECT_EQ(pitches[1], 64) << "chord note 2 must be E4 (64)";
+    EXPECT_EQ(pitches[2], 67) << "chord note 3 must be G4 (67)";
+    EXPECT_EQ(pitches[3], 72) << "C5 (72) must read from +13 even though +15 == 3";
+    delete score;
+}
+
 TEST_F(Tst_Structure, page_size_detected_from_wini_pts_format)
 {
     MasterScore* score = readEncoreScore("ornaments_fingering_grandstaff.enc");
