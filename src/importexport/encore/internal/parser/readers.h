@@ -91,6 +91,10 @@ struct EncFormatReader
     // True when TK instrument names need UTF-16 probe.
     virtual bool probeInstrumentEncoding() const { return false; }
 
+    // Header byte offset of the global staff-size selector (1-4). v0xC2/C4/C5 use 0x52;
+    // v0xA6 uses 0x8D. See ENCORE_FORMAT.md §Header.
+    virtual qint64 scoreSizeOffset() const { return 0x52; }
+
     // Reads Key transposition from TK content (v0xA6). See ENCORE_FORMAT.md §Instrument block.
     virtual void readKeyFromTKBlock(EncInstrument& /*instr*/,
                                     QDataStream& /*ds*/,

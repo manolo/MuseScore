@@ -65,9 +65,10 @@ The plaintext `SCOW` equivalent is structurally different, so re-saving from Enc
 | 0x32     | 1      | number of instrument blocks             |
 | 0x33     | 1      | staves per system                       |
 | 0x34     | 2      | **rendered measure count** (see below)  |
-| 0x52     | 1      | **global staff-size selector** 1-4 (4 = default). Used as fallback when LINE block data is absent. **Encore 4.x**: this field is unrelated (values 1-8, no monotone mapping to Size); per-instrument size always comes from LINE staff entry byte +13. |
+| 0x52     | 1      | **global staff-size selector** 1-4 (4 = default), for v0xC2/C4/C5. Used as fallback when LINE block data is absent. **Encore 4.x**: this field is unrelated (values 1-8, no monotone mapping to Size); per-instrument size always comes from LINE staff entry byte +13. |
+| 0x8D     | 1      | **global staff-size selector for v0xA6** (1=60%, 2=75%, 3=100%, 4=130%). v0xA6 has no per-staff LINE size, so this single value applies to every staff. Byte 0x52 is unrelated in v0xA6. Confirmed across 765 v0xA6 files: 0x8D is always 1-3, 0x52 ranges 3-8. |
 
-Bytes 0x36..0xC1 are padding except 0x52 (noted above).
+Bytes 0x36..0xC1 are padding except 0x52 / 0x8D (noted above).
 
 **Rendered measure count.** The field at 0x34 is the number of measures Encore displays.
 Files can contain extra "ghost" MEAS blocks from prior edits.
@@ -204,6 +205,18 @@ True page count is in `header.pageCount`; page break positions are not yet decod
 
 A RHYTHM staff (byte +20 = 2) encodes a single-line percussion staff.
 The staff type is constant across all LINE blocks for the same staff position.
+
+### v0xA6 staff size and clef
+
+v0xA6 reports `staffPerSystem = 0` and its LINE staff entries are a 22-byte positioning-only
+layout (no size, clef, or staff-type bytes). Consequently:
+- **Staff size**: single global value at header byte 0x8D (see Header), applied to all staves.
+- **Clef**: NOT stored per staff anywhere in v0xA6. Verified exhaustively (TK content bytes, the
+  22-byte LINE entries, and MEAS blocks) across 765 v0xA6 files: no byte separates F-clef from
+  G-clef staves except the MIDI-program byte itself. Encore derives the clef entirely from the
+  instrument (its default clef) plus the per-staff octave Key (TK content+42). The importer
+  therefore takes the v0xA6 clef from the matched instrument template and applies the octave Key
+  as an octave-decorated clef. (In v0xC4 the clef IS stored explicitly at LINE entry +14.)
 
 ---
 
