@@ -67,6 +67,45 @@ protected:
 // FIX: Encore "-" LYRIC elements are hyphen continuation markers; filter them out and tag adjacent
 // syllables with LyricsSyllabic. LaMorenaDeMiCopla m18 "JU - LIO RO -" reproduced the off-by-one shift.
 // ===========================================================================
+// ===========================================================================
+// FIX: a syllable whose stored tick falls between notes (beyond the half-beat
+// match window) with no rest available was dropped. A sung syllable always
+// belongs to a note, so it must attach to the nearest chord instead.
+// Fixture: notes at ticks 0/120/480 (no rests), lyric "ge" at tick 279 → must
+// land on the nearest note, the one at tick 120 (pitch 62).
+// ===========================================================================
+TEST_F(Tst_Text, lyrics_offgrid_syllable_attaches_to_nearest_chord)
+{
+    MasterScore* score = readEncoreScore("text_lyrics_offgrid_nearest_chord.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    int pitchWithLyric = -1;
+    int lyricCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* e = s->element(0);
+            if (!e || !e->isChord()) {
+                continue;
+            }
+            Chord* c = toChord(e);
+            for (Lyrics* ly : c->lyrics()) {
+                if (ly->plainText() == u"ge") {
+                    pitchWithLyric = c->upNote()->pitch();
+                    ++lyricCount;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(lyricCount, 1) << "the off-grid syllable must be kept, not dropped";
+    EXPECT_EQ(pitchWithLyric, 62) << "it must attach to the nearest chord (note at tick 120, pitch 62)";
+
+    delete score;
+}
+
 TEST_F(Tst_Text, lyrics_hyphen_separators_dropped_and_set_syllabic)
 {
     MasterScore* score = readEncoreScore("text_lyrics_hyphenated_words.enc");

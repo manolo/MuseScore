@@ -898,6 +898,12 @@ absolutely closer, so a syllable nudged forward by its layout offset still lands
 Rests are never counted when assigning a note's reference tick; a measure beginning with a rest
 would otherwise shift every following note by one position.
 
+A sung syllable always belongs to a note. If no note matches within the half-beat window and no
+rest is available to fall back on, attach the syllable to the nearest chord at any distance rather
+than discarding it. Continuation syllables (e.g. the second half of "fin-ger" or "soft-ly") can
+carry a stored tick that sits between notes, more than half a beat from the note they belong to;
+without this last resort they would be lost.
+
 On a grand staff the lyric must be matched against the notes that share its *resolved* staff,
 not its raw staff byte. A bottom-staff note can reach its staff either through `staffWithin`
 (its raw byte resolves to the lower LINE slot) or through the out-of-band voice (voice value

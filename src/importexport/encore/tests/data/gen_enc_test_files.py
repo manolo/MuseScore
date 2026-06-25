@@ -3377,6 +3377,23 @@ def gen_v0c4_lyrics_hyphenated_words():
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
 
+def gen_v0c4_lyrics_offgrid_nearest_chord():
+    # FIX: a continuation syllable whose stored tick sits between notes (further than
+    # half a beat from any of them) was dropped when no rest was available to fall back
+    # on. A sung syllable always belongs to a note, so it must attach to the nearest
+    # chord at any distance instead of being discarded.
+    # 4/4 (beatTicks=240, threshold=120): notes at ticks 0 (eighth), 120 (dotted quarter
+    # -> gap 360), 480 (half). Lyric "ge" at tick 279 is 159 from note@120 and 201 from
+    # note@480, beyond the 120 threshold, and there is no rest. It must land on the
+    # nearest chord, the note at tick 120 (pitch 62).
+    e  = note_v0c4(0,   0, 0, fv=4, pitch=60)
+    e += note_v0c4(120, 0, 0, fv=3, pitch=62)
+    e += note_v0c4(480, 0, 0, fv=2, pitch=64)
+    e += lyric_v0c4(279, 0, 0, 'ge')
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
 def gen_v0c4_lyrics_two_verses():
     e  = lyric_v0c4(  0, 0, 0, 'JU')
     e += lyric_v0c4(  0, 1, 0, 'Co')
@@ -8330,6 +8347,7 @@ if __name__=='__main__':
     write("text_lyrics_variable.enc",        gen_v0c4_lyrics_variable())
     write("text_lyrics_two_verses.enc",      gen_v0c4_lyrics_two_verses())
     write("text_lyrics_hyphenated_words.enc", gen_v0c4_lyrics_hyphenated_words())
+    write("text_lyrics_offgrid_nearest_chord.enc", gen_v0c4_lyrics_offgrid_nearest_chord())
     write("text_lyrics_latin1.enc",          gen_v0c4_lyrics_latin1())
     write("instruments_instr_bass_midi_tiebreak.enc",   gen_v0c4_instr_bass_midi_tiebreak())
     write("instruments_instr_percussion_drumset.enc",   gen_v0c4_instr_percussion_drumset())
