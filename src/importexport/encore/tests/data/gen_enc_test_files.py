@@ -2991,6 +2991,23 @@ def gen_v0c4_system_break():
     return assemble(0xC4, [one_measure() for _ in range(6)], fill_ts=(4, 4))
 
 
+def gen_v0c4_system_break_mcount_zero():
+    # SCO5 (big-endian Encore 5) does not surface the per-line measureCount, so the
+    # system span must be derived from the line start deltas. Simulate that here in a
+    # little-endian file by zeroing every LINE measureCount byte (content +12) while
+    # keeping the line starts intact; the importer must still lock system 0 to
+    # measures 0..2 (derived as start[1]-start[0] = 3).
+    data = bytearray(gen_v0c4_system_break())
+    pos = 0
+    while True:
+        p = data.find(b'LINE', pos)
+        if p < 0:
+            break
+        data[p + 8 + 12] = 0   # content +12 = measureCount byte
+        pos = p + 4
+    return bytes(data)
+
+
 def gen_v0c4_staccato_orn():
     # Encore stores per-chord staccato as a separate size-16 ORN tipo=0xC9
     # next to the chord's notes. Its MusicXML export drops the byte (Beethoven
@@ -8305,6 +8322,7 @@ if __name__=='__main__':
     write("ornaments_bowing_tick0_xoffset_mismatch.enc",    gen_v0c4_bowing_tick0_xoffset_mismatch())
     write("ornaments_fingering_orn.enc",          gen_v0c4_fingering_orn())
     write("structure_system_break.enc",           gen_v0c4_system_break())
+    write("structure_system_break_mcount_zero.enc", gen_v0c4_system_break_mcount_zero())
     write("structure_section_markers.enc",        gen_v0c4_section_markers())
     write("structure_jump_marks.enc",             gen_v0c4_jump_marks())
     write("structure_jump_marks_all.enc",         gen_v0c4_jump_marks_all())

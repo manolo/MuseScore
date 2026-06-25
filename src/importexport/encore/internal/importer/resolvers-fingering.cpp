@@ -155,12 +155,24 @@ static void applySystemLocksFromLines(BuildCtx& ctx)
     const auto& enc2ms = ctx.encToMsIdx;
     const int totalMeas = static_cast<int>(ctx.measuresByIdx.size());
 
-    for (const auto& line : lines) {
-        if (line.measureCount <= 0) {
+    for (size_t li = 0; li < lines.size(); ++li) {
+        const auto& line = lines[li];
+        const int firstBlock = static_cast<int>(line.start);
+        // System span in MEAS blocks. Prefer the stored per-line measure count, but fall
+        // back to the gap to the next line's start when it is absent (0). SCO5 (big-endian
+        // Encore 5) does not surface measureCount, yet the line start indices are correct,
+        // so the start delta recovers each system's length.
+        int span = static_cast<int>(line.measureCount);
+        if (span <= 0) {
+            const int nextStart = (li + 1 < lines.size())
+                                  ? static_cast<int>(lines[li + 1].start)
+                                  : static_cast<int>(enc2ms.size());
+            span = nextStart - firstBlock;
+        }
+        if (span <= 0) {
             continue;
         }
-        const int firstBlock = static_cast<int>(line.start);
-        const int lastBlock  = firstBlock + static_cast<int>(line.measureCount) - 1;
+        const int lastBlock = firstBlock + span - 1;
 
         if (firstBlock < 0 || lastBlock < firstBlock
             || firstBlock >= static_cast<int>(enc2ms.size())
