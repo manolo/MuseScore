@@ -285,19 +285,25 @@ static void handleTempoOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
                           || (mts.denominator() == 8
                               && mts.numerator() % 3 == 0
                               && mts.numerator() > 3);
-        // Skip ORN TEMPO only when it is a misplaced ornament: Encore sometimes stores a tempo
-        // mark in the last measure of system N when the mark visually belongs to the first
-        // measure of system N+1.  Evidence of misplacement: the immediately following measure
-        // already has a header BPM equal to the ORN's tempo (it will be applied there instead).
-        // If no subsequent measure matches, the ORN is genuine and must be used even if it
-        // disagrees with the current measure's header BPM.
-        if (encMeas.bpm != 0 && static_cast<quint16>(eo->tempo) != encMeas.bpm) {
-            // Suppress only when this is a misplaced ornament: the next measure already
-            // has the matching BPM and will handle it via applyMeasureBpmMarks.
-            const size_t nextMi = mc.measIdx + 1;
-            if (nextMi < enc.measures.size()
-                && enc.measures[nextMi].bpm == static_cast<quint16>(eo->tempo)) {
-                return;  // Misplaced ornament
+        // The MEAS header BPM is the authoritative tempo position: applyMeasureBpmMarks places a
+        // TempoText at the measure START (a real ChordRest segment that registers in the tempo map).
+        // The ORN TEMPO is only a visual mark whose stored tick is often off (Encore puts it at the
+        // end of a measure, or a full system before the actual change). Suppress the ORN and let the
+        // header place the tempo whenever a header BPM equals the ORN tempo:
+        //   - same measure (eo->tempo == encMeas.bpm): the ORN is redundant with this measure's
+        //     header — e.g. an initial "♩=230" Encore stores at the end of measure 1 instead of its
+        //     start. Without this, the ORN's end-of-measure segment fails to set the playback tempo
+        //     (stays at the default) and also blocks the header from placing it at the start.
+        //   - a later measure: a misplaced ornament stored before the measure that actually changes.
+        // Keep the ORN only when NO header BPM matches it (a genuine standalone mark).
+        if (static_cast<quint16>(eo->tempo) == encMeas.bpm) {
+            return;  // Redundant: this measure's header BPM places it at the measure start
+        }
+        {
+            for (size_t mi = mc.measIdx + 1; mi < enc.measures.size(); ++mi) {
+                if (enc.measures[mi].bpm == static_cast<quint16>(eo->tempo)) {
+                    return;  // Misplaced ornament: the header BPM at mi will place it
+                }
             }
             // Not misplaced: the ORN is the genuine score marking; fall through to use it.
         }

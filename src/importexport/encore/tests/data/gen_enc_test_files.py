@@ -3860,6 +3860,40 @@ def gen_v0c4_orn_tempo_mismatch_suppressed():
     return pre + body + SKELETON_POST
 
 
+def gen_v0c4_orn_tempo_misplaced_multi_measure():
+    # Multi-measure displacement: ORN TEMPO=80 in measure 1 (header BPM=249), but the tempo only
+    # changes to 80 at measure 4. The header BPM persists, so it stays 249 for measures 1-3.
+    # Expected: ONE TempoText 80 at measure 4; NO tempo text at measure 1.
+    orn = bytearray(ornament_v0c4(0, 0, 0, tipo=0x32))
+    orn[30] = 80        # ORN TEMPO=80, three measures before the BPM actually changes to 80
+    e1  = bytes(orn) + note_v0c4(0, 0, 0, fv=3, pitch=60) + end_marker()
+    en  = note_v0c4(0, 0, 0, fv=3, pitch=60) + end_marker()
+    pre  = set_chumagio(0xC4)
+    body  = meas_block(meas_hdr(4, 4, bpm=249), e1)
+    body += meas_block(meas_hdr(4, 4, bpm=249), en)
+    body += meas_block(meas_hdr(4, 4, bpm=249), en)
+    body += meas_block(meas_hdr(4, 4, bpm=80), en)
+    body += b''.join(meas_block(meas_hdr(4, 4, bpm=80), end_marker()) for _ in range(2))
+    return pre + body + SKELETON_POST
+
+
+def gen_v0c4_orn_tempo_equals_header_at_start():
+    # Initial tempo: measure 1 header BPM=230, plus a redundant ORN TEMPO=230 stored at a LATE tick
+    # (tick 240) — the same value as the header. The ORN's late/end-of-measure segment does not set
+    # the playback tempo, so it must be suppressed and the header must place the TempoText at the
+    # MEASURE START (tick 0). Mirrors an initial "= 230" Encore stores at the end of measure 1.
+    orn = bytearray(ornament_v0c4(240, 0, 0, tipo=0x32))
+    orn[30] = 230
+    e1  = note_v0c4(0, 0, 0, fv=3, pitch=60)
+    e1 += bytes(orn)
+    e1 += note_v0c4(240, 0, 0, fv=3, pitch=60)
+    e1 += end_marker()
+    pre  = set_chumagio(0xC4)
+    body = meas_block(meas_hdr(4, 4, bpm=230), e1)
+    body += b''.join(meas_block(meas_hdr(4, 4, bpm=230), end_marker()) for _ in range(3))
+    return pre + body + SKELETON_POST
+
+
 # ===========================================================================
 # instruments_no_tk_name_recovered.enc
 # BUG FIX: when a v0xC4 file has no TK blocks, recoverMissingNames() reads
@@ -8061,6 +8095,8 @@ if __name__=='__main__':
     write("text_orn_tempo_3_8_dotted_quarter.enc",              gen_v0c4_orn_tempo_3_8_dotted_quarter())
     write("text_meas_bpm_suppressed_by_orn_tempo_later_tick.enc", gen_v0c4_meas_bpm_suppressed_by_orn_tempo_later_tick())
     write("text_orn_tempo_mismatch_suppressed.enc",             gen_v0c4_orn_tempo_mismatch_suppressed())
+    write("text_orn_tempo_misplaced_multi_measure.enc",         gen_v0c4_orn_tempo_misplaced_multi_measure())
+    write("text_orn_tempo_equals_header.enc",                   gen_v0c4_orn_tempo_equals_header_at_start())
     write("notes_rdur_80_stays_16th.enc",         gen_v0c4_rdur_80_stays_16th())
     write("text_stafftext_tempo_promotion.enc",  gen_v0c4_stafftext_tempo_promotion())
     write("notes_tie_start_flag_byte6.enc",   gen_v0c4_tie_start_flag_byte6())

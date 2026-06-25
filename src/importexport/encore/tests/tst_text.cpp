@@ -187,11 +187,15 @@ TEST_F(Tst_Text, lyrics_offset_ticks_still_attach_correctly)
     std::vector<String> expected = { u"do", u"re", u"mi", u"fa" };
     std::vector<String> seen;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
-        if (!mb->isMeasure()) { continue; }
+        if (!mb->isMeasure()) {
+            continue;
+        }
         for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
              s; s = s->next(SegmentType::ChordRest)) {
             EngravingItem* el = s->element(0);
-            if (!el || !el->isChord()) { continue; }
+            if (!el || !el->isChord()) {
+                continue;
+            }
             for (Lyrics* ly : toChord(el)->lyrics()) {
                 seen.push_back(ly->plainText());
             }
@@ -783,7 +787,9 @@ TEST_F(Tst_Text, orn_tempo_suppressed_when_semantic_disabled)
 
     std::vector<double> bpsValues;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
-        if (!mb->isMeasure()) { continue; }
+        if (!mb->isMeasure()) {
+            continue;
+        }
         for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s;
              s = s->next(SegmentType::ChordRest)) {
             for (EngravingItem* e : s->annotations()) {
@@ -860,6 +866,74 @@ TEST_F(Tst_Text, orn_tempo_mismatch_with_header_bpm_suppressed)
     delete score;
 }
 
+// Same misplacement quirk, but the tempo change is several measures after the ORN (the old check
+// only looked one measure ahead, so it missed this and placed the tempo too early).
+TEST_F(Tst_Text, orn_tempo_misplaced_multi_measure_suppressed)
+{
+    // text_orn_tempo_misplaced_multi_measure.enc:
+    // M1: header BPM=249, ORN TEMPO=80 (misplaced); M2-M3: header BPM=249; M4: header BPM=80.
+    // Expected: TempoText BPM=80 at M4, NOT at M1.
+    MasterScore* score = readEncoreScore("text_orn_tempo_misplaced_multi_measure.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    Fraction tickOf80;
+    bool found80 = false, eightyAtStart = false;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isTempoText() && std::abs(toTempoText(e)->tempo().val - 80.0 / 60.0) < 1e-4) {
+                    found80 = true;
+                    tickOf80 = s->tick();
+                    if (s->tick() == Fraction(0, 1)) {
+                        eightyAtStart = true;
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_TRUE(found80) << "header BPM=80 at M4 must create a TempoText";
+    EXPECT_FALSE(eightyAtStart) << "misplaced ORN TEMPO=80 must not place a tempo at M1";
+    EXPECT_GT(tickOf80, Fraction(2, 1)) << "tempo 80 must land at M4 (several measures in), not at M1";
+
+    delete score;
+}
+
+// An ORN TEMPO whose BPM equals its own measure's header BPM (e.g. an initial "= 230" Encore
+// stores at the end of measure 1) is redundant: it must be suppressed so the header places the
+// tempo at the MEASURE START, where it actually drives playback — not left on the ORN's late
+// segment (which does not set the tempo, leaving the default).
+TEST_F(Tst_Text, orn_tempo_equal_to_header_placed_at_measure_start)
+{
+    MasterScore* score = readEncoreScore("text_orn_tempo_equals_header.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    int count230 = 0;
+    bool atStart = false, late = false;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isTempoText() && std::abs(toTempoText(e)->tempo().val - 230.0 / 60.0) < 1e-4) {
+                    ++count230;
+                    (s->tick() == Fraction(0, 1) ? atStart : late) = true;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(count230, 1) << "exactly one tempo 230 (no duplicate)";
+    EXPECT_TRUE(atStart) << "tempo 230 must be placed at the measure start";
+    EXPECT_FALSE(late) << "tempo 230 must not stay at the ORN's late tick";
+
+    delete score;
+}
+
 // ===========================================================================
 // FIX: v0xC2 lyric text was read at element offset +20 instead of +18, dropping
 // the first two bytes of every syllable (e.g. "ver"→"r", "dad"→"d", "Es"→"").
@@ -917,12 +991,12 @@ TEST_F(Tst_Text, lyrics_v0xc2_text_offset_full_words)
     auto contains = [&](const String& s) {
         return std::find(all.begin(), all.end(), s) != all.end();
     };
-    EXPECT_TRUE(contains(u"La"))  << "'La' must be present (wrong offset gives 'L')";
-    EXPECT_TRUE(contains(u"ro"))  << "'ro' must be present (wrong offset gives 'r')";
+    EXPECT_TRUE(contains(u"La")) << "'La' must be present (wrong offset gives 'L')";
+    EXPECT_TRUE(contains(u"ro")) << "'ro' must be present (wrong offset gives 'r')";
     EXPECT_TRUE(contains(u"sol")) << "'sol' must be present (wrong offset gives 's')";
-    EXPECT_TRUE(contains(u"es"))  << "'es' must be present (wrong offset gives 'e')";
-    EXPECT_TRUE(contains(u"mi"))  << "'mi' must be present (wrong offset gives 'm')";
-    EXPECT_TRUE(contains(u"do"))  << "'do' must be present (wrong offset gives 'd')";
+    EXPECT_TRUE(contains(u"es")) << "'es' must be present (wrong offset gives 'e')";
+    EXPECT_TRUE(contains(u"mi")) << "'mi' must be present (wrong offset gives 'm')";
+    EXPECT_TRUE(contains(u"do")) << "'do' must be present (wrong offset gives 'd')";
 
     // Single-char garbled fragments must not appear after the fix.
     EXPECT_FALSE(contains(u"L")) << "garbled fragment 'L' must not appear after offset fix";
@@ -943,9 +1017,15 @@ TEST_F(Tst_Text, lyrics_compound_meter_all_syllables_matched)
     std::vector<String> all = collectAllLyrics(score);
     int countLa = 0, countSol = 0, countEs = 0;
     for (const String& s : all) {
-        if (s == u"La")  { ++countLa; }
-        if (s == u"sol") { ++countSol; }
-        if (s == u"es")  { ++countEs; }
+        if (s == u"La") {
+            ++countLa;
+        }
+        if (s == u"sol") {
+            ++countSol;
+        }
+        if (s == u"es") {
+            ++countEs;
+        }
     }
     EXPECT_GE(countLa, 2)
         << "'La' must appear at least twice; before compound-meter fix: 0 or 1 occurrences.";
