@@ -3785,6 +3785,33 @@ def gen_v0c4_transposing_written_tpc():
     return pre + body + SKELETON_POST
 
 
+def gen_v0c4_transposing_respell_melody():
+    # BUG FIX: a melody on a transposing instrument was respelled with
+    # double-flats by score->spell(). spell() is a context/window heuristic that
+    # picks enharmonics minimising accidental distance; on a transposing staff
+    # whose written key is heavily flat (Eb, 3 flats) but whose concert key is
+    # sharp (A major) it drifted concert E/B/G# to Fb/Cb/Ab and the derived
+    # written notes to Cbb/Gbb/Ebb. A single note is spelled correctly by the
+    # computeWindow concert-key fix, so the regression only shows with a melody.
+    # Fix: after spell(), re-derive the TPC of notes on transposing staves from
+    # the sounding pitch + concert key (respellTransposingStaves).
+    # Fixture: oboe (MIDI 69), Key=+6 (aug4), written key sig = Eb (tipo=3).
+    # Written pitches 70/65/62/58 -> concert 76/71/68/64 = E5/B4/G#4/E4.
+    # Expected concert TPC 18/19/22/18 (E/B/G#/E), written TPC 12/13/16/12
+    # (Bb/F/D/Bb); never double-flats (tpc <= 5).
+    pre  = _patch_midi_program(SKELETON_PRE, 0, 69)
+    pre  = _patch_key_transpose(pre, 0, 6)
+    e    = keychange_v0c4(0, 0, 0, tipo=3)           # written key = Eb (3 flats)
+    for i, cp in enumerate((76, 71, 68, 64)):
+        e += note_v0c4(i * 240, 0, 0, fv=3, pitch=cp - 6)   # written = concert - 6
+    e   += end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
+
+
 def gen_v0c4_orn_tempo_3_8_dotted_quarter():
     # BUG FIX: 3/8 files with beatTicks=360 (dotted-quarter beat) had their
     # ORN TEMPO treated as plain quarter BPM, giving 2/3 of the correct speed.
@@ -8092,6 +8119,7 @@ if __name__=='__main__':
     write("instruments_no_tk_name_latin1.enc",                  gen_v0c4_no_tk_name_latin1())
     write("instruments_no_tk_name_fallback.enc",                gen_v0c4_no_tk_name_fallback())
     write("notes_transposing_written_tpc.enc",                  gen_v0c4_transposing_written_tpc())
+    write("notes_transposing_respell_melody.enc",               gen_v0c4_transposing_respell_melody())
     write("text_orn_tempo_3_8_dotted_quarter.enc",              gen_v0c4_orn_tempo_3_8_dotted_quarter())
     write("text_meas_bpm_suppressed_by_orn_tempo_later_tick.enc", gen_v0c4_meas_bpm_suppressed_by_orn_tempo_later_tick())
     write("text_orn_tempo_mismatch_suppressed.enc",             gen_v0c4_orn_tempo_mismatch_suppressed())

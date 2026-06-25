@@ -1407,6 +1407,51 @@ TEST_F(Tst_Notes, transposing_instrument_written_tpc_not_double_flat)
 
     delete score;
 }
+
+// ===========================================================================
+// transposing_melody_no_double_flat_after_spell
+//
+// score->spell() is a context/window heuristic; on a transposing staff whose
+// written key is heavily flat (Eb, 3 flats) while the concert key is sharp
+// (A major) it drifted a whole melody to double-flats: concert E/B/G# became
+// Fb/Cb/Ab and the written notes became Cbb/Gbb/Ebb. The single-note
+// computeWindow fix does not catch this (the drift only appears with a melody).
+// respellTransposingStaves re-derives the TPC of notes on transposing staves
+// from the sounding pitch + concert key after spell().
+// Fixture: oboe (MIDI 69), Key=+6 (aug4), written key Eb (tipo=3), written
+// pitches 70/65/62/58 -> concert 76/71/68/64 (E5/B4/G#4/E4).
+// Expected concert TPC 18/19/22/18, written TPC 12/13/16/12; never tpc <= 5.
+// ===========================================================================
+TEST_F(Tst_Notes, transposing_melody_no_double_flat_after_spell)
+{
+    MasterScore* score = readEncoreScore("notes_transposing_respell_melody.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    const std::vector<int> expectedTpc1 = { 18, 19, 22, 18 };   // E B G# E (concert)
+    const std::vector<int> expectedTpc2 = { 12, 13, 16, 12 };   // Bb F D Bb (written)
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    size_t i = 0;
+    for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        EngravingItem* e = seg->element(0);
+        if (!e || !e->isChord()) {
+            continue;
+        }
+        Note* note = toChord(e)->upNote();
+        ASSERT_NE(note, nullptr);
+        ASSERT_LT(i, expectedTpc1.size());
+        EXPECT_EQ(note->tpc1(), expectedTpc1[i])
+            << "Concert TPC at note " << i << " must follow the A-major concert key, not a flat drift";
+        EXPECT_EQ(note->tpc2(), expectedTpc2[i])
+            << "Written TPC at note " << i << " must not be a double-flat (spell() drift)";
+        ++i;
+    }
+    EXPECT_EQ(i, expectedTpc1.size()) << "Expected 4 melody notes on the transposing staff";
+
+    delete score;
+}
 // grandstaff_staffwithin_fermata
 TEST_F(Tst_Notes, grandstaff_staffwithin_fermata)
 {
