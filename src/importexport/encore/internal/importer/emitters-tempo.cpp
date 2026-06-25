@@ -22,6 +22,10 @@
 
 #include "emitters-internal.h"
 
+#include <cmath>
+
+#include "../parser/ticks.h"
+
 #include "engraving/dom/factory.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
@@ -29,16 +33,67 @@
 #include "engraving/dom/tempotext.h"
 
 namespace mu::iex::enc {
+// Decode the tempo mark's beat unit from the ORN `noto` field. The low 7 bits hold a
+// 0-indexed note value (0=whole, 1=half, 2=quarter, 3=eighth, ...) and the high bit
+// (0x80) marks a dotted unit; e.g. 0x82 is a dotted quarter, 0x02 a plain quarter.
+// Returns the beat duration in display ticks (quarter=240), or 0 when `noto` is unset
+// or unrecognised (older formats store unrelated bytes here) so the caller can fall
+// back to the meter heuristic.
+int notoToBeatTicks(quint8 noto)
+{
+    if (noto == 0) {
+        return 0;
+    }
+    const bool dotted = (noto & 0x80) != 0;
+    const int baseVal = noto & 0x7F;            // 0-indexed note value
+    if (baseVal > 6) {
+        return 0;                                // out of range: misparsed old-format byte
+    }
+    int ticks = faceValue2ticks(static_cast<quint8>(baseVal + 1));   // 1=whole .. 7=64th
+    if (ticks == 0) {
+        return 0;
+    }
+    if (dotted) {
+        ticks = ticks * 3 / 2;
+    }
+    return ticks;
+}
 
 // Render tempo text. displayBpm is the beat-unit BPM that Encore shows the user.
-// beatTicks=360 means the beat unit is a dotted quarter; beatTicks=240 is a quarter;
-// beatTicks=120 is an eighth note (e.g. 5/8 felt in eighths).
+// beatTicks is the beat duration in display ticks (quarter=240, dotted-quarter=360,
+// half=480, eighth=120, ...); a value that is a base note times 3/2 renders dotted.
 String tempoXmlText(int displayBpm, int beatTicks)
 {
-    if (beatTicks == 360) {
-        return String(u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = %1").arg(displayBpm);
+    bool dotted = false;
+    int base = beatTicks;
+    if (beatTicks % 3 == 0) {
+        const int b = beatTicks * 2 / 3;
+        if (b == 960 || b == 480 || b == 240 || b == 120 || b == 60) {
+            dotted = true;
+            base = b;
+        }
     }
-return String(u"<sym>metNoteQuarterUp</sym> = %1").arg(displayBpm);
+    String sym;
+    switch (base) {
+    case 960: sym = u"metNoteWhole";
+        break;
+    case 480: sym = u"metNoteHalfUp";
+        break;
+    case 240: sym = u"metNoteQuarterUp";
+        break;
+    case 120: sym = u"metNote8thUp";
+        break;
+    case 60:  sym = u"metNote16thUp";
+        break;
+    default:                                     // unknown: fall back to quarter / dotted-quarter
+        sym = u"metNoteQuarterUp";
+        dotted = (beatTicks == 360);
+        break;
+    }
+    if (dotted) {
+        return String(u"<sym>%1</sym><sym>space</sym><sym>metAugmentationDot</sym> = %2").arg(sym).arg(displayBpm);
+    }
+    return String(u"<sym>%1</sym> = %2").arg(sym).arg(displayBpm);
 }
 
 // Apply per-measure BPM from MEAS headers as TempoText elements.
@@ -79,21 +134,41 @@ void applyMeasureBpmMarks(BuildCtx& ctx)
             }
         }
         if (!hasExisting) {
-            // Detect dotted-quarter beat: MEAS header beatTicks=360, OR compound time sig
-            // (6/8, 9/8, 12/8). Old fixtures store beatTicks=240 even for 6/8, so keep
-            // the timesig fallback for backward compatibility.
-            const quint16 rawBeatTicks = enc.measures[mi].beatTicks;
-            const Fraction mts = m->timesig();
-            const bool cmpd = (rawBeatTicks == 360)
-                              || (mts.denominator() == 8
-                                  && mts.numerator() % 3 == 0
-                                  && mts.numerator() > 3);
+            // The header BPM is always a quarter-note BPM. Choose the DISPLAY beat unit:
+            // prefer the explicit unit stored on this measure's ORN tempo mark (`noto`),
+            // so a quarter=198 mark in a 6/8 stays "quarter=198" instead of being rewritten
+            // as the compound default "dotted-quarter=132". When no ORN unit is present, fall
+            // back to the meter heuristic (compound meters display in dotted quarters; old
+            // fixtures store beatTicks=240 even for 6/8, so keep the timesig fallback too).
+            int displayBeatTicks = 0;
+            for (const auto& el : enc.measures[mi].elements) {
+                const EncOrnament* orn = dynamic_cast<const EncOrnament*>(el.get());
+                if (orn && orn->ornType() == EncOrnamentType::TEMPO && orn->tempo > 0) {
+                    displayBeatTicks = notoToBeatTicks(orn->noto);
+                    if (displayBeatTicks != 0) {
+                        break;
+                    }
+                }
+            }
             const double bps = bpm / 60.0;
-            const int displayBpm = cmpd ? (bpm * 2 + 1) / 3 : static_cast<int>(bpm);
+            int displayBpm;
+            if (displayBeatTicks != 0) {
+                // Re-express the quarter-note BPM in the chosen beat unit.
+                displayBpm = static_cast<int>(std::lround(bpm * 240.0 / displayBeatTicks));
+            } else {
+                const quint16 rawBeatTicks = enc.measures[mi].beatTicks;
+                const Fraction mts = m->timesig();
+                const bool cmpd = (rawBeatTicks == 360)
+                                  || (mts.denominator() == 8
+                                      && mts.numerator() % 3 == 0
+                                      && mts.numerator() > 3);
+                displayBeatTicks = cmpd ? 360 : 240;
+                displayBpm = cmpd ? (bpm * 2 + 1) / 3 : static_cast<int>(bpm);
+            }
             TempoText* tt = Factory::createTempoText(seg);
             tt->setTrack(0);
             tt->setTempo(BeatsPerSecond(bps));
-            tt->setXmlText(tempoXmlText(displayBpm, cmpd ? 360 : 240));
+            tt->setXmlText(tempoXmlText(displayBpm, displayBeatTicks));
             tt->setFollowText(true);
             seg->add(tt);
             score->setTempo(measTick, BeatsPerSecond(bps));
@@ -101,5 +176,4 @@ void applyMeasureBpmMarks(BuildCtx& ctx)
         lastBpm = bpm;
     }
 }
-
 } // namespace mu::iex::enc

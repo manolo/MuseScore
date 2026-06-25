@@ -3882,6 +3882,32 @@ def gen_v0c4_tempo_orn_xoffset_downbeat():
 
 
 # ===========================================================================
+# text_tempo_orn_explicit_quarter_unit.enc
+# BUG FIX: the tempo mark's beat unit was guessed from the meter (compound -> dotted
+# quarter), ignoring the explicit unit Encore stores on the mark in the ORN `noto`
+# byte. In a 6/8 a "quarter = 198" mark (noto = 2, a plain quarter) was rewritten as
+# the compound default "dotted-quarter = 132" even though both are the same speed.
+# The importer must honor `noto`: low 7 bits = note value (2 = quarter), high bit
+# 0x80 = dotted.
+# Fixture: 6/8 (beatTicks=360), header bpm=198 (quarter BPM), ORN TEMPO=198 with
+# noto=2. The ORN value equals the header so it is suppressed and the header renders
+# the mark; honoring noto, the display must be quarter=198, not dotted-quarter=132.
+# Expected: TempoText "quarter = 198", BPS = 198/60 = 3.3.
+# ===========================================================================
+def gen_v0c4_tempo_orn_explicit_quarter_unit():
+    orn = bytearray(ornament_v0c4(0, 0, 0, tipo=0x32))
+    orn[28] = 2          # noto = explicit quarter-note beat unit (0-indexed note value)
+    orn[30] = 198        # ORN TEMPO value, in the noto unit (quarter BPM)
+    e  = bytes(orn)
+    e += note_v0c4(0, 0, 0, fv=4, pitch=60)   # one eighth note (6/8); rest auto-filled
+    e += end_marker()
+    pre  = set_chumagio(0xC4)
+    body = meas_block(meas_hdr(6, 8, bpm=198, beatTicks=360), e)
+    body += b''.join(meas_block(meas_hdr(6, 8, bpm=198, beatTicks=360), end_marker()) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
+# ===========================================================================
 # text_orn_tempo_mismatch_suppressed.enc
 # BUG FIX: ORN TEMPO ornaments stored in the wrong measure (one system before
 # their intended position due to Encore's visual layout) carry a BPM that
@@ -8151,6 +8177,7 @@ if __name__=='__main__':
     write("text_meas_bpm_suppressed_by_orn_tempo_later_tick.enc", gen_v0c4_meas_bpm_suppressed_by_orn_tempo_later_tick())
     write("text_orn_tempo_mismatch_suppressed.enc",             gen_v0c4_orn_tempo_mismatch_suppressed())
     write("text_tempo_orn_xoffset_downbeat.enc",                gen_v0c4_tempo_orn_xoffset_downbeat())
+    write("text_tempo_orn_explicit_quarter_unit.enc",           gen_v0c4_tempo_orn_explicit_quarter_unit())
     write("text_orn_tempo_misplaced_multi_measure.enc",         gen_v0c4_orn_tempo_misplaced_multi_measure())
     write("text_orn_tempo_equals_header.enc",                   gen_v0c4_orn_tempo_equals_header_at_start())
     write("notes_rdur_80_stays_16th.enc",         gen_v0c4_rdur_80_stays_16th())
