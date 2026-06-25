@@ -554,7 +554,8 @@ Type 5. Variable size. Offsets from element start:
 | +18      | 1      | alMezuro — measures forward to the end measure             |
 | +20      | 1      | xoffset2 — end x-position in the target measure            |
 | +26      | 1      | speguleco — bit 0: 0 = crescendo, 1 = diminuendo           |
-| +30      | 2      | BPM (TEMPO subtype only)                                   |
+| +28      | 1      | noto — tempo beat unit (TEMPO subtype): low 7 bits = note value (0 = whole, 1 = half, 2 = quarter, 3 = eighth, ...), high bit 0x80 = dotted. So 0x02 is a quarter, 0x82 a dotted quarter, 0x81 a dotted half. A value of 0 (or an out-of-range byte from an older format) means no explicit unit. |
+| +30      | 2      | BPM (TEMPO subtype only) — expressed in the beat unit from +28 |
 | +32      | 1      | TEXT block entry index (STAFFTEXT subtype)                 |
 
 ### Ornament subtypes
@@ -565,8 +566,10 @@ Type 5. Variable size. Offsets from element start:
 | 0x1E    | STAFFTEXT     | text from TEXT block at entry index +32                                          |
 | 0x21    | SLURSTART     | slur; endpoint encoded by alMezuro and xoffset2                                  |
 | 0x22    | ARPEGGIO      | chord arpeggio                                                                   |
-| 0x32    | TEMPO         | tempo mark; BPM at +30 (quarter-note BPM, or dotted-quarter BPM in compound      |
-|         |               | meter). Placement: like dynamics, the mark is anchored to a note's tick but      |
+| 0x32    | TEMPO         | tempo mark; BPM at +30, expressed in the beat unit stored at +28 (`noto`); the   |
+|         |               | composer may pick a plain quarter even in a compound meter (e.g. quarter=198 in  |
+|         |               | 6/8), so honour `noto` for the displayed unit instead of guessing from the meter.|
+|         |               | Placement: like dynamics, the mark is anchored to a note's tick but              |
 |         |               | drawn at its own `xoffset`. When that xoffset sits to the left of the note at    |
 |         |               | the encoded tick, the mark belongs to the earlier chord-rest at that x-position  |
 |         |               | (often the downbeat rest), so it snaps backward to that chord-rest rather than   |

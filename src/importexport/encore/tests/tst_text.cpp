@@ -506,6 +506,43 @@ TEST_F(Tst_Text, orn_tempo_snaps_to_downbeat_by_xoffset)
 }
 
 // ===========================================================================
+// FIX: the tempo mark's beat unit comes from the ORN `noto` byte, not a guess from
+// the meter. A "quarter = 198" mark in a 6/8 (noto=2, a plain quarter) must stay
+// quarter=198, not be rewritten as the compound default dotted-quarter=132. Here the
+// ORN value equals the header BPM, so the ORN is suppressed and the header path
+// renders the mark; it must still pick up the explicit quarter unit from noto.
+// Both forms are the same speed (198 quarter/min = 132 dotted-quarter/min = 3.3 BPS).
+// ===========================================================================
+TEST_F(Tst_Text, tempo_beat_unit_from_noto_overrides_compound_meter)
+{
+    MasterScore* score = readEncoreScore("text_tempo_orn_explicit_quarter_unit.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    TempoText* tt = nullptr;
+    for (MeasureBase* mb = score->first(); mb && !tt; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s && !tt; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isTempoText()) {
+                    tt = toTempoText(e);
+                    break;
+                }
+            }
+        }
+    }
+    ASSERT_NE(tt, nullptr) << "No TempoText found in score";
+    EXPECT_EQ(tt->xmlText(), u"<sym>metNoteQuarterUp</sym> = 198")
+        << "noto=2 (quarter) must override the 6/8 compound default; not dotted-quarter=132";
+    EXPECT_NEAR(tt->tempo().val, 198.0 / 60.0, 1e-6)
+        << "Playback unchanged: 198 quarter/min = 3.3 BPS";
+
+    delete score;
+}
+
+// ===========================================================================
 // BUG FIX: MEAS-header and ORN tempo texts used a raw Unicode note symbol
 // (U+2669 "♩") in their xmlText.  TempoText::updateTempo() matches against
 // TempoPattern strings that use <sym>metNoteQuarterUp</sym>, so the Unicode
@@ -680,17 +717,20 @@ TEST(Tst_TempoXmlText, dotted_quarter_beat_sym)
               String(u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = 80"));
 }
 
-TEST(Tst_TempoXmlText, non_dotted_beats_use_quarter_sym)
+TEST(Tst_TempoXmlText, beat_ticks_select_the_note_symbol)
 {
     using namespace mu::iex::enc;
-    // All non-compound beat units (beatTicks != 360) use the quarter note symbol.
-    // The ORN tempo field stores quarter-note BPM regardless of the piece's beatTicks.
+    // beatTicks is the beat duration in display ticks (quarter=240) and selects the note
+    // symbol: 120=eighth, 480=half, plus the dotted variants (base x 3/2).
     EXPECT_EQ(tempoXmlText(156, 120),
-              String(u"<sym>metNoteQuarterUp</sym> = 156"));
-    EXPECT_EQ(tempoXmlText(63, 120),
-              String(u"<sym>metNoteQuarterUp</sym> = 63"));
+              String(u"<sym>metNote8thUp</sym> = 156"));
     EXPECT_EQ(tempoXmlText(120, 240),
               String(u"<sym>metNoteQuarterUp</sym> = 120"));
+    EXPECT_EQ(tempoXmlText(90, 480),
+              String(u"<sym>metNoteHalfUp</sym> = 90"));
+    EXPECT_EQ(tempoXmlText(60, 720),
+              String(u"<sym>metNoteHalfUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = 60"));
+    // Unknown/zero falls back to a plain quarter note.
     EXPECT_EQ(tempoXmlText(80, 0),
               String(u"<sym>metNoteQuarterUp</sym> = 80"));
 }

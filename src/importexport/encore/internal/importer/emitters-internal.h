@@ -125,8 +125,11 @@ void capMeasureLength(BuildCtx& ctx, mu::engraving::Measure* measure);
 // Apply per-measure BPM marks as TempoText elements. (emitters-tempo.cpp)
 void applyMeasureBpmMarks(BuildCtx& ctx);
 
-// Render tempo text (beatTicks: 360=dotted-quarter, 240=quarter). (emitters-tempo.cpp)
+// Render tempo text (beatTicks in display ticks: 240=quarter, 360=dotted-quarter, ...). (emitters-tempo.cpp)
 mu::engraving::String tempoXmlText(int displayBpm, int beatTicks);
+
+// Decode the ORN tempo beat unit from the `noto` byte to display ticks, or 0 if unset. (emitters-tempo.cpp)
+int notoToBeatTicks(quint8 noto);
 } // namespace mu::iex::enc
 
 #endif // MU_IEX_ENCORE_NOTELOOP_INTERNAL_H

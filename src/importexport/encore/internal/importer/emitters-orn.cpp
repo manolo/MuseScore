@@ -321,12 +321,14 @@ static void handleTempoOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
         TempoText* tt2 = Factory::createTempoText(seg);
         tt2->setTrack(track);
 
-        // The ORN tempo field always stores quarter-note BPM (same convention as encMeas.bpm),
-        // except for compound time (6/8, 9/8, 12/8) where it stores dotted-quarter BPM.
-        // beatTicks reflects the internal Encore tick unit but does NOT change the BPM unit:
-        // a 5/8 piece with beatTicks=120 still expresses tempo as negras/min, not corcheas/min.
-        const double bps = cmpd ? eo->tempo * 1.5 / 60.0 : eo->tempo / 60.0;
-        const int displayBeatTicks = cmpd ? 360 : 240;
+        // The tempo value is expressed in the mark's beat unit. Prefer the unit Encore stored
+        // explicitly on the mark (`noto`); a compound meter is often beaten in dotted quarters,
+        // but the composer may pick a plain quarter (e.g. quarter=198 in 6/8), and only `noto`
+        // records that choice. Fall back to the meter heuristic when `noto` is unset.
+        const int notoTicks = notoToBeatTicks(eo->noto);
+        const int displayBeatTicks = notoTicks ? notoTicks : (cmpd ? 360 : 240);
+        const double beatInQuarters = displayBeatTicks / 240.0;
+        const double bps = eo->tempo * beatInQuarters / 60.0;
         tt2->setTempo(BeatsPerSecond(bps));
         tt2->setXmlText(tempoXmlText(static_cast<int>(eo->tempo), displayBeatTicks));
         tt2->setFollowText(true);
