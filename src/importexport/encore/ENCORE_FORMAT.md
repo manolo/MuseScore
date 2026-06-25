@@ -1294,10 +1294,20 @@ Total content size: 42 bytes (`varsize = 42`). Some older files have `varsize = 
 
 **Units — two variants.** Encore 5.x stores values in typographic points (1/72"). Earlier
 versions (including Encore 4.x and some 3.x) store them in **screen pixels at the monitor
-DPI** (~84-85 PPI on hardware of that era). The unit can be detected at parse time:
+DPI** (~84 PPI; the exact value is the screen the file was last saved on, e.g. 83.7). The
+displayed margins in those files are still inches; only the stored unit is device pixels.
 
-> If `rightEdge > pageWidth × 72` (i.e. the right-edge coordinate exceeds the current page
-> width expressed in points), the block is in screen-pixel units, NOT typographic points.
+Detecting the unit:
+
+> If the page size is known (e.g. from the PREC block), compute `(rightEdge + left) / pageWidthInches`.
+> A value near 72 means the block is in typographic points; a clearly larger value (~84) means
+> screen pixels, and that value is the pixels-per-inch to divide all four fields by. This is more
+> robust than the older `rightEdge > pageWidth × 72` test, which fails when a tall page (e.g. A3)
+> makes the bottom edge only marginally exceed the page height in points.
+>
+> The pixels-per-inch derived from `rightEdge + left` is exact only when the left and right margins
+> are equal; with asymmetric margins it is ~2% low (the far edges omit the larger far margin), so
+> the recovered right/bottom margins can be off by a couple of millimetres.
 
 **Derived values (typographic-point variant, rightEdge ≤ pageWidth_pts):**
 

@@ -553,6 +553,24 @@ TEST_F(Tst_Structure, page_size_from_prec_ansi_a3)
     delete score;
 }
 
+// Large WINI margins (A3, screen-pixel format ~84 dpi): top=176/left=209 px ≈ 2.1"/2.5".
+// These must survive import; previously every margin was clamped to a tiny 0.6" maximum, which
+// destroyed legitimate large margins. The px→inch conversion uses an estimated dpi, so the values
+// are approximate (exact only for symmetric margins); the key invariant is that they are NOT
+// clamped away.
+TEST_F(Tst_Structure, page_margins_wini_large_not_clamped)
+{
+    MasterScore* score = readEncoreScore("structure_wini_large_margins_a3.enc");
+    ASSERT_NE(score, nullptr);
+    const double topIn  = score->style().styleD(Sid::pageOddTopMargin);
+    const double leftIn = score->style().styleD(Sid::pageOddLeftMargin);
+    EXPECT_GT(topIn,  1.5) << "large top margin must not be clamped to a tiny maximum";
+    EXPECT_GT(leftIn, 1.5) << "large left margin must not be clamped to a tiny maximum";
+    EXPECT_NEAR(topIn,  2.14, 0.2) << "top margin ~2.1 inches (176 px at ~82 dpi)";
+    EXPECT_NEAR(leftIn, 2.54, 0.2) << "left margin ~2.5 inches (209 px at ~82 dpi)";
+    delete score;
+}
+
 // ===========================================================================
 // BUG regression: Fraction(2,2)==Fraction(4,4) via cross-multiplication
 // (2x4 == 4x2 = 8), so the 2/2 -> 4/4 change was silently swallowed by the
