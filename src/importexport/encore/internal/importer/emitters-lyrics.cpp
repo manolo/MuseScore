@@ -39,6 +39,20 @@ void enqueueLyric(BuildCtx& ctx, const EncLyric* el, track_idx_t track)
     if (text == u"-") {
         if (!queue.empty()) {
             queue.back().hyphenAfter = true;
+        } else {
+            // The preceding syllable was attached in an earlier measure (its queue was
+            // cleared at the barline). Promote it so the hyphen renders across the bar:
+            // a standalone word becomes the start of a hyphenated one (SINGLE -> BEGIN),
+            // and an ending syllable becomes a middle one (END -> MIDDLE).
+            auto it = ctx.lastAttachedLyric.find(track);
+            if (it != ctx.lastAttachedLyric.end() && it->second) {
+                mu::engraving::Lyrics* prev = it->second;
+                if (prev->syllabic() == mu::engraving::LyricsSyllabic::SINGLE) {
+                    prev->setSyllabic(mu::engraving::LyricsSyllabic::BEGIN);
+                } else if (prev->syllabic() == mu::engraving::LyricsSyllabic::END) {
+                    prev->setSyllabic(mu::engraving::LyricsSyllabic::MIDDLE);
+                }
+            }
         }
         ctx.nextLyricHyphenBefore[track] = true;
     } else if (text.isEmpty()) {
@@ -236,6 +250,7 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
             }
             ly->setSyllabic(syll);
             c->add(ly);
+            ctx.lastAttachedLyric[lyTrack] = ly;
         }
         // Lyric ticks are measure-relative; unmatched leftovers cannot anchor in a
         // later measure, so discard them.

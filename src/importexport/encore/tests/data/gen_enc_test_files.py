@@ -3377,6 +3377,22 @@ def gen_v0c4_lyrics_hyphenated_words():
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
 
+def gen_v0c4_lyrics_hyphen_across_barline():
+    # FIX: a hyphenated word split across a barline ("sof-tly" with "sof" ending one
+    # measure and "-" + "tly" opening the next) lost the connecting hyphen. The "-"
+    # arrives when the previous measure's queue is already cleared, so the first
+    # syllable was never promoted and stayed SINGLE. Expected: "sof" = BEGIN (m1),
+    # "tly" = END (m2), so MuseScore draws the hyphen across the bar.
+    e1  = lyric_v0c4(0, 0, 0, 'sof')
+    e1 += note_v0c4(0, 0, 0, fv=1, pitch=60)   # whole note
+    e1 += end_marker()
+    e2  = lyric_v0c4(0, 0, 0, '-')             # hyphen opens measure 2 (queue empty)
+    e2 += lyric_v0c4(0, 0, 0, 'tly')
+    e2 += note_v0c4(0, 0, 0, fv=1, pitch=62)
+    e2 += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e1), (meas_hdr(4, 4), e2)], fill_ts=(4, 4))
+
+
 def gen_v0c4_lyrics_offgrid_nearest_chord():
     # FIX: a continuation syllable whose stored tick sits between notes (further than
     # half a beat from any of them) was dropped when no rest was available to fall back
@@ -8348,6 +8364,7 @@ if __name__=='__main__':
     write("text_lyrics_two_verses.enc",      gen_v0c4_lyrics_two_verses())
     write("text_lyrics_hyphenated_words.enc", gen_v0c4_lyrics_hyphenated_words())
     write("text_lyrics_offgrid_nearest_chord.enc", gen_v0c4_lyrics_offgrid_nearest_chord())
+    write("text_lyrics_hyphen_across_barline.enc", gen_v0c4_lyrics_hyphen_across_barline())
     write("text_lyrics_latin1.enc",          gen_v0c4_lyrics_latin1())
     write("instruments_instr_bass_midi_tiebreak.enc",   gen_v0c4_instr_bass_midi_tiebreak())
     write("instruments_instr_percussion_drumset.enc",   gen_v0c4_instr_percussion_drumset())
