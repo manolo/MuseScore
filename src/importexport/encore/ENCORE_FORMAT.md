@@ -28,7 +28,7 @@ Byte at file offset 4 identifies the version:
 
 | Byte   | Version   | Encore release        |
 |--------|-----------|-----------------------|
-| 0xA6   | v0xA6     | Encore 2.x (legacy)   |
+| 0xA6   | v0xA6     | Encore 2.x to 4.0 (legacy; app version 0x28 = 592 for 4.0) |
 | 0xC2   | v0xC2     | Encore 3.x / 4.x      |
 | 0xC4   | v0xC4     | Encore 5.x            |
 
@@ -211,12 +211,29 @@ The staff type is constant across all LINE blocks for the same staff position.
 v0xA6 reports `staffPerSystem = 0` and its LINE staff entries are a 22-byte positioning-only
 layout (no size, clef, or staff-type bytes). Consequently:
 - **Staff size**: single global value at header byte 0x8D (see Header), applied to all staves.
-- **Clef**: NOT stored per staff anywhere in v0xA6. Verified exhaustively (TK content bytes, the
-  22-byte LINE entries, and MEAS blocks) across 765 v0xA6 files: no byte separates F-clef from
-  G-clef staves except the MIDI-program byte itself. Encore derives the clef entirely from the
-  instrument (its default clef) plus the per-staff octave Key (TK content+42). The importer
-  therefore takes the v0xA6 clef from the matched instrument template and applies the octave Key
-  as an octave-decorated clef. (In v0xC4 the clef IS stored explicitly at LINE entry +14.)
+- **Clef (location not decoded)**: a per-staff clef field has **not been located** in v0xA6. This
+  is an open gap, not proof that the clef is absent: Encore renders the correct clefs from these
+  files in every version, so the information is available to Encore (either stored per staff in a
+  byte not yet decoded, or derived from Encore's own instrument database). This applies to every
+  `SCOW` file with format byte `0xA6`, including Encore 4.0 (header app version `592` at offset
+  0x28), not just the oldest Encore 2.x files. Searched without finding it: TK content bytes, the
+  22-byte LINE staff entries (only staff index and Y-coordinate/layout bytes vary per staff), MEAS
+  blocks (no initial CLEF elements), and PAGE blocks (page metadata only). Across 765 v0xA6 files no
+  single byte separates F-clef from G-clef staves other than the MIDI-program byte; the nearest
+  candidate, TK content+49, reads 7 (`PERC`) on a snare staff but 0 on a bass staff that Encore
+  still shows in F, so it is more likely a staff-type field than the clef.
+
+  Whether the clef is **stored** somewhere not yet decoded or **derived from the instrument** is
+  unproven. One observation is consistent with the instrument-derived hypothesis but does not prove
+  it: a file whose last staff (name "Bajo", MIDI program 59) opens in Encore as the Tuba instrument
+  and shows bass clef, which is the Tuba default. This should be investigated once an Encore version
+  that writes v0xA6 (Encore 2.x to 4.0) is available: save the same score twice changing only one
+  staff's clef and diff the files; a changed byte is the clef field, no change means it is
+  instrument-derived. (Encore 5.x always saves as v0xC4, where the clef IS stored explicitly at LINE
+  entry +14, so it cannot run this test.)
+
+  *Suggested workaround until decoded*: take the displayed clef from the staff's instrument default,
+  or re-save the score in Encore 5 to obtain an explicit per-staff clef.
 
 ---
 
@@ -1517,5 +1534,12 @@ final:     chd_tick itself
   written pitch is displayed as-is. In particular, if an acoustic-bass or double-bass
   template carries `transposeChromatic = -12` but the enc file has Key=0, the -12 must also be
   cleared; otherwise notes display one octave higher than Encore shows them.
-  When Key ≠ 0 and the offset is a pure octave multiple (±12, ±24 …), the template's existing
-  octave transposition is left intact and the offset shapes the clef selection via clef selection based on key transposition.
+  When Key ≠ 0 and the offset is a pure octave multiple (±12, ±24 …), the sign decides how the
+  octave is shown:
+  - **Negative** (the instrument sounds lower, e.g. laud, bass guitar): the staff is given a
+    matching octave-down clef (8vb), the conventional notation for such instruments. The
+    template's existing octave transposition is left intact.
+  - **Positive** (the instrument sounds higher, e.g. a tuba "Bajo" with Key=+12): the staff keeps
+    a plain clef and the octave is stored as a playback transposition on the instrument, so the
+    notes stay at their written height. Octave-up (8va) clefs are not produced, because they are
+    rare and Encore itself shows these instruments with a plain clef.

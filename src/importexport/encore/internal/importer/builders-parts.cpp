@@ -155,7 +155,25 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
     if (useNameSearch) {
         // Step 2: name+MIDI score with transposition filter.
         if (!tmpl) {
-            tryStep(2, findEncoreInstrumentTemplate(instr.name, encMidi, encKey));
+            bool nameExact = false;
+            const InstrumentTemplate* nameTmpl = findEncoreInstrumentTemplate(instr.name, encMidi, encKey, &nameExact);
+            // A contains-only (substring) name match can outrank the GM instrument via the MIDI
+            // bonus: e.g. "Bajo" hits "Contrabajo"/"Clarín contrabajo" (a treble bugle sharing the
+            // tuba's program) instead of the bass-clef Tuba. When the name match is not exact,
+            // prefer the MIDI-program instrument if it differs. Exact matches are kept as-is, so
+            // the deliberate "Bass" -> acoustic-bass MIDI tiebreak (findTemplateByMidi returns the
+            // same template) is unaffected.
+            if (nameTmpl && !nameExact && !isRhythm && instr.midiProgram > 0) {
+                const InstrumentTemplate* midiTmpl = findTemplateByMidi(instr.midiProgram - 1);
+                if (midiTmpl && midiTmpl != nameTmpl) {
+                    LOGD() << "  instrument \"" << instr.name.toStdString()
+                           << "\": weak name match \"" << nameTmpl->trackName.toStdString()
+                           << "\" overridden by MIDI " << instr.midiProgram << " -> "
+                           << midiTmpl->trackName.toStdString();
+                    nameTmpl = midiTmpl;
+                }
+            }
+            tryStep(2, nameTmpl);
             if (!tmpl && !instr.name.trimmed().isEmpty()) {
                 const InstrumentTemplate* rejected = findEncoreInstrumentTemplate(instr.name, encMidi);
                 if (rejected) {
@@ -252,11 +270,17 @@ void buildParts(BuildCtx& ctx)
         }
 
         const int pitchOffset = static_cast<int>(instr.keyTransposeSemitones);
-        // Non-octave transposition: set on instrument so display shows written (Encore-stored) pitch.
-        // Octave offsets are handled by pickStaffClef() and the template's own transposition.
+        // Transposition handling depends on the offset:
+        //  - non-octave (Bb, Eb, F instruments): set on instrument so the display shows the
+        //    written (Encore-stored) pitch.
+        //  - positive octave (instrument sounds higher): also set on instrument, so the staff
+        //    keeps a plain clef and the notes stay at their written height (the octave is a
+        //    playback transposition). applyOctaveToClef() deliberately produces no 8va clef.
+        //  - negative octave (instrument sounds lower): left to the octave-down clef applied by
+        //    pickStaffClef()/applyOctaveToClef() plus the template's own transposition.
         Instrument* instrument = part->instrument();
         if (instrument) {
-            if (pitchOffset != 0 && std::abs(pitchOffset) % 12 != 0) {
+            if (pitchOffset != 0 && (std::abs(pitchOffset) % 12 != 0 || pitchOffset > 0)) {
                 const Interval iv(pitchOffset);
                 instrument->setTranspose(iv);
                 static const char* const keyNames[] = {

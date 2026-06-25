@@ -4718,6 +4718,43 @@ def gen_v0c4_f_clef_8va_from_key():
     return pre + body + SKELETON_POST
 
 
+# ===========================================================================
+# Instrument name matching: tokenizer and weak-match handling.
+# ===========================================================================
+def gen_v0c4_name_trailing_number_stripped():
+    """Name "Trumpet-1": the trailing "-1" (separator + ordinal) must be stripped so the
+    base name "Trumpet" matches the Trumpet template. MIDI 41 (Violin) only matters if the
+    name match fails, so resolving to Trumpet proves the trailing number was removed."""
+    pre = _patch_tk00('Trumpet-1'.encode('utf-16-le') + b'\x00\x00')
+    pre = _patch_midi_program(pre, 0, 41)   # Violin (the wrong answer if name matching fails)
+    body = meas_block(meas_hdr(4, 4), end_marker())
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
+def gen_v0c4_name_split_on_separator():
+    """Name "French-Horn": words must split on '-' (not only spaces) so the needle "horn"
+    matches the Horn template. MIDI 41 (Violin) is the wrong answer if splitting fails."""
+    pre = _patch_tk00('French-Horn'.encode('utf-16-le') + b'\x00\x00')
+    pre = _patch_midi_program(pre, 0, 41)   # Violin (the wrong answer if the split fails)
+    body = meas_block(meas_hdr(4, 4), end_marker())
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
+def gen_v0c4_weak_name_defers_to_midi():
+    """Name "Contrabass" + MIDI 59 (Tuba, program 58): the substring-only match to the treble
+    "Contrabass Bugle" (which shares program 58) outranks the bass-clef GM instrument via the
+    MIDI bonus. Because that name match is not exact, the importer must defer to the MIDI program
+    and resolve to a bass-clef tuba. Mirrors the Spanish "Bajo" -> "Clarín contrabajo" case."""
+    pre = _patch_tk00('Contrabass'.encode('utf-16-le') + b'\x00\x00')
+    pre = _patch_midi_program(pre, 0, 59)   # 1-indexed GM Tuba (program 58)
+    pre = _patch_key_transpose(pre, 0, 0)
+    body = meas_block(meas_hdr(4, 4), end_marker())
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
 def gen_v0c4_non_octave_key_keeps_clef():
     """G clef + Key=-7 (perfect fifth, not an octave)  →  plain G."""
     pre = _patch_tk00('UnknownClefTest'.encode('utf-16-le') + b'\x00\x00')
@@ -8003,6 +8040,9 @@ if __name__=='__main__':
     write("structure_g_clef_8va_from_key.enc",             gen_v0c4_g_clef_8va_from_key())
     write("structure_f_clef_8vb_from_key.enc",             gen_v0c4_f_clef_8vb_from_key())
     write("structure_f_clef_8va_from_key.enc",             gen_v0c4_f_clef_8va_from_key())
+    write("instruments_name_trailing_number.enc",          gen_v0c4_name_trailing_number_stripped())
+    write("instruments_name_dash_separator.enc",           gen_v0c4_name_split_on_separator())
+    write("instruments_weak_name_defers_to_midi.enc",      gen_v0c4_weak_name_defers_to_midi())
     write("structure_non_octave_key_keeps_clef.enc",       gen_v0c4_non_octave_key_keeps_clef())
     write("structure_g_clef_key0_stays_plain.enc",         gen_v0c4_g_clef_key0_stays_plain())
     write("structure_c_clef_key_keeps_clef.enc",           gen_v0c4_c_clef_key_keeps_clef())
