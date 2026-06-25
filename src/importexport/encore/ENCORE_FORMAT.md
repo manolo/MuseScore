@@ -1557,7 +1557,16 @@ round percentages (100 dominant, then 85/80/90/75 …) and dmPaperSize is domina
 - **Percussion MIDI program.** Percussion tracks always carry MIDI program 1 regardless of the
   actual kit. Identify the kit from the track name.
 - **Italian tempo terms.** Stored as STAFFTEXT elements, not as a dedicated tempo element.
-  TEMPO subtype (0x32) exists but is never emitted by Encore in practice.
+  The ORN TEMPO subtype (0x32), which carries a BPM at byte +30, IS used by some files for numeric
+  marks; when present that BPM is read. The MEAS header BPM (it persists on every measure, so it
+  always equals the active tempo) is the authoritative tempo position.
+- **Misplaced tempo ornaments.** The ORN TEMPO element's stored tick rarely matches where the
+  tempo actually applies. Two cases: (1) it can be stored several measures (often a full system)
+  before the measure whose header BPM changes — the ornament's BPM differs from the header BPM of
+  the measure it is stored in, and the real position is the later measure whose header BPM equals
+  it; (2) an initial tempo is stored at the END of measure 1 (after the notes) even though it is
+  measure 1's tempo — there its BPM equals that measure's header BPM. In both cases the authoritative
+  position is the measure START given by the matching header BPM, not the ornament's stored tick.
 - **Lyric voice byte.** Lyric voice = verse index (0-based), not a real voice assignment.
   All verses are anchored to voice-0 notes.
 - **Repeat-mark field.** Repeat type is the low byte only: `type = field & 0xFF`.
