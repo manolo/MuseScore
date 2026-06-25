@@ -39,7 +39,7 @@ bool isInstrumentMagic(const QString& magic)
 bool isKnownMagic(const QString& magic)
 {
     return magic == "LINE" || magic == "MEAS" || magic == "TITL" || magic == "TEXT"
-           || magic == "WINI" || isInstrumentMagic(magic);
+           || magic == "WINI" || magic == "PREC" || isInstrumentMagic(magic);
 }
 
 QString findNextKnownMagic(QDataStream& ds)
@@ -64,6 +64,38 @@ QString findNextKnownMagic(QDataStream& ds)
         magic.clear();
     }
     return magic;
+}
+
+// Parse a Windows DEVMODE (the PREC block) into page orientation, paper size and notation
+// scale. The device-name prefix is 32 bytes for an ANSI DEVMODE and 64 bytes (UTF-16) for a
+// Unicode one; the fixed fields follow at the same relative offsets. Detect the variant by
+// trying both bases and keeping the one whose dmOrientation is a valid 1 (portrait) or 2
+// (landscape); range-check the rest so a wrong base or an unusual driver blob is ignored.
+// See ENCORE_FORMAT.md §PREC block.
+static void parsePrecDevmode(const QByteArray& buf, EncPrintSetup& out)
+{
+    auto s16 = [&](int off) -> int {
+        if (off < 0 || off + 2 > buf.size()) {
+            return -1;
+        }
+        return static_cast<qint16>(static_cast<quint8>(buf[off])
+                                   | (static_cast<quint8>(buf[off + 1]) << 8));
+    };
+    for (int base : { 32, 64 }) {
+        const int orient = s16(base + 12);
+        const int paper  = s16(base + 14);
+        const int scale  = s16(base + 20);
+        if ((orient != 1 && orient != 2) || paper < 0) {
+            continue;
+        }
+        out.hasData     = true;
+        out.orientation = orient;
+        out.paperSize   = paper;
+        out.paperLength = s16(base + 16);
+        out.paperWidth  = s16(base + 18);
+        out.scale       = (scale > 0 && scale <= 400) ? scale : 0;
+        return;
+    }
 }
 
 void addSpannerEnds(std::vector<EncMeasure>& measures)
@@ -170,6 +202,14 @@ bool EncRoot::read(QDataStream& ds)
                 }
             } else {
                 ds.skipRawData(varSize);
+            }
+        } else if (nextId == "PREC") {
+            // PREC: a Windows DEVMODE carrying page orientation, paper size and notation scale.
+            QByteArray buf(static_cast<int>(varSize), '\0');
+            const int n = ds.readRawData(buf.data(), static_cast<int>(varSize));
+            if (n > 0) {
+                buf.resize(n);
+                parsePrecDevmode(buf, printSetup);
             }
         } else if (isInstrumentMagic(nextId)) {
             EncInstrument instr;

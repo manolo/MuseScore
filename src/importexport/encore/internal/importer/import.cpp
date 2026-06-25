@@ -198,7 +198,18 @@ static void logEncRootInfo(const EncRoot& enc)
                << "  (" << QString::number(ps.top / 72.0, 'f', 3).toStdString() << "\""
                << " / " << QString::number(ps.left / 72.0, 'f', 3).toStdString() << "\" margins)";
     } else {
-        LOGD() << "  WINI: absent — using MuseScore defaults";
+        LOGD() << "  WINI: absent — margins from MuseScore defaults";
+    }
+    const EncPrintSetup& pr = enc.printSetup;
+    if (pr.hasData) {
+        LOGD() << "  PREC: orientation=" << pr.orientation
+               << " (" << (pr.orientation == 2 ? "landscape" : "portrait") << ")"
+               << "  paperSize=" << pr.paperSize
+               << "  paper=" << pr.paperWidth << "x" << pr.paperLength << " (0.1mm)"
+               << "  scale/zoom=" << pr.scale << "%"
+               << "  [scale not applied: needs spatium mapping]";
+    } else {
+        LOGD() << "  PREC: absent — page size from WINI/defaults";
     }
     LOGD() << "--------------------------";
 }
@@ -231,7 +242,7 @@ static void applyStaffScale(MasterScore* score, const EncRoot& enc)
 // the QPageSize fractional value.  Without tolerance, A4 files with
 // bottomEdge=842 fall through to a non-A4 page (wrong size and margins).
 static bool detectPtsPageSize(qint32 rightEdge, qint32 bottomEdge,
-                               double& outWidthIn, double& outHeightIn)
+                              double& outWidthIn, double& outHeightIn)
 {
     static constexpr double kTol = 1.0;   // pts tolerance for metric rounding
     double bestArea = 1e18;
@@ -242,7 +253,7 @@ static bool detectPtsPageSize(qint32 rightEdge, qint32 bottomEdge,
         }
         const QSizeF sz = QPageSize::size(static_cast<QPageSize::PageSizeId>(id),
                                           QPageSize::Inch);
-        const double wPts = sz.width()  * 72.0;
+        const double wPts = sz.width() * 72.0;
         const double hPts = sz.height() * 72.0;
         if (wPts + kTol < static_cast<double>(rightEdge)
             || hPts + kTol < static_cast<double>(bottomEdge)) {
@@ -342,7 +353,67 @@ static bool detectWiniPageSize(int pageWUnits, int pageHUnits,
     return found;
 }
 
-static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
+// Map a Windows DEVMODE dmPaperSize (DMPAPER_*) to a Qt page size. Returns Custom for
+// values without a standard mapping; the caller then falls back to dmPaperLength/Width or
+// to the WINI geometry heuristic.
+static QPageSize::PageSizeId dmPaperToQt(int dmPaper)
+{
+    switch (dmPaper) {
+    case 1:  return QPageSize::Letter;
+    case 5:  return QPageSize::Legal;
+    case 7:  return QPageSize::Executive;
+    case 8:  return QPageSize::A3;
+    case 9:  return QPageSize::A4;
+    case 11: return QPageSize::A5;
+    case 12: return QPageSize::B4;     // DMPAPER_B4 (JIS)
+    case 13: return QPageSize::B5;     // DMPAPER_B5 (JIS)
+    default: return QPageSize::Custom;
+    }
+}
+
+// Apply page size, orientation and notation scale from the PREC (DEVMODE) block. Returns
+// true when the page size was set (so the WINI margin pass must not override it). PREC is
+// present in almost every Encore file across all formats, while WINI (margins) exists only
+// in v0xC4 — so this is the primary source of the page size for v0xA6/v0xC2 and for the
+// many v0xC4 files without a WINI block.
+static bool applyPagePrintSetup(MasterScore* score, const EncPrintSetup& pr)
+{
+    if (!pr.hasData) {
+        return false;
+    }
+    double wIn = 0.0, hIn = 0.0;
+    const QPageSize::PageSizeId id = dmPaperToQt(pr.paperSize);
+    if (id != QPageSize::Custom) {
+        const QSizeF sz = QPageSize::size(id, QPageSize::Inch);
+        wIn = sz.width();
+        hIn = sz.height();
+    } else if (pr.paperLength > 0 && pr.paperWidth > 0) {
+        // dmPaperLength/Width are in tenths of a millimetre.
+        wIn = pr.paperWidth / 254.0;
+        hIn = pr.paperLength / 254.0;
+    } else {
+        return false;   // unknown paper: let the WINI geometry heuristic decide
+    }
+    if (pr.orientation == 2) {   // DMORIENT_LANDSCAPE
+        std::swap(wIn, hIn);
+    }
+    score->style().set(Sid::pageWidth,  wIn);
+    score->style().set(Sid::pageHeight, hIn);
+    // NOT IMPLEMENTED: dmScale (the score "Zoom" / notation-size percent the user sets in Encore)
+    // is parsed and logged but not applied. MuseScore has no global percentage scale; the closest
+    // equivalent is the page "Staff space" (spatium), expressed in inches/mm, not a percent. Applying
+    // dmScale would mean converting the percent into a spatium reduction factor and reconciling it
+    // with the per-staff size from applyStaffScale (Pid::MAG), which would otherwise compound. That
+    // mapping needs investigation, so for now the value is only surfaced in the debug log.
+    LOGD() << "  PREC: orientation=" << pr.orientation << " paperSize=" << pr.paperSize
+           << " paper=" << pr.paperWidth << "x" << pr.paperLength << "(0.1mm)"
+           << " scale(zoom)=" << pr.scale << "%"
+           << " -> " << QString::number(wIn, 'f', 2).toStdString()
+           << "x" << QString::number(hIn, 'f', 2).toStdString() << "in";
+    return true;
+}
+
+static void applyPageMargins(MasterScore* score, const EncPageSetup& ps, bool pageSizeLocked)
 {
     if (!ps.hasData) {
         return;
@@ -364,21 +435,25 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
     // fractional pts (A4 297mm = 841.89pt → stored as 842) so the integer
     // WINI value can exceed floor(pageH*72) by 1 without being screen-pixels.
     static constexpr double kPixelTol = 1.0;
-    const bool screenPixelFmt = (ps.rightEdge  > static_cast<qint32>(pageWIn * 72.0 + kPixelTol))
+    const bool screenPixelFmt = (ps.rightEdge > static_cast<qint32>(pageWIn * 72.0 + kPixelTol))
                                 || (ps.bottomEdge > static_cast<qint32>(pageHIn * 72.0 + kPixelTol));
     double scaleUpi = 72.0;
     if (screenPixelFmt) {
         const int pageWUnits = ps.rightEdge + ps.left;
         const int pageHUnits = ps.bottomEdge + ps.top;
-        double detectedW = 0.0, detectedH = 0.0;
-        if (detectWiniPageSize(pageWUnits, pageHUnits, detectedW, detectedH)) {
-            pageWIn  = detectedW;
-            pageHIn  = detectedH;
-            score->style().set(Sid::pageWidth,  pageWIn);
-            score->style().set(Sid::pageHeight, pageHIn);
+        // Only let the WINI geometry heuristic set the page size when PREC did not already
+        // provide it (PREC dmPaperSize is a direct enum and more reliable than geometry).
+        if (!pageSizeLocked) {
+            double detectedW = 0.0, detectedH = 0.0;
+            if (detectWiniPageSize(pageWUnits, pageHUnits, detectedW, detectedH)) {
+                pageWIn  = detectedW;
+                pageHIn  = detectedH;
+                score->style().set(Sid::pageWidth,  pageWIn);
+                score->style().set(Sid::pageHeight, pageHIn);
+            }
         }
         scaleUpi = static_cast<double>(pageWUnits) / pageWIn;
-    } else {
+    } else if (!pageSizeLocked) {
         double detectedW = 0.0, detectedH = 0.0;
         if (detectPtsPageSize(ps.rightEdge, ps.bottomEdge, detectedW, detectedH)) {
             pageWIn  = detectedW;
@@ -397,7 +472,7 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps)
     LOGD() << "  enc margins (in): T=" << QString::number(topIn,  'f', 3).toStdString()
            << "  L=" << QString::number(leftIn, 'f', 3).toStdString()
            << "  R=" << QString::number(pageWIn - leftIn - printW, 'f', 3).toStdString()
-           << "  B=" << QString::number(pageHIn - topIn  - printH, 'f', 3).toStdString()
+           << "  B=" << QString::number(pageHIn - topIn - printH, 'f', 3).toStdString()
            << "  paper=" << QString::number(pageWIn * 25.4, 'f', 1).toStdString()
            << "x" << QString::number(pageHIn * 25.4, 'f', 1).toStdString() << "mm"
            << (screenPixelFmt ? "  [pixels]" : "  [pts]");
@@ -465,7 +540,8 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
 
     LOGD() << "  importPageLayout=" << (ctx.opts.importPageLayout ? "true" : "false");
     if (ctx.opts.importPageLayout) {
-        applyPageMargins(score, enc.pageSetup);
+        const bool sizeFromPrec = applyPagePrintSetup(score, enc.printSetup);
+        applyPageMargins(score, enc.pageSetup, sizeFromPrec);
     }
     if (ctx.opts.importStaffSize) {
         applyStaffScale(score, enc);

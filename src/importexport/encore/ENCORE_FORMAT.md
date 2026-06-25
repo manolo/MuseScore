@@ -1491,6 +1491,40 @@ final:     chd_tick itself
 
 ---
 
+## PREC block (page setup / printer DEVMODE)
+
+Magic: `PREC`. Variable size (132 bytes to several KiB). The content is a Windows
+**DEVMODE** structure (the printer/page-setup state). It is the page-setup source for the
+score and is present in almost every file across all three formats, while the WINI block
+(margins) exists only in v0xC4. So the page **size**, **orientation** and **notation scale**
+come from PREC even for v0xA6/v0xC2 and for the many v0xC4 files that have no WINI.
+
+The DEVMODE begins with a fixed device-name field followed by the standard fixed fields. Two
+variants occur and must be distinguished:
+
+- **ANSI** DEVMODE: device name is 32 bytes. Fixed fields start at offset 32. Seen in v0xA6
+  and v0xC2 (e.g. an old "Canon BJ-200" driver).
+- **Unicode** DEVMODE: device name is 64 bytes (32 UTF-16 code units, so even bytes are `00`
+  for an ASCII name). Fixed fields start at offset 64. Seen in v0xC4 (e.g. "Microsoft Print
+  to PDF").
+
+Relative to the field base (32 for ANSI, 64 for Unicode), the relevant fields are:
+
+| Offset (from base) | Field          | Meaning                                                        |
+|--------------------|----------------|----------------------------------------------------------------|
+| +12                | dmOrientation  | 1 = portrait, 2 = landscape                                     |
+| +14                | dmPaperSize    | DMPAPER_* enum: 1=Letter, 5=Legal, 7=Executive, 8=A3, 9=A4, 11=A5, 12=B4, 13=B5 |
+| +16                | dmPaperLength  | tenths of a millimetre (custom sizes only; 0 for standard)     |
+| +18                | dmPaperWidth   | tenths of a millimetre (custom sizes only; 0 for standard)     |
+| +20                | dmScale        | the score **Zoom** / notation-size percent the user sets in Encore (100 = default) |
+
+Detect the variant by reading dmOrientation at both bases and keeping the one that is 1 or 2;
+range-check the rest. When dmPaperSize is a standard value, use it directly for the page size;
+when it is custom/unknown (e.g. 0, 164, 256) fall back to dmPaperLength/Width, then to the WINI
+geometry. Validated across the corpus (12,055 files): dmScale shows a clean distribution of
+round percentages (100 dominant, then 85/80/90/75 …) and dmPaperSize is dominated by 9 (A4) and
+1 (Letter), confirming these are real user-set values.
+
 ## Known quirks
 
 - **Encore 5.0.2 instrument names.** TK block headers may be absent while the name is still present
