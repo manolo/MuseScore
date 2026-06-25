@@ -461,6 +461,51 @@ TEST_F(Tst_Text, orn_tempo_compound_meter_dotted_quarter_bpm)
 }
 
 // ===========================================================================
+// FIX: an ORN TEMPO is anchored in Encore to a note's tick but drawn (via a
+// smaller xoffset) over the earlier downbeat rest. The importer placed the
+// TempoText on the later note instead of the downbeat; it must snap the mark to
+// the chord-rest whose xoffset matches its drawn position, like dynamics do.
+// Fixture: 5/8 (beatTicks=120). Dotted-quarter REST at tick 0 (xoff 0), quarter
+// NOTE at tick 360 (xoff 67). ORN TEMPO=63 at tick 360 with xoffset=48 (left of
+// the note) belongs to the downbeat rest.
+// Expected: one TempoText at the measure downbeat (rtick 0), value quarter=63.
+// Before the fix it sat on the note at tick 360 (rtick 3/8).
+// ===========================================================================
+TEST_F(Tst_Text, orn_tempo_snaps_to_downbeat_by_xoffset)
+{
+    MasterScore* score = readEncoreScore("text_tempo_orn_xoffset_downbeat.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    TempoText* tt = nullptr;
+    Segment* host = nullptr;
+    for (MeasureBase* mb = score->first(); mb && !tt; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s && !tt; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isTempoText()) {
+                    tt = toTempoText(e);
+                    host = s;
+                    break;
+                }
+            }
+        }
+    }
+    ASSERT_NE(tt, nullptr) << "No TempoText found in score";
+    EXPECT_TRUE(host->rtick().isZero())
+        << "Tempo ORN must snap to the downbeat rest (rtick 0), not the later note; got rtick "
+        << host->rtick().toString().toStdString();
+    EXPECT_NEAR(tt->tempo().val, 63.0 / 60.0, 1e-6)
+        << "5/8 is not compound: ORN TEMPO=63 means quarter=63 (BPS 1.05)";
+    EXPECT_EQ(tt->xmlText(), u"<sym>metNoteQuarterUp</sym> = 63")
+        << "Simple-meter tempo must display quarter=63";
+
+    delete score;
+}
+
+// ===========================================================================
 // BUG FIX: MEAS-header and ORN tempo texts used a raw Unicode note symbol
 // (U+2669 "♩") in their xmlText.  TempoText::updateTempo() matches against
 // TempoPattern strings that use <sym>metNoteQuarterUp</sym>, so the Unicode
