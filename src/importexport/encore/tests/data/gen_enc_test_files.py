@@ -7354,6 +7354,61 @@ def gen_v0c4_multiinstr_compact_routing():
 
 
 # ===========================================================================
+# structure_sco5_macos.enc
+# SCO5 is the big-endian macOS Encore 5 format. Its PREC block is a macOS
+# NSPrintInfo XML plist (paper/orientation/scale), and it does not store document
+# margins anywhere importable. The importer reads page size + orientation from the
+# plist and forces zero margins (Encore lays these scores edge to edge).
+# Fixture: minimal SCO5 file, Letter portrait plist, one 4/4 measure.
+# Expected: page 8.5 x 11 in, all margins 0.
+# ===========================================================================
+def gen_sco5_macos_page_setup():
+    def be(fmt, *a):
+        return struct.pack('>' + fmt, *a)
+
+    h = bytearray(194)
+    h[0:4] = b'SCO5'
+    h[4] = 0                                  # chuMagio -> default v0xC4 reader
+    struct.pack_into('>H', h, 0x28, 0x0420)   # chuVersio = Encore 5
+    struct.pack_into('>h', h, 0x2E, 1)        # lineCount
+    struct.pack_into('>h', h, 0x30, 1)        # pageCount
+    h[0x32] = 1                               # instrumentCount
+    h[0x33] = 1                               # staffPerSystem
+    struct.pack_into('>h', h, 0x34, 1)        # measureCount
+    h[0x52] = 4                               # scoreSize (default)
+
+    # LINE: skip10 + start(u16) + measureCount(u8) + one 30-byte staff entry.
+    line = bytearray(10) + be('H', 0) + bytes([1])
+    staff = bytearray(30)
+    staff[19] = 1                             # show staff (clef@14=0=G, instrStaffIdx@21=0)
+    line += staff
+    line_blk = b'LINE' + be('I', len(line)) + bytes(line)
+
+    # MEAS: 0x36 header (4/4, beatTicks=240) + one quarter note + end marker.
+    mh = bytearray(0x36)
+    struct.pack_into('>H', mh, 0, 100)        # bpm
+    struct.pack_into('>H', mh, 4, 240)        # beatTicks
+    struct.pack_into('>H', mh, 6, 960)        # durTicks
+    mh[8] = 4
+    mh[9] = 4
+    nd = bytearray(25)
+    nd[0] = 28        # element size
+    nd[2] = 3         # faceValue = quarter
+    nd[12] = 60       # pitch
+    note = be('H', 0) + bytes([0x90]) + bytes(nd)   # tick=0, typeVoice=NOTE|voice0
+    elems = bytes(note) + b'\xff\xff'
+    meas_blk = b'MEAS' + be('I', len(elems)) + bytes(mh) + elems
+
+    plist = (b'<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict>\n'
+             b'<key>com.apple.print.PageFormat.PMOrientation</key><integer>1</integer>\n'
+             b'<key>PMTiogaPaperName</key><string>na-letter</string>\n'
+             b'</dict></plist>\n')
+    prec_blk = b'PREC' + be('I', len(plist)) + plist
+
+    return bytes(h) + line_blk + meas_blk + prec_blk
+
+
+# ===========================================================================
 # ornaments_v0c2_same_measure_slur_no_cross.enc
 # Regression: v0xC2 slur starting mid-measure must end within the same measure,
 # not cross to the next. The cross-measure extension must not fire when there is
@@ -8411,6 +8466,7 @@ if __name__=='__main__':
     write("zbot_from_bazo.enc",                 gen_zbot_from_bazo())
     write("sintetico_all_features.enc",          gen_sintetico_all_features())
     write("notes_multiinstr_compact_routing.enc", gen_v0c4_multiinstr_compact_routing())
+    write("structure_sco5_macos.enc",             gen_sco5_macos_page_setup())
     write("text_lyrics_grandstaff_routed_notes.enc", gen_v0c4_lyrics_grandstaff_routed_notes())
     write("importer_inner_tuplet_note_level_cap.enc", gen_v0c4_inner_tuplet_note_level_cap())
     write("importer_score_size2.enc", set_score_size(assemble(0xC4, [(meas_hdr(4, 4),

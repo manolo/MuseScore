@@ -22,6 +22,8 @@
 
 #include "elem.h"
 
+#include <QRegularExpression>
+
 #include "readers.h"
 
 namespace mu::iex::enc {
@@ -96,6 +98,58 @@ static void parsePrecDevmode(const QByteArray& buf, EncPrintSetup& out)
         out.scale       = (scale > 0 && scale <= 400) ? scale : 0;
         return;
     }
+}
+
+// SCO5 (macOS Encore 5) stores the PREC page setup as an NSPrintInfo XML plist
+// rather than a Windows DEVMODE. Pull orientation, paper size and notation scale
+// from it; the page margins are NOT in this block (the plist only carries the
+// printer's imageable rects, not Encore's document margins).
+bool parsePrecPlist(const QByteArray& buf, EncPrintSetup& out)
+{
+    const QString s = QString::fromUtf8(buf);
+    if (!s.contains("PMOrientation") && !s.contains("PaperName")) {
+        return false;
+    }
+    auto firstMatch = [&](const QString& pattern) -> QString {
+        QRegularExpression re(pattern);
+        QRegularExpressionMatch m = re.match(s);
+        return m.hasMatch() ? m.captured(1) : QString();
+    };
+
+    // Value entries put the data tag immediately after the key (the dict wrappers do not).
+    const int orient = firstMatch(QStringLiteral("PMOrientation</key>\\s*<integer>(-?\\d+)</integer>")).toInt();
+    const double scaling = firstMatch(QStringLiteral("PMScaling</key>\\s*<real>([-0-9.]+)</real>")).toDouble();
+    QString paper = firstMatch(QStringLiteral("PMTiogaPaperName</key>\\s*<string>([^<]+)</string>"));
+    if (paper.isEmpty()) {
+        paper = firstMatch(QStringLiteral("PMPaperName</key>\\s*<string>([^<]+)</string>"));
+    }
+
+    const QString p = paper.toLower();
+    int paperCode = 0;
+    if (p.contains("a4")) {
+        paperCode = 9;
+    } else if (p.contains("a3")) {
+        paperCode = 8;
+    } else if (p.contains("a5")) {
+        paperCode = 11;
+    } else if (p.contains("legal")) {
+        paperCode = 5;
+    } else if (p.contains("letter")) {
+        paperCode = 1;
+    }
+
+    if (paperCode == 0 && orient != 1 && orient != 2) {
+        return false;
+    }
+    out.hasData     = true;
+    out.orientation = (orient == 1 || orient == 2) ? orient : 1;
+    out.paperSize   = paperCode;
+    out.paperLength = 0;
+    out.paperWidth  = 0;
+    // PMScaling is a fraction (1.2 = 120%); store as a percent like dmScale.
+    out.scale       = (scaling > 0.0 && scaling <= 4.0)
+                      ? static_cast<int>(scaling * 100.0 + 0.5) : 0;
+    return true;
 }
 
 void addSpannerEnds(std::vector<EncMeasure>& measures)
@@ -204,12 +258,17 @@ bool EncRoot::read(QDataStream& ds)
                 ds.skipRawData(varSize);
             }
         } else if (nextId == "PREC") {
-            // PREC: a Windows DEVMODE carrying page orientation, paper size and notation scale.
+            // PREC carries page orientation, paper size and notation scale. SCOW stores it as a
+            // Windows DEVMODE; SCO5 (macOS Encore 5) stores it as an NSPrintInfo XML plist.
             QByteArray buf(static_cast<int>(varSize), '\0');
             const int n = ds.readRawData(buf.data(), static_cast<int>(varSize));
             if (n > 0) {
                 buf.resize(n);
-                parsePrecDevmode(buf, printSetup);
+                if (buf.startsWith("<?xml") || buf.contains("<plist")) {
+                    parsePrecPlist(buf, printSetup);
+                } else {
+                    parsePrecDevmode(buf, printSetup);
+                }
             }
         } else if (isInstrumentMagic(nextId)) {
             EncInstrument instr;

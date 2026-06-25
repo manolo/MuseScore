@@ -189,6 +189,10 @@ struct EncPrintSetup {
     int scale        { 0 };   // dmScale: notation/print scale percent (100 = default)
 };
 
+// Parse the SCO5 (macOS Encore 5) NSPrintInfo XML plist found in the PREC block into
+// orientation / paper size / scale. Returns false when the buffer is not a usable plist.
+bool parsePrecPlist(const QByteArray& buf, EncPrintSetup& out);
+
 struct EncRoot {
     EncHeader header;
     std::vector<EncInstrument> instruments;
