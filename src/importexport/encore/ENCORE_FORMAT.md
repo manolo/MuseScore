@@ -565,7 +565,12 @@ Type 5. Variable size. Offsets from element start:
 | 0x1E    | STAFFTEXT     | text from TEXT block at entry index +32                                          |
 | 0x21    | SLURSTART     | slur; endpoint encoded by alMezuro and xoffset2                                  |
 | 0x22    | ARPEGGIO      | chord arpeggio                                                                   |
-| 0x32    | TEMPO         | tempo; BPM at +30 (reserved, unused — tempo travels as STAFFTEXT)                |
+| 0x32    | TEMPO         | tempo mark; BPM at +30 (quarter-note BPM, or dotted-quarter BPM in compound      |
+|         |               | meter). Placement: like dynamics, the mark is anchored to a note's tick but      |
+|         |               | drawn at its own `xoffset`. When that xoffset sits to the left of the note at    |
+|         |               | the encoded tick, the mark belongs to the earlier chord-rest at that x-position  |
+|         |               | (often the downbeat rest), so it snaps backward to that chord-rest rather than   |
+|         |               | staying on the later note.                                                        |
 | 0x35    | TRILL_END     | end of trill+wavy-line span; no visible glyph. Consumed as span endpoint.        |
 | 0x36    | TRILL_START   | trill span start (tr + wavy line) when 0x35 or      |
 |         |               | `alMezuro>0` is present; otherwise falls back to Ornament glyph.                |

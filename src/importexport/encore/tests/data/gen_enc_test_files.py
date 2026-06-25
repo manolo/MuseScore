@@ -3855,6 +3855,33 @@ def gen_v0c4_meas_bpm_suppressed_by_orn_tempo_later_tick():
 
 
 # ===========================================================================
+# text_tempo_orn_xoffset_downbeat.enc
+# BUG FIX: an ORN TEMPO is anchored in Encore to a note's tick but drawn (via a
+# smaller xoffset) to the LEFT of that note, over the earlier downbeat rest. The
+# importer placed the TempoText on the later note instead of the downbeat. It
+# must snap the mark to the chord-rest whose xoffset matches its drawn position,
+# exactly as dynamics already do.
+# Fixture: 5/8 (beatTicks=120). Dotted-quarter REST at tick 0 (xoff 0), quarter
+# NOTE at tick 360 (xoff 67). ORN TEMPO=63 stored at tick 360 with xoffset=48
+# (left of the note) -> belongs to the downbeat rest. Header bpm=0 so only the
+# ORN places a tempo.
+# Expected: one TempoText at the measure downbeat (rtick 0), value quarter=63;
+# the bug placed it on the note at tick 360 (3/8).
+# ===========================================================================
+def gen_v0c4_tempo_orn_xoffset_downbeat():
+    orn = bytearray(ornament_v0c4(360, 0, 0, tipo=0x32, xoffset=48))
+    orn[30] = 63        # ORN TEMPO=63 (quarter BPM in 5/8, a non-compound meter)
+    e  = rest_v0c4(0, 0, 0, fv=3)                       # dotted-quarter rest at downbeat
+    e += note_v0c4_xoff(360, 0, 0, fv=3, pitch=60, xoff=67)  # quarter note, drawn right of ORN
+    e += bytes(orn)
+    e += end_marker()
+    pre  = set_chumagio(0xC4)
+    body = meas_block(meas_hdr(5, 8, bpm=0, beatTicks=120), e)
+    body += b''.join(meas_block(meas_hdr(5, 8, bpm=0, beatTicks=120), end_marker()) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
+# ===========================================================================
 # text_orn_tempo_mismatch_suppressed.enc
 # BUG FIX: ORN TEMPO ornaments stored in the wrong measure (one system before
 # their intended position due to Encore's visual layout) carry a BPM that
@@ -8123,6 +8150,7 @@ if __name__=='__main__':
     write("text_orn_tempo_3_8_dotted_quarter.enc",              gen_v0c4_orn_tempo_3_8_dotted_quarter())
     write("text_meas_bpm_suppressed_by_orn_tempo_later_tick.enc", gen_v0c4_meas_bpm_suppressed_by_orn_tempo_later_tick())
     write("text_orn_tempo_mismatch_suppressed.enc",             gen_v0c4_orn_tempo_mismatch_suppressed())
+    write("text_tempo_orn_xoffset_downbeat.enc",                gen_v0c4_tempo_orn_xoffset_downbeat())
     write("text_orn_tempo_misplaced_multi_measure.enc",         gen_v0c4_orn_tempo_misplaced_multi_measure())
     write("text_orn_tempo_equals_header.enc",                   gen_v0c4_orn_tempo_equals_header_at_start())
     write("notes_rdur_80_stays_16th.enc",         gen_v0c4_rdur_80_stays_16th())

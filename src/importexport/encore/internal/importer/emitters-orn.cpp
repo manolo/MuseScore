@@ -308,7 +308,13 @@ static void handleTempoOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
             // Not misplaced: the ORN is the genuine score marking; fall through to use it.
         }
 
-        Segment* seg = measure->getSegment(SegmentType::ChordRest, elemTick);
+        // Encore anchors a tempo mark to a note's tick but draws the glyph at an xoffset that
+        // may sit to the LEFT of that note, over an earlier downbeat rest. Snap to the chord-rest
+        // whose xoffset matches the drawn position (same logic as dynamics), so the tempo lands on
+        // the rest it visually governs rather than the later note.
+        Fraction placeTick = snapTickByXoffset(elemTick, static_cast<int>(eo->tick),
+                                               encMeas, ec.staffIdx, eo, measTick);
+        Segment* seg = measure->getSegment(SegmentType::ChordRest, placeTick);
         if (!seg) {
             seg = measure->getSegment(SegmentType::ChordRest, measTick);
         }
@@ -325,7 +331,7 @@ static void handleTempoOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
         tt2->setXmlText(tempoXmlText(static_cast<int>(eo->tempo), displayBeatTicks));
         tt2->setFollowText(true);
         seg->add(tt2);
-        score->setTempo(elemTick, BeatsPerSecond(bps));
+        score->setTempo(seg->tick(), BeatsPerSecond(bps));
     }
 }
 
