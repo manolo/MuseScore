@@ -59,10 +59,13 @@ void enqueueLyric(BuildCtx& ctx, const EncLyric* el, track_idx_t track)
 // Uses a "lyrics-first" greedy assignment: for each syllable in tick order, claim
 // the nearest available note within the threshold, so later syllables cannot steal
 // the note from an earlier one.
-void attachPendingLyrics(BuildCtx& ctx, Measure* measure,
-                         const EncMeasure& encMeas, Fraction measTick)
+void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
 {
-    // Build a sorted list of Encore NOTE encTicks for each staff/voice, so the
+    Measure* measure = mc.measure;
+    const EncMeasure& encMeas = *mc.encMeas;
+    const Fraction measTick = mc.measTick;
+
+    // Build a sorted list of Encore NOTE encTicks for each MuseScore staff, so the
     // segEncTick lookup uses the actual Encore tick of each note rather than a
     // conversion of the MuseScore cumTick.  The cumTick-to-encTick conversion is
     // unreliable because the note loop accumulates durations (not Encore ticks),
@@ -70,31 +73,34 @@ void attachPendingLyrics(BuildCtx& ctx, Measure* measure,
     // the Encore tick grid (e.g. v0xC4 6/8 with beatTicks=240, lyric offset=51
     // while the first note is at encTick=0).
     //
-    // encNoteTicksByTrack[track] = sorted list of Encore ticks for NOTE elements on
-    // that (staffIdx, voice) combination, populated from encMeas.elements.
-    std::map<track_idx_t, std::vector<int> > encNoteTicksByTrack;
+    // The note is routed to its MuseScore (staff, voice) with the SAME logic as the
+    // note loop (routeElementStaffVoice).  This matters for grand staves: a note can
+    // reach a lower staff either via staffWithin (raw-byte slot) or via the voice>=VOICES
+    // case, and a lyric can reach that staff by a different mechanism.  Keying the tick
+    // list by raw encStaff (instead of the routed staff) put the lyrics' notes on the
+    // wrong staff and reversed the syllables.  encNoteTicksByStaff[msStaff] holds the
+    // Encore ticks of the voice-0 notes that the note loop routed to that MuseScore staff.
+    std::map<int, std::vector<int> > encNoteTicksByStaff;
     for (const auto& elem : encMeas.elements) {
         const EncMeasureElem* e = elem.get();
         if (e->type != static_cast<quint8>(EncElemType::NOTE)) {
             continue;
         }
-        const int encStaff = static_cast<int>(e->staffIdx);
-        const int encVoice = static_cast<int>(e->voice);
-        // In the note loop, the MuseScore staffIdx is derived via lineSlotByRawByte
-        // which maps the raw staff byte to a slot.  For the bass staff
-        // (staffWithin=1), voice remapping subtracts vBase.  For lyrics (always
-        // staff 0 of the lyric track), match against voice 0 of each staff slot.
-        for (auto& [lyTrack, _entries] : ctx.pendingLyrics) {
-            const int lyStaff = static_cast<int>(lyTrack) / VOICES;
-            // Accept notes with encStaff == lyStaff (raw staffIdx) and any voice;
-            // de-duplication of chords at the same encTick is handled below.
-            if (encStaff == lyStaff && encVoice == 0) {
-                auto& tickList = encNoteTicksByTrack[lyTrack];
-                const int t = static_cast<int>(e->tick);
-                if (tickList.empty() || tickList.back() != t) {
-                    tickList.push_back(t);
-                }
-            }
+        int rStaff = 0, rVoice = 0, rMsVoice = 0;
+        track_idx_t rTrack = 0;
+        std::pair<int, int> rTrackKey, rEncVoiceKey;
+        if (!mc.lineSlotByRawByte
+            || !routeElementStaffVoice(e, /*isNoteOrRest*/ true, *mc.lineSlotByRawByte, mc, ctx,
+                                       rStaff, rVoice, rMsVoice, rTrack, rTrackKey, rEncVoiceKey)) {
+            continue;
+        }
+        if (rMsVoice != 0) {
+            continue;   // lyrics anchor to voice-0 chords
+        }
+        auto& tickList = encNoteTicksByStaff[rStaff];
+        const int t = static_cast<int>(e->tick);
+        if (tickList.empty() || tickList.back() != t) {
+            tickList.push_back(t);
         }
     }
 
@@ -120,8 +126,8 @@ void attachPendingLyrics(BuildCtx& ctx, Measure* measure,
         // proportional when note durations don't align with the Encore tick grid.
         const std::vector<int>* noteTickList = nullptr;
         {
-            auto it = encNoteTicksByTrack.find(lyTrack);
-            if (it != encNoteTicksByTrack.end() && !it->second.empty()) {
+            auto it = encNoteTicksByStaff.find(lyStaffIdx);
+            if (it != encNoteTicksByStaff.end() && !it->second.empty()) {
                 noteTickList = &it->second;
             }
         }
