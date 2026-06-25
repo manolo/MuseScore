@@ -103,6 +103,42 @@ void applyConcertPitch(Note* n, int semitone)
     n->setTpcFromPitch();
 }
 
+// score->spell() re-spells the whole score with a context-based heuristic that mishandles
+// transposing instruments: it can spell concert pitches with double-flats (e.g. a concert E in
+// A major rendered as a written double-flat) instead of the plain note the key wants. After
+// spell(), re-derive the TPC of notes on TRANSPOSING staves from the sounding pitch + concert key
+// + staff transposition (which honours the key); the pitch is unchanged. Non-transposing staves
+// keep spell()'s result, which is correct for them.
+static void respellTransposingStaves(MasterScore* score)
+{
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        Measure* m = toMeasure(mb);
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (track_idx_t t = 0; t < score->ntracks(); ++t) {
+                EngravingItem* e = s->element(t);
+                if (!e || !e->isChord()) {
+                    continue;
+                }
+                Chord* chord = toChord(e);
+                if (!chord->staff() || chord->staff()->transpose(chord->tick()).isZero()) {
+                    continue;   // non-transposing staff: keep spell()'s spelling
+                }
+                for (Chord* gc : chord->graceNotes()) {
+                    for (Note* n : gc->notes()) {
+                        n->setTpcFromPitch();
+                    }
+                }
+                for (Note* n : chord->notes()) {
+                    n->setTpcFromPitch();
+                }
+            }
+        }
+    }
+}
+
 // Derive display size (1-4) for a given instrument index.
 // LINE staff entry byte +13 (0-indexed 0-3) holds per-instrument size in both 4.x and 5.x.
 // header.scoreSize (byte 0x52) is a global fallback for files without LINE data.
@@ -579,6 +615,7 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     resolveAll(ctx);
 
     score->spell();
+    respellTransposingStaves(score);
     addTitleFrame(score, enc.titleBlock);
     score->setUpTempoMap();
     score->doLayout();

@@ -1596,3 +1596,15 @@ round percentages (100 dominant, then 85/80/90/75 …) and dmPaperSize is domina
     a plain clef and the octave is stored as a playback transposition on the instrument, so the
     notes stay at their written height. Octave-up (8va) clefs are not produced, because they are
     rare and Encore itself shows these instruments with a plain clef.
+- **Note spelling on transposing staves.** Encore stores only the sounding pitch plus the Key
+  offset, not an explicit enharmonic spelling. After all pitches are placed, the importer runs a
+  context-based re-speller across the whole score to choose readable accidentals. That heuristic
+  works on the written pitches and, on a transposing staff whose written key is far on the flat
+  side while the concert key is sharp (for example a part that sounds in A major, three sharps, but
+  is written in E flat major, three flats, when transposed up an augmented fourth), it drifts a
+  whole melody to double-flats: concert E, B and G sharp come out as F flat, C flat and A flat with
+  the written notes shown as C double-flat, G double-flat and E double-flat. A single isolated note
+  is spelled correctly, so the drift only appears with a run of notes. The importer corrects this
+  by re-deriving the pitch class of every note on a transposing staff from its sounding pitch and
+  the staff's concert key after the global re-spell; non-transposing staves keep the re-speller's
+  result. The audible pitch is never changed, only the written accidental.
