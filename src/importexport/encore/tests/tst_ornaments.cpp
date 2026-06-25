@@ -1169,7 +1169,6 @@ TEST_F(Tst_Ornaments, new_artic_bytes_stopped_inverted_turn_half_stopped)
     ASSERT_NE(m, nullptr);
 
     auto articsOnNote = [&](int noteIdx) {
-        int count = 0;
         Segment* seg = m->first(SegmentType::ChordRest);
         for (int i = 0; i < noteIdx && seg; ++i) {
             seg = seg->next(SegmentType::ChordRest);
