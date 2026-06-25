@@ -527,6 +527,32 @@ TEST_F(Tst_Structure, time_sig_change_6_8_to_3_4_and_back)
     delete score;
 }
 
+// Page size from the PREC (DEVMODE) block. dmPaperSize is a direct enum, so it is the primary
+// page-size source for all formats (v0xA6/v0xC2 have no WINI, and many v0xC4 files lack it).
+// Unicode DEVMODE variant (32-WCHAR device name): dmPaperSize=1 (Letter).
+TEST_F(Tst_Structure, page_size_from_prec_letter_unicode)
+{
+    MasterScore* score = readEncoreScore("structure_prec_page_letter.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_NEAR(score->style().styleD(Sid::pageWidth),  8.5,  0.02)
+        << "PREC dmPaperSize=1 must set Letter width";
+    EXPECT_NEAR(score->style().styleD(Sid::pageHeight), 11.0, 0.02)
+        << "PREC dmPaperSize=1 must set Letter height";
+    delete score;
+}
+
+// ANSI DEVMODE variant (32-byte device name): dmPaperSize=8 (A3 = 297x420mm).
+TEST_F(Tst_Structure, page_size_from_prec_ansi_a3)
+{
+    MasterScore* score = readEncoreScore("structure_prec_page_a3.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_NEAR(score->style().styleD(Sid::pageWidth),  297.0 / 25.4, 0.03)
+        << "ANSI PREC dmPaperSize=8 must set A3 width";
+    EXPECT_NEAR(score->style().styleD(Sid::pageHeight), 420.0 / 25.4, 0.03)
+        << "ANSI PREC dmPaperSize=8 must set A3 height";
+    delete score;
+}
+
 // ===========================================================================
 // BUG regression: Fraction(2,2)==Fraction(4,4) via cross-multiplication
 // (2x4 == 4x2 = 8), so the 2/2 -> 4/4 change was silently swallowed by the

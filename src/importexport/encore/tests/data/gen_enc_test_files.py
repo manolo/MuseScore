@@ -4742,6 +4742,46 @@ def gen_v0c4_name_split_on_separator():
     return pre + body + SKELETON_POST
 
 
+def _set_prec(post, paper, orient=1, scale=100, ansi=False):
+    """Return SKELETON_POST with its PREC (DEVMODE) page fields overridden.
+    The skeleton PREC is a Unicode DEVMODE (name 64 bytes); ansi=True instead replaces the
+    block with a 32-byte-name ANSI DEVMODE so both parser variants are exercised."""
+    post = bytearray(post)
+    o = post.find(b'PREC')
+    vs = struct.unpack('<I', post[o + 4:o + 8])[0]
+    c = o + 8
+    if ansi:
+        base = 32
+        content = bytearray(64)
+        content[0:8] = b'AnsiPrn\x00'
+        struct.pack_into('<h', content, base + 12, orient)
+        struct.pack_into('<h', content, base + 14, paper)
+        struct.pack_into('<h', content, base + 20, scale)
+        newblk = b'PREC' + struct.pack('<I', len(content)) + bytes(content)
+        return bytes(post[:o]) + newblk + bytes(post[o + 8 + vs:])
+    base = 64
+    struct.pack_into('<h', post, c + base + 12, orient)
+    struct.pack_into('<h', post, c + base + 14, paper)
+    struct.pack_into('<h', post, c + base + 20, scale)
+    return bytes(post)
+
+
+def gen_v0c4_prec_page_letter():
+    """PREC (Unicode DEVMODE) dmPaperSize=1 (Letter): page size must come from PREC, not WINI."""
+    pre = _patch_tk00('PrecLetter'.encode('utf-16-le') + b'\x00\x00')
+    body = meas_block(meas_hdr(4, 4), end_marker())
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + _set_prec(SKELETON_POST, paper=1)   # DMPAPER_LETTER
+
+
+def gen_v0c4_prec_page_ansi_a3():
+    """PREC (ANSI DEVMODE) dmPaperSize=8 (A3): exercises the ANSI variant and page size."""
+    pre = _patch_tk00('PrecAnsiA3'.encode('utf-16-le') + b'\x00\x00')
+    body = meas_block(meas_hdr(4, 4), end_marker())
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + _set_prec(SKELETON_POST, paper=8, ansi=True)   # DMPAPER_A3
+
+
 def gen_v0c4_weak_name_defers_to_midi():
     """Name "Contrabass" + MIDI 59 (Tuba, program 58): the substring-only match to the treble
     "Contrabass Bugle" (which shares program 58) outranks the bass-clef GM instrument via the
@@ -8043,6 +8083,8 @@ if __name__=='__main__':
     write("instruments_name_trailing_number.enc",          gen_v0c4_name_trailing_number_stripped())
     write("instruments_name_dash_separator.enc",           gen_v0c4_name_split_on_separator())
     write("instruments_weak_name_defers_to_midi.enc",      gen_v0c4_weak_name_defers_to_midi())
+    write("structure_prec_page_letter.enc",                gen_v0c4_prec_page_letter())
+    write("structure_prec_page_a3.enc",                    gen_v0c4_prec_page_ansi_a3())
     write("structure_non_octave_key_keeps_clef.enc",       gen_v0c4_non_octave_key_keeps_clef())
     write("structure_g_clef_key0_stays_plain.enc",         gen_v0c4_g_clef_key0_stays_plain())
     write("structure_c_clef_key_keeps_clef.enc",           gen_v0c4_c_clef_key_keeps_clef())

@@ -33,7 +33,6 @@
 #include "elem-text.h"     // EncLyric, EncTie, EncChordSym
 
 namespace mu::iex::enc {
-
 struct EncFormatReader;   // defined in reader.h
 
 // ---------------------------------------------------------------------------
@@ -113,11 +112,19 @@ struct EncTitle {
             return true;
         }
         auto anyNonEmpty = [](const std::vector<QString>& v) {
-            for (const auto& s : v) { if (!s.isEmpty()) { return true; } }
+            for (const auto& s : v) {
+                if (!s.isEmpty()) {
+                    return true;
+                }
+            }
             return false;
         };
         auto anyHFNonEmpty = [](const std::vector<EncHeaderFooter>& v) {
-            for (const auto& hf : v) { if (!hf.text.isEmpty()) { return true; } }
+            for (const auto& hf : v) {
+                if (!hf.text.isEmpty()) {
+                    return true;
+                }
+            }
             return false;
         };
         return anyNonEmpty(subtitle) || anyNonEmpty(instruction) || anyNonEmpty(author)
@@ -171,6 +178,17 @@ struct EncPageSetup {
     qint32 rightEdge  { 0 };   // pageWidth_pts  - rightMargin_pts
 };
 
+// PREC block: a Windows DEVMODE. Page size, orientation and notation scale.
+// See ENCORE_FORMAT.md §PREC block.
+struct EncPrintSetup {
+    bool hasData     { false };
+    int orientation  { 0 };   // dmOrientation: 1=portrait, 2=landscape
+    int paperSize    { 0 };   // dmPaperSize (DMPAPER_*): 1=Letter, 5=Legal, 8=A3, 9=A4, 11=A5, ...
+    int paperLength  { 0 };   // dmPaperLength: tenths of a millimetre (custom sizes only)
+    int paperWidth   { 0 };   // dmPaperWidth:  tenths of a millimetre (custom sizes only)
+    int scale        { 0 };   // dmScale: notation/print scale percent (100 = default)
+};
+
 struct EncRoot {
     EncHeader header;
     std::vector<EncInstrument> instruments;
@@ -179,9 +197,9 @@ struct EncRoot {
     EncTitle titleBlock;
     EncTextBlock textBlock;
     EncPageSetup pageSetup;
+    EncPrintSetup printSetup;
     std::unique_ptr<struct EncFormatReader> fmt;  // set during read()
 
     bool read(QDataStream& ds);
 };
-
 } // namespace mu::iex::enc
