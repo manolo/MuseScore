@@ -882,6 +882,12 @@ Portuguese/Spanish scores from older Encore builds use Latin-1.
 
 Syllabic role (begin/middle/end/single) derived from hyphen-before / hyphen-after flags.
 
+A `"-"` can open the measure *after* the syllable it follows (the word breaks across a barline,
+with the first syllable ending one measure and `"-"` plus the next syllable opening the following
+one). By then the previous measure's syllable is already placed, so the hyphen must promote that
+earlier syllable's role (single becomes begin, end becomes middle) for the hyphen to render across
+the bar.
+
 **Multi-verse.** Verse N uses voice (N−1) on the same staff. All verses anchor on the voice-0 chord.
 
 **Lyric-to-note matching.** Each lyric's `textAnchor` (+0x0A) is a visual x-offset, not a tick.

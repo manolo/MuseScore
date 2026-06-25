@@ -106,6 +106,50 @@ TEST_F(Tst_Text, lyrics_offgrid_syllable_attaches_to_nearest_chord)
     delete score;
 }
 
+// ===========================================================================
+// FIX: a hyphenated word split across a barline kept the hyphen only when the "-"
+// shared a measure with its first syllable. When "sof" ends one measure and "-"
+// opens the next, the first syllable (already attached) was never promoted, so the
+// connecting hyphen disappeared. The "-" must promote the previous measure's last
+// syllable: SINGLE -> BEGIN.
+// Fixture: m1 note "sof", m2 "-" then note "tly". Expect sof=BEGIN, tly=END.
+// ===========================================================================
+TEST_F(Tst_Text, lyrics_hyphen_renders_across_barline)
+{
+    MasterScore* score = readEncoreScore("text_lyrics_hyphen_across_barline.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    LyricsSyllabic sofSyll = LyricsSyllabic::SINGLE;
+    LyricsSyllabic tlySyll = LyricsSyllabic::SINGLE;
+    bool sofSeen = false, tlySeen = false;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* e = s->element(0);
+            if (!e || !e->isChord()) {
+                continue;
+            }
+            for (Lyrics* ly : toChord(e)->lyrics()) {
+                if (ly->plainText() == u"sof") {
+                    sofSyll = ly->syllabic();
+                    sofSeen = true;
+                } else if (ly->plainText() == u"tly") {
+                    tlySyll = ly->syllabic();
+                    tlySeen = true;
+                }
+            }
+        }
+    }
+    ASSERT_TRUE(sofSeen && tlySeen);
+    EXPECT_EQ(sofSyll, LyricsSyllabic::BEGIN) << "first syllable must become BEGIN so the hyphen renders";
+    EXPECT_EQ(tlySyll, LyricsSyllabic::END) << "continuation syllable after the barline is END";
+
+    delete score;
+}
+
 TEST_F(Tst_Text, lyrics_hyphen_separators_dropped_and_set_syllabic)
 {
     MasterScore* score = readEncoreScore("text_lyrics_hyphenated_words.enc");

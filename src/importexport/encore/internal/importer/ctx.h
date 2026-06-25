@@ -250,6 +250,10 @@ struct BuildCtx
     std::map<std::pair<int, int>, TupletTracker> innerTuplets {};
     // True when the next syllable follows a hyphen; reset at measure boundary.
     std::map<track_idx_t, bool> nextLyricHyphenBefore {};
+    // Last lyric attached on each track. Lets a hyphen that opens the next measure
+    // promote the previous measure's final syllable so the word stays hyphenated
+    // across the barline.
+    std::map<track_idx_t, mu::engraving::Lyrics*> lastAttachedLyric {};
 };
 } // namespace mu::iex::enc
 
