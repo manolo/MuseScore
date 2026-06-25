@@ -189,6 +189,11 @@ infer the actual kit from the track name.
 | +10    | 2    | `start` — 0-based index of the first measure in this system     |
 | +12    | 1    | `measureCount` — number of measures in this system              |
 
+In `SCO5` (big-endian Encore 5) this single-byte `measureCount` reads as 0 (the meaningful
+byte sits in the other half of a wider big-endian field), but the `start` indices remain
+correct. When `measureCount` is 0, derive each system's length from the gap to the next
+system's `start` (and to the total measure count for the last system) so line breaks still apply.
+
 ### LINE staff entry (30 bytes, repeated N times)
 
 | Offset | Size | Description                                                                    |

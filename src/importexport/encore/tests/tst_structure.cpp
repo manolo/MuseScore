@@ -646,6 +646,31 @@ TEST_F(Tst_Structure, system_breaks_from_line_data)
 }
 
 // ===========================================================================
+// FIX: SCO5 (big-endian Encore 5) does not surface the per-line measureCount
+// (the byte reads 0), but the line start indices are correct. The importer must
+// derive each system's span from the start deltas so line breaks still apply.
+// Fixture: same 6 measures / 2 systems as structure_system_break.enc but with
+// every LINE measureCount byte zeroed; system 0 must still lock measures 0..2.
+// ===========================================================================
+TEST_F(Tst_Structure, system_breaks_from_line_start_deltas_when_count_zero)
+{
+    MasterScore* score = readEncoreScore("structure_system_break_mcount_zero.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+    EXPECT_TRUE(m0->isStartOfSystemLock())
+        << "measure 0 must start a SystemLock derived from the line start delta";
+    Measure* m2 = measureAt(score, 2);
+    ASSERT_NE(m2, nullptr);
+    EXPECT_TRUE(m2->isEndOfSystemLock())
+        << "measure 2 (start[1]-start[0]=3 measures later) must end the first SystemLock";
+
+    delete score;
+}
+
+// ===========================================================================
 // FEATURE: SystemLocks lock each Encore system to exactly enc.lines[i].measureCount measures.
 // ===========================================================================
 TEST_F(Tst_Structure, fit_spatium_first_system_measure_count)
