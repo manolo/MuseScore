@@ -256,7 +256,6 @@ TEST_F(Tst_Importer, v0c4_octave_lower_implicit_silences)
     delete score;
 }
 
-
 // Regression: options byte bit 0 and position field must NOT produce string numbers on plain
 // piano/vocal notes. As muitas aguas is a grand-staff piece with opt=0x87/0x07 on all notes
 // and au=ad=0x00; it must import with zero fingerings.
@@ -1060,8 +1059,10 @@ TEST_F(Tst_Importer, v0c4_tremolo_orn_cross_voice_attaches)
     delete score;
 }
 
-// Binary-driven clef rule: G clef + Key=+12 → G8_VA. No template required.
-TEST_F(Tst_Importer, v0c4_g_clef_8va_from_key)
+// Positive octave Key: a clef is NOT decorated with an 8va (octave-up clefs are rare and Encore
+// shows such instruments with a plain clef). The octave becomes a playback transposition, so the
+// staff keeps its plain G clef and the notes stay at their written height.
+TEST_F(Tst_Importer, v0c4_positive_octave_key_keeps_g_clef)
 {
     MasterScore* score = readEncoreScore("structure_g_clef_8va_from_key.enc");
     ASSERT_NE(score, nullptr);
@@ -1071,8 +1072,11 @@ TEST_F(Tst_Importer, v0c4_g_clef_8va_from_key)
     ASSERT_NE(seg, nullptr);
     EngravingItem* el = seg->element(0);
     ASSERT_TRUE(el && el->isClef());
-    EXPECT_EQ(toClef(el)->clefType(), ClefType::G8_VA)
-        << "G clef + Key=+12 must yield G8_VA";
+    EXPECT_EQ(toClef(el)->clefType(), ClefType::G)
+        << "G clef + Key=+12 must keep a plain G clef (no 8va)";
+    ASSERT_FALSE(score->parts().empty());
+    EXPECT_EQ(score->parts()[0]->instrument()->transpose().chromatic, 12)
+        << "positive octave is carried as a playback transposition (+12)";
     delete score;
 }
 
@@ -1092,8 +1096,9 @@ TEST_F(Tst_Importer, v0c4_f_clef_8vb_from_key)
     delete score;
 }
 
-// Binary-driven clef rule: F clef + Key=+12 → F_8VA. No template required.
-TEST_F(Tst_Importer, v0c4_f_clef_8va_from_key)
+// Positive octave Key with an F clef (the tuba "Bajo" case): keep a plain F clef and carry the
+// octave as a playback transposition, so the bass instrument reads as clave de fa, not F8va.
+TEST_F(Tst_Importer, v0c4_positive_octave_key_keeps_f_clef)
 {
     MasterScore* score = readEncoreScore("structure_f_clef_8va_from_key.enc");
     ASSERT_NE(score, nullptr);
@@ -1103,8 +1108,11 @@ TEST_F(Tst_Importer, v0c4_f_clef_8va_from_key)
     ASSERT_NE(seg, nullptr);
     EngravingItem* el = seg->element(0);
     ASSERT_TRUE(el && el->isClef());
-    EXPECT_EQ(toClef(el)->clefType(), ClefType::F_8VA)
-        << "F clef + Key=+12 must yield F_8VA";
+    EXPECT_EQ(toClef(el)->clefType(), ClefType::F)
+        << "F clef + Key=+12 must keep a plain F clef (no 8va)";
+    ASSERT_FALSE(score->parts().empty());
+    EXPECT_EQ(score->parts()[0]->instrument()->transpose().chromatic, 12)
+        << "positive octave is carried as a playback transposition (+12)";
     delete score;
 }
 
@@ -1699,19 +1707,24 @@ TEST_F(Tst_Importer, encore_symbols_full_coverage)
                 // Combined single-glyph articulations: count toward each component.
                 // (Note: articStaccatoAbove/Below already counted above, not repeated here.)
                 case SymId::articMarcatoStaccatoAbove: case SymId::articMarcatoStaccatoBelow:
-                    ++marcatos; ++staccatos;
+                    ++marcatos;
+                    ++staccatos;
                     break;
                 case SymId::articMarcatoTenutoAbove: case SymId::articMarcatoTenutoBelow:
-                    ++marcatos; ++tenutos;
+                    ++marcatos;
+                    ++tenutos;
                     break;
                 case SymId::articAccentStaccatoAbove: case SymId::articAccentStaccatoBelow:
-                    ++accents; ++staccatos;
+                    ++accents;
+                    ++staccatos;
                     break;
                 case SymId::articTenutoStaccatoAbove: case SymId::articTenutoStaccatoBelow:
-                    ++tenutos; ++staccatos;
+                    ++tenutos;
+                    ++staccatos;
                     break;
                 case SymId::articTenutoAccentAbove: case SymId::articTenutoAccentBelow:
-                    ++tenutos; ++accents;
+                    ++tenutos;
+                    ++accents;
                     break;
                 case SymId::ornamentTrill:
                     ++trills;

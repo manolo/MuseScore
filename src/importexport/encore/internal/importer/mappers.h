@@ -43,13 +43,15 @@ class InstrumentTemplate;
 namespace mu::iex::enc {
 mu::engraving::ClefType encClef2MuseScore(EncClefType ct);
 
-// Pick octave-decorated clef when Encore's plain G/F plus Key offset implies one
-// (e.g. keyOffset=-12 -> G8_VB/F8_VB; -24 -> G15_MB/F15_MB; +12 -> G8_VA).
+// Pick octave-decorated clef when Encore's plain G/F plus a NEGATIVE octave Key implies one
+// (e.g. keyOffset=-12 -> G8_VB/F8_VB; -24 -> G15_MB/F15_MB). Positive octave Keys keep the plain
+// clef (the octave is carried as a playback transposition; see builders-parts.cpp).
 mu::engraving::ClefType pickStaffClef(EncClefType encClef, mu::engraving::ClefType concertClef, mu::engraving::ClefType transposingClef,
                                       int keyOffsetSemitones);
 
-// Return the octave-decorated variant of an already-resolved MuseScore clef for an octave Key
-// (±12/±24). Returns the input clef when the offset is non-octave or the clef has no variant.
+// Return the octave-down variant of an already-resolved MuseScore clef for a NEGATIVE octave Key
+// (-12/-24). Returns the input clef for non-octave or positive offsets, or when the clef has no
+// octave variant.
 mu::engraving::ClefType applyOctaveToClef(mu::engraving::ClefType base, int keyOffsetSemitones);
 
 int encKeyToFifths(quint8 key);
@@ -69,8 +71,10 @@ QString normalizeEncoreInstrName(const QString& name);
 constexpr int ENC_KEY_NO_FILTER = 0x7FFFFFFF;
 
 // Find best non-drumset template by name+MIDI score; applies transposition filter when encKeySemitones != ENC_KEY_NO_FILTER.
+// When outExactName is non-null, it is set to true if the returned template matched the instrument
+// name exactly (track/long/short name equality) rather than only via a substring ("contains").
 const mu::engraving::InstrumentTemplate* findEncoreInstrumentTemplate(
-    const QString& encName, int encMidiProgram = -1, int encKeySemitones = ENC_KEY_NO_FILTER);
+    const QString& encName, int encMidiProgram = -1, int encKeySemitones = ENC_KEY_NO_FILTER, bool* outExactName = nullptr);
 
 // Same as findEncoreInstrumentTemplate but restricted to useDrumset templates.
 const mu::engraving::InstrumentTemplate* findDrumsetTemplate(const QString& encName);

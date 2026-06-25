@@ -802,3 +802,50 @@ TEST_F(Tst_Instruments, no_tk_blocks_large_tk_layout_reads_all_instrument_names)
         << "Instrument 1 name must be read from NAME_BASE+2158=2360 (not 202+112=314)";
     delete score;
 }
+
+// Tokenizer: a trailing ordinal after a non-space separator ("Trumpet-1") must be stripped so
+// the base name "Trumpet" still matches. MIDI 41 (Violin) is the wrong answer if it is not.
+TEST_F(Tst_Instruments, instrument_name_trailing_number_after_dash_stripped)
+{
+    MasterScore* score = readEncoreScore("instruments_name_trailing_number.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts()[0]->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(inst->id().contains(String(u"trumpet")))
+        << "\"Trumpet-1\" must match a Trumpet (trailing \"-1\" stripped), not the MIDI fallback; got "
+        << inst->id().toStdString();
+    delete score;
+}
+
+// Tokenizer: words split on '-' (not only spaces), so "French-Horn" yields the needle "horn"
+// and matches the Horn template. MIDI 41 (Violin) is the wrong answer if the split fails.
+TEST_F(Tst_Instruments, instrument_name_splits_on_dash_separator)
+{
+    MasterScore* score = readEncoreScore("instruments_name_dash_separator.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts()[0]->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(inst->id().contains(String(u"horn")))
+        << "\"French-Horn\" must split on '-' and match a Horn, not the MIDI fallback; got "
+        << inst->id().toStdString();
+    delete score;
+}
+
+// Weak (substring-only) name match must not let a treble bugle sharing the tuba's MIDI program
+// outrank the GM instrument. "Contrabass" + MIDI 59 (Tuba) resolves to a bass-clef instrument,
+// not the treble "Contrabass Bugle". Mirrors the Spanish "Bajo" -> "Clarín contrabajo" case.
+TEST_F(Tst_Instruments, instrument_weak_substring_name_defers_to_midi)
+{
+    MasterScore* score = readEncoreScore("instruments_weak_name_defers_to_midi.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts()[0]->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_NE(inst->id(), String(u"contrabass-bugle"))
+        << "weak substring name match must not pick the treble bugle";
+    EXPECT_TRUE(inst->id().contains(String(u"tuba")))
+        << "must defer to MIDI program 59 (Tuba); got " << inst->id().toStdString();
+    delete score;
+}

@@ -175,12 +175,16 @@ static int clefGlyphFamily(ClefType ct)
     }
 }
 
-// When Key is +-12 or +-24 semitones, return the matching octave-decorated clef in the same
-// glyph family (so the octave-shifted pitch displays at the written octave). Other offsets and
+// When Key is a negative octave (-12 or -24), return the matching octave-down clef in the same
+// glyph family (so the octave-shifted pitch displays at the written octave): instruments that
+// sound an octave lower (laud, bass guitar, tuba sounding 8vb) are conventionally written with
+// an 8vb clef. A positive octave (the instrument sounds higher) is NOT decorated with an 8va
+// clef: octave-up clefs are extremely rare, and Encore shows such instruments with a plain clef
+// and the octave handled as a playback transposition (see builders-parts.cpp). Other offsets and
 // families with no octave variant return the base clef unchanged.
 ClefType applyOctaveToClef(ClefType base, int keyOffsetSemitones)
 {
-    if (keyOffsetSemitones == 0 || clefGlyphFamily(base) == 0) {
+    if (keyOffsetSemitones >= 0 || clefGlyphFamily(base) == 0) {
         return base;
     }
     static const std::array<ClefType, 8> kCandidates = {

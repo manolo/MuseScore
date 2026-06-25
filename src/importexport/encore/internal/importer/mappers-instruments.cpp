@@ -35,8 +35,9 @@ namespace mu::iex::enc {
 QString normalizeEncoreInstrName(const QString& name)
 {
     QString s = name.trimmed();
-    // Remove:  whitespace + digits + optional ordinal (ª º °)
-    static const QRegularExpression trailingNum(QStringLiteral("\\s+\\d+[\xaa\xb0\xba]*$"));
+    // Remove:  separator (space, - _ .) + digits + optional ordinal (ª º °).
+    // Covers "Voz 1", "Voz-1", "Voz_1", "Voz.1", "Bandurria 2ª" -> base name.
+    static const QRegularExpression trailingNum(QStringLiteral("[\\s\\-_.]+\\d+[\xaa\xb0\xba]*$"));
     // Remove:  trailing ordinals with no preceding digit
     static const QRegularExpression trailingOrd(QStringLiteral("[\xaa\xb0\xba]+$"));
     s.remove(trailingNum);
@@ -89,8 +90,11 @@ static constexpr int kScoreCommonGenre   = 1;  // "common" genre tag
 // With encKeySemitones filter, prefers transposition-compatible match; falls back to best name+MIDI
 // match when no compatible match exists (e.g. encKey=0 and no C-pitched variant for this MIDI program).
 const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, int encMidiProgram,
-                                                       int encKeySemitones)
+                                                       int encKeySemitones, bool* outExactName)
 {
+    if (outExactName) {
+        *outExactName = false;
+    }
     if (encName.isEmpty()) {
         return nullptr;
     }
@@ -111,11 +115,10 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
     };
     addNeedle(encName);
     addNeedle(norm);
-    for (QString word : norm.split(u' ', Qt::SkipEmptyParts)) {
-        // Strip trailing punctuation so "Bandurr." matches "Bandurria" via contains.
-        while (!word.isEmpty() && !word.back().isLetterOrNumber()) {
-            word.chop(1);
-        }
+    // Split words on any non-alphanumeric separator (space, - _ . and punctuation), keeping
+    // accented letters within words. So "Voz-1"/"Vln.2"/"Sax_tenor" tokenize correctly.
+    static const QRegularExpression wordSplit(QStringLiteral("[^\\p{L}\\p{N}]+"));
+    for (const QString& word : norm.split(wordSplit, Qt::SkipEmptyParts)) {
         if (word.length() >= 4) {
             addNeedle(word);
         }
@@ -131,6 +134,8 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
     int bestCompatibleScore = 0;
     int bestNameStrength = 0;
     int bestCompatibleNameStrength = 0;
+    bool bestExact = false;
+    bool bestCompatibleExact = false;
     for (const InstrumentGroup* g : instrumentGroups) {
         for (const InstrumentTemplate* it : g->instrumentTemplates) {
             if (it->useDrumset) {
@@ -140,20 +145,24 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
             const QString nl = normalizeForCompare(it->instrumentName.longName().toQString());
             const QString ns = normalizeForCompare(it->instrumentName.shortName().toQString());
             int nameStrength = 0;
+            bool exactHit = false;
             for (const QString& needle : needles) {
                 int s = 0;
                 if (nt == needle) {
                     s += kScoreTrackExact;
+                    exactHit = true;
                 } else if (nt.contains(needle)) {
                     s += kScoreTrackContains;
                 }
                 if (nl == needle) {
                     s += kScoreLongExact;
+                    exactHit = true;
                 } else if (nl.contains(needle)) {
                     s += kScoreLongContains;
                 }
                 if (ns == needle) {
                     s += kScoreShortExact;
+                    exactHit = true;
                 }
                 if (s > nameStrength) {
                     nameStrength = s;
@@ -185,6 +194,7 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
                 bestScore = score;
                 bestNameStrength = nameStrength;
                 best = it;
+                bestExact = exactHit;
             }
             if (filterTransp && transpCompatibleWith(it->transpose.chromatic, encKeySemitones)) {
                 if (score > bestCompatibleScore
@@ -192,11 +202,16 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
                     bestCompatibleScore = score;
                     bestCompatibleNameStrength = nameStrength;
                     bestCompatible = it;
+                    bestCompatibleExact = exactHit;
                 }
             }
         }
     }
-    return filterTransp ? (bestCompatible ? bestCompatible : best) : best;
+    const bool useCompatible = filterTransp && bestCompatible;
+    if (outExactName) {
+        *outExactName = useCompatible ? bestCompatibleExact : bestExact;
+    }
+    return useCompatible ? bestCompatible : best;
 }
 
 // Find best drumset template by name score (exact match only, no substring).
@@ -216,10 +231,8 @@ const InstrumentTemplate* findDrumsetTemplate(const QString& encName)
     };
     addNeedle(encName);
     addNeedle(norm);
-    for (QString word : norm.split(u' ', Qt::SkipEmptyParts)) {
-        while (!word.isEmpty() && !word.back().isLetterOrNumber()) {
-            word.chop(1);
-        }
+    static const QRegularExpression wordSplit(QStringLiteral("[^\\p{L}\\p{N}]+"));
+    for (const QString& word : norm.split(wordSplit, Qt::SkipEmptyParts)) {
         if (word.length() >= 4) {
             addNeedle(word);
         }
