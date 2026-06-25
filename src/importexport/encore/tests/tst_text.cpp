@@ -543,6 +543,41 @@ TEST_F(Tst_Text, tempo_beat_unit_from_noto_overrides_compound_meter)
 }
 
 // ===========================================================================
+// FIX: v0xC2 (Encore 3.x/4.x) stores a tempo mark's BPM at ORN element +28, not at
+// +30 like v0xC4 (+30 holds a constant 52 here). Reading +30 imported "negra = 80"
+// as "negra = 52". The v0xC2 reader moves +28 into the tempo value.
+// Fixture: 4/4 v0xC2, header bpm=80, ORN TEMPO with BPM=80 at +28 and 52 at +30.
+// Expected: TempoText quarter=80, BPS=80/60; not quarter=52.
+// ===========================================================================
+TEST_F(Tst_Text, tempo_orn_v0c2_reads_bpm_from_offset_28)
+{
+    MasterScore* score = readEncoreScore("text_tempo_orn_v0c2_bpm_offset.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    TempoText* tt = nullptr;
+    for (MeasureBase* mb = score->first(); mb && !tt; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s && !tt; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isTempoText()) {
+                    tt = toTempoText(e);
+                    break;
+                }
+            }
+        }
+    }
+    ASSERT_NE(tt, nullptr) << "No TempoText found in score";
+    EXPECT_EQ(tt->xmlText(), u"<sym>metNoteQuarterUp</sym> = 80")
+        << "v0xC2 tempo BPM is at ORN +28 (80), not +30 (the constant 52)";
+    EXPECT_NEAR(tt->tempo().val, 80.0 / 60.0, 1e-6);
+
+    delete score;
+}
+
+// ===========================================================================
 // BUG FIX: MEAS-header and ORN tempo texts used a raw Unicode note symbol
 // (U+2669 "♩") in their xmlText.  TempoText::updateTempo() matches against
 // TempoPattern strings that use <sym>metNoteQuarterUp</sym>, so the Unicode

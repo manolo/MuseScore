@@ -169,6 +169,13 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
             }
             // v0xC2: alMezuro has no valid measure-count semantics for spanning ornaments.
             orn->alMezuroValid = false;
+            // v0xC2 stores the TEMPO BPM at element +28 (read into `noto`); the +30 slot that
+            // carries the BPM in v0xC4 holds a constant unrelated byte here. Move it across so
+            // the tempo mark shows the real BPM (e.g. 80) instead of that constant (52).
+            if (orn->tipo == static_cast<quint8>(EncOrnamentType::TEMPO)) {
+                orn->tempo = orn->noto;
+                orn->noto = 0;   // v0xC2 has no per-mark beat unit; fall back to the meter
+            }
             return false;
         }
 

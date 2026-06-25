@@ -3894,6 +3894,40 @@ def gen_v0c4_tempo_orn_xoffset_downbeat():
 # the mark; honoring noto, the display must be quarter=198, not dotted-quarter=132.
 # Expected: TempoText "quarter = 198", BPS = 198/60 = 3.3.
 # ===========================================================================
+def ornament_v0c2_tempo(tick, voice, staffIdx, bpm):
+    """36-byte v0xC2 TEMPO ornament (tipo=0x32). Encore 3.x/4.x stores the BPM at
+    element +28 (d[28]); the +30 slot that carries the BPM in v0xC4 holds a constant
+    unrelated byte here (observed 0x34 = 52), which must be ignored."""
+    d = bytearray(36)
+    struct.pack_into('<H', d, 0, tick)
+    d[2] = (5 << 4) | (voice & 0xF)
+    d[3] = 36
+    d[4] = staffIdx & 0x3F
+    d[5] = 0x32           # TEMPO subtype
+    d[28] = bpm & 0xFF    # v0xC2 tempo BPM
+    d[30] = 0x34          # constant byte (52); v0xC4 puts the BPM here, v0xC2 does not
+    return bytes(d)
+
+
+# ===========================================================================
+# text_tempo_orn_v0c2_bpm_offset.enc
+# BUG FIX: v0xC2 (Encore 3.x/4.x) stores a tempo mark's BPM at ORN element +28,
+# not +28-is-noto/+30-is-BPM like v0xC4. Reading +30 yielded a constant 52, so a
+# "negra = 80" mark imported as "negra = 52". Move +28 into the tempo for v0xC2.
+# Fixture: 4/4 v0xC2, header bpm=80, ORN TEMPO with BPM=80 at +28 (and 52 at +30).
+# Expected: TempoText quarter=80 (the +28 value), not 52 (the +30 constant).
+# ===========================================================================
+def gen_v0c2_tempo_orn_bpm_offset():
+    orn = ornament_v0c2_tempo(0, 0, 0, bpm=80)
+    e  = bytes(orn)
+    e += note_v0c2(0, 0, 0, fv=3, pitch=60)
+    e += end_marker()
+    pre  = set_chumagio(0xC2)
+    body = meas_block(meas_hdr(4, 4, bpm=80), e)
+    body += b''.join(meas_block(meas_hdr(4, 4, bpm=0), end_marker()) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
 def gen_v0c4_tempo_orn_explicit_quarter_unit():
     orn = bytearray(ornament_v0c4(0, 0, 0, tipo=0x32))
     orn[28] = 2          # noto = explicit quarter-note beat unit (0-indexed note value)
@@ -8178,6 +8212,7 @@ if __name__=='__main__':
     write("text_orn_tempo_mismatch_suppressed.enc",             gen_v0c4_orn_tempo_mismatch_suppressed())
     write("text_tempo_orn_xoffset_downbeat.enc",                gen_v0c4_tempo_orn_xoffset_downbeat())
     write("text_tempo_orn_explicit_quarter_unit.enc",           gen_v0c4_tempo_orn_explicit_quarter_unit())
+    write("text_tempo_orn_v0c2_bpm_offset.enc",                 gen_v0c2_tempo_orn_bpm_offset())
     write("text_orn_tempo_misplaced_multi_measure.enc",         gen_v0c4_orn_tempo_misplaced_multi_measure())
     write("text_orn_tempo_equals_header.enc",                   gen_v0c4_orn_tempo_equals_header_at_start())
     write("notes_rdur_80_stays_16th.enc",         gen_v0c4_rdur_80_stays_16th())
