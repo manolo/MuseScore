@@ -118,6 +118,8 @@ static int staffDisplaySize(const EncRoot& enc, int instrIdx)
     return std::clamp(static_cast<int>(enc.header.scoreSize), 1, 4);
 }
 
+static bool precPageSizeInches(const EncPrintSetup& pr, double& wIn, double& hIn);
+
 static void logEncRootInfo(const EncRoot& enc)
 {
     const EncHeader& h = enc.header;
@@ -193,10 +195,21 @@ static void logEncRootInfo(const EncRoot& enc)
     LOGD() << "---- Page setup ----";
     const EncPageSetup& ps = enc.pageSetup;
     if (ps.hasData) {
+        // Derive all four margins (inches) for the summary: top/left are stored directly, while
+        // right/bottom come from the printable edges and the page size. The WINI unit (points vs
+        // screen pixels) is resolved from the PREC page size, same as applyPageMargins.
+        std::string marginStr;
+        double wIn = 0.0, hIn = 0.0;
+        if (precPageSizeInches(enc.printSetup, wIn, hIn) && wIn > 0.0 && hIn > 0.0) {
+            const double est = static_cast<double>(ps.rightEdge + ps.left) / wIn;
+            const double upi = (est <= 76.0) ? 72.0 : est;
+            marginStr = ("  (in: T=" + QString::number(ps.top / upi, 'f', 3)
+                         + " L=" + QString::number(ps.left / upi, 'f', 3)
+                         + " R=" + QString::number(wIn - ps.rightEdge / upi, 'f', 3)
+                         + " B=" + QString::number(hIn - ps.bottomEdge / upi, 'f', 3) + ")").toStdString();
+        }
         LOGD() << "  WINI: top=" << ps.top << "  left=" << ps.left
-               << "  bottomEdge=" << ps.bottomEdge << "  rightEdge=" << ps.rightEdge
-               << "  (" << QString::number(ps.top / 72.0, 'f', 3).toStdString() << "\""
-               << " / " << QString::number(ps.left / 72.0, 'f', 3).toStdString() << "\" margins)";
+               << "  bottomEdge=" << ps.bottomEdge << "  rightEdge=" << ps.rightEdge << marginStr;
     } else {
         LOGD() << "  WINI: absent — margins from MuseScore defaults";
     }
@@ -371,6 +384,31 @@ static QPageSize::PageSizeId dmPaperToQt(int dmPaper)
     }
 }
 
+// Resolve the page size (inches) from the PREC (DEVMODE) block: dmPaperSize enum, falling back
+// to dmPaperLength/Width (tenths of a millimetre) for custom sizes, with the landscape swap
+// applied. Returns false when PREC has no usable size (caller falls back to WINI geometry).
+static bool precPageSizeInches(const EncPrintSetup& pr, double& wIn, double& hIn)
+{
+    if (!pr.hasData) {
+        return false;
+    }
+    const QPageSize::PageSizeId id = dmPaperToQt(pr.paperSize);
+    if (id != QPageSize::Custom) {
+        const QSizeF sz = QPageSize::size(id, QPageSize::Inch);
+        wIn = sz.width();
+        hIn = sz.height();
+    } else if (pr.paperLength > 0 && pr.paperWidth > 0) {
+        wIn = pr.paperWidth / 254.0;
+        hIn = pr.paperLength / 254.0;
+    } else {
+        return false;
+    }
+    if (pr.orientation == 2) {   // DMORIENT_LANDSCAPE
+        std::swap(wIn, hIn);
+    }
+    return true;
+}
+
 // Apply page size, orientation and notation scale from the PREC (DEVMODE) block. Returns
 // true when the page size was set (so the WINI margin pass must not override it). PREC is
 // present in almost every Encore file across all formats, while WINI (margins) exists only
@@ -378,24 +416,9 @@ static QPageSize::PageSizeId dmPaperToQt(int dmPaper)
 // many v0xC4 files without a WINI block.
 static bool applyPagePrintSetup(MasterScore* score, const EncPrintSetup& pr)
 {
-    if (!pr.hasData) {
-        return false;
-    }
     double wIn = 0.0, hIn = 0.0;
-    const QPageSize::PageSizeId id = dmPaperToQt(pr.paperSize);
-    if (id != QPageSize::Custom) {
-        const QSizeF sz = QPageSize::size(id, QPageSize::Inch);
-        wIn = sz.width();
-        hIn = sz.height();
-    } else if (pr.paperLength > 0 && pr.paperWidth > 0) {
-        // dmPaperLength/Width are in tenths of a millimetre.
-        wIn = pr.paperWidth / 254.0;
-        hIn = pr.paperLength / 254.0;
-    } else {
+    if (!precPageSizeInches(pr, wIn, hIn)) {
         return false;   // unknown paper: let the WINI geometry heuristic decide
-    }
-    if (pr.orientation == 2) {   // DMORIENT_LANDSCAPE
-        std::swap(wIn, hIn);
     }
     score->style().set(Sid::pageWidth,  wIn);
     score->style().set(Sid::pageHeight, hIn);
@@ -426,7 +449,9 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps, bool pa
     // For pts format: detectPtsPageSize picks the smallest standard page that
     // contains the printable area, which is locale-independent.
     // For screen-pixel format: detectWiniPageSize matches via DPI ratio.
-    static constexpr double kMaxM = 0.60;   // max margin (inches)
+    // Cap each margin to a fraction of the page so a misread WINI cannot produce an absurd
+    // margin, while still allowing legitimately large margins (2"+ are common on A3/landscape).
+    static constexpr double kMaxMarginFrac = 0.45;
 
     double pageHIn = score->style().styleD(Sid::pageHeight);
     double pageWIn = score->style().styleD(Sid::pageWidth);
@@ -438,22 +463,26 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps, bool pa
     const bool screenPixelFmt = (ps.rightEdge > static_cast<qint32>(pageWIn * 72.0 + kPixelTol))
                                 || (ps.bottomEdge > static_cast<qint32>(pageHIn * 72.0 + kPixelTol));
     double scaleUpi = 72.0;
-    if (screenPixelFmt) {
+    if (pageSizeLocked) {
+        // The page size is known (from PREC), so derive the WINI unit directly from the printable
+        // extent rather than guessing: (rightEdge + left) / pageWidth ≈ 72 means the WINI is in
+        // typographic points, a clearly larger value (~84) means screen pixels at the monitor DPI.
+        // Snap the near-72 case to exactly 72 (points). The pixel estimate is exact only when the
+        // left/right margins are symmetric; with asymmetric margins it is ~2% low.
+        const double estUpi = static_cast<double>(ps.rightEdge + ps.left) / pageWIn;
+        scaleUpi = (estUpi <= 76.0) ? 72.0 : estUpi;
+    } else if (screenPixelFmt) {
         const int pageWUnits = ps.rightEdge + ps.left;
         const int pageHUnits = ps.bottomEdge + ps.top;
-        // Only let the WINI geometry heuristic set the page size when PREC did not already
-        // provide it (PREC dmPaperSize is a direct enum and more reliable than geometry).
-        if (!pageSizeLocked) {
-            double detectedW = 0.0, detectedH = 0.0;
-            if (detectWiniPageSize(pageWUnits, pageHUnits, detectedW, detectedH)) {
-                pageWIn  = detectedW;
-                pageHIn  = detectedH;
-                score->style().set(Sid::pageWidth,  pageWIn);
-                score->style().set(Sid::pageHeight, pageHIn);
-            }
+        double detectedW = 0.0, detectedH = 0.0;
+        if (detectWiniPageSize(pageWUnits, pageHUnits, detectedW, detectedH)) {
+            pageWIn  = detectedW;
+            pageHIn  = detectedH;
+            score->style().set(Sid::pageWidth,  pageWIn);
+            score->style().set(Sid::pageHeight, pageHIn);
         }
         scaleUpi = static_cast<double>(pageWUnits) / pageWIn;
-    } else if (!pageSizeLocked) {
+    } else {
         double detectedW = 0.0, detectedH = 0.0;
         if (detectPtsPageSize(ps.rightEdge, ps.bottomEdge, detectedW, detectedH)) {
             pageWIn  = detectedW;
@@ -477,8 +506,8 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps, bool pa
            << "x" << QString::number(pageHIn * 25.4, 'f', 1).toStdString() << "mm"
            << (screenPixelFmt ? "  [pixels]" : "  [pts]");
 
-    topIn  = std::clamp(topIn,  0.0, kMaxM);
-    leftIn = std::clamp(leftIn, 0.0, kMaxM);
+    topIn  = std::clamp(topIn,  0.0, pageHIn * kMaxMarginFrac);
+    leftIn = std::clamp(leftIn, 0.0, pageWIn * kMaxMarginFrac);
 
     const double maxPrintW = pageWIn - leftIn;
     if (printW > maxPrintW) {
@@ -486,7 +515,7 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps, bool pa
     }
 
     double bottomIn = std::max(0.0, pageHIn - topIn - printH);
-    bottomIn = std::min(bottomIn, kMaxM);
+    bottomIn = std::min(bottomIn, pageHIn * kMaxMarginFrac);
 
     LOGD() << "  applied (in):     T=" << QString::number(topIn,   'f', 3).toStdString()
            << "  L=" << QString::number(leftIn,   'f', 3).toStdString()

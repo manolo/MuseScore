@@ -4782,6 +4782,31 @@ def gen_v0c4_prec_page_ansi_a3():
     return pre + body + _set_prec(SKELETON_POST, paper=8, ansi=True)   # DMPAPER_A3
 
 
+def _set_wini(post, top, left, bottom_edge, right_edge):
+    """Return SKELETON_POST with the WINI margin int32 fields overridden:
+    @24=top, @28=left, @32=bottomEdge, @36=rightEdge (see ENCORE_FORMAT.md §WINI)."""
+    post = bytearray(post)
+    o = post.find(b'WINI')
+    c = o + 8
+    struct.pack_into('<i', post, c + 24, top)
+    struct.pack_into('<i', post, c + 28, left)
+    struct.pack_into('<i', post, c + 32, bottom_edge)
+    struct.pack_into('<i', post, c + 36, right_edge)
+    return bytes(post)
+
+
+def gen_v0c4_wini_large_margins_a3():
+    """A3 (PREC paper=8) with large WINI margins in screen pixels (~84 dpi): top=176, left=209,
+    bottomEdge=1191, rightEdge=752. Margins of ~2.1-2.5 inches must survive import, not be clamped
+    to a tiny maximum. Mirrors a real A3 score saved with 2.1/2.5/2.7/2.3 inch margins."""
+    pre = _patch_tk00('WiniA3Margins'.encode('utf-16-le') + b'\x00\x00')
+    body = meas_block(meas_hdr(4, 4), end_marker())
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    post = _set_prec(SKELETON_POST, paper=8)            # A3 portrait, Unicode DEVMODE
+    post = _set_wini(post, top=176, left=209, bottom_edge=1191, right_edge=752)
+    return pre + body + post
+
+
 def gen_v0c4_weak_name_defers_to_midi():
     """Name "Contrabass" + MIDI 59 (Tuba, program 58): the substring-only match to the treble
     "Contrabass Bugle" (which shares program 58) outranks the bass-clef GM instrument via the
@@ -8085,6 +8110,7 @@ if __name__=='__main__':
     write("instruments_weak_name_defers_to_midi.enc",      gen_v0c4_weak_name_defers_to_midi())
     write("structure_prec_page_letter.enc",                gen_v0c4_prec_page_letter())
     write("structure_prec_page_a3.enc",                    gen_v0c4_prec_page_ansi_a3())
+    write("structure_wini_large_margins_a3.enc",           gen_v0c4_wini_large_margins_a3())
     write("structure_non_octave_key_keeps_clef.enc",       gen_v0c4_non_octave_key_keeps_clef())
     write("structure_g_clef_key0_stays_plain.enc",         gen_v0c4_g_clef_key0_stays_plain())
     write("structure_c_clef_key_keeps_clef.enc",           gen_v0c4_c_clef_key_keeps_clef())
