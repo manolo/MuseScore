@@ -1525,11 +1525,27 @@ final:     chd_tick itself
 
 ## PREC block (page setup / printer DEVMODE)
 
-Magic: `PREC`. Variable size (132 bytes to several KiB). The content is a Windows
-**DEVMODE** structure (the printer/page-setup state). It is the page-setup source for the
-score and is present in almost every file across all three formats, while the WINI block
-(margins) exists only in v0xC4. So the page **size**, **orientation** and **notation scale**
-come from PREC even for v0xA6/v0xC2 and for the many v0xC4 files that have no WINI.
+Magic: `PREC`. Variable size (132 bytes to several KiB). The content is the printer/page-setup
+state, in one of two encodings depending on the platform that wrote the file:
+
+- **Windows** (`SCOW`): a Windows **DEVMODE** structure (see field table below).
+- **macOS** (`SCO5`): a macOS **NSPrintInfo XML plist** (begins with `<?xml ... <plist ...`).
+  Read the paper from `PMTiogaPaperName` / `PMPaperName` (e.g. `na-letter`, `iso-a4`),
+  orientation from `com.apple.print.PageFormat.PMOrientation` (1 = portrait, 2 = landscape),
+  and the notation scale from `com.apple.print.PageFormat.PMScaling` (a fraction, 1.2 = 120%).
+  The plist carries only the printer's imageable page/paper rects, not the document margins,
+  so SCO5 page **margins** are not available from PREC.
+
+PREC is the page-setup source for the score and is present in almost every file across all
+formats, while the WINI block exists only in some of them. So the page **size**, **orientation**
+and **notation scale** come from PREC even for v0xA6/v0xC2 and for files that have no WINI.
+
+**SCO5 document margins.** SCO5 stores no document margins in any importable block: WINI holds
+only window state, the PREC plist holds only printer rects, and some SCO5 files have no PREC at
+all. Across the available samples one file used 0.625" on every side while two used 0, and no
+byte field tracked that difference. Since the margins cannot be recovered, the importer applies a
+clean, symmetric **0.25" margin** on all sides for SCO5 files: forcing 0 looks cramped (edge to
+edge) and MuseScore's default margins are tuned for A4, so they come out asymmetric on Letter.
 
 The DEVMODE begins with a fixed device-name field followed by the standard fixed fields. Two
 variants occur and must be distinguished:

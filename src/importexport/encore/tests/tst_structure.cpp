@@ -671,6 +671,29 @@ TEST_F(Tst_Structure, system_breaks_from_line_start_deltas_when_count_zero)
 }
 
 // ===========================================================================
+// SCO5 (big-endian macOS Encore 5): page size + orientation come from the PREC
+// macOS plist (Letter portrait here); document margins are not stored anywhere
+// importable, so the importer applies a clean, symmetric 0.25" margin (better UX
+// than edge-to-edge 0 or the A4-tuned default, which is asymmetric on Letter).
+// ===========================================================================
+TEST_F(Tst_Structure, sco5_macos_page_letter_default_margins)
+{
+    MasterScore* score = readEncoreScore("structure_sco5_macos.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    const MStyle& st = score->style();
+    EXPECT_NEAR(st.styleD(Sid::pageWidth), 8.5, 1e-3) << "Letter width from PREC plist";
+    EXPECT_NEAR(st.styleD(Sid::pageHeight), 11.0, 1e-3) << "Letter height from PREC plist";
+    EXPECT_NEAR(st.styleD(Sid::pageOddLeftMargin), 0.25, 1e-6) << "SCO5 uses a uniform 0.25\" margin";
+    EXPECT_NEAR(st.styleD(Sid::pageOddTopMargin), 0.25, 1e-6);
+    EXPECT_NEAR(st.styleD(Sid::pageOddBottomMargin), 0.25, 1e-6);
+    EXPECT_NEAR(st.styleD(Sid::pagePrintableWidth), 8.0, 1e-3) << "printable width = page width - 2 x 0.25\"";
+
+    delete score;
+}
+
+// ===========================================================================
 // FEATURE: SystemLocks lock each Encore system to exactly enc.lines[i].measureCount measures.
 // ===========================================================================
 TEST_F(Tst_Structure, fit_spatium_first_system_measure_count)

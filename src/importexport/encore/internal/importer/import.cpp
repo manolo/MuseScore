@@ -246,6 +246,8 @@ static void logEncRootInfo(const EncRoot& enc)
         }
         LOGD() << "  WINI: top=" << ps.top << "  left=" << ps.left
                << "  bottomEdge=" << ps.bottomEdge << "  rightEdge=" << ps.rightEdge << marginStr;
+    } else if (enc.header.magic == "SCO5") {
+        LOGD() << "  WINI: absent — margins set to 0.25 inches";
     } else {
         LOGD() << "  WINI: absent — margins from MuseScore defaults";
     }
@@ -607,6 +609,22 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     if (ctx.opts.importPageLayout) {
         const bool sizeFromPrec = applyPagePrintSetup(score, enc.printSetup);
         applyPageMargins(score, enc.pageSetup, sizeFromPrec);
+        // SCO5 (macOS Encore 5) does not store document margins in any importable block:
+        // WINI holds only window state, the PREC plist holds only printer rects, and some
+        // files have no PREC at all. Apply a clean, symmetric 0.25" margin: forcing 0 looks
+        // cramped (edge to edge), and MuseScore's default margins are tuned for A4 so they
+        // come out asymmetric on Letter. A small uniform margin is the better default.
+        if (enc.header.magic == "SCO5") {
+            constexpr double kMacMarginIn = 0.25;
+            const double pageWIn = score->style().styleD(Sid::pageWidth);
+            score->style().set(Sid::pageOddTopMargin,     kMacMarginIn);
+            score->style().set(Sid::pageEvenTopMargin,    kMacMarginIn);
+            score->style().set(Sid::pageOddLeftMargin,    kMacMarginIn);
+            score->style().set(Sid::pageEvenLeftMargin,   kMacMarginIn);
+            score->style().set(Sid::pageOddBottomMargin,  kMacMarginIn);
+            score->style().set(Sid::pageEvenBottomMargin, kMacMarginIn);
+            score->style().set(Sid::pagePrintableWidth,   pageWIn - 2.0 * kMacMarginIn);
+        }
     }
     if (ctx.opts.importStaffSize) {
         applyStaffScale(score, enc);
