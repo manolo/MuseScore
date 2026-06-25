@@ -199,6 +199,24 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
                     }
                 }
             }
+            // Last resort: a sung syllable always belongs to a note. If nothing matched
+            // within the threshold and no rest was available, attach it to the nearest
+            // unconsumed chord at any distance rather than dropping it. This recovers
+            // continuation syllables (e.g. "fin-ger", "soft-ly") whose stored tick sits
+            // between notes, further than half a beat from the note they belong to.
+            if (bestIdx < 0) {
+                int bestD = INT_MAX;
+                for (size_t ni = 0; ni < crTickPairs.size(); ++ni) {
+                    if (crConsumed[ni] || !crTickPairs[ni].second->isChord()) {
+                        continue;
+                    }
+                    const int delta = std::abs(crTickPairs[ni].first - pl.encTick);
+                    if (delta < bestD) {
+                        bestD = delta;
+                        bestIdx = static_cast<int>(ni);
+                    }
+                }
+            }
             if (bestIdx < 0) {
                 continue;
             }
