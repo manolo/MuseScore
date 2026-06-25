@@ -7185,6 +7185,77 @@ def gen_v0c4_multiinstr_slur_routing():
 
 
 # ===========================================================================
+# text_lyrics_grandstaff_routed_notes.enc
+# Regression test for lyric-to-note matching on a routed (grand-staff) staff.
+#
+# Two instruments x 2 staves (4 staves). Lyrics belong to instrument 0's BOTTOM
+# staff, whose notes reach MuseScore staff 1 via the voice>=VOICES (case A) path.
+# The lyric also routes to staff 1 (voice 4). Instrument 1's TOP staff has raw
+# staffIdx == 1, so the old note-tick collection (keyed by RAW encStaff == lyStaff)
+# grabbed those wrong notes (ticks 0, 240) instead of the bottom-staff notes
+# (480, 720). With the wrong ticks the syllables matched no chord and fell back to
+# rests in reverse order ("ve Sal"). Routing the collected notes the same way the
+# note loop does fixes it ("Sal ve" on the bottom-staff notes).
+# Expected: bottom staff (MuseScore staff 1) shows "Sal-" then "ve" on the notes
+# at ticks 480 and 720, in order.
+# ===========================================================================
+def gen_v0c4_lyrics_grandstaff_routed_notes():
+    hdr = bytearray(194)
+    hdr[0:4] = b'SCOW'
+    hdr[4] = 0xC4
+    struct.pack_into('<H', hdr, 0x28, 0x0420)
+    struct.pack_into('<H', hdr, 0x2C, 0xF000)
+    struct.pack_into('<h', hdr, 0x2E, 1)         # lineCount = 1
+    struct.pack_into('<h', hdr, 0x30, 1)         # pageCount = 1
+    hdr[0x32] = 2                                # instrumentCount = 2
+    hdr[0x33] = 4                                # staffPerSystem = 4
+    struct.pack_into('<h', hdr, 0x34, 1)         # measureCount = 1
+
+    def make_staff_entry(clef, key, instr_staff_idx):
+        e = bytearray(30)
+        e[14] = clef
+        e[15] = key
+        e[19] = 1
+        e[21] = instr_staff_idx
+        return bytes(e)
+
+    line_data = (b'\x00' * 10
+                 + struct.pack('<H', 0)
+                 + bytes([1])
+                 + make_staff_entry(0, 0, 0x00)      # instr 0 treble
+                 + make_staff_entry(1, 0, 0x40)      # instr 0 bass (staffWithin 1)
+                 + make_staff_entry(0, 0, 0x01)      # instr 1 treble (raw staffIdx 1)
+                 + make_staff_entry(1, 0, 0x41))     # instr 1 bass
+    assert len(line_data) == 133, len(line_data)
+    line_block = b'LINE' + struct.pack('<I', 133) + line_data
+
+    def note_compact(tick, voice, raw_staff, fv, pitch):
+        d = bytearray(25)
+        d[0] = 28
+        d[1] = raw_staff & 0xFF
+        d[2] = fv
+        d[12] = pitch
+        return struct.pack('<H', tick) + bytes([(9 << 4) | (voice & 0xF)]) + bytes(d)
+
+    elems = b''
+    elems += note_compact(0, 0, 0x00, fv=1, pitch=72)     # instr0 treble: whole note
+    # instr0 bass (MuseScore staff 1) via voice=4: quarter notes at 480 and 720.
+    elems += note_compact(480, 4, 0x40, fv=3, pitch=55)
+    elems += note_compact(720, 4, 0x40, fv=3, pitch=57)
+    # instr1 treble (raw staffIdx 1): the "wrong" notes at ticks 0 and 240.
+    elems += note_compact(0,   0, 0x01, fv=3, pitch=64)
+    elems += note_compact(240, 0, 0x01, fv=3, pitch=65)
+    # Lyrics for the bottom staff, voice=4 -> routes to MuseScore staff 1 (case A).
+    elems += lyric_v0c4(490, 4, 0, "Sal")
+    elems += lyric_v0c4(491, 4, 0, "-")
+    elems += lyric_v0c4(730, 4, 0, "ve")
+    elems += end_marker()
+
+    meas = meas_block(meas_hdr(4, 4), elems)
+    return bytes(hdr) + line_block + meas + SKELETON_POST
+
+
+# ===========================================================================
 # notes_multiinstr_compact_routing.enc
 # Regression test for multi-instrument compact staffIdx routing.
 #
@@ -8322,6 +8393,7 @@ if __name__=='__main__':
     write("zbot_from_bazo.enc",                 gen_zbot_from_bazo())
     write("sintetico_all_features.enc",          gen_sintetico_all_features())
     write("notes_multiinstr_compact_routing.enc", gen_v0c4_multiinstr_compact_routing())
+    write("text_lyrics_grandstaff_routed_notes.enc", gen_v0c4_lyrics_grandstaff_routed_notes())
     write("importer_inner_tuplet_note_level_cap.enc", gen_v0c4_inner_tuplet_note_level_cap())
     write("importer_score_size2.enc", set_score_size(assemble(0xC4, [(meas_hdr(4, 4),
         note_v0c4(0, 0, 0, fv=3, pitch=60) + end_marker())], fill_ts=(4, 4)), sz=2))

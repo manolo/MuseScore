@@ -100,7 +100,7 @@ bool MeasEmitCtx::isTieStartAt(int si, int v, int tick, int notePosition) const
 }
 
 void MeasEmitCtx::closeTupletWithFill(BuildCtx& ctx, TupletTracker& tt,
-                                          std::pair<int, int> trackKey)
+                                      std::pair<int, int> trackKey)
 {
     if (!tt.inTuplet() || tt.placedTicks <= Fraction(0, 1)) {
         tt.closeTuplet();
@@ -342,7 +342,7 @@ static bool shouldIncludeElement(const EncMeasureElem* e, const EncMeasure& encM
 
 // Returns false if the element should be skipped (staffIdx out of range or voice invalid).
 // On success, fills staffIdx, voice, msVoice, track, trackKey, encVoiceKey.
-static bool routeElementStaffVoice(
+bool routeElementStaffVoice(
     const EncMeasureElem* e,
     bool isNoteOrRest,
     const std::array<int, 256>& lineSlotByRawByte,
@@ -500,8 +500,15 @@ static Fraction computeElementTick(
         const int encTick = static_cast<int>(e->tick);
         const int xoff = static_cast<int>(en->xoffset);
         bool already = false;
-        for (const auto& p : vec) { if (p.first == encTick) { already = true; break; } }
-        if (!already) { vec.push_back({ encTick, xoff }); }
+        for (const auto& p : vec) {
+            if (p.first == encTick) {
+                already = true;
+                break;
+            }
+        }
+        if (!already) {
+            vec.push_back({ encTick, xoff });
+        }
     } else if (et == EncElemType::REST) {
         ctx.prevRestTick[trackKey] = static_cast<int>(e->tick);
     }
@@ -712,15 +719,15 @@ static void handleKeyChange(BuildCtx& ctx, const MeasEmitCtx& mc,
 // Closes open tuplets, attaches lyrics, adjusts pickup, fills gaps, validates,
 // and advances the measure-skip counter for multi-measure rest expansion.
 static void finalizeMeasureAfterNoteLoop(BuildCtx& ctx, MeasEmitCtx& mc,
-                                          Measure* measure, const EncMeasure& encMeas,
-                                          const Fraction& measTick, int measIdx,
-                                          int& measSkip, size_t& msIdxCounter,
-                                          const EncRoot& enc)
+                                         Measure* measure, const EncMeasure& encMeas,
+                                         const Fraction& measTick, int measIdx,
+                                         int& measSkip, size_t& msIdxCounter,
+                                         const EncRoot& enc)
 {
     for (auto& [key, tt] : ctx.tuplets) {
         mc.closeTupletWithFill(ctx, tt, key);
     }
-    attachPendingLyrics(ctx, measure, encMeas, measTick);
+    attachPendingLyrics(ctx, mc);
     adjustPickupMeasure(ctx, measure, measIdx);
     fillTrailingGaps(ctx, measure, measTick);
     for (int si = 0; si < ctx.totalStaves; ++si) {
@@ -787,6 +794,7 @@ void emitMeasures(BuildCtx& ctx)
         mc.nLineStaves = nLineStaves;
         mc.lineStaffInstrIdx = &lineStaffInstrIdx;
         mc.lineStaffWithin = &lineStaffWithin;
+        mc.lineSlotByRawByte = &lineSlotByRawByte;
 
         resetPerMeasureState(ctx, measIdx);
 
@@ -920,7 +928,7 @@ void emitMeasures(BuildCtx& ctx)
         }  // end element for-loop
 
         finalizeMeasureAfterNoteLoop(ctx, mc, measure, encMeas, measTick, measIdx,
-                                      measSkip, msIdxCounter, enc);
+                                     measSkip, msIdxCounter, enc);
         ++measIdx;
     }
 

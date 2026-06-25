@@ -893,6 +893,15 @@ absolutely closer, so a syllable nudged forward by its layout offset still lands
 Rests are never counted when assigning a note's reference tick; a measure beginning with a rest
 would otherwise shift every following note by one position.
 
+On a grand staff the lyric must be matched against the notes that share its *resolved* staff,
+not its raw staff byte. A bottom-staff note can reach its staff either through `staffWithin`
+(its raw byte resolves to the lower LINE slot) or through the out-of-band voice (voice value
+≥ the voice count routes the note down one staff). A lyric likewise reaches the lower staff by
+one of those mechanisms. Resolve each note's staff with the same routing as the note stream
+before gathering the candidate ticks; gathering by the raw staff byte instead pulls in another
+instrument's notes (whose raw staff index collides with the resolved slot) and reverses the
+syllables.
+
 ---
 
 ## Note element

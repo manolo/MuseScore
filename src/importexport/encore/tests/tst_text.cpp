@@ -270,6 +270,58 @@ TEST_F(Tst_Text, lyrics_latin1_text_decoded_as_one_byte_per_char)
 }
 
 // ===========================================================================
+// FIX: lyrics on a grand-staff bottom staff were matched against the wrong staff's
+// notes and reversed. The bottom-staff notes reach MuseScore staff 1 via the
+// voice>=VOICES (case A) routing, and the lyric routes there too; but the note-tick
+// collection was keyed by RAW encStaff, so it grabbed a second instrument's notes
+// (raw staffIdx 1) instead. With the wrong ticks the syllables matched no chord and
+// fell back to rests in reverse ("ve Sal"). Collecting notes by their ROUTED staff
+// fixes the order and the anchors.
+// Fixture: 2 instruments x 2 staves. Bottom staff of instr 0 has quarter notes
+// (pitch 55, 57) at ticks 480/720 via voice 4; instr 1 treble (raw staffIdx 1) has
+// notes at 0/240. Lyrics "Sal-ve" (voice 4) belong to the bottom staff.
+// Expected: MuseScore staff 1 shows Sal (begin) on pitch 55 then ve (end) on 57.
+// ===========================================================================
+TEST_F(Tst_Text, lyrics_grandstaff_match_routed_staff_notes)
+{
+    MasterScore* score = readEncoreScore("text_lyrics_grandstaff_routed_notes.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    // Collect (pitch, syllable, syllabic) for lyrics on MuseScore staff 1 (track 4 = staff 1, voice 0).
+    struct Hit {
+        int pitch;
+        String text;
+        LyricsSyllabic syll;
+    };
+    std::vector<Hit> hits;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(4);   // staff 1, voice 0
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            Chord* c = toChord(el);
+            for (Lyrics* ly : c->lyrics()) {
+                hits.push_back({ c->upNote()->pitch(), ly->plainText(), ly->syllabic() });
+            }
+        }
+    }
+    ASSERT_EQ(hits.size(), 2u) << "Both syllables must land on the bottom-staff notes";
+    EXPECT_EQ(hits[0].text, String(u"Sal"));
+    EXPECT_EQ(hits[0].pitch, 55) << "First syllable must be on the first bottom-staff note (pitch 55), not reversed";
+    EXPECT_EQ(hits[0].syll, LyricsSyllabic::BEGIN);
+    EXPECT_EQ(hits[1].text, String(u"ve"));
+    EXPECT_EQ(hits[1].pitch, 57) << "Second syllable must be on the second bottom-staff note (pitch 57)";
+    EXPECT_EQ(hits[1].syll, LyricsSyllabic::END);
+
+    delete score;
+}
+
+// ===========================================================================
 // FIX: STAFFTEXT matching Italian tempo terms is promoted to TempoText.
 // Relative markings ("a tempo") get TempoText without absolute BPS; non-tempo strings stay StaffText.
 // ===========================================================================
