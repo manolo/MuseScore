@@ -1045,30 +1045,68 @@ TEST_F(Tst_Structure, timesig_v0c2_common_time_glyph_uppercase_preserved)
 
 TEST_F(Tst_Structure, mid_measure_clef_change_imported)
 {
-    // Fixture: one 4/4 measure with a quarter-note rest followed by a C4L clef change.
-    // Expected: a SegmentType::Clef segment at beat 2 (quarter-note offset within the measure)
-    // carrying ClefType::C4. Prior to this fix, CLEF elements fell through to EncGenericElem
-    // and were silently discarded, so no mid-measure clef segment appeared.
+    // The CLEF carries tick 180 but the next note in the stream is at tick 240 (beat 2);
+    // the clef must land before that note at Fraction(1,4), never at its own 3/16 tick.
     MasterScore* score = readEncoreScore("structure_clef_change_mid_measure.enc");
     ASSERT_NE(score, nullptr);
 
     bool foundC4 = false;
+    bool foundEarly = false;
     for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
         for (Segment* s = m->first(SegmentType::Clef); s; s = s->next(SegmentType::Clef)) {
             if (s->tick() <= m->tick()) {
                 continue;  // skip header clef at measure start
             }
-            if (s->tick() != m->tick() + Fraction(1, 4)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isClef() || toClef(el)->clefType() != ClefType::C4) {
                 continue;
             }
-            EngravingItem* el = s->element(0);
-            if (el && el->isClef() && toClef(el)->clefType() == ClefType::C4) {
+            if (s->tick() == m->tick() + Fraction(1, 4)) {
                 foundC4 = true;
+            } else if (s->tick() == m->tick() + Fraction(3, 16)) {
+                foundEarly = true;
             }
         }
     }
     EXPECT_TRUE(foundC4)
-        << "mid-measure CLEF(C4L) at enc-tick 240 must produce SegmentType::Clef at beat-2 offset";
+        << "mid-measure CLEF(C4L) must anchor to the following note at beat-2 offset (1/4)";
+    EXPECT_FALSE(foundEarly)
+        << "CLEF must not be placed at its own stored tick (3/16); it follows the next note";
+    delete score;
+}
+
+TEST_F(Tst_Structure, trailing_clef_change_moves_to_next_measure)
+{
+    MasterScore* score = readEncoreScore("structure_clef_trailing_cautionary.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m1 = score->firstMeasure();
+    ASSERT_NE(m1, nullptr);
+    Measure* m2 = m1->nextMeasure();
+    ASSERT_NE(m2, nullptr);
+    const Fraction barline = m2->tick();   // = end of measure 1 = downbeat of measure 2
+
+    // A cautionary clef on the m1/m2 barline is serialized as a trailing Clef segment of m1,
+    // so check by absolute tick rather than by measure ownership.
+    bool clefAtBarline = false;
+    bool clefMidM1 = false;
+    for (Measure* m = m1; m; m = m->nextMeasure()) {
+        for (Segment* s = m->first(SegmentType::Clef); s; s = s->next(SegmentType::Clef)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isClef() || toClef(el)->clefType() != ClefType::F) {
+                continue;
+            }
+            if (s->tick() == barline) {
+                clefAtBarline = true;
+            } else if (s->tick() > m1->tick() && s->tick() < barline) {
+                clefMidM1 = true;
+            }
+        }
+    }
+    EXPECT_TRUE(clefAtBarline)
+        << "trailing CLEF must take effect on the downbeat of the next measure";
+    EXPECT_FALSE(clefMidM1)
+        << "trailing CLEF must not land inside measure 1";
     delete score;
 }
 

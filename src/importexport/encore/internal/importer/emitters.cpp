@@ -676,9 +676,49 @@ static void handleClefChange(BuildCtx& ctx, const MeasEmitCtx& mc,
         return;
     }
     const ClefType ct = encClef2MuseScore(ecc->clefType);
-    Segment* seg = mc.measure->getSegment(SegmentType::Clef, ec.elemTick);
+    const track_idx_t track = static_cast<track_idx_t>(ec.staffIdx) * VOICES;
+
+    // A clef change applies before the note it physically precedes, NOT at its own stored tick:
+    // Encore stamps the clef element at a tick that may be earlier than the note it sits in front
+    // of. Scan the measure's element stream for the first note/rest on the same staff that comes
+    // AFTER this clef element and anchor the clef to that note's tick. When no note/rest follows
+    // (the clef is the trailing element of the measure) it is a cautionary clef that belongs on
+    // the downbeat of the NEXT measure (Encore draws it before the final barline).
+    const EncMeasureElem* nextCr = nullptr;
+    if (mc.encMeas) {
+        bool seenSelf = false;
+        for (const auto& up : mc.encMeas->elements) {
+            const EncMeasureElem* el = up.get();
+            if (el == e) {
+                seenSelf = true;
+                continue;
+            }
+            if (!seenSelf) {
+                continue;
+            }
+            const EncElemType t = static_cast<EncElemType>(el->type);
+            if ((t == EncElemType::NOTE || t == EncElemType::REST)
+                && el->staffIdx == e->staffIdx && el->staffWithin == e->staffWithin) {
+                nextCr = el;
+                break;
+            }
+        }
+    }
+
+    Measure* target = mc.measure;
+    Fraction segTick;
+    if (nextCr) {
+        segTick = mc.measure->tick() + Fraction(static_cast<int>(nextCr->tick), kEncWholeTicks);
+    } else if (Measure* next = mc.measure->nextMeasure()) {
+        target = next;
+        segTick = next->tick();
+    } else {
+        segTick = mc.measure->tick() + mc.measure->ticks();
+    }
+
+    Segment* seg = target->getSegment(SegmentType::Clef, segTick);
     Clef* clef = Factory::createClef(seg);
-    clef->setTrack(static_cast<track_idx_t>(ec.staffIdx) * VOICES);
+    clef->setTrack(track);
     clef->setClefType(ct);
     seg->add(clef);
 }
