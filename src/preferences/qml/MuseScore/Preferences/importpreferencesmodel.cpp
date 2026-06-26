@@ -178,9 +178,9 @@ QVariantList ImportPreferencesModel::encoreUnderfillStrategyModel() const
 QVariantList ImportPreferencesModel::encoreOverfillStrategyModel() const
 {
     QVariantList result = {
-        QVariantMap { { "title", muse::qtrc("preferences", "Truncate notes") },
+        QVariantMap { { "title", muse::qtrc("preferences", "Remove extra notes") },
             { "value", static_cast<int>(iex::enc::OverfillStrategy::Truncate) } },
-        QVariantMap { { "title", muse::qtrc("preferences", "Stretch last note") },
+        QVariantMap { { "title", muse::qtrc("preferences", "Stretch last notes") },
             { "value", static_cast<int>(iex::enc::OverfillStrategy::StretchLastNote) } },
         QVariantMap { { "title", muse::qtrc("preferences", "Extend measure") },
             { "value", static_cast<int>(iex::enc::OverfillStrategy::IrregularMeasure) } }

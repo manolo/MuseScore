@@ -1072,6 +1072,55 @@ def gen_v0c4_capped_tuplet_note():
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
 
+def gen_v0c4_overfull_messy_precontent_tuplet():
+    # Mirrors a real overfull measure (Lagrimas, Trumpet 1, m.3): 4/4 with messy
+    # pre-content 17/32 (16th + 32nd + 16th + dotted-quarter) then a 3:2 quarter triplet
+    # (natural span 1/2). Total = 33/32, overflowing 4/4 by exactly 1/32.
+    # Truncate must produce an exact 4/4; Stretch must compress the triplet to fit.
+    e  = note_v0c4(  0, 0, 0, fv=5, pitch=77)                 # 16th
+    e += note_v0c4( 60, 0, 0, fv=6, pitch=76)                 # 32nd
+    e += note_v0c4( 90, 0, 0, fv=5, pitch=77)                 # 16th
+    e += note_v0c4_dotctrl(150, 0, 0, fv=3, pitch=76, dotControl=1)  # dotted quarter
+    e += note_v0c4(510, 0, 0, fv=3, pitch=76, tuplet=0x32)    # triplet Q 1
+    e += note_v0c4(670, 0, 0, fv=3, pitch=76, tuplet=0x32)    # triplet Q 2
+    e += note_v0c4(830, 0, 0, fv=3, pitch=72, tuplet=0x32)    # triplet Q 3
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+def gen_v0c4_overfull_tuplet_with_slur():
+    # Overfull measure (like overfull_messy_precontent_tuplet) PLUS a SLURSTART (0x21)
+    # spanning into the 3:2 quarter triplet (alMezuro=0 -> ends in same measure). Exercises
+    # the overfull surgery in the presence of a slur whose endpoint resolves into the
+    # truncated/compressed region.
+    e  = ornament_v0c4(0, 0, 0, tipo=0x21, xoffset=3, alMezuro=0, xoffset2=5)  # SLURSTART
+    e += note_v0c4(  0, 0, 0, fv=5, pitch=77)
+    e += note_v0c4( 60, 0, 0, fv=6, pitch=76)
+    e += note_v0c4( 90, 0, 0, fv=5, pitch=77)
+    e += note_v0c4_dotctrl(150, 0, 0, fv=3, pitch=76, dotControl=1)
+    e += note_v0c4(510, 0, 0, fv=3, pitch=76, tuplet=0x32)
+    e += note_v0c4(670, 0, 0, fv=3, pitch=76, tuplet=0x32)
+    e += note_v0c4(830, 0, 0, fv=3, pitch=72, tuplet=0x32)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+def gen_v0c4_stretch_irregular_fallback():
+    # 4/4: 3 plain quarters (cumTick=3/4) then a 3:2 triplet of HALF notes (tup=0x32).
+    # Natural tuplet bracket = 2*half = a whole note (4/4). Only a quarter of space is
+    # left, so the largest bracket that fits (a quarter) is < half the natural span ->
+    # the Stretch strategy declines to compress and falls back to IrregularMeasure,
+    # extending the bar to hold all three half-note-triplet members intact.
+    e  = note_v0c4(  0, 0, 0, fv=3, pitch=60, tuplet=0x00)  # plain Q
+    e += note_v0c4(240, 0, 0, fv=3, pitch=62, tuplet=0x00)  # plain Q
+    e += note_v0c4(480, 0, 0, fv=3, pitch=64, tuplet=0x00)  # plain Q
+    e += note_v0c4(720, 0, 0, fv=2, pitch=65, tuplet=0x32)  # half-note triplet 1
+    e += note_v0c4(900, 0, 0, fv=2, pitch=67, tuplet=0x32)  # half-note triplet 2
+    e += note_v0c4(1080, 0, 0, fv=2, pitch=65, tuplet=0x32)  # half-note triplet 3
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
 # ===========================================================================
 # importer_inner_tuplet_note_level_cap.enc
 #
@@ -8317,6 +8366,9 @@ if __name__=='__main__':
     write("notes_mixed_value_tuplet.enc",      gen_v0c4_mixed_value_tuplet())
     write("notes_v0c2_implied_group_boundary.enc", gen_v0c2_implied_group_boundary())
     write("notes_capped_tuplet_note.enc",    gen_v0c4_capped_tuplet_note())
+    write("notes_stretch_irregular_fallback.enc", gen_v0c4_stretch_irregular_fallback())
+    write("notes_overfull_messy_precontent_tuplet.enc", gen_v0c4_overfull_messy_precontent_tuplet())
+    write("notes_overfull_tuplet_with_slur.enc", gen_v0c4_overfull_tuplet_with_slur())
     write("notes_perc_clef_positions.enc",   gen_v0c4_perc_clef_positions())
     write("notes_perc_notehead_all_nibbles.enc", gen_v0c4_perc_notehead_all_nibbles())
     write("notes_perc_shared_pitch_nibbles.enc", gen_v0c4_perc_shared_pitch_nibbles())

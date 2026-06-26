@@ -508,6 +508,63 @@ TEST_F(Tst_Options, overfill_stretch_last_note_does_not_crash)
     delete score;
 }
 
+TEST_F(Tst_Options, stretch_compresses_tuplet_keeps_all_notes)
+{
+    // notes_capped_tuplet_note.enc: 4/4 with 3 plain quarters + a 3:2 quarter triplet
+    // that overflows. "Stretch last notes" preserves ALL three triplet notes by
+    // compressing the tuplet bracket from a half (480) down to a quarter (240): the
+    // members become eighths in a 3:2 group filling the last beat. The tuplet stays
+    // intact (3 members) and the measure remains a standard 4/4.
+    EncImportOptions opts;
+    opts.overfillMeasureStrategy = OverfillStrategy::StretchLastNote;
+    MasterScore* score = readEncoreScoreWithOpts("notes_capped_tuplet_note.enc", opts);
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "Stretch-compressed measure must pass sanity check";
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->ticks(), m->timesig()) << "Compression keeps a standard 4/4 measure";
+    Fraction sum(0, 1);
+    int tupletMembers = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChordRest()) {
+            ChordRest* cr = toChordRest(e);
+            sum += cr->actualTicks();
+            if (cr->tuplet()) {
+                ++tupletMembers;
+            }
+        }
+    }
+    EXPECT_EQ(tupletMembers, 3) << "All three triplet notes preserved inside the tuplet";
+    EXPECT_EQ(sum, Fraction(4, 4)) << "Voice 0 sums to exactly 4/4";
+    delete score;
+}
+
+TEST_F(Tst_Options, stretch_falls_back_to_irregular_for_tiny_bracket)
+{
+    // notes_stretch_irregular_fallback.enc: 3 plain quarters + a 3:2 HALF-note triplet
+    // (natural bracket = a whole note). Only a quarter of space is left, so the largest
+    // bracket that fits is < half the natural span: Stretch declines to compress and
+    // falls back to IrregularMeasure, extending the bar and keeping all three members.
+    EncImportOptions opts;
+    opts.overfillMeasureStrategy = OverfillStrategy::StretchLastNote;
+    MasterScore* score = readEncoreScoreWithOpts("notes_stretch_irregular_fallback.enc", opts);
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "Stretch irregular fallback must pass sanity check";
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_GT(m->ticks(), m->timesig()) << "Fallback extends the measure past 4/4";
+    int tupletMembers = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChordRest() && toChordRest(e)->tuplet()) {
+            ++tupletMembers;
+        }
+    }
+    EXPECT_EQ(tupletMembers, 3) << "All three half-note-triplet members preserved";
+    delete score;
+}
+
 TEST_F(Tst_Options, overfill_irregular_measure_does_not_crash)
 {
     EncImportOptions opts;

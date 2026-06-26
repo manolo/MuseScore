@@ -128,8 +128,12 @@ void adjustPickupMeasure(BuildCtx& ctx, mu::engraving::Measure* measure, int mea
 void fillTrailingGaps(BuildCtx& ctx, mu::engraving::Measure* measure, mu::engraving::Fraction measTick);
 // Fix over/undershoots up to 1/24. (emitters-fill.cpp)
 void correctMeasureLength(BuildCtx& ctx, mu::engraving::Measure* measure);
+// Extend the measure to the max voice content (IrregularMeasure / Stretch fallback). (emitters-fill.cpp)
+void extendMeasureIrregular(BuildCtx& ctx, mu::engraving::Measure* measure);
 // Nuclear hard-cap: remove trailing elements and fill deficit. (emitters-fill.cpp)
 void capMeasureLength(BuildCtx& ctx, mu::engraving::Measure* measure);
+// Resolve overfull voices per the overfill strategy (Remove / Stretch / Irregular). (emitters-overfill.cpp)
+void fitOverfullMeasure(BuildCtx& ctx, mu::engraving::Measure* measure);
 
 // Apply per-measure BPM marks as TempoText elements. (emitters-tempo.cpp)
 void applyMeasureBpmMarks(BuildCtx& ctx);

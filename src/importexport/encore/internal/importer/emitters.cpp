@@ -734,7 +734,7 @@ static void finalizeMeasureAfterNoteLoop(BuildCtx& ctx, MeasEmitCtx& mc,
         measure->checkMeasure(static_cast<staff_idx_t>(si));
     }
     correctMeasureLength(ctx, measure);
-    capMeasureLength(ctx, measure);
+    fitOverfullMeasure(ctx, measure);
     const EncMeasure* prevMeas = (measIdx > 0) ? &enc.measures[measIdx - 1] : nullptr;
     measSkip = measDisplayCount(encMeas, prevMeas) - 1;
     ++msIdxCounter;
@@ -845,10 +845,11 @@ void emitMeasures(BuildCtx& ctx)
             EncElemType et = static_cast<EncElemType>(e->type);
             const bool isNoteOrRest = (et == EncElemType::NOTE || et == EncElemType::REST);
 
-            // IrregularMeasure: allow notes past durTicks through so capMeasureLength can extend the measure.
-            if (!shouldIncludeElement(e, encMeas)
-                && !(isNoteOrRest
-                     && ctx.opts.overfillMeasureStrategy == OverfillStrategy::IrregularMeasure)) {
+            // Let notes/rests past durTicks through for every overfill strategy so an
+            // overshooting tuplet's later members still arrive; non-tuplet overflow is
+            // re-dropped below (the "voice full" guard), and the post-pass resolves the
+            // rest. (Only note/rest are let through; other element gating is unchanged.)
+            if (!shouldIncludeElement(e, encMeas) && !isNoteOrRest) {
                 continue;
             }
 
@@ -877,8 +878,12 @@ void emitMeasures(BuildCtx& ctx)
 
             // Drop overflow notes when voice is full; MIDI artifacts must not spill to the next MuseScore voice.
             // IrregularMeasure: skip the cap so capMeasureLength can extend the measure to hold all notes.
+            // Open tuplet: keep placing members so the whole tuplet lands intact; the post-pass
+            // (fitOverfullMeasure) resolves an overshooting tuplet atomically.
+            const bool inOpenTuplet = ctx.tuplets.count(trackKey) && ctx.tuplets.at(trackKey).inTuplet();
             if (isNoteOrRest && !isChordExt && ctx.cumTick[trackKey] >= measure->ticks()
-                && ctx.opts.overfillMeasureStrategy != OverfillStrategy::IrregularMeasure) {
+                && ctx.opts.overfillMeasureStrategy != OverfillStrategy::IrregularMeasure
+                && !inOpenTuplet) {
                 continue;
             }
 

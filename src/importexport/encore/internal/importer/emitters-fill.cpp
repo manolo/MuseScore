@@ -203,6 +203,74 @@ void correctMeasureLength(BuildCtx& ctx, Measure* measure)
     }
 }
 
+// Extend the measure to the maximum voice content (IrregularMeasure behavior), shifting
+// later measures and pending hairpins, and filling short voices with a visible rest.
+// Used by the IrregularMeasure strategy and as the Stretch fallback when a tuplet cannot
+// be compressed enough to be musical.
+void extendMeasureIrregular(BuildCtx& ctx, Measure* measure)
+{
+    const Fraction mLen = measure->ticks();
+    const Fraction measTick = measure->tick();
+
+    Fraction maxVoiceSum { 0, 1 };
+    for (int si = 0; si < ctx.totalStaves; ++si) {
+        for (voice_idx_t v = 0; v < VOICES; ++v) {
+            const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
+            Fraction voiceSum { 0, 1 };
+            for (Segment* seg = measure->first(SegmentType::ChordRest);
+                 seg; seg = seg->next(SegmentType::ChordRest)) {
+                EngravingItem* el = seg->element(tr);
+                if (el) {
+                    voiceSum += toChordRest(el)->actualTicks();
+                }
+            }
+            if (voiceSum > maxVoiceSum) {
+                maxVoiceSum = voiceSum;
+            }
+        }
+    }
+    if (maxVoiceSum > mLen) {
+        const Fraction delta = maxVoiceSum - mLen;
+        measure->setTicks(maxVoiceSum);
+        for (Measure* m = measure->nextMeasure(); m; m = m->nextMeasure()) {
+            m->setTick(m->tick() + delta);
+        }
+        for (PendingHairpin& ph : ctx.pendingHairpins) {
+            if (ph.maxEndTick >= measTick + mLen) {
+                ph.maxEndTick += delta;
+            }
+        }
+        // Fill all voices that fall short of the extended measure length.
+        // Staves whose content stopped at the original measure length now sit
+        // inside a longer measure; a visible rest covers the added time.
+        for (int si = 0; si < ctx.totalStaves; ++si) {
+            for (voice_idx_t v = 0; v < VOICES; ++v) {
+                const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
+                Fraction voiceSum { 0, 1 };
+                for (Segment* seg = measure->first(SegmentType::ChordRest);
+                     seg; seg = seg->next(SegmentType::ChordRest)) {
+                    EngravingItem* el = seg->element(tr);
+                    if (el) {
+                        voiceSum += toChordRest(el)->actualTicks();
+                    }
+                }
+                if (voiceSum <= Fraction(0, 1) || voiceSum >= maxVoiceSum) {
+                    continue;
+                }
+                const Fraction fillTick = measTick + voiceSum;
+                Segment* fillSeg = measure->getSegment(SegmentType::ChordRest, fillTick);
+                if (!fillSeg->element(tr)) {
+                    Rest* r = Factory::createRest(fillSeg, TDuration(DurationType::V_MEASURE));
+                    r->setTicks(maxVoiceSum - voiceSum);
+                    r->setTrack(tr);
+                    r->setGap(false);
+                    fillSeg->add(r);
+                }
+            }
+        }
+    }
+}
+
 // Nuclear hard-cap: remove trailing ChordRest elements from any voice that
 // still overshoots after correctMeasureLength, then fill any residual deficit
 // with a rest. Guarantees no measure has wrong total duration.
@@ -215,63 +283,7 @@ void capMeasureLength(BuildCtx& ctx, Measure* measure)
     const Fraction measTick = measure->tick();
 
     if (ctx.opts.overfillMeasureStrategy == OverfillStrategy::IrregularMeasure) {
-        Fraction maxVoiceSum { 0, 1 };
-        for (int si = 0; si < ctx.totalStaves; ++si) {
-            for (voice_idx_t v = 0; v < VOICES; ++v) {
-                const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
-                Fraction voiceSum { 0, 1 };
-                for (Segment* seg = measure->first(SegmentType::ChordRest);
-                     seg; seg = seg->next(SegmentType::ChordRest)) {
-                    EngravingItem* el = seg->element(tr);
-                    if (el) {
-                        voiceSum += toChordRest(el)->actualTicks();
-                    }
-                }
-                if (voiceSum > maxVoiceSum) {
-                    maxVoiceSum = voiceSum;
-                }
-            }
-        }
-        if (maxVoiceSum > mLen) {
-            const Fraction delta = maxVoiceSum - mLen;
-            measure->setTicks(maxVoiceSum);
-            for (Measure* m = measure->nextMeasure(); m; m = m->nextMeasure()) {
-                m->setTick(m->tick() + delta);
-            }
-            for (PendingHairpin& ph : ctx.pendingHairpins) {
-                if (ph.maxEndTick >= measTick + mLen) {
-                    ph.maxEndTick += delta;
-                }
-            }
-            // Fill all voices that fall short of the extended measure length.
-            // Staves whose content stopped at the original measure length now sit
-            // inside a longer measure; a visible rest covers the added time.
-            for (int si = 0; si < ctx.totalStaves; ++si) {
-                for (voice_idx_t v = 0; v < VOICES; ++v) {
-                    const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
-                    Fraction voiceSum { 0, 1 };
-                    for (Segment* seg = measure->first(SegmentType::ChordRest);
-                         seg; seg = seg->next(SegmentType::ChordRest)) {
-                        EngravingItem* el = seg->element(tr);
-                        if (el) {
-                            voiceSum += toChordRest(el)->actualTicks();
-                        }
-                    }
-                    if (voiceSum <= Fraction(0, 1) || voiceSum >= maxVoiceSum) {
-                        continue;
-                    }
-                    const Fraction fillTick = measTick + voiceSum;
-                    Segment* fillSeg = measure->getSegment(SegmentType::ChordRest, fillTick);
-                    if (!fillSeg->element(tr)) {
-                        Rest* r = Factory::createRest(fillSeg, TDuration(DurationType::V_MEASURE));
-                        r->setTicks(maxVoiceSum - voiceSum);
-                        r->setTrack(tr);
-                        r->setGap(false);
-                        fillSeg->add(r);
-                    }
-                }
-            }
-        }
+        extendMeasureIrregular(ctx, measure);
         return;
     }
 
