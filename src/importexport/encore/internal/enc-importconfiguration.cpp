@@ -78,12 +78,12 @@ void EncImportConfiguration::init()
         m_instrumentSearchModeChanged.send(static_cast<InstrumentSearchMode>(val.toInt()));
     });
 
-    settings()->setDefaultValue(ENC_UNDERFILL_STRATEGY_KEY, Val(static_cast<int>(UnderfillStrategy::InvisibleRests)));
+    settings()->setDefaultValue(ENC_UNDERFILL_STRATEGY_KEY, Val(static_cast<int>(UnderfillStrategy::IrregularMeasure)));
     settings()->valueChanged(ENC_UNDERFILL_STRATEGY_KEY).onReceive(this, [this](const Val& val) {
         m_underfillMeasureStrategyChanged.send(static_cast<UnderfillStrategy>(val.toInt()));
     });
 
-    settings()->setDefaultValue(ENC_OVERFILL_STRATEGY_KEY, Val(static_cast<int>(OverfillStrategy::Truncate)));
+    settings()->setDefaultValue(ENC_OVERFILL_STRATEGY_KEY, Val(static_cast<int>(OverfillStrategy::IrregularMeasure)));
     settings()->valueChanged(ENC_OVERFILL_STRATEGY_KEY).onReceive(this, [this](const Val& val) {
         m_overfillMeasureStrategyChanged.send(static_cast<OverfillStrategy>(val.toInt()));
     });
