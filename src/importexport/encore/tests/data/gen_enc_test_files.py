@@ -8162,6 +8162,48 @@ def gen_v0c4_cross_measure_slur_precision():
     return assemble(0xC4, custom, fill_ts=(4, 4))
 
 
+def _clef_elem(tick, voice, staffIdx, clef_type):
+    # CLEF element, size=6: tick(2)+typeVoice(1)+size(1)+rawStaff(1)+clefType(1)
+    d = bytearray(3)
+    d[0] = 6; d[1] = staffIdx & 0x3F; d[2] = clef_type & 0xFF
+    return struct.pack('<H', tick) + bytes([(1 << 4) | (voice & 0xF)]) + bytes(d)
+
+
+def gen_v0c4_structure_clef_change_mid_measure():
+    # 2/4 measure of eight 16th notes. A CLEF(C4L=3) is serialized in the stream AFTER the
+    # beat-1 notes and BEFORE the beat-2 note, but carries an earlier stored tick (180). The
+    # importer must anchor the clef to the NOTE that physically follows it in the stream (the
+    # beat-2 note at tick 240 = Fraction(1,4)), NOT to its own stored tick: Encore draws a
+    # clef in front of the note it precedes regardless of the tick it carries.
+    e  = note_v0c4(  0, 0, 0, fv=5, pitch=72)
+    e += note_v0c4( 60, 0, 0, fv=5, pitch=71)
+    e += note_v0c4(120, 0, 0, fv=5, pitch=69)
+    e += note_v0c4(180, 0, 0, fv=5, pitch=67)
+    e += _clef_elem(180, 0, 0, clef_type=3)       # C4L clef, stored tick 180, before the beat-2 note
+    e += note_v0c4(240, 0, 0, fv=5, pitch=65)     # beat 2 (Fraction 1/4): clef anchors here
+    e += note_v0c4(300, 0, 0, fv=5, pitch=64)
+    e += note_v0c4(360, 0, 0, fv=5, pitch=62)
+    e += note_v0c4(420, 0, 0, fv=5, pitch=60)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(2, 4), e)], fill_ts=(2, 4))
+
+
+def gen_v0c4_structure_clef_trailing_cautionary():
+    # Measure 1 (2/4) is filled by eight 16th notes, then a CLEF(F=1) is the LAST stream
+    # element (no note/rest follows it). Such a trailing/cautionary clef takes effect on the
+    # downbeat of measure 2, not before measure 1's final note.
+    e0 = b''
+    for i, t in enumerate([0, 60, 120, 180, 240, 300, 360, 420]):
+        e0 += note_v0c4(t, 0, 0, fv=5, pitch=72 - i)
+    e0 += _clef_elem(420, 0, 0, clef_type=1)      # trailing F clef, last element of measure 1
+    e0 += end_marker()
+    e1 = b''
+    for i, t in enumerate([0, 60, 120, 180, 240, 300, 360, 420]):
+        e1 += note_v0c4(t, 0, 0, fv=5, pitch=53 + i)
+    e1 += end_marker()
+    return assemble(0xC4, [(meas_hdr(2, 4), e0), (meas_hdr(2, 4), e1)], fill_ts=(2, 4))
+
+
 def write(name,data):
     path=os.path.join(OUT_DIR,name)
     with open(path,'wb') as f: f.write(data)
@@ -8608,5 +8650,7 @@ if __name__=='__main__':
     write("notes_v0c2_full_measure_no_false_dot.enc",      gen_v0c2_full_measure_no_false_dot())
     write("instruments_c2_no_tilde_compact_names_midi.enc", gen_v0c2_no_tilde_compact_names_midi())
     write("instruments_c2_tilde_primary_block_midi.enc",    gen_v0c2_tilde_primary_block_midi())
+    write("structure_clef_change_mid_measure.enc",         gen_v0c4_structure_clef_change_mid_measure())
+    write("structure_clef_trailing_cautionary.enc",        gen_v0c4_structure_clef_trailing_cautionary())
     print("Done.")
 
