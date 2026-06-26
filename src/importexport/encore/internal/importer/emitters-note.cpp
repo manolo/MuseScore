@@ -440,9 +440,13 @@ static bool advanceCumulativeTick(
 
     // Cap advance to remaining space; remove tuplet membership to avoid sanityCheck overshoot.
     // IrregularMeasure: skip the cap so cumTick can exceed measure ticks and capMeasureLength extends it.
+    // Tuplet members: never cut here for any strategy. A tuplet is atomic; let it overshoot
+    // and resolve the whole tuplet in the post-pass (fitOverfullMeasure). Cutting a member
+    // here would leave an invalid partial tuplet.
     Fraction remaining = measure->ticks() - ctx.cumTick[trackKey];
     if (advance > remaining && remaining > Fraction(0, 1)
-        && ctx.opts.overfillMeasureStrategy != OverfillStrategy::IrregularMeasure) {
+        && ctx.opts.overfillMeasureStrategy != OverfillStrategy::IrregularMeasure
+        && !(chord && chord->tuplet())) {
         advance = TDuration(remaining, true).fraction();
         if (advance.numerator() == 0) {
             // Remaining smaller than any standard duration; chord would become zero-tick. Remove it.

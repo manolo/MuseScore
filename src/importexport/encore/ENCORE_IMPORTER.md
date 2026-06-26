@@ -84,11 +84,39 @@ import and passes the filled struct into `importEncore()`.
 | `importUnsupportedArticulationsAsText` | false | Unknown artic bytes emitted as StaffText; false = silently dropped |
 | `instrumentSearchMode` | NameAndMidi | `NameAndMidi` = name+MIDI scoring; `MidiOnly` = skip name steps 2-4; `Piano` = always Grand Piano |
 | `underfillMeasureStrategy` | InvisibleRests | How to fill trailing gaps: `InvisibleRests`, `VisibleRests`, `IrregularMeasure` |
-| `overfillMeasureStrategy` | Truncate | How to handle overflow: `Truncate`, `IrregularMeasure` |
+| `overfillMeasureStrategy` | Truncate | How to handle a measure whose content exceeds the time signature: `Truncate` ("Remove extra notes"), `StretchLastNote` ("Stretch last notes"), `IrregularMeasure` |
 | `firstMeasureIsPickup` | true | Shorten first measure as pickup if underflowed; false = pad with leading rests |
 
 `EncImportOptions` is stored in `BuildCtx` and consulted throughout `emitters-*.cpp`
 and `resolvers-*.cpp`.
+
+## Overfull measures
+
+Some Encore measures carry more content than the time signature allows (most often a
+trailing tuplet that overshoots the barline by a small, rounding-sized amount). Because a
+tuplet is indivisible, the note loop lets such content overshoot (it is not cut mid-stream)
+and a single post-pass, `fitOverfullMeasure` in `emitters-overfill.cpp`, resolves each
+overfull voice according to `overfillMeasureStrategy`. A tuplet is always preserved whole,
+compressed whole, or dissolved whole; a partial tuplet is never produced.
+
+- **Remove extra notes** (`Truncate`): a trailing tuplet that is cut is dissolved (its
+  members revert to their plain face value); trailing notes are then removed until the
+  content fits; the last surviving note is lengthened by at most one augmentation dot, and
+  any remainder is filled with an exact rest. Destructive but always a standard measure.
+
+- **Stretch last notes** (`StretchLastNote`): preserves all the notes by compressing the
+  trailing tuplet's bracket to the largest value that fits (base limited to 3 dots so the
+  notation survives layout) and filling the remainder with an exact rest; a lone trailing
+  note is reduced with up to 3 dots instead. If the compressed bracket would be smaller
+  than half the tuplet's natural span, it falls back to `IrregularMeasure` for that measure.
+
+- **Mark as irregular measure** (`IrregularMeasure`): the measure's actual duration is
+  extended to hold all the content, preserving the exact rhythm at the cost of a
+  non-standard bar length.
+
+The fill durations are split into individually notatable figures (up to 3 dots) via
+`toDurationList`, so a residual that is not a single note value becomes a tied sequence
+rather than a non-notatable duration.
 
 ## Block dispatch and resync
 

@@ -75,6 +75,7 @@ target_sources(iex_encore PRIVATE
     internal/importer/emitters-lyrics.cpp
     internal/importer/emitters-tempo.cpp
     internal/importer/emitters-fill.cpp
+    internal/importer/emitters-overfill.cpp
     internal/importer/emitters.cpp
     internal/importer/resolvers.h
     internal/importer/resolvers.cpp

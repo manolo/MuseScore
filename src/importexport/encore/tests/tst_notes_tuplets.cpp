@@ -690,40 +690,83 @@ TEST_F(Tst_NotesTuplets, implied_group_boundary_no_spurious_new_group)
     delete score;
 }
 
-TEST_F(Tst_NotesTuplets, capped_tuplet_note_removed_from_tuplet)
+TEST_F(Tst_NotesTuplets, truncate_overfull_tuplet_no_partial_tuplet)
 {
     // notes_capped_tuplet_note.enc: 4/4 measure with 3 plain quarters
-    // (cumTick=3/4) followed by 3 explicit 3:2 triplet quarters (tup=0x32).
-    // 1st triplet Q advance = (1/4)*(2/3) = 1/6. cumTick=3/4+1/6=11/12.
-    // 2nd triplet Q: remaining=1/12 < 1/6 → advance capped. Note removed from tuplet.
+    // (cumTick=3/4) followed by 3 explicit 3:2 triplet quarters (tup=0x32). The full
+    // content overflows 4/4.
     //
-    // Bug: without removal, chord stays in tuplet with ticks=1/4 (face value).
-    //   actualTicks = 1/6 > 1/12 (capped advance). Sum overshoots mLen → corrupted.
-    // Fix: capped note removed. Its ticks = capped value → actualTicks ≤ advance ≤
-    //   remaining → sum stays within mLen.
+    // Default overfill strategy is "Remove extra notes" (Truncate): a tuplet is atomic, so
+    // the trailing tuplet is DISSOLVED to plain quarters, then trailing notes are removed
+    // until the bar is filled, and the last survivor is dotted to fill exactly (here the
+    // 3 originals + 1 dissolved quarter fill 4/4 exactly, so no dots and no rest).
+    //
+    // Regression: the old note-loop cap ripped one note out of the tuplet, leaving an
+    // INVALID partial tuplet (3:2 with <3 members) that broke copy/paste with
+    // "Tuplet cannot cross barlines". The measure must contain NO tuplet at all.
     MasterScore* score = readEncoreScore("notes_capped_tuplet_note.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
-    EXPECT_TRUE(ret) << "Capped tuplet note should not overshoot mLen: " << ret.text();
+    EXPECT_TRUE(ret) << "Truncated measure must pass sanity check: " << ret.text();
     Measure* m = measureAt(score, 0);
     ASSERT_NE(m, nullptr);
     EXPECT_EQ(m->timesig(), Fraction(4, 4));
-    std::vector<Chord*> chords;
+    EXPECT_EQ(m->ticks(), Fraction(4, 4)) << "Truncate keeps a standard 4/4 measure";
+    Fraction sum(0, 1);
+    int tupletChords = 0;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* e = s->element(0);
-        if (e && e->isChord()) {
-            chords.push_back(toChord(e));
+        if (e && e->isChordRest()) {
+            ChordRest* cr = toChordRest(e);
+            sum += cr->actualTicks();
+            if (cr->tuplet()) {
+                ++tupletChords;
+            }
         }
     }
-    ASSERT_GE(chords.size(), 4u);
-    EXPECT_EQ(chords[0]->tuplet(), nullptr) << "Plain Q 1 no tuplet";
-    EXPECT_EQ(chords[1]->tuplet(), nullptr) << "Plain Q 2 no tuplet";
-    EXPECT_EQ(chords[2]->tuplet(), nullptr) << "Plain Q 3 no tuplet";
-    EXPECT_NE(chords[3]->tuplet(), nullptr) << "First triplet Q in tuplet";
-    if (chords.size() >= 5) {
-        EXPECT_EQ(chords[4]->tuplet(), nullptr)
-            << "Capped 2nd triplet Q removed from tuplet";
+    EXPECT_EQ(tupletChords, 0) << "Truncate must leave NO tuplet (no partial tuplet)";
+    EXPECT_EQ(sum, Fraction(4, 4)) << "Voice 0 must sum to exactly 4/4";
+    delete score;
+}
+
+TEST_F(Tst_NotesTuplets, truncate_overfull_messy_precontent_fills_to_4_4)
+{
+    // notes_overfull_messy_precontent_tuplet.enc mirrors a real overfull measure: 4/4 with
+    // 17/32 of pre-content (16th+32nd+16th+dotted-quarter) then a 3:2 quarter triplet,
+    // total 33/32. Default Truncate must dissolve the triplet, drop trailing notes, dot
+    // the survivor, and leave an EXACT 4/4 (no underfull gap, no partial tuplet).
+    MasterScore* score = readEncoreScore("notes_overfull_messy_precontent_tuplet.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "Truncated messy measure must pass sanity check";
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->ticks(), Fraction(4, 4)) << "Truncate keeps a standard 4/4 measure";
+    Fraction sum(0, 1);
+    int tupletChords = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChordRest()) {
+            ChordRest* cr = toChordRest(e);
+            sum += cr->actualTicks();
+            if (cr->tuplet()) {
+                ++tupletChords;
+            }
+        }
     }
+    EXPECT_EQ(tupletChords, 0) << "No partial tuplet left";
+    EXPECT_EQ(sum, Fraction(4, 4)) << "Voice 0 must fill exactly 4/4 (no underfull gap)";
+    delete score;
+}
+
+TEST_F(Tst_NotesTuplets, truncate_overfull_tuplet_with_slur_no_crash)
+{
+    // notes_overfull_tuplet_with_slur.enc: overfull 4/4 with a 3:2 quarter triplet and a
+    // SLURSTART spanning into it. Truncate dissolves and removes tuplet members; a slur
+    // whose endpoint resolves into the modified region must not leave a dangling reference
+    // that crashes during layout or at score teardown.
+    MasterScore* score = readEncoreScore("notes_overfull_tuplet_with_slur.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
     delete score;
 }
 
