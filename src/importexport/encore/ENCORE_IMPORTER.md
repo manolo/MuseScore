@@ -510,8 +510,8 @@ is set mark the receiving side and are dropped from the tie
 queue; the receiving note is matched by `(staffIdx, voice,
 pitch)` when it is placed.
 
-Observed distribution by `(+5, +6)` pair on the Beethoven
-Sinfonia 7 II Allegretto Plectro corpus (`Beethoven_S7M2_Plectro.enc`):
+Observed distribution by `(+5, +6)` pair on a large real-world
+plectrum-ensemble corpus:
 
 | (+5, +6)     | Count | Role         |
 |--------------|------:|--------------|
@@ -545,7 +545,7 @@ where `leadingGraceFv` is the maximum faceValue seen in the current
 grace queue (tracked in `v0xA6LeadingGraceFv` per `trackKey`, cleared
 when the queue flushes). Notes with g1=0x10 whose faceValue is LOWER
 (= longer duration) than the leader are regular notes following the
-group (boda.enc distinguishes: m57 has a 64th inner grace after a 32nd
+group (a real v0xA6 score distinguishes: m57 has a 64th inner grace after a 32nd
 leader; m75 has regular 16ths after the same 32nd leader).
 
 **Face-grid snap suppression.** The implicit-silence snap that advances
@@ -570,7 +570,7 @@ note in a grace-containing group ends up with a raw gap to the measure
 end that is SMALLER than its face value, because the grace notes
 "borrowed" that time.
 
-Example (boda.enc m75, 3/8 measure, beatTicks=120, durTicks=360):
+Example (a real v0xA6 3/8 score, m75, beatTicks=120, durTicks=360):
 
 ```
 tick=  0  8th  (regular)     faceValue=120
@@ -612,7 +612,7 @@ Encore stores single-chord tremolos in two ways:
    `tick == durTicks`, after the last note of a long passage). Both map
    to `TremoloSingleChord` / R32 (3 slashes = 32nd-note speed), the
    standard bandurria / plectro tremolo. Confirmed by 248 occurrences
-   in a Beethoven plectro score where tremolo is ubiquitous.
+   in a real plectrum-ensemble score where tremolo is ubiquitous.
 
 Resolution is deferred via `PendingOrnTremolo` (tick, measTick,
 staffIdx, msVoice, tremType). The post-pass:
@@ -633,7 +633,7 @@ staffIdx, msVoice, tremType). The post-pass:
    Without the correction the tremolo would appear on the shorter tied-to
    note instead of the longer tied-from note.
 
-Tipo `0xBE` appears rarely (3 times in Beethoven Plectro) on quarter
+Tipo `0xBE` appears rarely (3 times in the plectrum-ensemble corpus) on quarter
 notes at measure starts, always with `byte+14 = 0xF4`. Its semantics
 are not yet decoded; it is currently silently ignored.
 
@@ -788,11 +788,11 @@ created with `TremoloType::R8/R16/R32` matching the stroke count
 **Per-chord staccato from ORN tipo 0xC9.** Encore stores chord-
 level staccato as a separate size-16 ORN at the chord's tick.
 Encore's own MusicXML exporter drops `0xC9` entirely (the
-Beethoven reference XML shows only 1 `<staccato/>` while the
+reference XML shows only 1 `<staccato/>` while the
 score visually displays staccato dots on hundreds of notes). The
 importer attaches `SymId::articStaccatoAbove` and dedups against
-the per-note artic byte `0x1D`. Recovered count on Beethoven
-Plectro: 1 -> 1864 staccatos.
+the per-note artic byte `0x1D`. Recovered count on the
+plectrum-ensemble corpus: 1 -> 1864 staccatos.
 
 ## Stand-alone FINGER and BOWING ORN routing in grand-staff scores
 
@@ -852,8 +852,7 @@ Encore `.enc` files do not emit a separate WEDGESTOP or SLURSTOP
 element. The endpoint is synthesised from `alMezuro` (count of
 measures forward) and `xoffset2` (horizontal position within the
 end measure) at WEDGESTART/SLURSTART time, in a post-pass over
-the measure list. Compare with `Enc2MusicXML/src/encfile.cpp::addSpannerEnds`,
-which clones each START as a STOP into the destination measure.
+the measure list.
 
 **Zero-length hairpins.** A hairpin whose computed end falls on
 the same tick as the start would assert during layout. The
@@ -1055,7 +1054,7 @@ In v0xC4, `dotControl` at note byte +14 is a dot COUNT (0, 1, 2, 3).
 In v0xC2, the same byte is a layout/display field whose bit meanings are
 less precise: bit 0 is sometimes set as a "dotted" indicator but also
 appears coincidentally on undotted notes (observed with values 0x28, 0x39,
-0x60 in tapada.enc where the notes are plain).
+0x60 in a real v0xC2 score where the notes are plain).
 
 `computeDotCount` resolves dots in priority order:
 1. `calcDots(dotControl, fv)` — treats `dotControl` as a tick value.
@@ -1067,7 +1066,7 @@ appears coincidentally on undotted notes (observed with values 0x28, 0x39,
 When `rdur ≤ faceTicks` the note is plain (exact match) or shortened by
 multi-stream overlap; bit 0 in dotControl is then a spurious layout flag.
 This guard prevents false dotted notes on v0xC2 plain 16ths and 8ths whose
-`dotControl` happens to have bit 0 set (tapada.enc m28 staff 2: five plain
+`dotControl` happens to have bit 0 set (a real v0xC2 score, m28 staff 2: five plain
 notes were incorrectly promoted to dotted, overflowing the measure).
 
 **v0xC2 dotted-eighth anomaly (`fixDottedEighthPattern`, readers-v0xc2.cpp):**
@@ -1095,7 +1094,7 @@ runs for these notes.
 regardless of the face value nibble; for a notated 16th with
 rdur=80 this misclassified the note as longer and pushed the
 remainder of the measure into a spurious second voice. Verified
-on `bandurriator/Tie a Yellow Ribbon Guitarra B.enc` m1 (single
+on a real plucked-string score, m1 (single
 voice with 14 events, previously 10 + 4 spurious voice-2).
 
 **Inflated dotted rdur does not promote face value.** Real-world
@@ -1499,7 +1498,7 @@ Modern Encore 5 files write text in UTF-16 LE, but legacy files
 (notably Spanish/Portuguese scores) write it as single-byte
 Latin-1. Forcing UTF-16 on a Latin-1 entry combines pairs of
 single-byte chars into one BMP code unit and produces Chinese-
-looking gibberish (sirena.enc m21 "la 1ª vez" becomes
+looking gibberish (a real Latin-1 score, m21 "la 1ª vez" becomes
 "慬ㄠ₪敶⁺").
 
 `EncTextBlock::read` probes bytes 14 and 15 of each entry: a
@@ -1521,7 +1520,7 @@ Exercised by `Tst_Text.staff_text_multiline_preserved`.
 ## End-of-measure dynamics and staff text
 
 Encore can place a dynamic or staff-text ornament at a tick that
-exceeds the measure's `durTicks` (sirena.enc m21 is 2/4 with
+exceeds the measure's `durTicks` (a real 2/4 score, m21 with
 durTicks=480 but stores the 1st-volta `pp` + "la 2ª" pair at
 tick=960). These are repeat-aware section-end markers Encore
 renders just before the bar line of the source measure. The
@@ -1756,13 +1755,13 @@ writing the result to:
 | author      | `COMPOSER`                  | `composer`               |
 | copyright   | (not on VBox)               | `copyright`              |
 
-For Encore's `Mamae_eu_quero-Bateria.enc`, the three non-empty
-author slots become a single `composer` text:
+For a file whose three author slots are all populated, they become a
+single `composer` text:
 
 ```
-Vicente Paiva e Jararáca
-Adapt.: Sgt Solano
-Banda de Música do CRPO/VRS
+Composer name
+Adapt.: arranger name
+Ensemble name
 ```
 
 This matches what Encore's own MusicXML exporter writes as a
@@ -1791,8 +1790,8 @@ different alignments stay on their own Sids.
 
 `EncTitle::read()` clears the slot vectors (`subtitle`,
 `instruction`, `author`, `header`, `footer`, `copyright`) at the
-start of every pass. Some Encore files (e.g. `Mamae_eu_quero-
-Bateria.enc`) save the TITL block twice; the reset makes the
+start of every pass. Some Encore files save the TITL block twice;
+the reset makes the
 second block replace the first instead of appending its content,
 which would otherwise double every line in the resulting score.
 
@@ -1830,7 +1829,7 @@ produces ~30% more beam segments than Encore's explicit
 decisions. Honoring the explicit BEAM elements would require
 pairing each one with the chord range it covers and setting
 `BeamMode::BEGIN / MID / END` on those chords. Left as future
-work; for the Beethoven Sinfonia 7 Plectro arrangement (1042 +
+work; for a large plectrum-ensemble arrangement (1042 +
 333 + 39 = 1414 BEAM elements) the visual difference is small.
 
 ## Dynamic ladder coverage
@@ -1839,11 +1838,11 @@ The contiguous 0x80..0x8A ladder is fully decoded: `ppp pp p mp
 mf f ff fff sfz sffz fp`. The two outliers (0xAA -> fz, 0xAB ->
 sf) cover the dynamics that live outside the contiguous range.
 
-Mapping was confirmed against `encore-symbols.enc` (one of every
-dynamic, one tipo per byte) and cross-checked against the
-Beethoven Sinfonia 7 II Allegretto Plectro corpus (subset usage
-of pp/p/f/ff only). Coverage of the encore-symbols reference:
-13 of 13 dynamics. On Beethoven Plectro the recovered count
+Mapping was confirmed against `encore_symbols.enc` (one of every
+dynamic, one tipo per byte) and cross-checked against a large
+plectrum-ensemble corpus (subset usage
+of pp/p/f/ff only). Coverage of the encore_symbols reference:
+13 of 13 dynamics. On the plectrum-ensemble corpus the recovered count
 rose from 165 to 208 of 221 (94%).
 
 ## Reference fixtures
@@ -1856,9 +1855,8 @@ Test fixtures under `tests/data/`:
 - `synthetic_v0c4_*.enc` -- targeted single-feature fixtures
   generated programmatically. Each covers exactly one of the
   decisions in this document.
-- Real-world corpus files (Beethoven Sinfonia 7, La Morena de
-  mi Copla, bandurriator/Tie a Yellow Ribbon, etc.) referenced
-  by the integration tests in `tst_encore.cpp`.
+- Real-world corpus files (large orchestral and plucked-string
+  arrangements) referenced by the integration tests in `tst_encore.cpp`.
 
 ## Staff scale
 
@@ -1996,14 +1994,11 @@ Exercised by `Tst_Options.firstMeasure_not_pickup_irregular_volta_at_barline`.
 
 ## Current corpus status
 
-5124 `.enc` files in `c-download-enc/downloads`:
+Validated against a large real-world corpus of ~5100 `.enc` files:
 
 - 4963 OK
 - 161 non-Encore (136 ZIP archives, 23 HTML pages, all expected)
 - 0 CORRUPTED
 - 0 CRASHED
 
-Six importer fixes landed in `feature/enc-importer` brought the
-CORRUPTED count from 32 to 0. All ported to `4.6.5-tmp`; the
-rest-anchor analog has also been ported to Enc2MusicXML
-(`d420e98`).
+Six importer fixes brought the CORRUPTED count from 32 to 0.
