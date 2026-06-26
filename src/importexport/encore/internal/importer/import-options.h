@@ -27,19 +27,19 @@ namespace mu {
 namespace iex {
 namespace enc {
 enum class UnderfillStrategy {
-    InvisibleRests,    // gap rests (invisible) — current default
+    InvisibleRests,    // gap rests (invisible)
     VisibleRests,      // normal visible rests
-    IrregularMeasure,  // set actual measure duration to match content
+    IrregularMeasure,  // set actual measure duration to match content (shipped default)
 };
 
 enum class OverfillStrategy {
-    Truncate,          // remove trailing notes/rests — current default
-    StretchLastNote,   // extend last note duration to fill to the barline
-    IrregularMeasure,  // set actual measure duration to match content
+    Truncate,          // remove trailing notes/rests
+    StretchLastNote,   // compress the trailing tuplet / notes to fit
+    IrregularMeasure,  // set actual measure duration to match content (shipped default)
 };
 
 enum class InstrumentSearchMode {
-    NameAndMidi,  // name matching + MIDI fallback — current default
+    NameAndMidi,  // name matching + MIDI fallback (shipped default)
     MidiOnly,     // skip name matching, use only MIDI program
     Piano,        // assign Grand Piano to all instruments
 };
@@ -60,7 +60,8 @@ struct EncImportOptions {
     // Instrument search
     InstrumentSearchMode instrumentSearchMode = InstrumentSearchMode::NameAndMidi;
 
-    // Measure correction group
+    // Measure correction group. These struct values are the in-code fallback used by tests;
+    // the shipped (GUI) default for both is IrregularMeasure (see enc-importconfiguration.cpp).
     UnderfillStrategy underfillMeasureStrategy = UnderfillStrategy::InvisibleRests;
     OverfillStrategy overfillMeasureStrategy  = OverfillStrategy::Truncate;
     bool firstMeasureIsPickup = true;  // shorten first measure as pickup; false = pad with rests

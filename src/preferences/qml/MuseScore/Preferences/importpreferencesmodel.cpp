@@ -149,46 +149,6 @@ QVariantList ImportPreferencesModel::shortestNotes() const
     return result;
 }
 
-QVariantList ImportPreferencesModel::encoreInstrumentSearchModeModel() const
-{
-    return {
-        QVariantMap { { "title", muse::qtrc("preferences", "Name + MIDI") },
-            { "value", static_cast<int>(iex::enc::InstrumentSearchMode::NameAndMidi) } },
-        QVariantMap { { "title", muse::qtrc("preferences", "MIDI only") },
-            { "value", static_cast<int>(iex::enc::InstrumentSearchMode::MidiOnly) } },
-        QVariantMap { { "title", muse::qtrc("preferences", "Grand Piano") },
-            { "value", static_cast<int>(iex::enc::InstrumentSearchMode::Piano) } },
-    };
-}
-
-QVariantList ImportPreferencesModel::encoreUnderfillStrategyModel() const
-{
-    QVariantList result = {
-        QVariantMap { { "title", muse::qtrc("preferences", "Fill with invisible rests") },
-            { "value", static_cast<int>(iex::enc::UnderfillStrategy::InvisibleRests) } },
-        QVariantMap { { "title", muse::qtrc("preferences", "Fill with visible rests") },
-            { "value", static_cast<int>(iex::enc::UnderfillStrategy::VisibleRests) } },
-        QVariantMap { { "title", muse::qtrc("preferences", "Shorten measure") },
-            { "value", static_cast<int>(iex::enc::UnderfillStrategy::IrregularMeasure) } }
-    };
-
-    return result;
-}
-
-QVariantList ImportPreferencesModel::encoreOverfillStrategyModel() const
-{
-    QVariantList result = {
-        QVariantMap { { "title", muse::qtrc("preferences", "Remove extra notes") },
-            { "value", static_cast<int>(iex::enc::OverfillStrategy::Truncate) } },
-        QVariantMap { { "title", muse::qtrc("preferences", "Stretch last notes") },
-            { "value", static_cast<int>(iex::enc::OverfillStrategy::StretchLastNote) } },
-        QVariantMap { { "title", muse::qtrc("preferences", "Extend measure") },
-            { "value", static_cast<int>(iex::enc::OverfillStrategy::IrregularMeasure) } }
-    };
-
-    return result;
-}
-
 QStringList ImportPreferencesModel::stylePathFilter() const
 {
     return { muse::qtrc("preferences", "MuseScore style file") + " (*.mss)" };
@@ -357,6 +317,46 @@ void ImportPreferencesModel::setMnxRequireExactSchemaValidation(bool value)
 
     mnxConfiguration()->setMnxRequireExactSchemaValidation(value);
     emit mnxRequireExactSchemaValidationChanged(value);
+}
+
+QVariantList ImportPreferencesModel::encoreInstrumentSearchModeModel() const
+{
+    return {
+        QVariantMap { { "title", muse::qtrc("preferences", "Try Name first, then MIDI") },
+            { "value", static_cast<int>(iex::enc::InstrumentSearchMode::NameAndMidi) } },
+        QVariantMap { { "title", muse::qtrc("preferences", "Use MIDI program only") },
+            { "value", static_cast<int>(iex::enc::InstrumentSearchMode::MidiOnly) } },
+        QVariantMap { { "title", muse::qtrc("preferences", "Set Grand Piano for all staves") },
+            { "value", static_cast<int>(iex::enc::InstrumentSearchMode::Piano) } },
+    };
+}
+
+QVariantList ImportPreferencesModel::encoreUnderfillStrategyModel() const
+{
+    QVariantList result = {
+        QVariantMap { { "title", muse::qtrc("preferences", "Reduce measure time (irregular)") },
+            { "value", static_cast<int>(iex::enc::UnderfillStrategy::IrregularMeasure) } },
+        QVariantMap { { "title", muse::qtrc("preferences", "Fill with rests") },
+            { "value", static_cast<int>(iex::enc::UnderfillStrategy::VisibleRests) } },
+        QVariantMap { { "title", muse::qtrc("preferences", "Fill with invisible rests") },
+            { "value", static_cast<int>(iex::enc::UnderfillStrategy::InvisibleRests) } }
+    };
+
+    return result;
+}
+
+QVariantList ImportPreferencesModel::encoreOverfillStrategyModel() const
+{
+    QVariantList result = {
+        QVariantMap { { "title", muse::qtrc("preferences", "Enlarge measure time (irregular)") },
+            { "value", static_cast<int>(iex::enc::OverfillStrategy::IrregularMeasure) } },
+        QVariantMap { { "title", muse::qtrc("preferences", "Remove last notes") },
+            { "value", static_cast<int>(iex::enc::OverfillStrategy::Truncate) } },
+        QVariantMap { { "title", muse::qtrc("preferences", "Stretch last notes") },
+            { "value", static_cast<int>(iex::enc::OverfillStrategy::StretchLastNote) } }
+    };
+
+    return result;
 }
 
 bool ImportPreferencesModel::encoreImportPageLayout() const

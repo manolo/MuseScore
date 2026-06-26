@@ -241,15 +241,18 @@ PreferencesPage {
                 importPreferencesModel.encoreImportStaffSize = true
                 importPreferencesModel.encoreImportTempoTextSemantic = true
                 importPreferencesModel.encoreImportUnsupportedArticulationsAsText = false
-                importPreferencesModel.encoreInstrumentSearchMode = 0
-                importPreferencesModel.encoreUnderfillStrategy = 0
-                importPreferencesModel.encoreOverfillStrategy = 0
+                importPreferencesModel.encoreInstrumentSearchMode = 0   // NameAndMidi
+                importPreferencesModel.encoreUnderfillStrategy = 2      // IrregularMeasure
+                importPreferencesModel.encoreOverfillStrategy = 2       // IrregularMeasure
                 importPreferencesModel.encoreFirstMeasureIsPickup = true
             }
 
             onFocusChanged: {
                 if (activeFocus) {
-                    root.ensureContentVisibleRequested(Qt.rect(x, y, width, height))
+                    if (!suppressEnsureVisible) {
+                        root.ensureContentVisibleRequested(Qt.rect(x, y, width, height))
+                    }
+                    suppressEnsureVisible = false
                 }
             }
         }

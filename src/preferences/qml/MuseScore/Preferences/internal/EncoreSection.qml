@@ -54,6 +54,11 @@ BaseSection {
 
     property alias firstMeasureIsPickup: firstMeasureIsPickupBox.checked
 
+    // When a dropdown popup opens it steals the section's activeFocus; on close the
+    // section regains it and would otherwise snap the scroll back to the section top.
+    // This flag suppresses that single ensure-visible so the scroll position is kept.
+    property bool suppressEnsureVisible: false
+
     signal importPageLayoutChangeRequested(bool value)
     signal importPageBreaksChangeRequested(bool value)
     signal importSystemLocksChangeRequested(bool value)
@@ -72,7 +77,7 @@ BaseSection {
         spacing: 6
 
         StyledTextLabel {
-            text: qsTrc("preferences", "Encore")
+            text: qsTrc("preferences", "ENCORE")
             font: ui.theme.bodyBoldFont
             horizontalAlignment: Text.AlignLeft
             Layout.fillWidth: true
@@ -110,6 +115,8 @@ BaseSection {
         navigationPanel: root.navigation
         navigationRow: 0
 
+        onIsOpenedChanged: if (isOpened) { root.suppressEnsureVisible = true }
+
         onValueEdited: function(newIndex, newValue) {
             root.instrumentSearchModeChangeRequested(newValue)
         }
@@ -125,7 +132,7 @@ BaseSection {
         CheckBox {
             id: importPageLayoutBox
             Layout.fillWidth: true
-            text: qsTrc("preferences", "Import page layout")
+            text: qsTrc("preferences", "Apply page size and margins")
             navigation.name: "EncoreImportPageLayoutBox"
             navigation.panel: root.navigation
             navigation.row: 1
@@ -133,13 +140,13 @@ BaseSection {
         }
 
         CheckBox {
-            id: importPageBreaksBox
+            id: importStaffSizeBox
             Layout.fillWidth: true
-            text: qsTrc("preferences", "Import page breaks")
-            navigation.name: "EncoreImportPageBreaksBox"
+            text: qsTrc("preferences", "Apply staff size scaling")
+            navigation.name: "EncoreImportStaffSizeBox"
             navigation.panel: root.navigation
             navigation.row: 2
-            onClicked: root.importPageBreaksChangeRequested(!checked)
+            onClicked: root.importStaffSizeChangeRequested(!checked)
         }
 
         CheckBox {
@@ -153,23 +160,19 @@ BaseSection {
         }
 
         CheckBox {
-            id: importStaffSizeBox
+            id: importPageBreaksBox
             Layout.fillWidth: true
-            text: qsTrc("preferences", "Import staff size")
-            navigation.name: "EncoreImportStaffSizeBox"
+            text: qsTrc("preferences", "Import page breaks")
+            navigation.name: "EncoreImportPageBreaksBox"
             navigation.panel: root.navigation
             navigation.row: 4
-            onClicked: root.importStaffSizeChangeRequested(!checked)
+            onClicked: root.importPageBreaksChangeRequested(!checked)
         }
-
-        // Spacer row to separate text/content options from layout options above
-        Item { Layout.fillWidth: true; height: 4 }
-        Item { Layout.fillWidth: true; height: 4 }
 
         CheckBox {
             id: importTempoTextSemanticBox
             Layout.fillWidth: true
-            text: qsTrc("preferences", "Text tempo: prefer BPM")
+            text: qsTrc("preferences", "Prefer tempo marks (♩=80) to BPM")
             navigation.name: "EncoreImportTempoTextSemanticBox"
             navigation.panel: root.navigation
             navigation.row: 5
@@ -179,32 +182,30 @@ BaseSection {
         CheckBox {
             id: importUnsupportedArticulationsAsTextBox
             Layout.fillWidth: true
-            text: qsTrc("preferences", "Unknown artic. as text")
+            text: qsTrc("preferences", "Show unrecognized articulations as text")
             navigation.name: "EncoreImportUnsupportedArticulationsAsTextBox"
             navigation.panel: root.navigation
             navigation.row: 6
             onClicked: root.importUnsupportedArticulationsAsTextChangeRequested(!checked)
         }
-    }
 
-    // First measure — before measure correction dropdowns
-    CheckBox {
-        id: firstMeasureIsPickupBox
-        width: parent.width
-
-        text: qsTrc("preferences", "Treat first measure as pickup (anacrusis)")
-
-        navigation.name: "EncoreFirstMeasureIsPickupBox"
-        navigation.panel: root.navigation
-        navigation.row: 7
-
-        onClicked: root.firstMeasureIsPickupChangeRequested(!checked)
+        // First measure — before measure correction dropdowns
+        CheckBox {
+            id: firstMeasureIsPickupBox
+            Layout.fillWidth: true
+            Layout.columnSpan: 2
+            text: qsTrc("preferences", "Treat first measure as pickup")
+            navigation.name: "EncoreFirstMeasureIsPickupBox"
+            navigation.panel: root.navigation
+            navigation.row: 7
+            onClicked: root.firstMeasureIsPickupChangeRequested(!checked)
+        }
     }
 
     ComboBoxWithTitle {
         id: underfillStrategyBox
 
-        title: qsTrc("preferences", "Short measure handling")
+        title: qsTrc("preferences", "Short measures")
         columnWidth: root.columnWidth
 
         currentIndex: indexOfValue(root.currentUnderfillStrategy)
@@ -216,6 +217,8 @@ BaseSection {
         navigationPanel: root.navigation
         navigationRow: 8
 
+        onIsOpenedChanged: if (isOpened) { root.suppressEnsureVisible = true }
+
         onValueEdited: function(newIndex, newValue) {
             root.underfillStrategyChangeRequested(newValue)
         }
@@ -224,7 +227,7 @@ BaseSection {
     ComboBoxWithTitle {
         id: overfillStrategyBox
 
-        title: qsTrc("preferences", "Long measure handling")
+        title: qsTrc("preferences", "Long measures")
         columnWidth: root.columnWidth
 
         currentIndex: indexOfValue(root.currentOverfillStrategy)
@@ -235,6 +238,8 @@ BaseSection {
         navigationName: "EncoreOverfillStrategyBox"
         navigationPanel: root.navigation
         navigationRow: 9
+
+        onIsOpenedChanged: if (isOpened) { root.suppressEnsureVisible = true }
 
         onValueEdited: function(newIndex, newValue) {
             root.overfillStrategyChangeRequested(newValue)

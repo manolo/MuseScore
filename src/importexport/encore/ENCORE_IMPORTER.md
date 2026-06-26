@@ -83,12 +83,16 @@ import and passes the filled struct into `importEncore()`.
 | `importTempoTextSemantic` | true | Promote Italian tempo terms to TempoText with BPM; false = plain StaffText |
 | `importUnsupportedArticulationsAsText` | false | Unknown artic bytes emitted as StaffText; false = silently dropped |
 | `instrumentSearchMode` | NameAndMidi | `NameAndMidi` = name+MIDI scoring; `MidiOnly` = skip name steps 2-4; `Piano` = always Grand Piano |
-| `underfillMeasureStrategy` | InvisibleRests | How to fill trailing gaps: `InvisibleRests`, `VisibleRests`, `IrregularMeasure` |
-| `overfillMeasureStrategy` | Truncate | How to handle a measure whose content exceeds the time signature: `Truncate` ("Remove extra notes"), `StretchLastNote` ("Stretch last notes"), `IrregularMeasure` |
+| `underfillMeasureStrategy` | IrregularMeasure | How to fill trailing gaps: `InvisibleRests`, `VisibleRests`, `IrregularMeasure` |
+| `overfillMeasureStrategy` | IrregularMeasure | How to handle a measure whose content exceeds the time signature: `IrregularMeasure`, `Truncate` ("Remove last notes"), `StretchLastNote` ("Stretch last notes") |
 | `firstMeasureIsPickup` | true | Shorten first measure as pickup if underflowed; false = pad with leading rests |
 
 `EncImportOptions` is stored in `BuildCtx` and consulted throughout `emitters-*.cpp`
-and `resolvers-*.cpp`.
+and `resolvers-*.cpp`. The "Default" column above is the shipped Preferences default
+(set in `enc-importconfiguration.cpp`). For the two measure-correction strategies the
+in-code struct fallback in `import-options.h` stays at `InvisibleRests` / `Truncate`,
+which is what direct callers and the unit tests use; only the GUI default is
+`IrregularMeasure`.
 
 ## Overfull measures
 
@@ -99,9 +103,9 @@ and a single post-pass, `fitOverfullMeasure` in `emitters-overfill.cpp`, resolve
 overfull voice according to `overfillMeasureStrategy`. A tuplet is always preserved whole,
 compressed whole, or dissolved whole; a partial tuplet is never produced.
 
-- **Remove extra notes** (`Truncate`): a trailing tuplet that is cut is dissolved (its
+- **Remove last notes** (`Truncate`): a trailing tuplet that is cut is dissolved (its
   members revert to their plain face value); trailing notes are then removed until the
-  content fits; the last surviving note is lengthened by at most one augmentation dot, and
+  content fits; the last surviving note is lengthened by up to 3 augmentation dots, and
   any remainder is filled with an exact rest. Destructive but always a standard measure.
 
 - **Stretch last notes** (`StretchLastNote`): preserves all the notes by compressing the
@@ -1965,8 +1969,8 @@ The Preferences UI (Phase 2) will read these values from `IEncoreImportConfigura
 
 | Field | Type | Default | Options |
 |---|---|---|---|
-| `underfillMeasureStrategy` | `UnderfillStrategy` | `InvisibleRests` | `InvisibleRests`: gap rests (invisible). `VisibleRests`: normal visible rests. `IrregularMeasure`: reserved. |
-| `overfillMeasureStrategy` | `OverfillStrategy` | `Truncate` | `Truncate`: remove trailing notes (current). `StretchLastNote`: reserved. `IrregularMeasure`: reserved. |
+| `underfillMeasureStrategy` | `UnderfillStrategy` | `InvisibleRests` | `InvisibleRests`: gap rests (invisible). `VisibleRests`: normal visible rests. `IrregularMeasure`: shorten the measure's actual duration to the content. (Struct fallback `InvisibleRests`; shipped GUI default `IrregularMeasure`.) |
+| `overfillMeasureStrategy` | `OverfillStrategy` | `Truncate` | `Truncate`: remove trailing notes to fit. `StretchLastNote`: compress the trailing tuplet/note to fit. `IrregularMeasure`: extend the measure's actual duration to the content. (Struct fallback `Truncate`; shipped GUI default `IrregularMeasure`.) |
 | `firstMeasureIsPickup` | `bool` | `true` | When `false`, Case A and Case B pickup detection are bypassed; the first measure keeps its nominal full duration and leading beats are left as rests. |
 
 #### firstMeasureIsPickup=false + IrregularMeasure invariant
