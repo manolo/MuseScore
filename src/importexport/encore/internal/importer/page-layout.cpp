@@ -38,7 +38,10 @@
 #include "engraving/dom/layoutbreak.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
-#include "engraving/dom/systemlock.h"
+#include "engraving/dom/mscore.h"
+#include "engraving/dom/page.h"
+#include "engraving/dom/system.h"
+#include "engraving/dom/rangelock.h"
 #include "engraving/style/style.h"
 
 #include "log.h"
@@ -76,18 +79,11 @@ static bool detectPtsPageSize(qint32 rightEdge, qint32 bottomEdge,
     return found;
 }
 
-// Try to identify the paper size from WINI screen-pixel coordinates.
-// pageWUnits = rightEdge + left, pageHUnits = bottomEdge + top.
-//
-// Two-pass approach:
-//   Pass 1, ISO A-series only (A0..A10).  All AN sizes share the 1:√2 aspect
-//   ratio, so for A-series WINI data the only ambiguity is WHICH AN size, and
-//   that is resolved by smallest |dpiW−dpiH|.  Checking A-series first prevents
-//   non-A formats (e.g. 12"×18") from incorrectly winning when their
-//   accidentally smaller delta would beat the correct AN with a unified scan.
-//   Pass 2, all remaining standard sizes, pick smallest delta.
-//
-// Returns false when no standard size matches within tolerance (custom page).
+// Identify the paper size from WINI screen-pixel coordinates (pageWUnits = rightEdge + left,
+// pageHUnits = bottomEdge + top) by matching the implied DPI ratio. Pass 1 tries the ISO A-series
+// first: all AN sizes share the 1:sqrt(2) ratio, so a non-A format with an accidentally smaller
+// delta must not win over the correct AN. Pass 2 tries every other standard size. Both keep the
+// candidate with the smallest abs(dpiW - dpiH). Returns false when nothing matches (custom page).
 static bool detectWiniPageSize(int pageWUnits, int pageHUnits,
                                double& outWidthIn, double& outHeightIn)
 {
@@ -215,12 +211,9 @@ static bool applyPagePrintSetup(MasterScore* score, const EncPrintSetup& pr)
     }
     score->style().set(Sid::pageWidth,  wIn);
     score->style().set(Sid::pageHeight, hIn);
-    // NOT IMPLEMENTED: dmScale (the score "Zoom" / notation-size percent the user sets in Encore)
-    // is parsed and logged but not applied. MuseScore has no global percentage scale; the closest
-    // equivalent is the page "Staff space" (spatium), expressed in inches/mm, not a percent. Applying
-    // dmScale would mean converting the percent into a spatium reduction factor and reconciling it
-    // with the per-staff size from applyStaffScale (Pid::MAG), which would otherwise compound. That
-    // mapping needs investigation, so for now the value is only surfaced in the debug log.
+    // TODO: dmScale (Encore's notation-size percent) is parsed and logged but not applied.
+    // MuseScore has no global percentage scale, and mapping it onto spatium would compound with
+    // the per-staff size from applyStaffScale (Pid::MAG); the reconciliation needs investigation.
     LOGD() << "  PREC: orientation=" << pr.orientation << " paperSize=" << pr.paperSize
            << " paper=" << pr.paperWidth << "x" << pr.paperLength << "(0.1mm)"
            << " scale(zoom)=" << pr.scale << "%"
@@ -229,41 +222,62 @@ static bool applyPagePrintSetup(MasterScore* score, const EncPrintSetup& pr)
     return true;
 }
 
+// Display size (1-4) for an instrument: per-instrument staffSizeHint from the LINE staff entry,
+// falling back to the global header.scoreSize for files without LINE data.
+// See ENCORE_FORMAT.md §System block (LINE).
+int staffDisplaySize(const EncRoot& enc, int instrIdx)
+{
+    if (!enc.lines.empty()) {
+        for (const EncLineStaffData& lsd : enc.lines[0].staffData) {
+            if (static_cast<int>(lsd.instrumentIndex()) == instrIdx) {
+                return std::clamp(static_cast<int>(lsd.staffSizeHint) + 1, 1, 4);
+            }
+        }
+    }
+    return std::clamp(static_cast<int>(enc.header.scoreSize), 1, 4);
+}
+
+double winiUnitsPerInch(int rightEdge, int left, double pageWIn)
+{
+    if (pageWIn <= 0.0) {
+        return 72.0;
+    }
+    // (rightEdge + left) / pageWidth near 72 means the WINI is in typographic points; a clearly
+    // larger value (about 84) means screen pixels at the monitor DPI. Snap the near-72 case to
+    // exactly 72. The pixel estimate is exact only when left/right margins are symmetric; with
+    // asymmetric margins it reads about 2% low.
+    const double est = static_cast<double>(rightEdge + left) / pageWIn;
+    return (est <= 76.0) ? 72.0 : est;
+}
+
 static void applyPageMargins(MasterScore* score, const EncPageSetup& ps, bool pageSizeLocked)
 {
     if (!ps.hasData) {
         return;
     }
-    // WINI fields are nominally in typographic points (1/72 inch), but some
-    // Encore versions store them in screen pixels at the monitor's DPI (~84-85
-    // PPI on older hardware).  Symptom: rightEdge or bottomEdge exceeds the
-    // page dimensions in pts (e.g. rightEdge=672 > A4_width_pts=595).
-    //
-    // For pts format: detectPtsPageSize picks the smallest standard page that
-    // contains the printable area, which is locale-independent.
-    // For screen-pixel format: detectWiniPageSize matches via DPI ratio.
-    // Cap each margin to a fraction of the page so a misread WINI cannot produce an absurd
-    // margin, while still allowing legitimately large margins (2"+ are common on A3/landscape).
+    // WINI fields are nominally typographic points (1/72 inch), but some Encore versions store
+    // them in screen pixels at the monitor DPI (about 84-85 PPI on older hardware); the tell is
+    // rightEdge/bottomEdge exceeding the page size in pts (e.g. 672 > A4 width 595). The pts case
+    // recovers the page via detectPtsPageSize, the pixel case via detectWiniPageSize (DPI ratio).
+    // See ENCORE_FORMAT.md §WINI block.
+    // Cap each margin to a fraction of the page so a misread WINI cannot produce an absurd margin,
+    // while still allowing legitimately large margins (2"+ are common on A3/landscape).
     static constexpr double kMaxMarginFrac = 0.45;
 
     double pageHIn = score->style().styleD(Sid::pageHeight);
     double pageWIn = score->style().styleD(Sid::pageWidth);
 
-    // 1 pt tolerance mirrors detectPtsPageSize: metric page heights convert to
-    // fractional pts (A4 297mm = 841.89pt → stored as 842) so the integer
-    // WINI value can exceed floor(pageH*72) by 1 without being screen-pixels.
+    // 1 pt tolerance mirrors detectPtsPageSize: metric page heights convert to fractional pts
+    // (A4 297mm = 841.89pt, stored as 842) so the integer WINI value can exceed floor(pageH*72)
+    // by 1 without being screen-pixels.
     static constexpr double kPixelTol = 1.0;
     const bool screenPixelFmt = (ps.rightEdge > static_cast<qint32>(pageWIn * 72.0 + kPixelTol))
                                 || (ps.bottomEdge > static_cast<qint32>(pageHIn * 72.0 + kPixelTol));
     double scaleUpi = 72.0;
     if (pageSizeLocked) {
         // The page size is known (from PREC), so derive the WINI unit directly from the printable
-        // extent rather than guessing: (rightEdge + left) / pageWidth ≈ 72 means the WINI is in
-        // typographic points, a clearly larger value (~84) means screen pixels at the monitor DPI.
-        // Snap the near-72 case to exactly 72 (points). The pixel estimate is exact only when the
-        // left/right margins are symmetric; with asymmetric margins it is ~2% low.
-        const double estUpi = static_cast<double>(ps.rightEdge + ps.left) / pageWIn;
-        scaleUpi = (estUpi <= 76.0) ? 72.0 : estUpi;
+        // extent rather than guessing whether it is points or screen pixels.
+        scaleUpi = winiUnitsPerInch(ps.rightEdge, ps.left, pageWIn);
     } else if (screenPixelFmt) {
         const int pageWUnits = ps.rightEdge + ps.left;
         const int pageHUnits = ps.bottomEdge + ps.top;
@@ -327,10 +341,8 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps, bool pa
 }
 
 // Inclusive [firstBlock, lastBlock] MEAS-block range covered by line[li]. Prefer the stored
-// per-line measure count, but fall back to the gap to the next line's start (or to
-// totalBlocks for the last line) when it is absent (0). SCO5 (big-endian Encore 5) does not
-// surface measureCount, yet the line start indices are correct, so the start delta recovers
-// each system's length. lastBlock < firstBlock when the line spans nothing.
+// per-line measureCount; when it is absent (0, as in SCO5) fall back to the gap to the next
+// line's start, or to totalBlocks for the last line. lastBlock < firstBlock when it spans nothing.
 struct LineBlockSpan {
     int firstBlock;
     int lastBlock;
@@ -367,9 +379,8 @@ static void applySystemLocksFromLines(BuildCtx& ctx)
         }
 
         const int firstMsIdx = static_cast<int>(enc2ms[static_cast<size_t>(firstBlock)]);
-        // Last MuseScore measure = first of the last MEAS block's range, plus however
-        // many MuseScore measures that block produces (gap to next block, or to end).
-        // Last MS measure = first MS index of last block's range plus the block's span.
+        // Last MuseScore measure = first MS index of the last MEAS block's range plus that block's
+        // span (the gap to the next block, or to the end).
         const int nextBlockMs = (lastBlock + 1 < static_cast<int>(enc2ms.size()))
                                 ? static_cast<int>(enc2ms[static_cast<size_t>(lastBlock + 1)])
                                 : totalMeas;
@@ -385,7 +396,7 @@ static void applySystemLocksFromLines(BuildCtx& ctx)
         if (!firstM || !lastM) {
             continue;
         }
-        ctx.score->addSystemLock(new SystemLock(firstM, lastM));
+        ctx.score->addSystemLock(new RangeLock(firstM, lastM));
     }
 }
 
@@ -466,6 +477,15 @@ void applyPageSetup(BuildCtx& ctx)
             score->style().set(Sid::pageOddBottomMargin,  kMacMarginIn);
             score->style().set(Sid::pageEvenBottomMargin, kMacMarginIn);
             score->style().set(Sid::pagePrintableWidth,   pageWIn - 2.0 * kMacMarginIn);
+        } else if (sizeFromPrec && !enc.pageSetup.hasData) {
+            // No WINI margins, but PREC set the page size (e.g. A4 landscape). MuseScore's default
+            // printable width is sized for the portrait page, so the extra landscape width becomes a
+            // lopsided right margin (~4" on A4 landscape). Keep the default margins but recompute the
+            // printable width so the right margin equals the left. On a portrait page whose size
+            // matches the default this is a no-op (printable already = width - 2*leftMargin).
+            const double pageWIn = score->style().styleD(Sid::pageWidth);
+            const double leftIn  = score->style().styleD(Sid::pageOddLeftMargin);
+            score->style().set(Sid::pagePrintableWidth, pageWIn - 2.0 * leftIn);
         }
     }
 
@@ -475,5 +495,69 @@ void applyPageSetup(BuildCtx& ctx)
     if (ctx.opts.importPageBreaks) {
         applyPageBreaksFromLines(ctx);
     }
+}
+
+// Page index (0-based) that the first imported PAGE break's measure is laid out on, or -1 when
+// there is no such break or its page cannot be resolved (caller then leaves the staff space
+// untouched).
+static int firstPageBreakPageIndex(MasterScore* score)
+{
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        bool hasPageBreak = false;
+        for (EngravingItem* e : mb->el()) {
+            if (e && e->isLayoutBreak() && toLayoutBreak(e)->isPageBreak()) {
+                hasPageBreak = true;
+                break;
+            }
+        }
+        if (!hasPageBreak) {
+            continue;
+        }
+        const System* sys = toMeasure(mb)->system();
+        if (!sys || !sys->page()) {
+            return -1;
+        }
+        const std::vector<Page*>& pages = score->pages();
+        for (size_t i = 0; i < pages.size(); ++i) {
+            if (pages[i] == sys->page()) {
+                return static_cast<int>(i);
+            }
+        }
+        return -1;
+    }
+    return -1;
+}
+
+void fitFirstPageStaffSpace(BuildCtx& ctx)
+{
+    if (!ctx.opts.importPageBreaks) {
+        return;
+    }
+    MasterScore* score = ctx.score;
+    if (firstPageBreakPageIndex(score) <= 0) {
+        // -1: no importable page break. 0: the first page already holds all its systems.
+        return;
+    }
+
+    const double sp0 = score->style().styleD(Sid::spatium);
+    constexpr double kStepInches = 0.002;   // reduction granularity
+    constexpr int kMaxSteps      = 11;      // up to 0.022 inch total
+
+    // Bubble up from the smallest reduction; the first that pulls the spilled system back onto
+    // the first page is the ideal (least change from Encore's staff size).
+    for (int k = 1; k <= kMaxSteps; ++k) {
+        score->style().set(Sid::spatium, sp0 - kStepInches * k * DPI);
+        score->doLayout();
+        if (firstPageBreakPageIndex(score) == 0) {
+            return;
+        }
+    }
+
+    // Even a 0.022 inch reduction was not enough: restore Encore's original staff size.
+    score->style().set(Sid::spatium, sp0);
+    score->doLayout();
 }
 } // namespace mu::iex::enc
