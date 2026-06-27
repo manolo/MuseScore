@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Top-level document structs: EncRoot and its parts (instruments, system lines, title,
+// header, text, page/print setup) plus the free functions that parse and stitch them.
+
 #pragma once
 
 #include <memory>
@@ -45,7 +48,6 @@ struct EncInstrument {
     qint64 contentFilePos { -1 };   // byte offset of TK content start (after 8-byte header); -1 for compact
     int nstaves   { 0 };
     int midiProgram { 0 };   // 1-indexed GM program (0 = not configured)
-    bool showStaff { true }; // false = hidden in score (Encore "Show" flag)
     // Signed chromatic offset from Encore's Staff Sheet "Key" field.
     // 0=written, -12=octave lower, +12=octave higher. v0xC4 only.
     qint8 keyTransposeSemitones { 0 };
@@ -92,7 +94,7 @@ struct EncLine {
 // Title block
 // ---------------------------------------------------------------------------
 
-QString readTextItem(QDataStream& ds, EncCharSize cs);
+QString readTextItem(QDataStream& ds, EncCharSize cs, qint64 blockEnd);
 
 struct EncHeaderFooter {
     QString text;
@@ -144,6 +146,8 @@ struct EncHeader {
     QString magic;
     quint8 chuMagio       { 0 };
     quint16 chuVersio      { 0 };
+    // Parsed for format completeness and as read-order cursors, not consumed by the importer:
+    // reserved header words after the version. Removing them shifts every subsequent header read.
     quint16 nekon1         { 0 };
     quint16 fiksa1         { 0 };
     qint16 lineCount      { 0 };
@@ -151,6 +155,7 @@ struct EncHeader {
     qint8 instrumentCount{ 0 };
     qint8 staffPerSystem { 0 };
     qint16 measureCount   { 0 };
+    quint8 formatRev      { 0 };  // format-revision byte at 0x3E: 1 = Encore 4.5, 4 = Encore 5.0 (v0xC4)
     quint8 scoreSize      { 4 };  // staff-size selector 1-4 at header offset 0x52; 4 = default
 
     bool readMagicAndVersion(QDataStream& ds);
@@ -158,7 +163,7 @@ struct EncHeader {
 };
 
 // ---------------------------------------------------------------------------
-// EncRoot - top-level container
+// EncRoot: top-level container
 // ---------------------------------------------------------------------------
 
 bool isInstrumentMagic(const QString& magic);
@@ -166,11 +171,12 @@ bool isKnownMagic(const QString& magic);
 QString findNextKnownMagic(QDataStream& ds);
 void addSpannerEnds(std::vector<EncMeasure>& measures);
 
-// TEXT block: N-th entry referenced by ORN tind byte (+32). See ENCORE_FORMAT.md §TEXT block.
+// TEXT block: N-th entry referenced by ORN tind byte. textOffset (from EncFormatReader) is the
+// per-entry text offset (14 for v0xC4/v0xC2, 0 for v0xA6). See ENCORE_FORMAT.md §TEXT block.
 struct EncTextBlock {
     std::vector<QString> entries;
 
-    bool read(QDataStream& ds, quint32 varSize);
+    bool read(QDataStream& ds, quint32 varSize, int textOffset = 14, bool hasRunHeader = true);
 };
 
 // WINI block: margins in points (1/72 inch). See ENCORE_FORMAT.md §WINI block.

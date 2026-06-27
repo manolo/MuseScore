@@ -20,13 +20,14 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Top-level Encore (.enc) import: read the file, build the score, and run whole-score fix-up passes.
+// Binary format reverse-engineered by Leon Vinken (Enc2MusicXML, GPL v3+) building on enc2ly by Felipe Castro.
+
 #include "ctx.h"
 #include "builders.h"
 #include "resolvers.h"
 #include "page-layout.h"
-
-// Encore (.enc) file importer for MuseScore.
-// Binary format reverse-engineered by Leon Vinken (Enc2MusicXML, GPL v3+) building on enc2ly by Felipe Castro.
+#include "debug-dump.h"
 
 #include "import.h"
 
@@ -82,9 +83,14 @@
 #include "engraving/dom/tuplet.h"
 #include "engraving/dom/system.h"
 #include "engraving/dom/volta.h"
+#include "engraving/dom/mscore.h"
+#include "engraving/types/spatium.h"
 #include "engraving/engravingerrors.h"
 
 #include "engraving/editing/editenharmonicspelling.h"
+#include "engraving/editing/implodeexplode.h"
+#include "engraving/editing/editvoice.h"
+#include "engraving/editing/transaction/transaction.h"
 
 #include "log.h"
 
@@ -109,12 +115,10 @@ void applyConcertPitch(Note* n, int semitone)
     n->setTpcFromPitch();
 }
 
-// score->spell() re-spells the whole score with a context-based heuristic that mishandles
-// transposing instruments: it can spell concert pitches with double-flats (e.g. a concert E in
-// A major rendered as a written double-flat) instead of the plain note the key wants. After
-// spell(), re-derive the TPC of notes on TRANSPOSING staves from the sounding pitch + concert key
-// + staff transposition (which honours the key); the pitch is unchanged. Non-transposing staves
-// keep spell()'s result, which is correct for them.
+// score->spell() re-spells the whole score with a context heuristic that can spell transposed
+// pitches with double-flats instead of the plain note the key wants. Re-derive the TPC of notes on
+// transposing staves from pitch + concert key + transposition (pitch unchanged); leave others as is.
+// TODO: format-agnostic, reads no Encore data; candidate to promote to a shared importexport util.
 static void respellTransposingStaves(MasterScore* score)
 {
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
@@ -145,131 +149,8 @@ static void respellTransposingStaves(MasterScore* score)
     }
 }
 
-// Derive display size (1-4) for a given instrument index.
-// LINE staff entry byte +13 (0-indexed 0-3) holds per-instrument size in both 4.x and 5.x.
-// header.scoreSize (byte 0x52) is a global fallback for files without LINE data.
-static int staffDisplaySize(const EncRoot& enc, int instrIdx)
-{
-    if (!enc.lines.empty()) {
-        for (const EncLineStaffData& lsd : enc.lines[0].staffData) {
-            if (static_cast<int>(lsd.instrumentIndex()) == instrIdx) {
-                return std::clamp(static_cast<int>(lsd.staffSizeHint) + 1, 1, 4);
-            }
-        }
-    }
-    return std::clamp(static_cast<int>(enc.header.scoreSize), 1, 4);
-}
-
-static void logEncRootInfo(const EncRoot& enc)
-{
-    const EncHeader& h = enc.header;
-    const char* fmtName = enc.fmt ? enc.fmt->formatName() : "unknown";
-
-    const char* encVer = (h.chuVersio >= 1000) ? "Encore 5.x"
-                         : (h.chuVersio >= 700) ? "Encore 4.x"
-                         : "Encore 2.x/3.x (legacy)";
-
-    LOGD() << "---- Encore file info ----";
-    LOGD() << "  Magic:" << h.magic.toStdString()
-           << "  Format:0x" << QString::number(h.chuMagio, 16).toUpper().toStdString()
-           << "(" << fmtName << ")  version=" << h.chuVersio << "(" << encVer << ")";
-    LOGD() << "  Lines:" << h.lineCount
-           << "  Pages:" << h.pageCount
-           << "  Instruments:" << h.instrumentCount
-           << "  Staves/sys:" << h.staffPerSystem
-           << "  Measures:" << h.measureCount;
-
-    LOGD() << "---- Titles ----";
-    if (!enc.titleBlock.title.isEmpty()) {
-        LOGD() << "  Title:    " << enc.titleBlock.title.toStdString();
-    }
-    if (!enc.titleBlock.subtitle.empty() && !enc.titleBlock.subtitle[0].isEmpty()) {
-        LOGD() << "  Subtitle: " << enc.titleBlock.subtitle[0].toStdString();
-    }
-    if (!enc.titleBlock.author.empty() && !enc.titleBlock.author[0].isEmpty()) {
-        LOGD() << "  Author:   " << enc.titleBlock.author[0].toStdString();
-    }
-    if (!enc.titleBlock.copyright.empty() && !enc.titleBlock.copyright[0].isEmpty()) {
-        LOGD() << "  Copyrt:   " << enc.titleBlock.copyright[0].toStdString();
-    }
-
-    static const char* kSizeLabel[4] = { "60%", "70%", "75%", "100%" };
-
-    LOGD() << "---- Instruments ----";
-    for (size_t i = 0; i < enc.instruments.size(); ++i) {
-        const EncInstrument& ins = enc.instruments[i];
-        const int sz = staffDisplaySize(enc, static_cast<int>(i));
-        LOGD() << "  [" << i << "] \"" << ins.name.toStdString() << "\""
-               << "  midi=" << ins.midiProgram
-               << "  staves=" << ins.nstaves
-               << "  key=" << ins.keyTransposeSemitones
-               << "  size=" << sz << "(" << kSizeLabel[sz - 1] << ")"
-               << (ins.showStaff ? "" : "  hidden");
-    }
-
-    LOGD() << "---- Systems ----";
-    for (size_t i = 0; i < enc.lines.size(); ++i) {
-        const EncLine& ln = enc.lines[i];
-        LOGD() << "  [" << i << "] start=" << ln.start << "  count=" << (int)ln.measureCount;
-    }
-
-    LOGD() << "---- Tempos ----";
-    LOGD() << "  Total: " << enc.measures.size();
-    quint8 lastNum = 0, lastDen = 0;
-    quint16 lastBpm = 0;
-    for (size_t i = 0; i < enc.measures.size(); ++i) {
-        const EncMeasure& m = enc.measures[i];
-        const bool timeSigChanged = (m.timeSigNum != lastNum || m.timeSigDen != lastDen);
-        const bool bpmChanged = (m.bpm != 0 && m.bpm != lastBpm);
-        if (i == 0 || timeSigChanged || bpmChanged) {
-            LOGD() << "  [" << i << "] " << (int)m.timeSigNum << "/" << (int)m.timeSigDen
-                   << (m.bpm ? (QString("  bpm=") + QString::number(m.bpm)).toStdString() : "");
-            lastNum = m.timeSigNum;
-            lastDen = m.timeSigDen;
-            if (m.bpm) {
-                lastBpm = m.bpm;
-            }
-        }
-    }
-    LOGD() << "---- Page setup ----";
-    const EncPageSetup& ps = enc.pageSetup;
-    if (ps.hasData) {
-        // Derive all four margins (inches) for the summary: top/left are stored directly, while
-        // right/bottom come from the printable edges and the page size. The WINI unit (points vs
-        // screen pixels) is resolved from the PREC page size, same as applyPageMargins.
-        std::string marginStr;
-        double wIn = 0.0, hIn = 0.0;
-        if (precPageSizeInches(enc.printSetup, wIn, hIn) && wIn > 0.0 && hIn > 0.0) {
-            const double est = static_cast<double>(ps.rightEdge + ps.left) / wIn;
-            const double upi = (est <= 76.0) ? 72.0 : est;
-            marginStr = ("  (in: T=" + QString::number(ps.top / upi, 'f', 3)
-                         + " L=" + QString::number(ps.left / upi, 'f', 3)
-                         + " R=" + QString::number(wIn - ps.rightEdge / upi, 'f', 3)
-                         + " B=" + QString::number(hIn - ps.bottomEdge / upi, 'f', 3) + ")").toStdString();
-        }
-        LOGD() << "  WINI: top=" << ps.top << "  left=" << ps.left
-               << "  bottomEdge=" << ps.bottomEdge << "  rightEdge=" << ps.rightEdge << marginStr;
-    } else if (enc.fmt && enc.fmt->usesUniformPageMargins()) {
-        LOGD() << "  WINI: absent, margins set to 0.25 inches";
-    } else {
-        LOGD() << "  WINI: absent, margins from MuseScore defaults";
-    }
-    const EncPrintSetup& pr = enc.printSetup;
-    if (pr.hasData) {
-        LOGD() << "  PREC: orientation=" << pr.orientation
-               << " (" << (pr.orientation == 2 ? "landscape" : "portrait") << ")"
-               << "  paperSize=" << pr.paperSize
-               << "  paper=" << pr.paperWidth << "x" << pr.paperLength << " (0.1mm)"
-               << "  scale/zoom=" << pr.scale << "%"
-               << "  [scale not applied: needs spatium mapping]";
-    } else {
-        LOGD() << "  PREC: absent, page size from WINI/defaults";
-    }
-    LOGD() << "--------------------------";
-}
-
-// Map Encore score-size (1 to 4) to MuseScore Staff Properties → Scale (Pid::MAG).
-// 1=60%, 2=75%, 3=100%, 4=130%.  Global spatium is not changed.
+// Map Encore score-size (1 to 4) to MuseScore Staff Properties Scale (Pid::MAG): 1=60%, 2=75%,
+// 3=100%, 4=130%. Global spatium is not changed.
 static void applyStaffScale(MasterScore* score, const EncRoot& enc)
 {
     static const double kScaleBySize[4] = { 0.60, 0.75, 1.00, 1.30 };
@@ -284,14 +165,171 @@ static void applyStaffScale(MasterScore* score, const EncRoot& enc)
     }
 }
 
+// Collapse a staff's voices back into voice 1 when they never sound at the same time (the
+// engraving equivalent of "move to voice 1" + Tools > Implode). All-or-nothing per staff:
+// a staff is collapsible only if every voice fits into voice 1 with no timing change (notes may
+// merge into a chord only at identical onset+duration), so the music is never altered.
+// TODO: format-agnostic, reads no Encore data; candidate to promote to a shared importexport util.
+static void mergeNonOverlappingVoices(MasterScore* score)
+{
+    // Pass 1: find the staves that carry notes in more than voice 0 and whose voices
+    // can be flattened without a timing conflict.
+    std::vector<staff_idx_t> candidates;
+    for (staff_idx_t si = 0; si < score->nstaves(); ++si) {
+        const track_idx_t base = si * VOICES;
+        bool hasUpperVoiceNotes = false;
+        std::set<std::pair<int, int> > intervals;   // distinct (startTick, endTick) of chords
+        for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+            for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+                for (voice_idx_t v = 0; v < VOICES; ++v) {
+                    EngravingItem* e = s->element(base + v);
+                    if (!e || !e->isChord()) {
+                        continue;
+                    }
+                    if (v != 0) {
+                        hasUpperVoiceNotes = true;
+                    }
+                    const Chord* c = toChord(e);
+                    const int start = c->tick().ticks();
+                    const int end   = (c->tick() + c->actualTicks()).ticks();
+                    intervals.insert({ start, end });
+                }
+            }
+        }
+        if (!hasUpperVoiceNotes) {
+            continue;   // already a single voice, nothing to do
+        }
+        // The distinct intervals (identical ones, i.e. chord candidates, are deduped
+        // by the set) must not overlap. Sweep in start order: an interval that begins
+        // before the furthest end seen so far overlaps a different one => conflict.
+        bool collapsible = true;
+        int maxEnd = -1;
+        for (const std::pair<int, int>& iv : intervals) {   // std::set is ordered by (start, end)
+            if (iv.first < maxEnd) {
+                collapsible = false;
+                break;
+            }
+            maxEnd = std::max(maxEnd, iv.second);
+        }
+        if (collapsible) {
+            candidates.push_back(si);
+        }
+    }
+
+    Measure* first = score->firstMeasure();
+    Measure* last  = score->lastMeasure();
+    if (!first || !last) {
+        return;
+    }
+
+    // Pass 2: collapse each candidate staff. No undo transaction is opened, so the
+    // editing commands below execute immediately and free themselves (see
+    // UndoStack::pushAndPerform); the surrounding ScoreLoad keeps that path quiet.
+    // (May be empty; the stale-rest cleanup below still runs.)
+    for (staff_idx_t si : candidates) {
+        const track_idx_t base = si * VOICES;
+
+        // The voice change below rebuilds the destination chord from scratch; it carries
+        // articulations, lyrics and slurs across but not a single-chord tremolo, so a
+        // tremolo on a moved upper-voice chord would be lost. Snapshot every tremolo on
+        // the staff (keyed by onset tick) and re-attach it after the collapse.
+        std::map<int, TremoloType> tremolosByTick;
+        for (Measure* m = first; m; m = m->nextMeasure()) {
+            for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+                for (voice_idx_t v = 0; v < VOICES; ++v) {
+                    EngravingItem* e = s->element(base + v);
+                    if (e && e->isChord()) {
+                        if (TremoloSingleChord* trem = toChord(e)->tremoloSingleChord()) {
+                            tremolosByTick[s->tick().ticks()] = trem->tremoloType();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Move every note on the staff into voice 1, filling its rests and merging
+        // simultaneous same-duration notes into chords.
+        score->deselectAll();
+        score->select(first, SelectType::RANGE, si);
+        score->select(last, SelectType::RANGE, si);
+        EditVoice::changeSelectedElementsVoice(score->transactionManager()->currentOrDummyTransaction(), score, 0);
+
+        // Drop the now-empty upper voices (their leftover rests) by imploding the
+        // single staff onto voice 1.
+        score->deselectAll();
+        score->select(first, SelectType::RANGE, si);
+        score->select(last, SelectType::RANGE, si);
+        ImplodeExplode::implode(score);
+
+        // Re-attach any tremolo whose chord was moved into voice 1 (and so lost it).
+        for (const auto& [tick, type] : tremolosByTick) {
+            const Fraction f = Fraction::fromTicks(tick);
+            Measure* m = score->tick2measure(f);
+            if (!m) {
+                continue;
+            }
+            Segment* s = m->findSegment(SegmentType::ChordRest, f);
+            if (!s) {
+                continue;
+            }
+            for (voice_idx_t v = 0; v < VOICES; ++v) {
+                EngravingItem* e = s->element(base + v);
+                if (e && e->isChord() && !toChord(e)->tremoloSingleChord()) {
+                    Chord* c = toChord(e);
+                    TremoloSingleChord* trem = Factory::createTremoloSingleChord(c);
+                    trem->setTremoloType(type);
+                    c->add(trem);
+                    break;
+                }
+            }
+        }
+    }
+
+    // Final pass: drop redundant upper-voice rests. An upper voice (index >= 1) holding only rests
+    // in a measure is not a real second voice (voice 0 already fills the bar after the collapse);
+    // it would show as a spurious extra voice and can inflate the measure length. An upper voice
+    // still carrying a chord is a genuine overlapping voice and is left untouched.
+    for (staff_idx_t si = 0; si < score->nstaves(); ++si) {
+        const track_idx_t base = si * VOICES;
+        std::vector<Rest*> staleRests;
+        for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+            for (voice_idx_t v = 1; v < VOICES; ++v) {
+                bool voiceHasChord = false;
+                std::vector<Rest*> voiceRests;
+                for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+                    EngravingItem* e = s->element(base + v);
+                    if (!e) {
+                        continue;
+                    }
+                    if (e->isChord()) {
+                        voiceHasChord = true;
+                        break;
+                    }
+                    if (e->isRest()) {
+                        voiceRests.push_back(toRest(e));
+                    }
+                }
+                if (!voiceHasChord) {
+                    staleRests.insert(staleRests.end(), voiceRests.begin(), voiceRests.end());
+                }
+            }
+        }
+        for (Rest* r : staleRests) {
+            score->removeElement(r);
+        }
+    }
+    score->deselectAll();
+}
+
 static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOptions& opts)
 {
+    ScoreLoad sl;   // import edits run outside any undo transaction; see mergeNonOverlappingVoices
+
     score->style().set(Sid::chordsXmlFile, true);
     score->chordList()->read(u"chords.xml");
 
-    // Enable multi-measure rest display only when the Encore file actually uses them.
-    // A file with no mrestCount > 1 REST elements should show individual whole rests,
-    // not collapsed multi-measure rests.
+    // Enable multi-measure rests only when the file uses them (any REST with mrestCount > 1);
+    // otherwise show individual whole rests.
     const bool hasMMRest = std::any_of(enc.measures.begin(), enc.measures.end(),
                                        [](const EncMeasure& m) {
         if (m.elements.empty()) {
@@ -311,6 +349,14 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     score->style().set(Sid::tupletOutOfStaff,      false);
     score->style().set(Sid::tupletVHeadDistance,   0.0);
     score->style().set(Sid::tupletVStemDistance,   0.0);
+
+    // Encore does not stretch systems and staves to fill the page: it lays them out at fixed
+    // distances from the top. Keep vertical justification enabled but allow it no extra room
+    // (max system/staff spread = 0), so the imported spacing matches Encore instead of being
+    // spread to fill the page.
+    score->style().set(Sid::enableVerticalSpread, true);
+    score->style().set(Sid::maxSystemSpread,      Spatium(0.0));
+    score->style().set(Sid::maxStaffSpread,       Spatium(0.0));
 
     BuildCtx ctx{ score, enc, opts };
     buildParts(ctx);
@@ -335,6 +381,21 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     score->rebuildMidiMapping();
     score->setUpTempoMap();
     score->doLayout();
+
+    if (ctx.opts.mergeVoices) {
+        mergeNonOverlappingVoices(score);
+        score->doLayout();
+    }
+
+    // With imported page breaks, a first-page system may have spilled onto the next page at the
+    // default staff space; shrink it just enough (<= 0.022 inch) to pull that system back.
+    fitFirstPageStaffSpace(ctx);
+
+    // doLayout computes and caches the repeat list; at that point voltas may not yet be
+    // anchored, so the cached expansion ignores 1st/2nd endings and replays the 1st
+    // ending on every pass. The file read path invalidates the repeat list after load
+    // for the same reason; do the same here so playback right after import is correct.
+    score->masterScore()->invalidateRepeatList();
 }
 
 muse::String encoreLoadErrorMessage(const QString& path)
