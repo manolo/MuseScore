@@ -1675,33 +1675,41 @@ of queuing it as a prefix for the next note.
 
 ---
 
-## Snap-back-by-xoffset for attached ornaments
+## Coordinate-based anchoring of ornaments and spanners
 
-Encore tags an attached ornament (dynamic or hairpin start) at the
-CHORD-REST AT OR AFTER its visible position but records the
-rendered layout x in the ornament's `xoffset` field. When the
-ornament's xoffset is SMALLER than the tagged chord-rest's
-xoffset, Encore visually pulls the glyph back to the previous
-chord-rest. The importer used to plant the glyph on the tagged
-tick, so users saw it one chord later than in Encore.
+An attached ornament or spanner stores a rendered layout x in its `xoffset`
+field (and an end x in `xoffset2`). This x does NOT share the note `xoffset`
+origin: the two differ by a per-file constant (it is not zero, and it varies
+between files with the staff scale - tightly engraved scores have a small
+offset, widely spaced scores a large one). A raw `xoffset` therefore cannot be
+compared against note xoffsets directly. Two anchoring patterns recur:
 
-The fix lives in a `snapTickByXoffset` lambda shared by the
-`DYN_*` and `WEDGESTART` cases:
+**START snap (`snapStartTickByXoffset`, in `importer/coords.{h,cpp}`).** Shared
+by dynamics, tempo marks, hairpin starts and trills. Encore tags the glyph at the
+chord-rest at or after its visible position; when the glyph xoffset is SMALLER
+than the note at the tagged tick, Encore visually pulls it back to a previous
+chord-rest. The helper:
 
-1. If the default tick is the measure start, skip the snap so
-   bar-line dynamics stay at the bar (their xoffset is layout
-   padding, not a real position).
-2. Locate the NOTE/REST at the default tick on the same
-   `(staffIdx, voice)` and read its xoffset.
-3. If `ornament.xoffset >= note.xoffset`, keep the default tick.
-4. Otherwise walk the EncMeasure elements backward on the same
-   `(staffIdx, voice)` and return the largest tick whose NOTE/REST
-   has `xoffset <= ornament.xoffset`. Fall back to the default
-   when nothing qualifies.
+1. Reads the xoffset of the note/rest at the element's own tick on the staff.
+2. If `glyph.xoffset >= note.xoffset`, keeps the tick (the glyph sits at/after
+   its note).
+3. Otherwise returns the largest preceding tick whose note/rest has
+   `xoffset <= glyph.xoffset`; falls back to the tick when nothing qualifies.
 
-The same convention applies to STAFFTEXT but is not snapped
-because text positions stayed accurate in the corpus; revisit if
-a real file shows the same off-by-one chord drift.
+**END snap by `xoffset2`.** Used by the hairpin end (`resolvers-hairpin.cpp`):
+in the target measure (start + `alMezuro`) it picks the last note/rest whose
+`xoffset <= xoffset2`, else clamps to the barline.
+
+Other elements anchor by related coordinate logic: fingering/bowing
+(`resolvers-fingering.cpp`) trust the raw tick first and fall back to the closest
+note xoffset; lyrics (`emitters-lyrics.cpp`) attach to the nearest chord within a
+threshold; the slur resolver (`resolvers-slur.cpp`) derives its end from
+`alMezuro` plus a pixel-span xoffset heuristic. STAFFTEXT follows the same start
+convention but is not snapped (text positions stayed accurate in the corpus).
+
+Note: the slur end heuristic is the least robust of these because, unlike a tie
+(which anchors by matching pitch on the next note), a slur is a pure graphic with
+no stored end note - it must be inferred from the unreliable end x-coordinate.
 
 ## Hairpin direction and endpoint resolution
 
