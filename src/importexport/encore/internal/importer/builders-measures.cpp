@@ -179,7 +179,7 @@ void buildMeasures(BuildCtx& ctx)
             Measure* measure = Factory::createMeasure(score->dummy()->system());
             measure->setTick(Fraction::fromTicks(currentTick));
 
-            // Case A: timeSig[0] != timeSig[1] — pickup with explicit shorter sig; shorten now.
+            // Case A: timeSig[0] != timeSig[1], pickup with explicit shorter sig; shorten now.
             // Case B (same sig, partial content): detected post-emitters via actual cumTick.
             // When firstMeasureIsPickup=false, bypass pickup detection and use the nominal sig.
             const bool pickupEnabled = ctx.opts.firstMeasureIsPickup;
@@ -257,7 +257,7 @@ void buildInitialSignatures(BuildCtx& ctx)
     // Files without per-staff LINE clef data (v0xA6): the initial clef comes from the
     // instrument template, which does not reflect an octave Key. The note pitches are already
     // octave-shifted by the Key, so apply the matching octave-decorated clef to bring the
-    // display back to the written octave — mirroring what pickStaffClef does for v0xC4.
+    // display back to the written octave, mirroring what pickStaffClef does for v0xC4.
     const bool haveLineClefs = !enc.lines.empty() && !enc.lines[0].staffData.empty();
     if (!haveLineClefs) {
         for (int si = 0; si < ctx.totalStaves; ++si) {

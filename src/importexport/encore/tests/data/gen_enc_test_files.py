@@ -356,7 +356,7 @@ def note_v0xa6(tick, voice, staffIdx, fv, pitch_offset):
     return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)+bytes(pad)
 
 # ---------------------------------------------------------------------------
-# File generators — original set
+# File generators, original set
 # ---------------------------------------------------------------------------
 def gen_v0c2_pitches():
     e  = note_v0c2(0,  0,0,3,60)
@@ -534,7 +534,7 @@ def gen_v0xa6_score_size():
     return build_v0xa6([('Vz1', 0, 0), ('Vz2', 0, 0)], [m], staff_size=1)
 
 # ---------------------------------------------------------------------------
-# File generators — new set (replacing Encore 5 example files)
+# File generators, new set (replacing Encore 5 example files)
 # ---------------------------------------------------------------------------
 
 def gen_v0c4_corrupted():
@@ -841,7 +841,7 @@ def gen_v0c4_whole_rest_2_4():
 # 2/4 measure with 2 quarter notes at off-beat MIDI ticks (0 and 241, not 0 and 240).
 # With faceValue-cumulative placement: both notes land at canonical positions
 # (cumTick 0 and 1/4) regardless of MIDI timing drift.
-# Voice sums to exactly 2/4 = mLen — no gaps, no fills, sanityCheck passes cleanly.
+# Voice sums to exactly 2/4 = mLen, no gaps, no fills, sanityCheck passes cleanly.
 # Previously (MIDI-tick placement) tick=241 → MS 482 ≠ 480, creating a 2-tick gap
 # that checkMeasure couldn't fill exactly.
 # ===========================================================================
@@ -927,7 +927,7 @@ def gen_v0c4_dotted_note_capping():
 # ===========================================================================
 # notes_mixed_value_tuplet.enc
 # 2/4 measure reproducing the besamemucho-style mixed-value tuplet pattern:
-# - Complete 3:2 group: Q(0x32), Q(0x32), 8th(0x32) — MIXED face values.
+# - Complete 3:2 group: Q(0x32), Q(0x32), 8th(0x32), MIXED face values.
 #   group advance = 1/6+1/6+1/12 = 5/12 < default startTuplet ticks 1/2.
 #   Without exact-ticks fix: tuplet->ticks()=1/2, next note at 5/12 < 1/2 →
 #     checkMeasure breaks → stray large fill → corrupted.
@@ -1362,7 +1362,7 @@ def gen_v0c4_triple_dotted_advance():
 # notes_v0c2_near_simultaneous_chord.enc
 # v0xC2 2/4 measure: two notes meant to be simultaneous but stored at ticks
 # 0 and 3 (3-tick MIDI offset, < CHORD_CLUSTER_THRESHOLD=4).
-# Both are quarter notes with different pitches — a chord in Encore display.
+# Both are quarter notes with different pitches, a chord in Encore display.
 #
 # Bug: calculateRealDurations gave the first note rdur=3 (<15) → SKIP.
 #   Only the second note survived → 1 note instead of 2-note chord.
@@ -1478,7 +1478,7 @@ def gen_v0c2_dotted_eighth():
 # ===========================================================================
 # notes_rdur_snap.enc
 # v0xC4 4/4 measure: an 8th note at tick=0 with dotControl=0 (no hint) whose
-# MIDI realDuration is 211 ticks — exactly 1 tick away from dd8th=210.
+# MIDI realDuration is 211 ticks, exactly 1 tick away from dd8th=210.
 # calcDots(211, 8th) = 0 (no exact match), but calcDotsSnap(211, 8th, tol=1)
 # returns 2 because |211-210| = 1 <= 1.
 #
@@ -2068,7 +2068,7 @@ def gen_v0c4_tk_onebyte_name():
 # instruments_instrument_count_padding.enc
 # v0xC4 file with instrumentCount=2 in the header but only 1 TK block (TK00).
 # Encore 5.0.2 can omit TK blocks for some instruments (e.g. pachbel.enc has
-# 5 instruments but only 4 TK blocks — Guitarra has no TK block).
+# 5 instruments but only 4 TK blocks, Guitarra has no TK block).
 # The importer must pad the instruments vector to instrumentCount so all
 # parts referenced by LINE staffData are created.
 # ===========================================================================
@@ -2325,8 +2325,8 @@ def gen_v0c4_partial_triplet_unreduced_cumtick():
 # ===========================================================================
 def gen_v0c4_grace_slur_to_main():
     # 4/4 measure: appoggiatura grace at tick=0 + SLURSTART at tick=0 (alMezuro=0).
-    # Regular note (the grace's parent) is at Encore tick=15 — 15 ticks stolen by the
-    # grace — so in MuseScore both grace and parent land at cumTick=0 (same beat).
+    # Regular note (the grace's parent) is at Encore tick=15, 15 ticks stolen by the
+    # grace, so in MuseScore both grace and parent land at cumTick=0 (same beat).
     #
     # The slur resolver previously converted tick=15 to measTick+Fraction(15,960),
     # found no chord there, and dropped the slur.  With the fix, it snaps to the
@@ -2603,8 +2603,8 @@ def gen_v0c4_tie_intra_chord_arc_no_spurious():
     e  = intra + intra + intra + intra   # 4 duplicates, same as real Encore files
     e += note_v0c4(  0, 0, 0, fv=3, pitch=60)   # C4 quarter (chord note 1)
     e += note_v0c4(  0, 0, 0, fv=3, pitch=62)   # D4 quarter (chord note 2)
-    e += note_v0c4(480, 0, 0, fv=3, pitch=60)   # C4 again — would receive spurious tie
-    e += note_v0c4(480, 0, 0, fv=3, pitch=62)   # D4 again — would receive spurious tie
+    e += note_v0c4(480, 0, 0, fv=3, pitch=60)   # C4 again, would receive spurious tie
+    e += note_v0c4(480, 0, 0, fv=3, pitch=62)   # D4 again, would receive spurious tie
     e += end_marker()
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
@@ -4095,7 +4095,7 @@ def gen_v0c4_orn_tempo_misplaced_multi_measure():
 
 def gen_v0c4_orn_tempo_equals_header_at_start():
     # Initial tempo: measure 1 header BPM=230, plus a redundant ORN TEMPO=230 stored at a LATE tick
-    # (tick 240) — the same value as the header. The ORN's late/end-of-measure segment does not set
+    # (tick 240), the same value as the header. The ORN's late/end-of-measure segment does not set
     # the playback tempo, so it must be suppressed and the header must place the TempoText at the
     # MEASURE START (tick 0). Mirrors an initial "= 230" Encore stores at the end of measure 1.
     orn = bytearray(ornament_v0c4(240, 0, 0, tipo=0x32))
@@ -5540,7 +5540,7 @@ def gen_v0c4_hairpin_snapstart_at_barline():
     e1 += note_v0c4_xoff(240, 0, 0, fv=3, pitch=60, xoff=60)
     e1 += note_v0c4_xoff(480, 0, 0, fv=3, pitch=60, xoff=90)
     e1 += note_v0c4_xoff(720, 0, 0, fv=3, pitch=60, xoff=120)
-    # WEDGE at tick=960 (= durTicks, bar line) – dim crossing into m2.
+    # WEDGE at tick=960 (= durTicks, bar line), dim crossing into m2.
     # xoffset=110: snap-back in m1 finds latest note with xoff<=110.
     # Note at tick=480 has xoff=90 (<=110) and is the latest.
     # Note at tick=720 has xoff=120 (>110) so NOT eligible.
@@ -6718,11 +6718,11 @@ def gen_sintetico_all_features():
       m1 : dotted notes (dotted-H dotted-Q dotted-8th) + rests (Q-rest 8th-rest 16th-rest)
       m2 : ties (Q-Q Q-8th)
       m3 : 8th triplets (3:2 groups of three)
-      m4 : grace notes — appoggiatura (grace1=0x20/0x04) + acciaccatura (grace1=0x30/0x04)
-      m5 : articulations above — fermata(0x20) accent(0x12) marcato(0x13) staccato(0x1D)
-      m6 : articulations — tenuto(0x1C) staccatissimo(0x29) up-bow(0x18) down-bow(0x19)
-      m7 : technical markings — harmonic(0x1E) thumb(0x44) open-string(0x46) fingering 1–5
-      m8 : ornaments — trill(ORN 0x36) mordent(0x0B artic) inv-mordent(0x0A artic) turn(0x08)
+      m4 : grace notes, appoggiatura (grace1=0x20/0x04) + acciaccatura (grace1=0x30/0x04)
+      m5 : articulations above, fermata(0x20) accent(0x12) marcato(0x13) staccato(0x1D)
+      m6 : articulations, tenuto(0x1C) staccatissimo(0x29) up-bow(0x18) down-bow(0x19)
+      m7 : technical markings, harmonic(0x1E) thumb(0x44) open-string(0x46) fingering 1 to 5
+      m8 : ornaments, trill(ORN 0x36) mordent(0x0B artic) inv-mordent(0x0A artic) turn(0x08)
       m9 : tremolo ORN (0xAF) + per-note tremolos artic 0x41/0x42/0x43 (1/2/3 strokes)
       m10: dynamics pp p mp mf (ORN 0x81 0x82 0x83 0x84)
       m11: dynamics f ff fff sfz sffz fp fz sf + hairpin crescendo
@@ -6856,7 +6856,7 @@ def gen_sintetico_all_features():
     e4 += perc([0, Q, Q*2, Q*3])
     measures.append((meas_hdr(4, 4), e4 + end_marker()))
 
-    # m5: articulations above — fermata(0x20 no tuplet), accent, marcato, staccato
+    # m5: articulations above, fermata(0x20 no tuplet), accent, marcato, staccato
     e5  = n(  0, 0, 3, 60, au=0x20)   # fermata above
     e5 += n(Q,   0, 3, 62, au=0x12)   # accent
     e5 += n(Q*2, 0, 3, 64, au=0x13)   # marcato
@@ -6864,7 +6864,7 @@ def gen_sintetico_all_features():
     e5 += perc([0, Q, Q*2, Q*3])
     measures.append((meas_hdr(4, 4), e5 + end_marker()))
 
-    # m6: articulations — tenuto, staccatissimo, up-bow, down-bow (below slot)
+    # m6: articulations, tenuto, staccatissimo, up-bow, down-bow (below slot)
     e6  = n(  0, 0, 3, 60, au=0x1C)   # tenuto
     e6 += n(Q,   0, 3, 62, au=0x29)   # staccatissimo
     e6 += n(Q*2, 0, 3, 64, au=0x18)   # up-bow
@@ -6872,7 +6872,7 @@ def gen_sintetico_all_features():
     e6 += perc([0, Q, Q*2, Q*3])
     measures.append((meas_hdr(4, 4), e6 + end_marker()))
 
-    # m7: technical — harmonic, thumb-position, open-string (Fingering "0"), fingering 1-5
+    # m7: technical, harmonic, thumb-position, open-string (Fingering "0"), fingering 1-5
     e7  = n(  0, 0, 4, 60, au=0x1E)   # harmonic
     e7 += n(Q//2, 0, 4, 62, au=0x44)  # thumb-position
     e7 += n(Q,   0, 4, 64, au=0x46)   # open-string
@@ -6884,7 +6884,7 @@ def gen_sintetico_all_features():
     e7 += perc([0, Q, Q*2, Q*3])
     measures.append((meas_hdr(4, 4), e7 + end_marker()))
 
-    # m8: ornaments — trill ORN 0x36, mordent artic 0x0B, inv-mordent artic 0x0A, turn artic 0x08
+    # m8: ornaments, trill ORN 0x36, mordent artic 0x0B, inv-mordent artic 0x0A, turn artic 0x08
     e8  = o(  0, 0, 0x36)              # trill start ORN
     e8 += n(  0, 0, 3, 60)            # Q C4 (carries trill)
     e8 += n(Q,   0, 3, 62, au=0x0B)   # mordent
@@ -6962,7 +6962,7 @@ def gen_sintetico_all_features():
     e13 += perc([0, Q, Q*2, Q*3])
     measures.append((meas_hdr(4, 4), e13 + end_marker()))
 
-    # m14: lyrics "do re mi fa" (STAFFTEXT omitted from sintetico — Encore 4.x
+    # m14: lyrics "do re mi fa" (STAFFTEXT omitted from sintetico, Encore 4.x
     # does not support STAFFTEXT ORN tipo=0x1E in MEAS elements; it crashes with
     # a null-pointer when looking up the tind in its TEXT table.
     # STAFFTEXT is covered by tst_text.cpp tests (text_staff_text.enc fixture).
@@ -7062,7 +7062,7 @@ def gen_sintetico_all_features():
         # Patch instrument 1 MIDI: 17 → 25 (Guitar) at byte 314+60=374
         pre_base[374] = 25
         # Patch measureCount only. Keep PALOTEOS nSystems (6) and 0x2A (13)
-        # unchanged — we use PALOTEOS's 6 LINE blocks, so nSystems must stay 6.
+        # unchanged, we use PALOTEOS's 6 LINE blocks, so nSystems must stay 6.
         # Encore uses nSystems to iterate LINE blocks; mismatching it causes crash.
         struct.pack_into('<H', pre_base, 0x34, len(measures))
     else:
@@ -7087,7 +7087,7 @@ def gen_sintetico_all_features():
     # as the base, patching only instrument names, MIDI, and measureCount.
     # Our custom LINE blocks crashed Encore due to missing layout bytes.
     # PALOTEOS's 6 LINE blocks cover 22 measures; we only provide 20 MEAS blocks
-    # and set measureCount=20 — Encore ignores measures beyond measureCount.
+    # and set measureCount=20, Encore ignores measures beyond measureCount.
     pre_base_final = bytearray(pre_base)
     # Also restore PALOTEOS's original 6 LINE blocks (already in pre_base since
     # pre_base = PALOTEOS bytes 0..451, but we need the LINE blocks too).
@@ -7753,8 +7753,8 @@ def gen_v0c4_pickup_measure_same_ts():
 # ===========================================================================
 # notes_implicit_trailing_gap.enc
 #
-# Measure 0: fully filled 4/4 (4 quarter notes) — no pickup detection.
-# Measure 1: two eighth notes filling 1/4 of 4/4 — trailing 3/4 should
+# Measure 0: fully filled 4/4 (4 quarter notes), no pickup detection.
+# Measure 1: two eighth notes filling 1/4 of 4/4, trailing 3/4 should
 # be invisible gap rests, not visible rests.
 #   m1 note0: rdur = 120 (tick spacing) -> V_EIGHTH, advance=1/8
 #   m1 note1: rdur = 840 (fallback V_EIGHTH), advance=1/8
@@ -7875,7 +7875,7 @@ def gen_v0c4_triplet_orphan_prior_complete_group():
     e += note_tup(160, 64, 0x32)   # group 1, note 3
     e += note_v0c4(240, 0, 0, fv=3, pitch=65)   # regular Q
     e += note_tup(480, 67, 0x32)   # group 2, note 1
-    e += note_tup(560, 69, 0x00)   # group 2, note 2 — ORPHAN
+    e += note_tup(560, 69, 0x00)   # group 2, note 2, ORPHAN
     e += note_tup(640, 70, 0x32)   # group 2, note 3
     e += note_v0c4(720, 0, 0, fv=3, pitch=72)   # regular Q
     e += end_marker()
@@ -7974,7 +7974,7 @@ def gen_v0c4_2_2_beatticks240_gap_snap():
     e += note_v0c4(720, 0, 0, fv=4, pitch=67)    # 8th
     e += note_v0c4(840, 0, 0, fv=4, pitch=69)    # 8th
     e += end_marker()
-    # Use beatTicks=240 explicitly (non-standard for 2/2 — the bug trigger).
+    # Use beatTicks=240 explicitly (non-standard for 2/2, the bug trigger).
     return assemble(0xC4, [(meas_hdr(2, 2, beatTicks=240, durTicks=960), e)],
                     fill_ts=(2, 2))
 

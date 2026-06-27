@@ -857,7 +857,7 @@ TEST_F(Tst_Text, staff_text_placement_from_yoffset)
 }
 
 // ===========================================================================
-// UNIT: tempoXmlText() — pure-function tests, no score needed.
+// UNIT: tempoXmlText(), pure-function tests, no score needed.
 // Verifies that the note symbol is always emitted as a <sym> tag (not raw
 // Unicode), that beatTicks=360 (dotted quarter) uses the dotted-quarter variant,
 // and that beatTicks=240 (quarter) uses the plain quarter.
@@ -1100,7 +1100,7 @@ TEST_F(Tst_Text, orn_tempo_mismatch_with_header_bpm_suppressed)
         }
     }
 
-    // No TempoText at measure 1 (tick=0) with BPM=80 — the misplaced ornament must be suppressed
+    // No TempoText at measure 1 (tick=0) with BPM=80, the misplaced ornament must be suppressed
     for (const auto& t : found) {
         if (t.tick == Fraction(0, 1)) {
             EXPECT_FALSE(std::abs(t.bps - 80.0 / 60.0) < 1e-4)
@@ -1159,7 +1159,7 @@ TEST_F(Tst_Text, orn_tempo_misplaced_multi_measure_suppressed)
 
 // An ORN TEMPO whose BPM equals its own measure's header BPM (e.g. an initial "= 230" Encore
 // stores at the end of measure 1) is redundant: it must be suppressed so the header places the
-// tempo at the MEASURE START, where it actually drives playback — not left on the ORN's late
+// tempo at the MEASURE START, where it actually drives playback, not left on the ORN's late
 // segment (which does not set the tempo, leaving the default).
 TEST_F(Tst_Text, orn_tempo_equal_to_header_placed_at_measure_start)
 {

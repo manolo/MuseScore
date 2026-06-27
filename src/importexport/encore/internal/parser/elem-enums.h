@@ -109,7 +109,7 @@ enum class EncOrnamentType : quint8 {
     ARPEGGIO   = 0x22,
     // Guitar bends (size=28 spanner format; alMezuro+xoffset2 encode bend arc).
     // Confirmed in "Accidentals Marks and others2.enc" m37-m38.
-    // Not yet implemented in MuseScore importer — skip silently with LOGW.
+    // Not yet implemented in MuseScore importer, skip silently with LOGW.
     GUITAR_BEND            = 0x28,  // regular bend (curved arrow up)
     GUITAR_BEND_2          = 0x29,  // regular bend (curved arrow)
     GUITAR_PREBEND         = 0x2A,  // prebend
@@ -145,7 +145,7 @@ enum class EncOrnamentType : quint8 {
     MARCATO_STACCATO_BELOW = 0xC0,
     // 0xC6: heavy accent (∨, inverted marcato, vertex down) → articMarcatoBelow.
     MARCATO_BELOW = 0xC6,
-    // 0xC8: tenuto (—) as standalone ORN → articTenutoAbove.
+    // 0xC8: tenuto (, ) as standalone ORN → articTenutoAbove.
     TENUTO = 0xC8,
     // Standalone string-number ORNs (circled number above note).
     // Per-note artic bytes cover strings 1 (0x39), 7 (0x3F), 8 (0x40).

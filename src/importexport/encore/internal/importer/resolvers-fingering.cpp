@@ -83,13 +83,13 @@ static void correctBowingTickFromXoffset(
     const std::vector<PendingBowing>& allBowings,
     const BuildCtx& ctx)
 {
-    // When xoffset == 0 the ornament has no visual displacement data — it is
+    // When xoffset == 0 the ornament has no visual displacement data, it is
     // already tagged at its correct note tick, so no correction is needed.
     if (pb.ornXoffset == 0) {
         return;
     }
     // Pre-check: if there is a note on the ORN's own staff at the ORN's raw
-    // Encore tick, that tick directly names the beat the mark sits on — trust it
+    // Encore tick, that tick directly names the beat the mark sits on, trust it
     // and skip all correction.  The raw enc tick is an explicit per-ORN value and
     // is a far more reliable anchor than the xoffset heuristic: ornXoffset and
     // note xoffset use different horizontal origins (in real files the offset

@@ -49,7 +49,7 @@ protected:
 };
 
 // ===========================================================================
-// BUG FIX: v0xA6 (very old format) — wrong element offset and pitch encoding
+// BUG FIX: v0xA6 (very old format), wrong element offset and pitch encoding
 // ===========================================================================
 
 TEST_F(Tst_ImporterV0xa6, very_old_format_v0xa6_sanity_check)

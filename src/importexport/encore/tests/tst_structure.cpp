@@ -331,7 +331,7 @@ TEST_F(Tst_Structure, section_markers_and_dotted_barline)
 }
 
 // ===========================================================================
-// FIX: v0xC2 (old Encore format) — MIDI pitch stored at byte +13 (tuplet field), not semiTonePitch.
+// FIX: v0xC2 (old Encore format), MIDI pitch stored at byte +13 (tuplet field), not semiTonePitch.
 // ===========================================================================
 
 TEST_F(Tst_Structure, old_format_v0c2_correct_pitches)
@@ -392,7 +392,7 @@ TEST_F(Tst_Structure, old_format_v0c2_triplets_detected)
 }
 
 // ===========================================================================
-// BUG FIX: v0xA6 (very old format) — wrong element offset and pitch encoding
+// BUG FIX: v0xA6 (very old format), wrong element offset and pitch encoding
 // ===========================================================================
 
 TEST_F(Tst_Structure, very_old_format_v0xa6_sanity_check)
@@ -620,7 +620,7 @@ TEST_F(Tst_Structure, time_sig_change_2_2_to_4_4_and_back)
 }
 
 // ===========================================================================
-// FEATURE: LINE block data becomes SystemLocks — each Encore system is locked so the
+// FEATURE: LINE block data becomes SystemLocks, each Encore system is locked so the
 // layout engine keeps its measures together regardless of spatium.
 // ===========================================================================
 TEST_F(Tst_Structure, system_breaks_from_line_data)
@@ -826,7 +826,7 @@ TEST_F(Tst_Structure, page_margins_wini_bottom_margin_derived)
 }
 
 // ===========================================================================
-// FIX: WINI screen-pixel format — coordinates in monitor pixels (~84-85 PPI)
+// FIX: WINI screen-pixel format, coordinates in monitor pixels (~84-85 PPI)
 // rather than typographic points (1/72").  Symptom: rightEdge=672 exceeds
 // A4_width_pts=595, causing the old code to clamp the right margin to ~0.03"
 // and the bottom margin to 0 (both wrong).  The fix detects the screen-pixel
@@ -850,7 +850,7 @@ TEST_F(Tst_Structure, page_margins_wini_screen_pixel_a4_detected)
         << "Screen-pixel WINI: page must be detected as A4 height";
 
     // Margins must be symmetric at ~0.331" = 28 / 84.67 DPI.
-    // (Old code: L=T=0.389", R=0.030", B=0.10" — all wrong.)
+    // (Old code: L=T=0.389", R=0.030", B=0.10", all wrong.)
     const double kExpectedM = 28.0 / (700.0 / kA4W);   // ≈ 0.331"
     EXPECT_NEAR(score->style().styleD(Sid::pageOddLeftMargin),  kExpectedM, 0.005)
         << "Screen-pixel WINI: left margin must be ~0.33\"";

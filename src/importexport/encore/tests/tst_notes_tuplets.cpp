@@ -204,7 +204,7 @@ TEST_F(Tst_NotesTuplets, tuplet_state_cleared_between_measures)
                 bool isPow2 = (den > 0) && ((den & (den - 1)) == 0);
                 EXPECT_TRUE(isPow2)
                     << "Measure " << measIdx << " non-tuplet chord has denominator "
-                    << den << " — tuplet state may have bled from the previous measure";
+                    << den << ", tuplet state may have bled from the previous measure";
             }
         }
     }
@@ -465,7 +465,7 @@ TEST_F(Tst_NotesTuplets, dotted_note_dotctrl_bit0_with_rdur_drift)
     ASSERT_NE(m, nullptr);
     EXPECT_EQ(m->timesig(), Fraction(2, 4));
 
-    // Collect chords (no rests expected — measure must be clean)
+    // Collect chords (no rests expected, measure must be clean)
     std::vector<Chord*> chords;
     std::vector<Rest*> rests;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
@@ -943,7 +943,7 @@ TEST_F(Tst_NotesTuplets, mixed_duration_triplet_face_value_sum_grouping)
     ASSERT_NE(m, nullptr);
     EXPECT_EQ(m->timesig(), Fraction(2, 4));
 
-    // Count chords/rests in the measure — should have 7 elements (plus fills)
+    // Count chords/rests in the measure, should have 7 elements (plus fills)
     // First 4 should be in the same tuplet, next 3 in another.
     std::vector<ChordRest*> crs;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
@@ -1005,7 +1005,7 @@ TEST_F(Tst_NotesTuplets, mixed_baseLen_QE_bracket_closes_after_two_notes)
     }
     ASSERT_EQ(chords.size(), 6u) << "plain-Q + 2 in bracket1 + 3 in bracket2";
 
-    // chords[0]: plain quarter — not in a tuplet
+    // chords[0]: plain quarter, not in a tuplet
     EXPECT_EQ(chords[0]->tuplet(), nullptr) << "Plain Q must not be in a tuplet";
 
     // chords[1] (Q) and chords[2] (E): first bracket {Q,E}

@@ -22,7 +22,7 @@ src/importexport/encore/
 ├── internal/
 │   ├── notationencreader.{h,cpp} INotationReader adapter; calls importEncore()
 │   │
-│   ├── parser/                   LAYER 1 — Binary bytes → EncRoot tree
+│   ├── parser/                   LAYER 1, Binary bytes → EncRoot tree
 │   │   ├── elem*.h               Parsed data structs (EncRoot, EncNote, EncOrnament, …)
 │   │   ├── parsers-*.cpp         Per-block/element parsers
 │   │   ├── parsers-encoding.*    Text encoding probe (Latin-1 vs UTF-16 LE)
@@ -30,7 +30,7 @@ src/importexport/encore/
 │   │   ├── readers-v0x*.{h,cpp}  Version-specific readers (v0xC4, v0xC2, v0xA6)
 │   │   └── ticks.{h,cpp}         Tick arithmetic: faceValue↔ticks, dots, tuplets
 │   │
-│   └── importer/                 LAYER 2 — EncRoot tree → MuseScore DOM
+│   └── importer/                 LAYER 2, EncRoot tree → MuseScore DOM
 │       ├── import.{h,cpp}        importEncore() top-level orchestration
 │       ├── import-options.h      EncImportOptions struct (8 user-configurable flags)
 │       ├── ctx.h                 BuildCtx: shared mutable state for all passes
@@ -194,7 +194,7 @@ template:
 - "common" genre tiebreaker so the everyday classical guitar wins
   over the soprano variant when both share GM program 24.
 
-**Percussion detection — four-level chain.** Encore percussion tracks
+**Percussion detection, four-level chain.** Encore percussion tracks
 always report `midiProgram = 1` (see ENCORE_FORMAT.md), so a strict
 MIDI-program lookup would route them to Grand Piano. The importer uses
 a prioritized chain instead:
@@ -738,7 +738,7 @@ known:
 2. **Cross-measure span:** `alMezuro > 0` → creates a `Trill` spanner to the
    `endTick()` of `ctx.measuresByIdx[measIdx + alMezuro]`.
 3. **No span info** (`alMezuro == 0` and no matching `TRILL_END`) → falls back
-   to an `Ornament` glyph (`ornamentTrill`) — the single-beat `tr` mark.
+   to an `Ornament` glyph (`ornamentTrill`), the single-beat `tr` mark.
 
 `TRILL_ALT` (0x37) always produces an `Ornament` glyph, never a spanner; it
 marks a note within the span that Encore annotates with a redundant `tr`.
@@ -898,8 +898,8 @@ destination staff. The importer:
 
 1. Reads `staffWithin = rawStaffByte >> 6` into `EncMeasureElem::staffWithin`.
 2. In the note-loop element dispatch, when `staffWithin > 0`:
-   - `staffIdx += staffWithin` — route to the correct staff.
-   - `voice -= staffWithin * (VOICES / 2)` — remap voice to 0-based within that staff.
+   - `staffIdx += staffWithin`, route to the correct staff.
+   - `voice -= staffWithin * (VOICES / 2)`, remap voice to 0-based within that staff.
 3. The TIE-start pre-pass applies the same routing so tie keys are consistent.
 
 For a 2-staff piano: voices 0/1 stay on staff 0, voices 2/3 (staffWithin=1) route
@@ -970,7 +970,7 @@ Some Encore files encode the same note pitch twice in the same chord cluster. Th
 elements are identical in tick/staff/voice/pitch but differ in `grace1 bit 0x40`: one copy
 has the bit clear (the "root" chord note), the other has it set (a chord-extension marker).
 When both are added to MuseScore's Chord, the result is two noteheads at the same stem
-position — visually a double-headed notehead the user must delete manually.
+position, visually a double-headed notehead the user must delete manually.
 
 **Detection:** `grace1 & 0x40` marks the chord-extension copy. The importer suppresses it
 when the concert pitch is already present in the chord (`chord->findNote(concertPitch)`).
@@ -1057,9 +1057,9 @@ appears coincidentally on undotted notes (observed with values 0x28, 0x39,
 0x60 in a real v0xC2 score where the notes are plain).
 
 `computeDotCount` resolves dots in priority order:
-1. `calcDots(dotControl, fv)` — treats `dotControl` as a tick value.
-2. `calcDotsSnap(realDuration, fv)` — MIDI tick value within ±1 snap.
-3. Bit-0 fallback (`useBit0Fallback=true`) — forces 1 dot when bit 0 is set.
+1. `calcDots(dotControl, fv)`, treats `dotControl` as a tick value.
+2. `calcDotsSnap(realDuration, fv)`, MIDI tick value within ±1 snap.
+3. Bit-0 fallback (`useBit0Fallback=true`), forces 1 dot when bit 0 is set.
 
 **Bit-0 fallback guard (ticks.cpp):** the fallback only fires when
 `realDuration > faceValue2ticks(fv)` (rdur exceeds the plain face value).
@@ -1077,9 +1077,9 @@ When detected, `EncNote::forceDotted` is set on the 8th; the emitter
 then forces `dots=1` directly, bypassing `computeDotCount` entirely.
 
 **faceSum guard in `fixDottedEighthPattern`:** the 8th+16th@tick+120 binary
-pattern is ambiguous — it also appears in a genuine 8th followed by a 16th
+pattern is ambiguous, it also appears in a genuine 8th followed by a 16th
 inside a fully-filled measure. Guard: only apply when `faceSum + 60 == durTicks`
-(the voice group is exactly 60t short — the amount the anomaly steals).
+(the voice group is exactly 60t short, the amount the anomaly steals).
 When `faceSum == durTicks` (full measure) the fix is blocked.
 
 `EncNote::forceDotted` (elem-note.h): bool field set exclusively by
@@ -1193,7 +1193,7 @@ TOCODA via the pending-markers post-pass.
 
 **"Coda" word label not imported.** Encore renders its first CODA
 marker as "⊕ Coda" (symbol + the word). This is Encore's own
-display convention — the word "Coda" is not stored in the ENC
+display convention, the word "Coda" is not stored in the ENC
 file as a data element (it does not appear in the TEXT block and
 there is no accompanying STAFFTEXT ornament element). MuseScore's
 `MarkerType::CODA` renders as the ⊕ symbol only, which is the
@@ -1236,7 +1236,7 @@ The gap-snap logic converts an Encore MIDI tick to a fraction of the measure
 using `encTickFrac = Fraction(e->tick, wholeTicks)`.  The formula
 `wholeTicks = beatTicks * timeSigDen` gives 960 only when `beatTicks` is the
 raw note unit (240 for x/4, 120 for x/8).  Files that store a non-standard
-value — e.g. 2/2 with `beatTicks=240` instead of the correct 480 — produce
+value, e.g. 2/2 with `beatTicks=240` instead of the correct 480, produce
 `wholeTicks=480`.  A note at Encore tick=360 would then have
 `encTickFrac = 360/480 = 3/4`, exceeding `cumTick = 3/8` after a rest+quarter,
 causing gap-snap to fire and jump cumTick from 3/8 to 3/4.  All notes in the
@@ -1258,8 +1258,8 @@ now checks whether the staff carries a drumset and, if so, forces
 
 ## MIDI artifact filter bypass for chord roots and chord extensions
 
-The MIDI artifact filter (lines 152–174 in `emitters-note.cpp`) drops notes
-whose `realDuration` falls in the range 5–14 ticks when the face value is an
+The MIDI artifact filter (lines 152 to 174 in `emitters-note.cpp`) drops notes
+whose `realDuration` falls in the range 5 to 14 ticks when the face value is an
 eighth note or longer.  Two valid cases were incorrectly caught:
 
 1. **First note on staff in a measure** (`savedPrevMidiTick < 0`): can never
@@ -1274,9 +1274,9 @@ eighth note or longer.  Two valid cases were incorrectly caught:
 Both are now bypassed, so all notes in a simultaneous chord group survive even
 when `calculateRealDurations` assigns a very short tick-diff rdur.
 
-## Instruments in the GM Percussive range (MIDI programs 113–128)
+## Instruments in the GM Percussive range (MIDI programs 113 to 128)
 
-General MIDI programs 113–128 are the "Percussive" section (Agogo, Steel
+General MIDI programs 113 to 128 are the "Percussive" section (Agogo, Steel
 Drums, Woodblock, Taiko Drum, Melodic Tom, Synth Drum, …).  Encore files
 sometimes name percussion parts with performer credits or catalog numbers
 (e.g. "A. Marazuela 335", "Hermenegildo Lerma") that match no instrument
@@ -1300,7 +1300,7 @@ last triplet note is dropped entirely.
 
 Two-part fix:
 
-1. **`computeImpliedTupletMembers` — sandwich heuristic**: when the main
+1. **`computeImpliedTupletMembers`, sandwich heuristic**: when the main
    explicit-group loop breaks (next note has wrong/no tup byte) but the group
    is still incomplete, check whether:
    - the orphan has the same face value as the group's base note;
@@ -1310,7 +1310,7 @@ Two-part fix:
    If all three hold, set `a2/n2` to the group's ratio so the loop continues
    and marks the orphan as a group member.
 
-2. **`handleNote` — active-tuplet bypass**: even after the orphan is in
+2. **`handleNote`, active-tuplet bypass**: even after the orphan is in
    `validTupletGroupMember`, `handleNote` recomputes `actualN/normalN` from
    `en->actualNotes()/normalNotes()`, which returns 0 for `tup=0x00`.  The
    else-branch then closes the active group.  A guard after the implied-tuplet
@@ -1345,8 +1345,8 @@ all pairs of metrically-equivalent but visually-distinct signatures:
 The MEAS header byte at offset 0x02 (`timeSigGlyph`) encodes the
 visual form of the time signature.  Two values denote common time:
 
-- `0x43` ('C', uppercase ASCII) — produced by Encore 3.x / 4.x
-- `0x63` ('c', lowercase ASCII) — produced by Encore 5.x
+- `0x43` ('C', uppercase ASCII), produced by Encore 3.x / 4.x
+- `0x63` ('c', lowercase ASCII), produced by Encore 5.x
 
 Both map to `TimeSigType::FOUR_FOUR` (MuseScore's common-time C symbol).
 When `timeSigGlyph == 0x00` the normal numeric display is used.
@@ -1419,7 +1419,7 @@ The original code guarded expansion with two conditions:
 Condition 2 was the bug source: it collapsed a legitimate mrest when
 followed by a rest measure (e.g. a dotted-quarter rest in the measure
 after a 3-measure multi-measure rest). The successor content is
-irrelevant — Encore's `mrestCount` byte is authoritative.
+irrelevant, Encore's `mrestCount` byte is authoritative.
 
 The fix removes condition 2 from `encMeasDisplayCount` (builders.cpp)
 and from the identical `measDisplayCount` lambda in emitters.cpp. Both
@@ -1434,7 +1434,7 @@ Exercised by `Tst_Importer.mrest_single_block_expands_when_successor_is_rest`.
 Encore file contains at least one MEAS block whose lone REST element has
 `mrestCount > 1`. When no such block exists the flag stays at its MuseScore
 default (false), so individual rest measures are rendered as individual whole
-rests — matching what Encore displays — rather than being collapsed into
+rests, matching what Encore displays, rather than being collapsed into
 multi-measure rest objects.
 
 Detection: `std::any_of` over `enc.measures`, checking `elements.size() == 1`,
@@ -1584,7 +1584,7 @@ guard) and when `xoffset2 == 0` (no endpoint hint).
 `.enc` files carry no SLURSTOP, so the slur's end is reconstructed in a post-pass.
 How depends on the format, because the reliability of the stored coordinates differs.
 
-### v0xC4 / SCO5 — pixel-span heuristic
+### v0xC4 / SCO5, pixel-span heuristic
 
 SLURSTART carries two layout-x fields: `xoffset` at the start and
 `xoffset2` at the end. Each one is offset from the underlying
@@ -1610,7 +1610,7 @@ If `alMezuro > 0` (cross-measure span) the heuristic is skipped: xoffsets reset
 at the bar line, so the importer matches xoffset2 directly against the target
 measure's notes, falling back to the last ChordRest there.
 
-### v0xC2 — reliable +16 measure-count
+### v0xC2, reliable +16 measure-count
 
 In v0xC2 the absolute slur xoffset2 lives in a stale ornament-coordinate origin,
 so matching it directly over-extends slurs (a note-1→note-2 arc read as note-1→note-4).
@@ -1635,7 +1635,7 @@ files: cross-measure arcs in one score, within-measure note-to-next slurs in ano
 
 When a SLURSTART (tipo 0x21) is co-located with an appoggiatura (same Encore tick),
 the pixel-span heuristic fails because grace notes and their parent chord share the
-same written tick — there is no note at the proportional written tick derived from
+same written tick, there is no note at the proportional written tick derived from
 the slur's xoffset2. Two resolution cases:
 
 **Grace-to-main** (`startTick == endTick` after snapping): create the slur with
@@ -1670,7 +1670,7 @@ The `computeStartElement()` call in the regular path would replace the explicitl
 with the main chord.
 
 **v0xC4 binary ordering.** Encore 5 serialises the MAIN note BEFORE its ACCIACCATURA
-grace at the same beat — opposite of v0xC2 (grace first). When the main note arrives first
+grace at the same beat, opposite of v0xC2 (grace first). When the main note arrives first
 and a grace follows at the same tick (`tick − prevTick < 8`), it is a retroactive
 chord-extension of the already-placed main chord. Attach it directly to that chord instead
 of queuing it as a prefix for the next note.
@@ -1931,14 +1931,14 @@ In screen-pixel format, the paper size is not stored explicitly. It is recovered
 by matching `pageWidth_units = rightEdge + left` against all standard
 `QPageSize` sizes in two passes:
 
-**Pass 1 — ISO A-series (A0..A10) only.** All AN sizes share the 1:√2 aspect
+**Pass 1, ISO A-series (A0..A10) only.** All AN sizes share the 1:√2 aspect
 ratio, so within any AN file exactly one AN size falls in the plausible DPI
 range [60, 135] (consecutive sizes differ by √2 ≈ 1.414× in DPI). The in-range
 AN candidate with smallest `|dpiW − dpiH|` is selected. Checking A-series first
 prevents non-document sizes (envelopes, 12"×18" sheet, …) from winning over the
 correct AN via accidentally smaller delta.
 
-**Pass 2 — all other sizes (Letter, Legal, B-series, …).** Reached only when no
+**Pass 2, all other sizes (Letter, Legal, B-series, …).** Reached only when no
 A-series candidate qualifies. Picks smallest `|dpiW − dpiH|` among in-range
 candidates. If neither pass finds a match, returns false and the caller keeps the
 current MuseScore page dimensions (custom page).
@@ -1997,7 +1997,7 @@ The Preferences UI (Phase 2) will read these values from `IEncoreImportConfigura
 When `firstMeasureIsPickup=false` and the first Encore measure is a Case A pickup (its
 declared time signature differs from the nominal), `buildMeasures` sets the first MuseScore
 measure's ticks to `nominalTimeSig` and must also advance `currentTick` by the same
-`nominalTimeSig` value — not by the shorter Encore pickup duration `ts`.
+`nominalTimeSig` value, not by the shorter Encore pickup duration `ts`.
 
 If these two values diverge, subsequent measures are placed at inconsistent positions.
 When `IrregularMeasure` then fires during `fillTrailingGaps` (because the measure's actual

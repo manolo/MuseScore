@@ -218,7 +218,7 @@ static void handleTempoOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
         // end of a measure, or a full system before the actual change). Suppress the ORN and let the
         // header place the tempo whenever a header BPM equals the ORN tempo:
         //   - same measure (eo->tempo == encMeas.bpm): the ORN is redundant with this measure's
-        //     header — e.g. an initial "♩=230" Encore stores at the end of measure 1 instead of its
+        //     header, e.g. an initial "♩=230" Encore stores at the end of measure 1 instead of its
         //     start. Without this, the ORN's end-of-measure segment fails to set the playback tempo
         //     (stays at the default) and also blocks the header from placing it at the start.
         //   - a later measure: a misplaced ornament stored before the measure that actually changes.
@@ -307,7 +307,7 @@ static void handleWedgeStart(BuildCtx& ctx, const MeasEmitCtx& mc,
     // On grand-staff instruments (staffWithin > 0), WEDGESTART ORNs use Encore voice=0 but the
     // actual notes may be in a different Encore voice (e.g. voice=1).  Find the voice used by
     // the first note on the same sub-staff so the hairpin ends up on the same MuseScore track
-    // as the notes it spans — otherwise it lands on the measure-rest-only voice 0 and cannot
+    // as the notes it spans, otherwise it lands on the measure-rest-only voice 0 and cannot
     // be positioned at its true start tick.
     track_idx_t resolvedTrack = track;
     int resolvedEncVoice = voice;

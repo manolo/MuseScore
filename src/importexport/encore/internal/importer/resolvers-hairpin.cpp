@@ -95,7 +95,7 @@ void resolveHairpins(BuildCtx& ctx)
 
     // Pre-pass: detect same-measure CRESC+DIM swell pairs on the same track.
     // For each pair, split the measure at its midpoint so both hairpins cover
-    // equal halves — xoffset2 pixel coordinates do not map linearly to ticks when
+    // equal halves, xoffset2 pixel coordinates do not map linearly to ticks when
     // the measure has empty beats, so a midpoint split better matches Encore's visual.
     const size_t n = ctx.pendingHairpins.size();
     std::vector<Fraction> startOverride(n, Fraction(-1, 1)); // -1 = no override

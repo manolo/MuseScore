@@ -495,7 +495,7 @@ TEST_F(Tst_Options, underfill_irregular_measure_passes_sanity_check)
 }
 
 // ===========================================================================
-// overfillMeasureStrategy — reserved variants: sanity-only tests
+// overfillMeasureStrategy, reserved variants: sanity-only tests
 // (StretchLastNote and IrregularMeasure are not yet fully implemented)
 // ===========================================================================
 

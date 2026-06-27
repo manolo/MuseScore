@@ -271,7 +271,7 @@ static void readMidiProgramsNoTk(
         } else {
             // ~~~~-block compact format: MIDI at byte +93 of each 112-byte entry.
             // Skip instruments that have their own named block (e.g. "Voz " in
-            // some v0xC2 files) — their MIDI is read in the first pass below.
+            // some v0xC2 files), their MIDI is read in the first pass below.
             static constexpr qint64 PNB = 202, PNS = 2158;  // primary name base/step
             auto hasPrimaryBlock = [&](size_t n) -> bool {
                 const qint64 off = PNB + static_cast<qint64>(n) * PNS;

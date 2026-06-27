@@ -38,7 +38,7 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x06:
     case 0x07: return { SymId::ornamentTrill };
     case 0x08: return { SymId::ornamentTurn };
-    case 0x09: return {};  // wave mark — no MuseScore equivalent, skip
+    case 0x09: return {};  // wave mark, no MuseScore equivalent, skip
     case 0x0A: return { SymId::ornamentShortTrill };    // <inverted-mordent>
     case 0x0C: return { SymId::ornamentTremblement };   // <inverted-mordent long="yes">
     case 0x0B: return { SymId::ornamentMordent };       // simple lower mordent
