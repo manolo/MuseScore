@@ -849,3 +849,26 @@ TEST_F(Tst_Instruments, instrument_weak_substring_name_defers_to_midi)
         << "must defer to MIDI program 59 (Tuba); got " << inst->id().toStdString();
     delete score;
 }
+
+// ===========================================================================
+// FIX: the importer never rebuilt the MIDI mapping, so every part's channel
+// stayed at -1. Reading the score into an .mscz hides this (the file read path
+// rebuilds the mapping on load), but exporting straight to MusicXML calls
+// Part::midiPort(), which indexes m_midiMapping[-1] and crashes. After import,
+// every part must own a valid (>= 0) MIDI channel and a safe MIDI port.
+// ===========================================================================
+TEST_F(Tst_Instruments, midi_mapping_is_built_for_every_part)
+{
+    MasterScore* score = readEncoreScore("instruments_compact_tk_ignores_key_byte.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    for (const Part* part : score->parts()) {
+        const Instrument* inst = part->instrument();
+        ASSERT_NE(inst, nullptr);
+        EXPECT_GE(inst->channel(0)->channel(), 0)
+            << "import must assign a MIDI channel; -1 makes midiPort() index out of bounds";
+        EXPECT_GE(part->midiPort(), 0)
+            << "midiPort() must be valid so MusicXML export does not crash";
+    }
+    delete score;
+}

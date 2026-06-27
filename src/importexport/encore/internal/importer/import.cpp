@@ -724,6 +724,11 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     score->spell();
     respellTransposingStaves(score);
     addTitleFrame(score, enc.titleBlock);
+    // Assign MIDI ports/channels to every part. The file read path does this on load,
+    // but a direct import builds the score in memory without it, leaving each channel
+    // at -1; that makes Part::midiPort() index m_midiMapping[-1] and crash on a
+    // straight-to-MusicXML export.
+    score->rebuildMidiMapping();
     score->setUpTempoMap();
     score->doLayout();
 
