@@ -1355,7 +1355,7 @@ TEST_F(Tst_Ornaments, trill_accidentals_set_interval_above)
 
 // ===========================================================================
 // OPEN-STRING (0x46): plain Fingering "0", NOT circled STRING_NUMBER.
-// STICK (0x47): unmapped — no fingering added.
+// STICK (0x47): unmapped, no fingering added.
 // ===========================================================================
 TEST_F(Tst_Ornaments, open_string_0x46_is_plain_fingering_not_string_number)
 {
@@ -1808,7 +1808,7 @@ TEST_F(Tst_Ornaments, guitar_bend_orns_skipped)
 // ===========================================================================
 // REGRESSION: ORN tipo 0xEE (TREMOLO_16) produces R16 tremolo (2 slashes).
 // ORN tipos 0xE6 and 0xE9 are string-number markers (string 2 and 5),
-// NOT tremolos — they must produce Fingering STRING_NUMBER, not tremolo.
+// NOT tremolos, they must produce Fingering STRING_NUMBER, not tremolo.
 // ===========================================================================
 TEST_F(Tst_Ornaments, tremolo_orn_r16_and_string_numbers)
 {

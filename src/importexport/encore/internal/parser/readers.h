@@ -100,7 +100,7 @@ struct EncFormatReader
                                     QDataStream& /*ds*/,
                                     qint64 /*contentStart*/) const {}
 
-    // Format capability queries — see ENCORE_FORMAT.md §Known quirks for per-version details.
+    // Format capability queries, see ENCORE_FORMAT.md §Known quirks for per-version details.
     virtual bool hasGraceTimeBorrowing() const { return false; }  // v0xA6: grace borrows rdur from next note
     virtual const char* formatName() const { return "v0xC4"; }    // for logging
 

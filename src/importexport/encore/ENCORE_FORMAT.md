@@ -186,8 +186,8 @@ infer the actual kit from the track name.
 
 | Offset | Size | Description                                                      |
 |--------|------|------------------------------------------------------------------|
-| +10    | 2    | `start` — 0-based index of the first measure in this system     |
-| +12    | 1    | `measureCount` — number of measures in this system              |
+| +10    | 2    | `start`, 0-based index of the first measure in this system     |
+| +12    | 1    | `measureCount`, number of measures in this system              |
 
 In `SCO5` (big-endian Encore 5) this single-byte `measureCount` reads as 0 (the meaningful
 byte sits in the other half of a wider big-endian field), but the `start` indices remain
@@ -259,16 +259,16 @@ layout (no size, clef, or staff-type bytes). Consequently:
 | 0x0C        | 1      | start barline type (see table)                                                         |
 | 0x0D        | 1      | end barline type (same table)                                                          |
 | 0x0F        | 1      | repeat-alternative bitmask (see Repeat alternatives section)                                         |
-| 0x1A        | 4      | repeat-mark field — LOW byte = repeat type (see table); upper 3 bytes = position/style |
-| 0x10–0x35   | 38     | layout data: measure width, x-offsets, "Writer" UTF-16 tag                             |
+| 0x1A        | 4      | repeat-mark field, LOW byte = repeat type (see table); upper 3 bytes = position/style |
+| 0x10 to 0x35   | 38     | layout data: measure width, x-offsets, "Writer" UTF-16 tag                             |
 
 #### Time-signature glyph values
 
 | Value  | Meaning                                                                          |
 |--------|----------------------------------------------------------------------------------|
-| 0x00   | Numeric display — show numerator / denominator digits (e.g. "4/4", "3/4", "6/8") |
-| 0x43   | Common time "C" — `TimeSigType::FOUR_FOUR`; numerator=4, denominator=4; produced by Encore 3.x / 4.x |
-| 0x63   | Common time "C" — `TimeSigType::FOUR_FOUR`; numerator=4, denominator=4; produced by Encore 5.x |
+| 0x00   | Numeric display, show numerator / denominator digits (e.g. "4/4", "3/4", "6/8") |
+| 0x43   | Common time "C", `TimeSigType::FOUR_FOUR`; numerator=4, denominator=4; produced by Encore 3.x / 4.x |
+| 0x63   | Common time "C", `TimeSigType::FOUR_FOUR`; numerator=4, denominator=4; produced by Encore 5.x |
 
 Values other than 0x00, 0x43, and 0x63 have been observed (0x01, 0x02, 0x06, 0x07) in files
 with unusual meter strings; treat as numeric display (glyph = NORMAL).
@@ -287,7 +287,7 @@ with unusual meter strings; treat as numeric display (glyph = NORMAL).
 
 #### Volta (repeat-alternative) bitmask
 
-Byte 0x0F is a bitmask — bit `n` set means the measure belongs to ending `n+1`.
+Byte 0x0F is a bitmask, bit `n` set means the measure belongs to ending `n+1`.
 Encore sets the same bitmask on **every** measure inside the ending (not just the first).
 Consecutive measures with the same non-zero bitmask form one multi-ending bracket; the bitmask bit-positions give the ending numbers (bit 0 = ending 1, bit 1 = ending 2, etc.).
 
@@ -300,11 +300,11 @@ Consecutive measures with the same non-zero bitmask form one multi-ending bracke
 | 0x82   | D.C. al Fine                                                   |
 | 0x83   | D.S. al Fine                                                   |
 | 0x84   | D.S.                                                           |
-| 0x85   | "To Coda" source — displays "To Coda", player jumps from here  |
+| 0x85   | "To Coda" source, displays "To Coda", player jumps from here  |
 | 0x86   | Fine                                                           |
 | 0x87   | D.C.                                                           |
 | 0x88   | Segno marker                                                   |
-| 0x89   | Coda destination — displays Coda glyph, player jumps to here   |
+| 0x89   | Coda destination, displays Coda glyph, player jumps to here   |
 
 `0x85` (CODA1) and `0x89` (CODA2) are paired: `0x85` → To-Coda navigation point, `0x89` → Coda target.
 Mapping both to CODA was a bug.
@@ -314,7 +314,7 @@ ORN subtype `0xA5` and repeat-mark `0x85` are parallel encodings of "To Coda"; b
 
 Quarter-note BPM regardless of time signature.
 In 3/8, 5/8, etc., Encore's UI shows eighth-BPM (= 2× on-disk value), but the binary always stores quarter-BPM.
-An unrelated layout field at +0x18 always holds 200 in v0xC4 files — do not confuse with BPM.
+An unrelated layout field at +0x18 always holds 200 in v0xC4 files, do not confuse with BPM.
 
 ---
 
@@ -396,9 +396,9 @@ Type 7. Variable size. Encodes a chord symbol (harmony marking) above the staff.
 |--------|------|----------|-------------|
 | +0     | 1    | `toniko` | Chord quality type (index 0-62 into the quality table below) |
 | +1     | 1    | `tipo`   | Flags: bit 0 = text present, bit 1 = bass note present |
-| +2-4   | 3    | —        | skipped |
+| +2-4   | 3    |, | skipped |
 | +5     | 1    | `xoffset`| Horizontal display offset |
-| +6     | 1    | —        | skipped |
+| +6     | 1    |, | skipped |
 | +7     | 1    | `radiko` | Root note (see note encoding below) |
 | +8     | 1    | `baso`   | Bass note for slash chords (same encoding as `radiko`; valid only when `tipo & 0x02`) |
 | +9     | 36   | `teksto` | Chord text slot (only present when `tipo & 0x01`; UTF-16 LE or Latin-1, byte 0/1 probe) |
@@ -487,8 +487,8 @@ A CLEF element's tick position also acts as a duration boundary for any precedin
 
 Type 2. Size 6 bytes. Byte at +5 = key index into the fifths table:
 - 0 = C / 0 fifths
-- 1–7 = F..Cb / −1..−7 fifths
-- 8–14 = G..C# / +1..+7 fifths
+- 1 to 7 = F..Cb / −1..−7 fifths
+- 8 to 14 = G..C# / +1..+7 fifths
 
 Value 0 is a legitimate change (naturals cancel prior accidentals).
 
@@ -519,9 +519,9 @@ authoritative forward-tie signal:
 
 | Offset   | Size   | Description                                                         |
 |----------|--------|---------------------------------------------------------------------|
-| +10      | 1      | `arcX1` — x-position of arc start (measure-relative pixel units)   |
-| +12      | 1      | `arcX2` — x-position of arc end                                    |
-| +14      | 1      | `sourcePosition` — staff position of the source note (matches `EncNote::position`); disambiguates which note in a multi-note chord carries the tie |
+| +10      | 1      | `arcX1`, x-position of arc start (measure-relative pixel units)   |
+| +12      | 1      | `arcX2`, x-position of arc end                                    |
+| +14      | 1      | `sourcePosition`, staff position of the source note (matches `EncNote::position`); disambiguates which note in a multi-note chord carries the tie |
 
 **Forward-tie rule (18-byte form).**
 
@@ -560,12 +560,12 @@ Type 5. Variable size. Offsets from element start:
 | +5       | 1      | ornament subtype (see table)                               |
 | +10      | 2      | start x-position within the measure (layout units)         |
 | +12      | 2      | signed s16 Cartesian y (negative = below staff)            |
-| +16      | 1      | altMezuro (v0xC2 only) — measures forward to the end measure for slurs; see v0xC2 caveat below |
-| +18      | 1      | alMezuro — measures forward to the end measure             |
-| +20      | 1      | xoffset2 — end x-position in the target measure            |
-| +26      | 1      | speguleco — bit 0: 0 = crescendo, 1 = diminuendo           |
-| +28      | 1      | noto — tempo beat unit (TEMPO subtype): low 7 bits = note value (0 = whole, 1 = half, 2 = quarter, 3 = eighth, ...), high bit 0x80 = dotted. So 0x02 is a quarter, 0x82 a dotted quarter, 0x81 a dotted half. A value of 0 (or an out-of-range byte from an older format) means no explicit unit. |
-| +30      | 2      | BPM (TEMPO subtype only, v0xC4) — expressed in the beat unit from +28. In v0xC2 (Encore 3.x/4.x) the BPM is instead at +28 and this +30 slot holds a constant unrelated byte (observed 0x34 = 52); read +28 for v0xC2 tempo marks. |
+| +16      | 1      | altMezuro (v0xC2 only), measures forward to the end measure for slurs; see v0xC2 caveat below |
+| +18      | 1      | alMezuro, measures forward to the end measure             |
+| +20      | 1      | xoffset2, end x-position in the target measure            |
+| +26      | 1      | speguleco, bit 0: 0 = crescendo, 1 = diminuendo           |
+| +28      | 1      | noto, tempo beat unit (TEMPO subtype): low 7 bits = note value (0 = whole, 1 = half, 2 = quarter, 3 = eighth, ...), high bit 0x80 = dotted. So 0x02 is a quarter, 0x82 a dotted quarter, 0x81 a dotted half. A value of 0 (or an out-of-range byte from an older format) means no explicit unit. |
+| +30      | 2      | BPM (TEMPO subtype only, v0xC4), expressed in the beat unit from +28. In v0xC2 (Encore 3.x/4.x) the BPM is instead at +28 and this +30 slot holds a constant unrelated byte (observed 0x34 = 52); read +28 for v0xC2 tempo marks. |
 | +32      | 1      | TEXT block entry index (STAFFTEXT subtype)                 |
 
 ### Ornament subtypes
@@ -631,7 +631,7 @@ Type 5. Variable size. Offsets from element start:
 | 0xA3    | REPEAT_MEAS   | "%" repeat-last-bar glyph (size-16 ORN); replaces measure content with MeasureRepeat |
 | 0xA7    | CAESURA       | caesura (//) breath element placed after preceding note (size-16 ORN)           |
 | 0xA8    | BREATH_COMMA  | comma breath mark placed after preceding note (size-16 ORN)                     |
-| 0xBE    | ACCENT        | standalone accent above (>) in v0xC4 as size-16 ORN; maps to articAccentAbove. In v0xC2, accent is instead ORN tipo=0xC4. **Two parsing rules:** (1) **Voice scan** — the ORN `voice` byte is always 0 regardless of which voice the annotated note is in; scan all four voices of the ORN's staff before falling back to the sibling staff, otherwise accents on staves where notes are all in voice 1+ are missed. (2) **Tick derivation** — the target tick is `measStartTick + orn.tick` (raw Encore tick), not the cumulative placement tick. When voice 0 has no notes on the staff, the cumulative tick stays at 0 throughout the measure, making the cumulative tick useless for positioning; the raw ORN tick always gives the correct beat. (3) **Raw-tick pre-check**: before applying any tick correction, the importer checks whether a note exists on the ORN's own staff at the ORN's raw Encore tick; if one does, that tick directly names the beat the mark sits on, so the raw tick is trusted and no correction is applied. The xoffset heuristic is only used as a last resort, when the ORN's own staff has no note at its raw tick (the beat is empty, so the stored tick cannot be taken literally). Comparing the ORN xoffset against note xoffsets is unreliable as a positive anchor because the ORN xoffset and the note xoffset use different horizontal origins: the difference between them is a per-file constant rather than zero, so a same-note bow can have an ORN xoffset tens of units away from its note's xoffset. Same rules apply to DOWNBOW and UPBOW. |
+| 0xBE    | ACCENT        | standalone accent above (>) in v0xC4 as size-16 ORN; maps to articAccentAbove. In v0xC2, accent is instead ORN tipo=0xC4. **Two parsing rules:** (1) **Voice scan**, the ORN `voice` byte is always 0 regardless of which voice the annotated note is in; scan all four voices of the ORN's staff before falling back to the sibling staff, otherwise accents on staves where notes are all in voice 1+ are missed. (2) **Tick derivation**, the target tick is `measStartTick + orn.tick` (raw Encore tick), not the cumulative placement tick. When voice 0 has no notes on the staff, the cumulative tick stays at 0 throughout the measure, making the cumulative tick useless for positioning; the raw ORN tick always gives the correct beat. (3) **Raw-tick pre-check**: before applying any tick correction, the importer checks whether a note exists on the ORN's own staff at the ORN's raw Encore tick; if one does, that tick directly names the beat the mark sits on, so the raw tick is trusted and no correction is applied. The xoffset heuristic is only used as a last resort, when the ORN's own staff has no note at its raw tick (the beat is empty, so the stored tick cannot be taken literally). Comparing the ORN xoffset against note xoffsets is unreliable as a positive anchor because the ORN xoffset and the note xoffset use different horizontal origins: the difference between them is a per-file constant rather than zero, so a same-note bow can have an ORN xoffset tens of units away from its note's xoffset. Same rules apply to DOWNBOW and UPBOW. |
 
 **Previously undecoded subtypes, now decoded** (confirmed by opening files in Encore 5):
 
@@ -640,16 +640,16 @@ Type 5. Variable size. Offsets from element start:
 | 0x10  | OTTAVA_ALTA | 8va line above staff. Size=16 ORN; no explicit endpoint stored (byte+14 is the visual right edge of the "8va" text box, a cosmetic constant ~12 px). alMezuro (+18) falls outside the element and reads garbage from the next element's typeVoice byte, producing large values that clamp to end of score. Endpoint resolved in post-pass: start of the next ottava on the same staff, or end of score when no successor exists. |
 | 0x12  | OTTAVA_BASSA | 8vb line below staff. Same size/endpoint rules as OTTAVA_ALTA. |
 | 0x1C  | GRAPHIC_LINE | User-drawn graphic line (Encore Graphics palette); no musical meaning; skip silently |
-| 0x28  | GUITAR_BEND | Guitar bend, curved arrow up (size=28 spanner); no standard notation equivalent — skip |
-| 0x29  | GUITAR_BEND_2 | Guitar bend, curved arrow (size=28 spanner); no standard notation equivalent — skip |
-| 0x2A  | GUITAR_PREBEND | Guitar prebend (size=28 spanner); no standard notation equivalent — skip |
-| 0x2B  | GUITAR_PREBEND_RELEASE | Guitar prebend-release (size=28 spanner); no standard notation equivalent — skip |
-| 0x30  | GUITAR_BEND_V | Guitar V-shape bend (size=28 spanner); no standard notation equivalent — skip |
+| 0x28  | GUITAR_BEND | Guitar bend, curved arrow up (size=28 spanner); no standard notation equivalent, skip |
+| 0x29  | GUITAR_BEND_2 | Guitar bend, curved arrow (size=28 spanner); no standard notation equivalent, skip |
+| 0x2A  | GUITAR_PREBEND | Guitar prebend (size=28 spanner); no standard notation equivalent, skip |
+| 0x2B  | GUITAR_PREBEND_RELEASE | Guitar prebend-release (size=28 spanner); no standard notation equivalent, skip |
+| 0x30  | GUITAR_BEND_V | Guitar V-shape bend (size=28 spanner); no standard notation equivalent, skip |
 | 0xB8  | DOUBLE_MORDENT | `ornamentPrallMordent` (double lower mordent) |
 | 0xBF  | MARCATO | `articMarcatoAbove` (^, vertex up; standard marcato) |
 | 0xC0  | MARCATO_STACCATO_BELOW | `articMarcatoStaccatoBelow` (heavy accent ∨ + staccato dot) |
 | 0xC6  | MARCATO_BELOW | `articMarcatoBelow` (heavy accent ∨, inverted marcato, vertex down) |
-| 0xC8  | TENUTO | `articTenutoAbove` (tenuto dash —) |
+| 0xC8  | TENUTO | `articTenutoAbove` (tenuto dash, ) |
 | 0xE6, 0xE7 | TREMOLO_8 | `TremoloType::R8` (1-slash tremolo) |
 | 0xEE  | TREMOLO_16 | `TremoloType::R16` (2-slash tremolo; confirmed in plectrum corpus) |
 | 0xE9, 0xEA | TREMOLO_64 | `TremoloType::R64` (4-slash tremolo) |
@@ -736,7 +736,7 @@ Walk backwards on the same (staffIdx, voice) for the latest NOTE/REST with
 
 | Field                      | Probe                                                       |
 |----------------------------|-------------------------------------------------------------|
-| TK block instrument name   | byte 0 in 0x20–0x7E (printable ASCII) and byte 1 == 0x00 → UTF-16 LE; otherwise Latin-1 |
+| TK block instrument name   | byte 0 in 0x20 to 0x7E (printable ASCII) and byte 1 == 0x00 → UTF-16 LE; otherwise Latin-1 |
 | TK fallback (NAME_BASE)    | same probe; falls back to Latin-1                           |
 | LYRIC element              | byte 0/1 probe at text start                                |
 | TEXT block entries         | byte 14/15 probe; lines split on `0x04 0x00`, string ends at null |
@@ -766,7 +766,7 @@ grace note, both elements reference the same beat in the measure (tick=0 of that
 in Encore). Grace notes and their parent chord share the same written tick position (grace notes do not advance the cumulative position).
 
 **Problem**: the same-measure xoffset heuristic converts the end note's Encore tick
-(e.g. tick=15) to the proportional written tick (15/960 of a whole note). No note exists there — the parent chord is at position 0. The slur-end resolver finds
+(e.g. tick=15) to the proportional written tick (15/960 of a whole note). No note exists there, the parent chord is at position 0. The slur-end resolver finds
 nothing and returns null → slur removed.
 
 **Fix**: two cases are handled:
@@ -812,7 +812,7 @@ fallback path can produce a zero-span that resolves to the end of the measure. I
   with the main chord.
 
 **v0xC4 binary ordering.** Encore 5 serializes the MAIN note BEFORE its ACCIACCATURA grace
-note at the same beat — opposite of v0xC2 where the grace comes first. When the main note
+note at the same beat, opposite of v0xC2 where the grace comes first. When the main note
 arrives first and a grace note immediately follows at the same tick
 (`tick − prevTick < 8`), the grace is a retroactive chord-extension of the already-placed
 main note, not a prefix to the NEXT note. Detect this and attach it directly to the
@@ -948,20 +948,20 @@ syllables.
 
 | Offset   | Size   | Description                                                                      |
 |----------|--------|----------------------------------------------------------------------------------|
-| +5       | 1      | face value — high nibble (notehead type): 0=normal, 1=diamond, 2=triangle-up, 3=square, 4=cross(X), 5=X-with-circle, 6=plus(+), 7=slash, 8=large-diamond(open), 9=invisible(no head); low nibble (duration): 1=whole, 2=half, 3=qtr, 4=8th, …, 8=128th |
+| +5       | 1      | face value, high nibble (notehead type): 0=normal, 1=diamond, 2=triangle-up, 3=square, 4=cross(X), 5=X-with-circle, 6=plus(+), 7=slash, 8=large-diamond(open), 9=invisible(no head); low nibble (duration): 1=whole, 2=half, 3=qtr, 4=8th, …, 8=128th |
 | +6       | 1      | grace1 (high-nibble flags, see grace section)                                    |
 | +7       | 1      | grace2                                                                           |
 | +10      | 2      | layout x-position                                                                |
-| +12      | 1      | staff-relative pitch — diatonic steps from C4 (C4=0, D4=1, E4=2, F4=3, … A5=12). On PERC clef staves this byte encodes the visual staff line in Encore; convert to staff line: `line = max(-4, 10 − position)`. PERC clef places A4 on the middle line (line=5), so D4→line=9, F4→line=7, A5→line=−2. On pitched staves: legacy display hint, not used for playback. |
-| +13      | 1      | tuplet byte — high nibble = actualN, low nibble = normalN                        |
+| +12      | 1      | staff-relative pitch, diatonic steps from C4 (C4=0, D4=1, E4=2, F4=3, … A5=12). On PERC clef staves this byte encodes the visual staff line in Encore; convert to staff line: `line = max(-4, 10 − position)`. PERC clef places A4 on the middle line (line=5), so D4→line=9, F4→line=7, A5→line=−2. On pitched staves: legacy display hint, not used for playback. |
+| +13      | 1      | tuplet byte, high nibble = actualN, low nibble = normalN                        |
 | +14      | 1      | dot count (0/1/2/3)                                                              |
-| +15      | 1      | MIDI pitch (0–127)                                                               |
+| +15      | 1      | MIDI pitch (0 to 127)                                                               |
 | +16      | 2      | playback duration in ticks (recorded MIDI; diverges from notated for tuplets)    |
 | +19      | 1      | velocity                                                                         |
 | +20      | 1      | options                                                                          |
 | +21      | 1      | alteration glyph (accidental override)                                           |
-| +24      | 1      | articulation byte — above slot                                                   |
-| +26      | 1      | articulation byte — below slot                                                   |
+| +24      | 1      | articulation byte, above slot                                                   |
+| +26      | 1      | articulation byte, below slot                                                   |
 
 ### v0xC2 (size = 22 or 24)
 
@@ -995,7 +995,7 @@ ambiguous file in Encore 5 rewrites it to a form that no longer triggers the iss
 | +7       | 1      | grace2                                                                           |
 | +10      | 2      | layout x-position                                                                |
 | +13      | 1      | **MIDI pitch** (sub-variant A: non-zero) or a tuplet ratio (sub-variant B: pitch is at +15)  |
-| +14      | 1      | dotControl — layout/display byte. Bit 0 sometimes indicates a dotted note but **may be coincidentally set on undotted notes** (observed: 0x28, 0x30, 0x39, 0x60 on plain 16ths and 8ths in v0xC2 files such as tapada.enc). Parsers must NOT treat bit 0 as a reliable dotted indicator when `realDuration ≤ faceValue2ticks(fv)`. See v0xC2 dotted-eighth anomaly note below. |
+| +14      | 1      | dotControl, layout/display byte. Bit 0 sometimes indicates a dotted note but **may be coincidentally set on undotted notes** (observed: 0x28, 0x30, 0x39, 0x60 on plain 16ths and 8ths in v0xC2 files such as tapada.enc). Parsers must NOT treat bit 0 as a reliable dotted indicator when `realDuration ≤ faceValue2ticks(fv)`. See v0xC2 dotted-eighth anomaly note below. |
 | +15      | 1      | **MIDI pitch** (sub-variant B only); in sub-variant A this is 0 or a small stray flag (e.g. 1 or 3), never a pitch |
 | +16      | 2      | playback duration in ticks                                                       |
 | +19      | 1      | velocity                                                                         |
@@ -1021,8 +1021,8 @@ layout flag; bit 0 is clear, so these notes are not dotted).
 | +5       | face value                                                     |
 | +6       | grace1 (& 0x30: 0x20 = APPOGGIATURA, 0x10 = inner grace)       |
 | +7       | explicit tuplet byte (3:2 = `0x32`, 5:4 = `0x54`, …)           |
-| +9       | staff-position / diatonic line — NOT the MIDI pitch            |
-| +11      | MIDI pitch (absolute 0–127)                                    |
+| +9       | staff-position / diatonic line, NOT the MIDI pitch            |
+| +11      | MIDI pitch (absolute 0 to 127)                                    |
 
 Byte +9 is staff-position (e.g. 11 for B4 in treble clef counting), NOT pitch.
 Byte +11 is the playable MIDI value.
@@ -1035,11 +1035,11 @@ Byte +11 is the playable MIDI value.
 
 | Offset   | Size   | Description                                                                      |
 |----------|--------|----------------------------------------------------------------------------------|
-| +5       | 1      | face value — same encoding as Note element                                       |
+| +5       | 1      | face value, same encoding as Note element                                       |
 | +10      | 1      | layout x-position                                                                |
-| +13      | 1      | tuplet byte — high nibble = actualN, low nibble = normalN (same as note)         |
-| +14      | 1      | dotControl — **bitmask flag, NOT a tick count**. Bit 0 = dotted display hint.   |
-| +15      | 1      | **mrestCount** — Encore multi-measure rest display count. When > 1, this single MEAS block represents that many consecutive empty display measures (Encore draws one rest symbol with this count above it). Multi-staff files emit one REST element per staff, so the MEAS block can contain N elements (all REST, all with the same mrestCount). The count is read from the first element. Expansion is applied when ALL elements are REST and `mrestCount > 1`. The only suppression case is when the predecessor MEAS block is itself a multi-measure rest (all-REST, mrestCount > 1), which prevents cascading in the rare event Encore writes consecutive mrest blocks. A predecessor that is a plain single-measure rest (mrestCount == 1) does NOT suppress expansion. The successor content never affects validity — `mrestCount` is authoritative regardless of what follows. |
+| +13      | 1      | tuplet byte, high nibble = actualN, low nibble = normalN (same as note)         |
+| +14      | 1      | dotControl, **bitmask flag, NOT a tick count**. Bit 0 = dotted display hint.   |
+| +15      | 1      | **mrestCount**, Encore multi-measure rest display count. When > 1, this single MEAS block represents that many consecutive empty display measures (Encore draws one rest symbol with this count above it). Multi-staff files emit one REST element per staff, so the MEAS block can contain N elements (all REST, all with the same mrestCount). The count is read from the first element. Expansion is applied when ALL elements are REST and `mrestCount > 1`. The only suppression case is when the predecessor MEAS block is itself a multi-measure rest (all-REST, mrestCount > 1), which prevents cascading in the rare event Encore writes consecutive mrest blocks. A predecessor that is a plain single-measure rest (mrestCount == 1) does NOT suppress expansion. The successor content never affects validity, `mrestCount` is authoritative regardless of what follows. |
 
 **dotControl semantics.** dotControl is a **bitmask**, not a sounding tick value:
 
@@ -1048,7 +1048,7 @@ Byte +11 is the playable MIDI value.
 | 0   | dotted display flag (1 = dotted) |
 | others | visual/layout hints, ignore  |
 
-Do NOT pass dotControl as a raw tick count to `calcDots()` — it will return 0 in most
+Do NOT pass dotControl as a raw tick count to `calcDots()`, it will return 0 in most
 cases. Instead:
 1. Try `calcDots(dotControl, fv)` (works when dotControl happens to equal a dotted tick count).
 2. Fallback to `calcDotsSnap(realDuration, fv)` (handles exact or ±1-tick-accurate rdur).
@@ -1063,7 +1063,7 @@ eighth (equal to a plain eighth), so `calcDotsSnap` returns 0. The `dotControl` 
 (typically `0x60`) also lacks bit 0.
 
 Detection: when an 8th with `rdur=120` is followed by a 16th at `tick+120` with `rdur=60`,
-AND `faceSum + 60 == durTicks` (the voice group is exactly 60t short — the amount the
+AND `faceSum + 60 == durTicks` (the voice group is exactly 60t short, the amount the
 anomaly steals), set `EncNote::forceDotted = true` on the 8th. The `forceDotted` signal
 bypasses `dotControl` entirely in the emitter.
 
@@ -1088,9 +1088,9 @@ The combined-articulation range 0x22-0x2D is laid out in consecutive (below, abo
 | 0x06         | trill to augmented second (sharp) | `ornamentTrill` + `intervalAbove=AUGMENTED` |
 | 0x07         | trill to major second (natural) | `ornamentTrill` + `intervalAbove=MAJOR` |
 | 0x08         | turn | `ornamentTurn` |
-| 0x01         | flat mark (b) | not an articulation — skip |
+| 0x01         | flat mark (b) | not an articulation, skip |
 | 0x02         | sharp/natural mark (#/♮) | skip |
-| 0x09         | wave mark | no notation equivalent — skip |
+| 0x09         | wave mark | no notation equivalent, skip |
 | 0x0A         | inverted-mordent (short) | `ornamentShortTrill` |
 | 0x0C         | inverted-mordent (long) | `ornamentTremblement` |
 | 0x0B         | mordent (simple lower) | `ornamentMordent` |
@@ -1105,7 +1105,7 @@ The combined-articulation range 0x22-0x2D is laid out in consecutive (below, abo
 | 0x19         | down bow | `stringsDownBow` |
 | 0x1A         | marcato (variant) | `articMarcatoAbove` |
 | 0x1B         | stopped horn/brass (+) | `brassMuteClosed` |
-| 0x1C         | tenuto (`—`) | `articTenutoAbove` |
+| 0x1C         | tenuto (`, `) | `articTenutoAbove` |
 | 0x1D         | staccato (`.`) | `articStaccatoAbove` |
 | 0x1E, 0x1F   | harmonic | `stringsHarmonic` |
 | 0x20, 0x21   | fermata; **on tuplet note means "tuplet bracket above/below" (not a fermata)** | `fermataAbove` |
@@ -1122,15 +1122,15 @@ The combined-articulation range 0x22-0x2D is laid out in consecutive (below, abo
 
 | Byte         | Meaning                                                        |
 |--------------|----------------------------------------------------------------|
-| 0x0D–0x11    | fingering 1–5                                                  |
+| 0x0D, 0x11    | fingering 1 to 5                                                  |
 | 0x1E, 0x1F   | harmonic (see above)                                           |
 | 0x44, 0x45   | thumb-position                                                 |
 | 0x46         | open-string (plain Fingering "0", not circled)                |
-| 0x47         | "stick" drumstick technique; no SMuFL equivalent — skip |
-| 0x48         | brush; no SMuFL equivalent — skip |
-| 0x49         | soft mallet; no SMuFL equivalent — skip |
-| 0x4A         | hard mallet; no SMuFL equivalent — skip |
-| 0x39–0x40    | scale string numbers 1–8 (byte `0x38 + N` = string N); when at least one such byte appears in a measure, all notes in that measure with options bit 0 set also display their scale-degree position as a circled string number |
+| 0x47         | "stick" drumstick technique; no SMuFL equivalent, skip |
+| 0x48         | brush; no SMuFL equivalent, skip |
+| 0x49         | soft mallet; no SMuFL equivalent, skip |
+| 0x4A         | hard mallet; no SMuFL equivalent, skip |
+| 0x39 to 0x40    | scale string numbers 1 to 8 (byte `0x38 + N` = string N); when at least one such byte appears in a measure, all notes in that measure with options bit 0 set also display their scale-degree position as a circled string number |
 
 ### Single-note tremolos (articulation slots)
 
@@ -1141,14 +1141,14 @@ The combined-articulation range 0x22-0x2D is laid out in consecutive (below, abo
 | 0x43   | 3         | 32nd; Encore may render 4 strokes in some files  |
 | 0x03   | 3         | bare 3-stroke variant (no high-nibble flag)      |
 
-`0x44` and above are technical markings — NOT tremolos.
+`0x44` and above are technical markings, NOT tremolos.
 
 ### Deduplication of artic-byte markings on chords
 
 Each NOTE element carries its own `articulationUp` and `articulationDown` bytes.
 When multiple notes in the same chord (same tick, same voice) carry the same
 artic byte, each would independently produce the same ornament or articulation
-glyph on the chord — resulting in duplicate visual marks (e.g. two "tr" symbols).
+glyph on the chord, resulting in duplicate visual marks (e.g. two "tr" symbols).
 
 **Importer rule:** before adding an ornament or articulation to a chord, the
 importer checks `chord->articulations()` for an existing element with the same
@@ -1277,7 +1277,7 @@ its first line.
 
 Text length is bounded by the null terminator, **not** by `payload_size - 14 - 4`
 (some entries carry padding after the terminator).
-Dynamic marks use their own ornament subtypes — they are NOT in the TEXT block.
+Dynamic marks use their own ornament subtypes, they are NOT in the TEXT block.
 
 ---
 
@@ -1290,8 +1290,8 @@ Encoding from varsize: < 5000 → Latin-1 (96 bytes/line); ≥ 10000 → UTF-16 
 
 | Offset      | Size   | Description                                                |
 |-------------|--------|------------------------------------------------------------|
-| +0–+29      | 30     | prefix (byte +14 = horizontal alignment for header/footer) |
-| +30–+1055   | 1026   | UTF-16 LE text, NUL-terminated, zero-padded                |
+| +0, +29      | 30     | prefix (byte +14 = horizontal alignment for header/footer) |
+| +30, +1055   | 1026   | UTF-16 LE text, NUL-terminated, zero-padded                |
 
 Alignment byte: `0x02` = RIGHT, `0x04` = LEFT, `0x06` = CENTER. Other line types leave it at `0x00`.
 
@@ -1347,7 +1347,7 @@ Block layout (after 8-byte magic + varsize header):
 Total content size: 42 bytes (`varsize = 42`). Some older files have `varsize = 40`
 (the trailing uint16 is absent in some files); both layouts are valid.
 
-**Units — two variants.** Encore 5.x stores values in typographic points (1/72"). Earlier
+**Units, two variants.** Encore 5.x stores values in typographic points (1/72"). Earlier
 versions (including Encore 4.x and some 3.x) store them in **screen pixels at the monitor
 DPI** (~84 PPI; the exact value is the screen the file was last saved on, e.g. 83.7). The
 displayed margins in those files are still inches; only the stored unit is device pixels.
@@ -1398,7 +1398,7 @@ accidentally satisfy the delta criterion.
 **Encoding quirk.** Encore stores `round(inches × 72)`, then displays
 `floor(pts / 72 × 1000) / 1000`. A user-entered 0.100" stores as 7 pts and
 displays back as 0.097". In screen-pixel files Encore displays margins using
-1/72" even though the stored unit is 1/DPI — the importer should match this
+1/72" even though the stored unit is 1/DPI, the importer should match this
 display behaviour (divide by 72 for displayed margins, divide by detected DPI
 for accurate physical margins).
 
@@ -1439,12 +1439,12 @@ voice byte; only the first fill is valid notation.
 
 Two cases:
 
-**Case A — explicit short time signature.** When `timeSig[measure_0] ≠ timeSig[measure_1]`,
+**Case A, explicit short time signature.** When `timeSig[measure_0] ≠ timeSig[measure_1]`,
 Encore stored a shorter time signature for the pickup. Use `timeSig[measure_0]` for display,
 but the actual duration of measure 0 is `durTicks[measure_0]`. All subsequent measures start
 at `durTicks[measure_0]`.
 
-**Case B — implicit (underflowed) pickup.** When `timeSig[measure_0] = timeSig[measure_1]`
+**Case B, implicit (underflowed) pickup.** When `timeSig[measure_0] = timeSig[measure_1]`
 but the actual placed content (`maxPlacedTicks` across all voices/staves) is
 `0 < maxPlacedTicks < durTicks`:
 1. Shrink measure 0 to `maxPlacedTicks`.
@@ -1532,7 +1532,7 @@ at the barline. This note is valid notation. Do not filter it out based on its s
 | ≥ 4 (out-of-band) | voice 0 of the adjacent staff (staffWithin) |
 
 **Overflow drop.** Once a voice is full (`placedTicks = durTicks`), additional elements
-arriving with the same voice byte are dropped — they are never promoted to the next voice.
+arriving with the same voice byte are dropped, they are never promoted to the next voice.
 
 **Duplicate REST dedup.** When two out-of-band voice bytes both map to the same output
 voice and both carry an explicit REST at the identical tick, treat the second REST as a
@@ -1633,10 +1633,10 @@ round percentages (100 dominant, then 85/80/90/75 …) and dmPaperSize is domina
   always equals the active tempo) is the authoritative tempo position.
 - **Misplaced tempo ornaments.** The ORN TEMPO element's stored tick rarely matches where the
   tempo actually applies. Two cases: (1) it can be stored several measures (often a full system)
-  before the measure whose header BPM changes — the ornament's BPM differs from the header BPM of
+  before the measure whose header BPM changes, the ornament's BPM differs from the header BPM of
   the measure it is stored in, and the real position is the later measure whose header BPM equals
   it; (2) an initial tempo is stored at the END of measure 1 (after the notes) even though it is
-  measure 1's tempo — there its BPM equals that measure's header BPM. In both cases the authoritative
+  measure 1's tempo, there its BPM equals that measure's header BPM. In both cases the authoritative
   position is the measure START given by the matching header BPM, not the ornament's stored tick.
 - **Lyric voice byte.** Lyric voice = verse index (0-based), not a real voice assignment.
   All verses are anchored to voice-0 notes.

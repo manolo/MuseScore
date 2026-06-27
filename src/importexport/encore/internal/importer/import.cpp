@@ -247,9 +247,9 @@ static void logEncRootInfo(const EncRoot& enc)
         LOGD() << "  WINI: top=" << ps.top << "  left=" << ps.left
                << "  bottomEdge=" << ps.bottomEdge << "  rightEdge=" << ps.rightEdge << marginStr;
     } else if (enc.header.magic == "SCO5") {
-        LOGD() << "  WINI: absent — margins set to 0.25 inches";
+        LOGD() << "  WINI: absent, margins set to 0.25 inches";
     } else {
-        LOGD() << "  WINI: absent — margins from MuseScore defaults";
+        LOGD() << "  WINI: absent, margins from MuseScore defaults";
     }
     const EncPrintSetup& pr = enc.printSetup;
     if (pr.hasData) {
@@ -260,12 +260,12 @@ static void logEncRootInfo(const EncRoot& enc)
                << "  scale/zoom=" << pr.scale << "%"
                << "  [scale not applied: needs spatium mapping]";
     } else {
-        LOGD() << "  PREC: absent — page size from WINI/defaults";
+        LOGD() << "  PREC: absent, page size from WINI/defaults";
     }
     LOGD() << "--------------------------";
 }
 
-// Map Encore score-size (1–4) to MuseScore Staff Properties → Scale (Pid::MAG).
+// Map Encore score-size (1 to 4) to MuseScore Staff Properties → Scale (Pid::MAG).
 // 1=60%, 2=75%, 3=100%, 4=130%.  Global spatium is not changed.
 static void applyStaffScale(MasterScore* score, const EncRoot& enc)
 {
@@ -325,12 +325,12 @@ static bool detectPtsPageSize(qint32 rightEdge, qint32 bottomEdge,
 // pageWUnits = rightEdge + left, pageHUnits = bottomEdge + top.
 //
 // Two-pass approach:
-//   Pass 1 — ISO A-series only (A0..A10).  All AN sizes share the 1:√2 aspect
-//   ratio, so for A-series WINI data the only ambiguity is WHICH AN size — and
+//   Pass 1, ISO A-series only (A0..A10).  All AN sizes share the 1:√2 aspect
+//   ratio, so for A-series WINI data the only ambiguity is WHICH AN size, and
 //   that is resolved by smallest |dpiW−dpiH|.  Checking A-series first prevents
 //   non-A formats (e.g. 12"×18") from incorrectly winning when their
 //   accidentally smaller delta would beat the correct AN with a unified scan.
-//   Pass 2 — all remaining standard sizes, pick smallest delta.
+//   Pass 2, all remaining standard sizes, pick smallest delta.
 //
 // Returns false when no standard size matches within tolerance (custom page).
 static bool detectWiniPageSize(int pageWUnits, int pageHUnits,
@@ -450,7 +450,7 @@ static bool precPageSizeInches(const EncPrintSetup& pr, double& wIn, double& hIn
 // Apply page size, orientation and notation scale from the PREC (DEVMODE) block. Returns
 // true when the page size was set (so the WINI margin pass must not override it). PREC is
 // present in almost every Encore file across all formats, while WINI (margins) exists only
-// in v0xC4 — so this is the primary source of the page size for v0xA6/v0xC2 and for the
+// in v0xC4, so this is the primary source of the page size for v0xA6/v0xC2 and for the
 // many v0xC4 files without a WINI block.
 static bool applyPagePrintSetup(MasterScore* score, const EncPrintSetup& pr)
 {

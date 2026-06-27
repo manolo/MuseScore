@@ -683,7 +683,7 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
             NoteHeadGroup::HEAD_NORMAL,        // 0
             NoteHeadGroup::HEAD_DIAMOND,       // 1 rombo
             NoteHeadGroup::HEAD_TRIANGLE_UP,   // 2 triangulo
-            NoteHeadGroup::HEAD_NORMAL,        // 3 (square — handled above)
+            NoteHeadGroup::HEAD_NORMAL,        // 3 (square, handled above)
             NoteHeadGroup::HEAD_CROSS,         // 4 equis
             NoteHeadGroup::HEAD_XCIRCLE,       // 5 equis con circulo
             NoteHeadGroup::HEAD_PLUS,          // 6 mas (+)
@@ -709,7 +709,7 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
         if (nibble != 0) {
             fixNoteHeadImmune(note, en, ds);
         }
-        // nibble=9: "sin_cabeza" (no notehead) — make note invisible.
+        // nibble=9: "sin_cabeza" (no notehead), make note invisible.
         if (nibble == 9) {
             note->setVisible(false);
         }

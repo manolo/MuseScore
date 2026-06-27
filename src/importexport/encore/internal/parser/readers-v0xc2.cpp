@@ -53,7 +53,7 @@ static void fixDottedEighthPattern(std::vector<EncMeasureElem*>& elems, qint16 d
     // The dotted-8th anomaly: one 8th is stored as plain (120t) instead of
     // dotted (180t), making the measure exactly 60t short.
     // If the deficit is not 60t, the measure is already correct or has a
-    // different issue — don't apply the dotted fix.
+    // different issue, don't apply the dotted fix.
     if (faceSum + 60 != static_cast<int>(durTicks)) {
         return;
     }

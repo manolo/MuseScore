@@ -261,7 +261,7 @@ TEST_F(Tst_Importer, v0c4_octave_lower_implicit_silences)
 // and au=ad=0x00; it must import with zero fingerings.
 TEST_F(Tst_Importer, v0c4_no_spurious_string_numbers_from_options_byte)
 {
-    // Fixture: 4 notes with opt=0x87 or 0x07, au=ad=0x00, pos=3/6/13/5 — matches the
+    // Fixture: 4 notes with opt=0x87 or 0x07, au=ad=0x00, pos=3/6/13/5, matches the
     // "As muitas aguas" piano piece pattern that was incorrectly getting circles.
     MasterScore* score = readEncoreScore("notes_no_spurious_string_numbers.enc");
     ASSERT_NE(score, nullptr);
@@ -1309,7 +1309,7 @@ TEST_F(Tst_Importer, isolated_explicit_tuplet_caps_chord_ticks)
 }
 
 // Regression: note-level path-A cap deleted a chord that belonged to an inner (nested) tuplet.
-// Old code called tt.currentTuplet->remove(chord) — the outer tuplet — which does not contain the
+// Old code called tt.currentTuplet->remove(chord), the outer tuplet, which does not contain the
 // chord, logging "cannot find element" and leaving a dangling pointer in the inner tuplet's
 // m_currentElements.  The next innerTuplet->add() call iterated over that dangling pointer → SIGSEGV.
 // Fix: use chord->tuplet() (the actual owning tuplet) rather than tt.currentTuplet.
@@ -1480,7 +1480,7 @@ TEST_F(Tst_Importer, title_frame_created)
 
 TEST_F(Tst_Importer, no_title_frame_when_empty)
 {
-    // bazo.enc has no title — should not have a VBox frame
+    // bazo.enc has no title, should not have a VBox frame
     MasterScore* score = readEncoreScore("bazo.enc");
     ASSERT_NE(score, nullptr);
     MeasureBase* first = score->first();
@@ -2025,7 +2025,7 @@ TEST_F(Tst_Importer, v0c4_mixed_duration_tuplet_bracket_closes_correctly)
     MasterScore* score = readEncoreScore("ornaments_tuplet_mixed_baseLen.enc");
     ASSERT_NE(score, nullptr) << "Failed to load ornaments_tuplet_mixed_baseLen.enc";
 
-    // No measure corruption — the sanityCheck must pass
+    // No measure corruption, the sanityCheck must pass
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Measure is corrupt (overrun): " << ret.text();
 
@@ -2282,7 +2282,7 @@ TEST_F(Tst_Importer, v0c4_2_2_beatticks480_correct_encoding_still_works)
     ASSERT_EQ(elements.size(), 7u)
         << "Correct 2/2 (beatTicks=480) must also produce 7 elements";
     EXPECT_EQ(elements[2].first, Fraction(3, 8))
-        << "Third element must be at 3/8 — no regression from wholeTicks fix";
+        << "Third element must be at 3/8, no regression from wholeTicks fix";
     EXPECT_FALSE(elements[2].second) << "Third element must be a chord, not a rest";
 
     delete score;
@@ -2335,7 +2335,7 @@ TEST_F(Tst_Importer, v0c4_2_2_beatticks240_gap_snap_no_false_fire)
     EXPECT_EQ(elements[1].first, Fraction(1, 8));
     EXPECT_FALSE(elements[1].second) << "element 1 must be a chord (Q)";
 
-    // tick 3/8: first 8th note after Q — the false-snap target
+    // tick 3/8: first 8th note after Q, the false-snap target
     EXPECT_EQ(elements[2].first, Fraction(3, 8))
         << "element 2 must be at 3/8 (tick 360); "
         "false gap-snap would place it at 3/4 (tick 720)";

@@ -298,7 +298,7 @@ TEST_F(Tst_Notes, invalid_facevalue_notes_have_valid_duration_type)
 }
 
 // ===========================================================================
-// BUG FIX: Small realDuration (< 15 ticks) skipped — MIDI timing artifacts
+// BUG FIX: Small realDuration (< 15 ticks) skipped, MIDI timing artifacts
 // ===========================================================================
 
 TEST_F(Tst_Notes, tiny_duration_notes_do_not_create_overlaps)
@@ -307,7 +307,7 @@ TEST_F(Tst_Notes, tiny_duration_notes_do_not_create_overlaps)
     // These are MIDI timing artifacts with realDuration < 15 Encore ticks.
     // After fix: such notes are skipped so they don't pollute voice 0.
     // The file loads without crash. The remaining notes (triplets at 265, 341, 420)
-    // have non-quantized swing positions — we verify the file loads, not strict ordering.
+    // have non-quantized swing positions, we verify the file loads, not strict ordering.
     // notes_swing.enc: note at tick=180 (realDur=2) is skipped; note at
     // tick=182 survives.  Voice 0 of measure 1 has the rest + the surviving note only.
     MasterScore* score = readEncoreScore("notes_swing.enc");
@@ -780,7 +780,7 @@ TEST_F(Tst_Notes, near_simultaneous_notes_form_chord)
 }
 
 // ===========================================================================
-// BUG FIX: Triple-dotted note advance multiplier — docs/verify ticks match advance
+// BUG FIX: Triple-dotted note advance multiplier, docs/verify ticks match advance
 // ===========================================================================
 
 TEST_F(Tst_Notes, triple_dotted_advance_matches_chord_ticks)
@@ -804,7 +804,7 @@ TEST_F(Tst_Notes, triple_dotted_advance_matches_chord_ticks)
     ASSERT_NE(first, nullptr);
     EXPECT_EQ(first->ticks(), Fraction(15, 64)) << "Must be triple-dotted 8th (15/64)";
     EXPECT_EQ(first->dots(), 3) << "Must have 3 augmentation dots";
-    // Second chord: plain 8th immediately after — its position must be measTick+15/64,
+    // Second chord: plain 8th immediately after, its position must be measTick+15/64,
     // NOT measTick+14/64 (which would be a 1/64 overrun causing a stray fill).
     Chord* second = nullptr;
     for (Segment* s = first->segment()->next(SegmentType::ChordRest);
@@ -870,7 +870,7 @@ TEST_F(Tst_Notes, dotted_rest_uses_dotcontrol_byte)
     ASSERT_NE(m, nullptr);
     EXPECT_EQ(m->timesig(), Fraction(3, 4));
 
-    // Find the rest (second ChordRest segment — first is the quarter note chord)
+    // Find the rest (second ChordRest segment, first is the quarter note chord)
     Rest* dottedRest = nullptr;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* e = s->element(0);
@@ -888,7 +888,7 @@ TEST_F(Tst_Notes, dotted_rest_uses_dotcontrol_byte)
 }
 
 // ===========================================================================
-// BUG FIX: calcDotsSnap — 1-tick rdur tolerance identifies dotted notes
+// BUG FIX: calcDotsSnap, 1-tick rdur tolerance identifies dotted notes
 // ===========================================================================
 
 TEST_F(Tst_Notes, rdur_snap_corrects_dot_count)
@@ -1057,7 +1057,7 @@ TEST_F(Tst_Notes, chord_cluster_5tick_v0c2)
     // Expect exactly 2 chords: the 4-note sender chord and the 4-note receiver chord.
     ASSERT_EQ(chords.size(), 2u) << "Must have exactly 2 chords (sender + receiver)";
 
-    // Sender chord must have all 4 notes — not split.
+    // Sender chord must have all 4 notes, not split.
     EXPECT_EQ(chords[0]->notes().size(), 4u)
         << "All 4 live-recorded chord notes must be in one chord, not split";
 

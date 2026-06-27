@@ -159,7 +159,7 @@ TEST_F(Tst_ImporterMrest, mrest_single_block_expands_when_successor_is_rest)
     EXPECT_FALSE(hasPitchedNotes(measureAt(score, 2))) << "measure 3 (mrest) must be empty";
     EXPECT_FALSE(hasPitchedNotes(measureAt(score, 3))) << "measure 4 (mrest) must be empty";
     EXPECT_FALSE(hasPitchedNotes(measureAt(score, 4))) << "measure 5 (mrest) must be empty";
-    // Measure 6: the single-rest successor (not a note measure — this is what triggered the bug)
+    // Measure 6: the single-rest successor (not a note measure, this is what triggered the bug)
     EXPECT_FALSE(hasPitchedNotes(measureAt(score, 5))) << "measure 6 (single rest) must be empty";
     // Measure 7: note
     EXPECT_TRUE(hasPitchedNotes(measureAt(score, 6))) << "measure 7 must have notes";
@@ -284,7 +284,7 @@ TEST_F(Tst_ImporterMrest, mrest_single_block_expands_for_multi_staff_file)
 // ===========================================================================
 TEST_F(Tst_ImporterMrest, mmrest_flag_off_when_file_has_no_mrest_blocks)
 {
-    // bazo.enc has no multi-measure rest blocks — only chord/note content.
+    // bazo.enc has no multi-measure rest blocks, only chord/note content.
     MasterScore* score = readEncoreScore("bazo.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_FALSE(score->style().styleB(Sid::createMultiMeasureRests))

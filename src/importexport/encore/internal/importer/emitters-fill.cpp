@@ -168,7 +168,7 @@ void correctMeasureLength(BuildCtx& ctx, Measure* measure)
                 continue;
             }
             // Overshoot: remove gap rests smallest-first.
-            // Skip for IrregularMeasure overfill — capMeasureLength will extend instead.
+            // Skip for IrregularMeasure overfill, capMeasureLength will extend instead.
             if (voiceSum > mLen && (voiceSum - mLen) <= maxDelta
                 && ctx.opts.overfillMeasureStrategy != OverfillStrategy::IrregularMeasure) {
                 std::stable_sort(gapRests.begin(), gapRests.end(),

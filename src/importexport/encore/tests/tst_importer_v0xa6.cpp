@@ -494,7 +494,7 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_grace_restores_face_value)
             elements.push_back({ c->durationType().type(), false });
         }
     }
-    // Expected: 8th (regular), 32nd (grace), 16th, 16th, 8th — no rests
+    // Expected: 8th (regular), 32nd (grace), 16th, 16th, 8th, no rests
     ASSERT_EQ(elements.size(), 5u)
         << "grace time-borrowing correction must restore the last 8th and "
         "eliminate spurious rests; got " << elements.size() << " elements";

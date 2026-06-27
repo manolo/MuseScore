@@ -291,7 +291,7 @@ TEST_F(Tst_OrnamentsSlurs, v0xc2_same_measure_slur_not_extended_to_next_measure)
 }
 
 // ===========================================================================
-// REGRESSION: v0xC2 multi-instrument slur routing — combined emLineSlot +
+// REGRESSION: v0xC2 multi-instrument slur routing, combined emLineSlot +
 // targetEndXoff fix. Reproduces the SALVEDOL organ-bass pattern on all 4 staves.
 // ===========================================================================
 
@@ -590,13 +590,13 @@ TEST_F(Tst_OrnamentsSlurs, v0c4_grace_after_main_grace_to_later_slur_anchors_to_
     // (SECOND, xoff=3), Note at tick=480 (xoff=9), SLURSTART at tick=240
     // (xoffset=5, xoffset2=9).
     //
-    // emitters — without Fix 1 (retroactive attachment):
+    // emitters, without Fix 1 (retroactive attachment):
     //   Regular@240: gap-snap to 1/4, mainChord@1/4, cumTick→1/2. prevMidiTick=240.
     //   ACCIACCATURA@240: isChordExt=TRUE → pendingGraces.
     //   Note@480: cumTick=1/2, chord@1/2, pendingGraces flushed → ACCIACCATURA on
     //     chord@1/2 (WRONG). With Fix 1: grace retroactively on mainChord@1/4.
     //
-    // resolveSlurs — heuristic/shortcut interaction:
+    // resolveSlurs, heuristic/shortcut interaction:
     //   firstNoteXoff=5 (Regular@240), targetEnd=9. Note@480 bestDist=0, regularDist=4.
     //   Refined shortcut: 4 > 0 → does NOT force zero-span (grace-to-LATER, not main).
     //   Old shortcut: targetEnd(9) <= maxXoff(9) → DID force zero-span (wrong).
@@ -734,7 +734,7 @@ TEST_F(Tst_OrnamentsSlurs, v0c4_grace_after_main_slur_arc_starts_at_grace_not_re
     EXPECT_TRUE(graceStart) << "startElement must be the grace chord";
     EXPECT_TRUE(endAtSameTick)
         << "Slur must end at the co-located main chord (grace-to-main), not the "
-        "later note — firstNoteXoff must use the grace xoffset, not the regular";
+        "later note, firstNoteXoff must use the grace xoffset, not the regular";
 
     delete score;
 }

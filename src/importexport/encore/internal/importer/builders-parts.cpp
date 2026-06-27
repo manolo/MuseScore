@@ -145,7 +145,7 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         }
     };
 
-    // Step 1: PERC clef or GM Percussive range (113–128 1-indexed) → drumset.
+    // Step 1: PERC clef or GM Percussive range (113 to 128 1-indexed) → drumset.
     static constexpr int GM_PERC_FIRST = 113;
     if (isPercByClef || instr.midiProgram >= GM_PERC_FIRST) {
         tryStep(1, searchTemplate(String(u"drumset")));
