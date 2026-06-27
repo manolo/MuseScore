@@ -117,27 +117,21 @@ TEST_F(Tst_OrnamentsSlurs, multi_measure_slur_resolved_from_almezuro)
 }
 
 // ===========================================================================
-// FIX: v0xC2 cross-measure slurs resolved via xoffset span heuristic extended
-// to the next measure when targetEndXoff exceeds the start measure's range.
+// FIX: v0xC2 cross-measure slurs resolved from the reliable +16 measure-count
+// (altMezuro), anchoring the end to the downbeat of the target measure.
 // ===========================================================================
 
 TEST_F(Tst_OrnamentsSlurs, v0xc2_cross_measure_slur_ends_in_next_measure)
 {
-    // Reproduces the XEQUEABU.ENC pattern: a v0xC2 slur whose arc (xoffset=1,
-    // xoffset2=5) starts before the first note of the measure (xoff=3) and extends
-    // beyond all same-measure notes (maxXoffInMeas=4, targetEndXoff=7).
+    // Reproduces the XEQUEABU.ENC pattern: a v0xC2 slur whose spanning measure-count
+    // (element byte +16 = altMezuro = 1) marks it as ending one bar later. Encore draws
+    // these as note-1 -> note-1 arcs between bar starts, and their xoffset2 is stale, so
+    // the importer anchors the end to the downbeat (first chord) of the target measure.
     //
-    // Measure 0: note@0(xoff=3) + SLURSTART(xoff=1,xoff2=5) + note@240(xoff=2)
-    //            + note@480(xoff=3) + note@720(xoff=4)
-    // Measure 1: note@0(xoff=7)   ← correct endpoint (dist=0)
+    // Measure 0: note@0 + SLURSTART(altMezuro=1) + three more quarter notes (fill 4/4).
+    // Measure 1: note@0  <- downbeat endpoint (cross-measure).
     //
-    // Bug (before fix): bestEncTick=720 >= 0 and resolved=true after finding the
-    // last same-measure note (dist=3). The cross-measure extension condition had
-    // !resolved && bestEncTick<0, so it was skipped and the slur landed on tick=720
-    // (last note of measure 0) instead of the first note of measure 1.
-    //
-    // Fix: remove !resolved and bestEncTick<0; replace with !usedTinyPixelSpan &&
-    // (targetEndXoff>maxXoffInMeas || bestEncTick<0), excluding grace-to-main slurs.
+    // The earlier xoffset pixel-extension heuristic is gone; the +16 count supersedes it.
     MasterScore* score = readEncoreScore("ornaments_v0c2_cross_measure_slur.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -227,11 +221,11 @@ TEST_F(Tst_OrnamentsSlurs, multiinstr_slur_endpoint_on_second_note_not_last_chor
 }
 
 // ===========================================================================
-// FIX: targetEndXoff = slurXoffset2 (not firstNoteXoff + pixelSpan).
-// When firstNoteXoff << slurXoffset the old formula underestimates the target
-// and a "decoy" note with a low xoffset wins over the correct endpoint.
-// Pattern: note1(xoff=2) + SLUR(xoff=10,xoff2=11) + note2(xoff=9) + note3(xoff=3).
-// OLD target=3 → note3(dist=0) wins ✗. NEW target=11 → note2(dist=2) wins ✓.
+// FIX: v0xC2 within-measure slur with a tiny pixel span ends at the NEXT note.
+// The absolute xoffset2 is stale in v0xC2, so it must not be matched directly.
+// Pattern: note1(xoff=2) + SLUR(xoff=10,xoff2=11, span=1) + note2 + note3(decoy).
+// A tiny span (|11-10|=1 ≤ 2) means a note-to-next-note slur → note2 (the next
+// note after the start), regardless of the decoy note3's xoffset.
 // ===========================================================================
 
 TEST_F(Tst_OrnamentsSlurs, v0xc2_slur_ends_at_note2_not_decoy_note3)
@@ -266,11 +260,10 @@ TEST_F(Tst_OrnamentsSlurs, v0xc2_slur_ends_at_note2_not_decoy_note3)
 TEST_F(Tst_OrnamentsSlurs, v0xc2_same_measure_slur_not_extended_to_next_measure)
 {
     // ornaments_v0c2_same_measure_slur_no_cross.enc reproduces the pattern from
-    // SALVEDOL.ENC measure 3: a slur from note 5 to note 6 within the same measure.
-    // firstNoteXoff=9, slurXoffset=11, slurXoffset2=12: pixelSpan=1,
-    // targetEndXoff=10 > maxXoffInMeas=9 -- tiny overshoot triggers the cross-measure
-    // extension without the fix. Measure 1 has a decoy G4 (xoff=9, dist=1) that the
-    // extension would incorrectly prefer over the correct same-measure E4 (xoff=5, dist=5).
+    // SALVEDOL.ENC measure 3: a within-measure slur (byte +16 count = 0) with a tiny
+    // pixel span (slurXoffset=11, slurXoffset2=12, span=1). The next-note rule ends it
+    // at the same-measure E4, and the reliable count==0 keeps it from extending to the
+    // decoy G4 in measure 1 that an xoffset match would otherwise prefer.
     MasterScore* score = readEncoreScore("ornaments_v0c2_same_measure_slur_no_cross.enc");
     ASSERT_NE(score, nullptr);
 
@@ -305,13 +298,13 @@ TEST_F(Tst_OrnamentsSlurs, v0xc2_same_measure_slur_not_extended_to_next_measure)
 TEST_F(Tst_OrnamentsSlurs, v0xc2_multiinstr_slur_endpoint_on_note2_not_decoy)
 {
     // ornaments_v0c2_multiinstr_slur_routing.enc: v0xC2, 2 instruments × 2 staves,
-    // 3 quarter notes per staff with a SLURSTART at note1.
-    // SALVEDOL organ-bass pattern: note1(xoff=2), SLUR(xoff=10,xoff2=11),
-    // note2(xoff=9, correct endpoint), note3(xoff=3, decoy — close to OLD target=3).
+    // 3 quarter notes per staff with a SLURSTART at note1 (tiny pixel span).
+    // SALVEDOL organ-bass pattern: note1, SLUR(xoff=10,xoff2=11,span=1), note2 (next
+    // note = correct endpoint), note3 (decoy).
     //
-    // Without emLineSlot fix: staves 1-3 find no notes, strategy-3 picks note3.
-    // Without targetEndXoff fix: target=3, note3(dist=0) beats note2(dist=6).
-    // Both fixes: note2 wins on every staff.
+    // Two cooperating rules: emLineSlot maps the compact rawStaff byte to the LINE slot
+    // so the slur finds notes on every staff, and the v0xC2 next-note rule ends the slur
+    // at note2 (the next note) instead of the decoy note3.
     //
     // Expected note2 pitches: staff0=60, staff1=52, staff2=71, staff3=59.
     MasterScore* score = readEncoreScore("ornaments_v0c2_multiinstr_slur_routing.enc");

@@ -32,8 +32,10 @@ bool EncOrnament::read(QDataStream& ds)
     ds >> xoffset;
     ds.skipRawData(1);
     ds >> yoffset;
-    ds.skipRawData(4);
-    ds >> alMezuro;
+    ds.skipRawData(2);
+    ds >> altMezuro;   // +16: v0xC2 spanning measure-count
+    ds.skipRawData(1);
+    ds >> alMezuro;    // +18: v0xC4 spanning measure-count
     ds.skipRawData(1);
     ds >> xoffset2;
     ds.skipRawData(5);

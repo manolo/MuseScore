@@ -1579,9 +1579,12 @@ default tick, finding the latest note/rest in the source measure with
 Steps 2-3 are skipped for notes with `xoffset == 0` (synthetic fixture
 guard) and when `xoffset2 == 0` (no endpoint hint).
 
-## Slur endpoint resolution (pixel-span heuristic)
+## Slur endpoint resolution
 
-## Slur endpoint resolution (pixel-span heuristic)
+`.enc` files carry no SLURSTOP, so the slur's end is reconstructed in a post-pass.
+How depends on the format, because the reliability of the stored coordinates differs.
+
+### v0xC4 / SCO5 — pixel-span heuristic
 
 SLURSTART carries two layout-x fields: `xoffset` at the start and
 `xoffset2` at the end. Each one is offset from the underlying
@@ -1593,30 +1596,40 @@ the pixel distance between the first and last covered notes:
 slurXoffset2 - slurXoffset == endNote.xoffset - firstNote.xoffset
 ```
 
-`PendingSlur` therefore captures `startTick`, `startMeasIdx`,
-`alMezuro`, `slurXoffset`, `slurXoffset2`, plus `staffIdx` and
-`encVoice`. The post-pass:
+`PendingSlur` captures `startTick`, `startMeasIdx`, `alMezuro`,
+`slurXoffset`, `slurXoffset2`, plus `staffIdx` and `encVoice`. The post-pass:
 
 1. Finds the first NOTE in the start measure at the slur start
-   tick on the same (staffIdx, encVoice) and reads its
-   `xoffset`.
-2. Computes `target = firstNote.xoffset + (slurXoffset2 -
-   slurXoffset)`.
-3. Walks the same measure's NOTEs on the same (staffIdx,
-   encVoice) and picks the one whose xoffset is closest to
-   `target`.
+   tick on the same (staffIdx, encVoice) and reads its `xoffset`.
+2. Computes `target = firstNote.xoffset + (slurXoffset2 - slurXoffset)`.
+3. Walks the same measure's NOTEs on the same (staffIdx, encVoice) and picks
+   the one whose xoffset is closest to `target`.
 4. Anchors the slur's `tick2` on that note.
 
-If `alMezuro > 0` (cross-measure span) the heuristic is skipped:
-xoffsets reset at the bar line and a per-measure pixel
-calibration would be needed to bridge them, so the importer falls
-back to the last existing ChordRest on the same track in the
-alMezuro target measure (the previous behaviour).
+If `alMezuro > 0` (cross-measure span) the heuristic is skipped: xoffsets reset
+at the bar line, so the importer matches xoffset2 directly against the target
+measure's notes, falling back to the last ChordRest there.
 
-Without the heuristic the importer extended every slur to the
-last note in the alMezuro target measure, which on real legacy
-files (e.g. a 3-note slur in instrument 2 of a Spanish plectro
-score) grew to cover every remaining note in the bar.
+### v0xC2 — reliable +16 measure-count
+
+In v0xC2 the absolute slur xoffset2 lives in a stale ornament-coordinate origin,
+so matching it directly over-extends slurs (a note-1→note-2 arc read as note-1→note-4).
+The reliable signal is the forward measure-count at element +16, which the parser
+copies into `alMezuro` and marks valid (see ENCORE_FORMAT.md). Resolution:
+
+- **count > 0 (cross-measure):** Encore draws these as note-1 → note-1 arcs between
+  bar starts. Anchor the end to the downbeat (first chord) of measure `start+count`,
+  locating both endpoints by iterating ChordRest segments (tick2segment is unreliable
+  at bar boundaries) and setting `startElement`/`endElement` explicitly. Such slurs are
+  recorded in an explicit set so the orphan-removal post-pass does not recompute and
+  null them.
+- **count == 0 (within-measure):** a tiny pixel span (`|slurXoffset2 - slurXoffset| ≤ 2`)
+  means a short note-to-next-note slur, so the end is the next note on the staff after
+  the start. A grace note co-located at the start instead resolves grace-to-main.
+
+The cross-measure pixel-extension heuristic that previously guessed v0xC2 endpoints by
+xoffset is no longer used; the +16 count supersedes it (validated against real legacy
+files: cross-measure arcs in one score, within-measure note-to-next slurs in another).
 
 ## Grace-to-main and grace-to-later slurs
 
