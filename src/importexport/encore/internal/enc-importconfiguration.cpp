@@ -39,6 +39,7 @@ static const Settings::Key ENC_INSTRUMENT_SEARCH_MODE_KEY(module_name, "import/e
 static const Settings::Key ENC_UNDERFILL_STRATEGY_KEY(module_name, "import/encore/underfillMeasureStrategy");
 static const Settings::Key ENC_OVERFILL_STRATEGY_KEY(module_name, "import/encore/overfillMeasureStrategy");
 static const Settings::Key ENC_FIRST_MEASURE_PICKUP_KEY(module_name, "import/encore/firstMeasureIsPickup");
+static const Settings::Key ENC_MERGE_VOICES_KEY(module_name, "import/encore/mergeVoices");
 
 void EncImportConfiguration::init()
 {
@@ -91,6 +92,11 @@ void EncImportConfiguration::init()
     settings()->setDefaultValue(ENC_FIRST_MEASURE_PICKUP_KEY, Val(true));
     settings()->valueChanged(ENC_FIRST_MEASURE_PICKUP_KEY).onReceive(this, [this](const Val& val) {
         m_firstMeasureIsPickupChanged.send(val.toBool());
+    });
+
+    settings()->setDefaultValue(ENC_MERGE_VOICES_KEY, Val(true));
+    settings()->valueChanged(ENC_MERGE_VOICES_KEY).onReceive(this, [this](const Val& val) {
+        m_mergeVoicesChanged.send(val.toBool());
     });
 }
 
@@ -243,4 +249,19 @@ void EncImportConfiguration::setFirstMeasureIsPickup(bool value)
 async::Channel<bool> EncImportConfiguration::firstMeasureIsPickupChanged() const
 {
     return m_firstMeasureIsPickupChanged;
+}
+
+bool EncImportConfiguration::mergeVoices() const
+{
+    return settings()->value(ENC_MERGE_VOICES_KEY).toBool();
+}
+
+void EncImportConfiguration::setMergeVoices(bool value)
+{
+    settings()->setSharedValue(ENC_MERGE_VOICES_KEY, Val(value));
+}
+
+async::Channel<bool> EncImportConfiguration::mergeVoicesChanged() const
+{
+    return m_mergeVoicesChanged;
 }

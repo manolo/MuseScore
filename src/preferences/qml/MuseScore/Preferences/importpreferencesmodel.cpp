@@ -104,6 +104,10 @@ void ImportPreferencesModel::load()
         emit encoreFirstMeasureIsPickupChanged(val);
     });
 
+    encoreConfiguration()->mergeVoicesChanged().onReceive(this, [this](bool val) {
+        emit encoreMergeVoicesChanged(val);
+    });
+
     encoreConfiguration()->instrumentSearchModeChanged().onReceive(this, [this](iex::enc::InstrumentSearchMode val) {
         emit encoreInstrumentSearchModeChanged(static_cast<int>(val));
     });
@@ -497,4 +501,18 @@ void ImportPreferencesModel::setEncoreFirstMeasureIsPickup(bool value)
     }
 
     encoreConfiguration()->setFirstMeasureIsPickup(value);
+}
+
+bool ImportPreferencesModel::encoreMergeVoices() const
+{
+    return encoreConfiguration()->mergeVoices();
+}
+
+void ImportPreferencesModel::setEncoreMergeVoices(bool value)
+{
+    if (value == encoreMergeVoices()) {
+        return;
+    }
+
+    encoreConfiguration()->setMergeVoices(value);
 }

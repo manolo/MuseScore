@@ -32,7 +32,7 @@ src/importexport/encore/
 │   │
 │   └── importer/                 LAYER 2, EncRoot tree → MuseScore DOM
 │       ├── import.{h,cpp}        importEncore() top-level orchestration
-│       ├── import-options.h      EncImportOptions struct (8 user-configurable flags)
+│       ├── import-options.h      EncImportOptions struct (9 user-configurable flags)
 │       ├── ctx.h                 BuildCtx: shared mutable state for all passes
 │       ├── builders*.{h,cpp}     Score / part / measure setup
 │       ├── emitters*.{h,cpp}     Per-type element emitters (notes, rests, ornaments, …)
@@ -68,7 +68,7 @@ MasterScore  (complete)
 
 ## Import options (Preferences → Import → Encore)
 
-`EncImportOptions` (in `importer/import-options.h`) holds eight user-configurable flags.
+`EncImportOptions` (in `importer/import-options.h`) holds nine user-configurable flags.
 `IEncImportConfiguration` / `EncImportConfiguration` (in `ienc-importconfiguration.h` /
 `internal/enc-importconfiguration.h`) persist them via `muse::Settings` and expose
 `async::Channel<T>` change signals. `NotationEncoreReader` reads the config on every
@@ -86,13 +86,16 @@ import and passes the filled struct into `importEncore()`.
 | `underfillMeasureStrategy` | IrregularMeasure | How to fill trailing gaps: `InvisibleRests`, `VisibleRests`, `IrregularMeasure` |
 | `overfillMeasureStrategy` | IrregularMeasure | How to handle a measure whose content exceeds the time signature: `IrregularMeasure`, `Truncate` ("Remove last notes"), `StretchLastNote` ("Stretch last notes") |
 | `firstMeasureIsPickup` | true | Shorten first measure as pickup if underflowed; false = pad with leading rests |
+| `mergeVoices` | true | Collapse a staff's voices back into one when they never overlap in time (see "Voice consolidation"); false = keep every voice as imported |
 
 `EncImportOptions` is stored in `BuildCtx` and consulted throughout `emitters-*.cpp`
 and `resolvers-*.cpp`. The "Default" column above is the shipped Preferences default
 (set in `enc-importconfiguration.cpp`). For the two measure-correction strategies the
 in-code struct fallback in `import-options.h` stays at `InvisibleRests` / `Truncate`,
 which is what direct callers and the unit tests use; only the GUI default is
-`IrregularMeasure`.
+`IrregularMeasure`. `mergeVoices` follows the same split: the struct fallback is
+`false` (so unit-test fixtures keep their voices unless a test opts in) while the
+shipped GUI default is `true`.
 
 ## Overfull measures
 
@@ -309,6 +312,37 @@ tracks `prevEncVoice[trackKey]` for this check.
 Without the multi-stream split, the second stream silently
 overwrites or merges with the first and the importer emits a
 1/3072 tick gap that aborts layout downstream.
+
+## Voice consolidation
+
+The multi-stream split above, and Encore files that simply notate a
+single line across several voices, often leave a staff with more
+voices than the music needs: the voices never actually sound at the
+same time, so they could all live in voice 1. When `mergeVoices` is
+enabled, a post-process pass run after the score is fully built
+(`mergeNonOverlappingVoices` in `importer/import.cpp`) collapses such
+staves back into one voice. It mirrors the manual workflow of moving
+every note to voice 1 and then running Tools > Implode.
+
+The pass is conservative and works per staff, all-or-nothing:
+
+- A first read-only sweep collects, for each staff, the distinct time
+  intervals `[onset, onset + duration)` of its chords across all four
+  voices. A staff is a candidate only when it has notes beyond voice 1
+  and those distinct intervals never overlap. Two notes that share the
+  exact same onset and duration count as one interval (they can become
+  a chord); any other overlap (different onset, or same onset with a
+  different duration, or a partial overlap) marks the staff as genuinely
+  polyphonic and it is left exactly as imported.
+- For each candidate staff the pass moves every note into voice 1
+  (filling that voice's rests and merging simultaneous same-duration
+  notes into chords) and then implodes the single staff to drop the
+  now-empty upper voices. Timings are never changed.
+
+The editing helpers used here record undo steps, so the whole import
+runs inside a `ScoreLoad` sentinel and opens no undo transaction; each
+step is performed and freed immediately rather than accumulating on the
+undo stack.
 
 ## Implicit-silence gap snap
 

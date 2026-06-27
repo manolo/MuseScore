@@ -73,6 +73,7 @@ class ImportPreferencesModel : public QObject, public muse::Contextable, public 
     Q_PROPERTY(int encoreOverfillStrategy READ encoreOverfillStrategy WRITE setEncoreOverfillStrategy NOTIFY encoreOverfillStrategyChanged)
     Q_PROPERTY(bool encoreFirstMeasureIsPickup READ encoreFirstMeasureIsPickup WRITE setEncoreFirstMeasureIsPickup
                NOTIFY encoreFirstMeasureIsPickupChanged)
+    Q_PROPERTY(bool encoreMergeVoices READ encoreMergeVoices WRITE setEncoreMergeVoices NOTIFY encoreMergeVoicesChanged)
 
     Q_PROPERTY(int currentShortestNote READ currentShortestNote WRITE setCurrentShortestNote NOTIFY currentShortestNoteChanged)
     Q_PROPERTY(bool roundTempo READ roundTempo WRITE setRoundTempo NOTIFY roundTempoChanged)
@@ -129,6 +130,7 @@ public:
     int encoreUnderfillStrategy() const;
     int encoreOverfillStrategy() const;
     bool encoreFirstMeasureIsPickup() const;
+    bool encoreMergeVoices() const;
 
 public slots:
     void setStyleFileImportPath(QString path);
@@ -157,6 +159,7 @@ public slots:
     void setEncoreUnderfillStrategy(int value);
     void setEncoreOverfillStrategy(int value);
     void setEncoreFirstMeasureIsPickup(bool value);
+    void setEncoreMergeVoices(bool value);
 
 signals:
     void styleFileImportPathChanged(QString styleFileImportPath);
@@ -181,5 +184,6 @@ signals:
     void encoreUnderfillStrategyChanged(int value);
     void encoreOverfillStrategyChanged(int value);
     void encoreFirstMeasureIsPickupChanged(bool value);
+    void encoreMergeVoicesChanged(bool value);
 };
 }

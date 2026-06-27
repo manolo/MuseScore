@@ -818,3 +818,69 @@ TEST_F(Tst_Options, overfill_truncate_drops_notes_at_barline)
         << "Truncate mode must not extend the measure";
     delete score;
 }
+
+// ===========================================================================
+// mergeVoices
+// importer_merge_voices_non_overlapping.enc: one staff, voice 0 = quarter C4 on
+//   beat 1, voice 1 = quarter E4 on beat 2 (the two voices never overlap).
+// importer_merge_voices_overlapping.enc: one staff, voice 0 = half C4 over beats
+//   1-2, voice 1 = quarter E4 on beat 2 (the two voices overlap in time).
+// ===========================================================================
+
+// Count the distinct voices that carry at least one Chord on the given staff.
+static int voicesWithChords(MasterScore* score, staff_idx_t staffIdx)
+{
+    bool used[VOICES] = { false, false, false, false };
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (voice_idx_t v = 0; v < VOICES; ++v) {
+                EngravingItem* e = s->element(staffIdx * VOICES + v);
+                if (e && e->isChord()) {
+                    used[v] = true;
+                }
+            }
+        }
+    }
+    int count = 0;
+    for (bool u : used) {
+        if (u) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+TEST_F(Tst_Options, mergeVoices_default_off_keeps_separate_voices)
+{
+    // struct fallback used by tests has mergeVoices = false, so the two
+    // non-overlapping voices are left as the importer split them.
+    MasterScore* score = readEncoreScore("importer_merge_voices_non_overlapping.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_EQ(voicesWithChords(score, 0), 2)
+        << "mergeVoices=false (test default) must keep both voices";
+    delete score;
+}
+
+TEST_F(Tst_Options, mergeVoices_collapses_non_overlapping_voices)
+{
+    EncImportOptions opts;
+    opts.mergeVoices = true;
+    MasterScore* score = readEncoreScoreWithOpts("importer_merge_voices_non_overlapping.enc", opts);
+    ASSERT_NE(score, nullptr);
+    EXPECT_EQ(voicesWithChords(score, 0), 1)
+        << "mergeVoices=true must collapse two non-overlapping voices into voice 1";
+    EXPECT_TRUE(score->sanityCheck()) << "merged score must pass sanity check";
+    delete score;
+}
+
+TEST_F(Tst_Options, mergeVoices_keeps_overlapping_voices)
+{
+    EncImportOptions opts;
+    opts.mergeVoices = true;
+    MasterScore* score = readEncoreScoreWithOpts("importer_merge_voices_overlapping.enc", opts);
+    ASSERT_NE(score, nullptr);
+    EXPECT_EQ(voicesWithChords(score, 0), 2)
+        << "mergeVoices=true must leave genuinely overlapping voices untouched (all-or-nothing)";
+    EXPECT_TRUE(score->sanityCheck()) << "untouched score must pass sanity check";
+    delete score;
+}

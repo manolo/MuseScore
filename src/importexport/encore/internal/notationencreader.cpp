@@ -41,6 +41,7 @@ muse::Ret NotationEncoreReader::read(MasterScore* score, const muse::io::path_t&
     opts.underfillMeasureStrategy             = encoreConfiguration()->underfillMeasureStrategy();
     opts.overfillMeasureStrategy              = encoreConfiguration()->overfillMeasureStrategy();
     opts.firstMeasureIsPickup                 = encoreConfiguration()->firstMeasureIsPickup();
+    opts.mergeVoices                          = encoreConfiguration()->mergeVoices();
     Err err = importEncore(score, path.toQString(), opts);
     return make_ret(err, path);
 }

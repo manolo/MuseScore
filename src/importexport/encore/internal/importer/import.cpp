@@ -82,7 +82,10 @@
 #include "engraving/dom/tuplet.h"
 #include "engraving/dom/system.h"
 #include "engraving/dom/volta.h"
+#include "engraving/dom/mscore.h"
 #include "engraving/engravingerrors.h"
+
+#include "engraving/editing/implodeexplode.h"
 
 #include "log.h"
 
@@ -571,8 +574,94 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps, bool pa
     score->style().set(Sid::pageEvenBottomMargin, bottomIn);
 }
 
+// When a staff splits its content across several voices that never sound at the
+// same time, collapse them back into voice 1. This is the engraving equivalent of
+// the manual "move notes to voice 1" + Tools > Implode workflow. A staff is treated
+// as collapsible only when ALL of its voices fit into voice 1 with no timing change:
+// two notes from different voices may share voice 1 only when they have the exact
+// same onset and duration (they become a chord); any other time overlap leaves the
+// whole staff untouched (all-or-nothing per staff), so the music is never altered.
+static void mergeNonOverlappingVoices(MasterScore* score)
+{
+    // Pass 1: find the staves that carry notes in more than voice 0 and whose voices
+    // can be flattened without a timing conflict.
+    std::vector<staff_idx_t> candidates;
+    for (staff_idx_t si = 0; si < score->nstaves(); ++si) {
+        const track_idx_t base = si * VOICES;
+        bool hasUpperVoiceNotes = false;
+        std::set<std::pair<int, int> > intervals;   // distinct (startTick, endTick) of chords
+        for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+            for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+                for (voice_idx_t v = 0; v < VOICES; ++v) {
+                    EngravingItem* e = s->element(base + v);
+                    if (!e || !e->isChord()) {
+                        continue;
+                    }
+                    if (v != 0) {
+                        hasUpperVoiceNotes = true;
+                    }
+                    const Chord* c = toChord(e);
+                    const int start = c->tick().ticks();
+                    const int end   = (c->tick() + c->actualTicks()).ticks();
+                    intervals.insert({ start, end });
+                }
+            }
+        }
+        if (!hasUpperVoiceNotes) {
+            continue;   // already a single voice -- nothing to do
+        }
+        // The distinct intervals (identical ones, i.e. chord candidates, are deduped
+        // by the set) must not overlap. Sweep in start order: an interval that begins
+        // before the furthest end seen so far overlaps a different one => conflict.
+        bool collapsible = true;
+        int maxEnd = -1;
+        for (const std::pair<int, int>& iv : intervals) {   // std::set is ordered by (start, end)
+            if (iv.first < maxEnd) {
+                collapsible = false;
+                break;
+            }
+            maxEnd = std::max(maxEnd, iv.second);
+        }
+        if (collapsible) {
+            candidates.push_back(si);
+        }
+    }
+
+    if (candidates.empty()) {
+        return;
+    }
+
+    Measure* first = score->firstMeasure();
+    Measure* last  = score->lastMeasure();
+    if (!first || !last) {
+        return;
+    }
+
+    // Pass 2: collapse each candidate staff. No undo transaction is opened, so the
+    // editing commands below execute immediately and free themselves (see
+    // UndoStack::pushAndPerform); the surrounding ScoreLoad keeps that path quiet.
+    for (staff_idx_t si : candidates) {
+        // Move every note on the staff into voice 1, filling its rests and merging
+        // simultaneous same-duration notes into chords.
+        score->deselectAll();
+        score->select(first, SelectType::RANGE, si);
+        score->select(last, SelectType::RANGE, si);
+        score->changeSelectedElementsVoice(0);
+
+        // Drop the now-empty upper voices (their leftover rests) by imploding the
+        // single staff onto voice 1.
+        score->deselectAll();
+        score->select(first, SelectType::RANGE, si);
+        score->select(last, SelectType::RANGE, si);
+        ImplodeExplode::implode(score);
+    }
+    score->deselectAll();
+}
+
 static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOptions& opts)
 {
+    ScoreLoad sl;   // import edits run outside any undo transaction; see mergeNonOverlappingVoices
+
     score->style().set(Sid::chordsXmlFile, true);
     score->chordList()->read(u"chords.xml");
 
@@ -637,6 +726,11 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     addTitleFrame(score, enc.titleBlock);
     score->setUpTempoMap();
     score->doLayout();
+
+    if (ctx.opts.mergeVoices) {
+        mergeNonOverlappingVoices(score);
+        score->doLayout();
+    }
 }
 
 Err importEncore(MasterScore* score, const QString& path, const EncImportOptions& opts)

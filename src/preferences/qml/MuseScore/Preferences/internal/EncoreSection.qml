@@ -54,6 +54,8 @@ BaseSection {
 
     property alias firstMeasureIsPickup: firstMeasureIsPickupBox.checked
 
+    property alias mergeVoices: mergeVoicesBox.checked
+
     // When a dropdown popup opens it steals the section's activeFocus; on close the
     // section regains it and would otherwise snap the scroll back to the section top.
     // This flag suppresses that single ensure-visible so the scroll position is kept.
@@ -69,6 +71,7 @@ BaseSection {
     signal underfillStrategyChangeRequested(int value)
     signal overfillStrategyChangeRequested(int value)
     signal firstMeasureIsPickupChangeRequested(bool value)
+    signal mergeVoicesChangeRequested(bool value)
     signal resetToDefaultRequested()
 
     // Header: section title + reset button
@@ -199,6 +202,18 @@ BaseSection {
             navigation.panel: root.navigation
             navigation.row: 7
             onClicked: root.firstMeasureIsPickupChangeRequested(!checked)
+        }
+
+        // Collapse voices that never overlap back into a single voice
+        CheckBox {
+            id: mergeVoicesBox
+            Layout.fillWidth: true
+            Layout.columnSpan: 2
+            text: qsTrc("preferences", "Combine non-overlapping voices into one")
+            navigation.name: "EncoreMergeVoicesBox"
+            navigation.panel: root.navigation
+            navigation.row: 8
+            onClicked: root.mergeVoicesChangeRequested(!checked)
         }
     }
 
