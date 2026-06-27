@@ -560,6 +560,7 @@ Type 5. Variable size. Offsets from element start:
 | +5       | 1      | ornament subtype (see table)                               |
 | +10      | 2      | start x-position within the measure (layout units)         |
 | +12      | 2      | signed s16 Cartesian y (negative = below staff)            |
+| +16      | 1      | altMezuro (v0xC2 only) — measures forward to the end measure for slurs; see v0xC2 caveat below |
 | +18      | 1      | alMezuro — measures forward to the end measure             |
 | +20      | 1      | xoffset2 — end x-position in the target measure            |
 | +26      | 1      | speguleco — bit 0: 0 = crescendo, 1 = diminuendo           |
@@ -665,9 +666,14 @@ alMezuro (+18) = count of measures forward to the end measure.
 xoffset2 (+20) = visual x within that target measure.
 No separate WEDGESTOP or SLURSTOP element is emitted.
 
-**v0xC2 caveat.** In v0xC2 files, alMezuro is unreliable and often holds stale or zero values.
-The parser sets `EncOrnament.alMezuroValid = false` for all v0xC2 ornaments; the importer then
-uses the xoffset pixel-span heuristic exclusively and ignores the alMezuro measure count.
+**v0xC2 caveat.** In v0xC2 files the +18 alMezuro slot is unreliable and often holds stale or
+zero values, so the parser sets `EncOrnament.alMezuroValid = false` for non-slur v0xC2 ornaments
+(hairpins, trills) and they fall back to the xoffset heuristic. **Slurs are the exception:** in
+v0xC2 the slur's forward measure-count lives at +16 (altMezuro), not +18. It is reliable, so for a
+SLURSTART the parser copies +16 into alMezuro and marks the count valid (including the value 0,
+which means a within-measure slur). The absolute slur xoffset2 in v0xC2 lives in a stale
+ornament-coordinate origin and must not be matched directly; the importer uses the +16 count
+instead (see Slur endpoint below).
 
 **Hairpin endpoint.** Three-tier resolution:
 1. **Next-dynamic** (primary): walk forward for the first Dynamic on the same track within the alMezuro
@@ -678,12 +684,23 @@ uses the xoffset pixel-span heuristic exclusively and ignores the alMezuro measu
    measure, clamp to targetMeasure.tick.
 Notes with xoffset == 0 are ignored in steps 2-3 (synthetic fixture guard).
 
-**Slur endpoint (pixel-span heuristic).** `slurXoffset2 - slurXoffset` equals `endNote.xoffset - firstNote.xoffset`.
-Recover end tick via `target = firstNote.xoffset + (slurXoffset2 - slurXoffset)` and snap to the nearest note.
-Only applies when alMezuro == 0 (same-measure slurs). For cross-measure slurs (alMezuro > 0),
-use xoffset2 directly: compare each note in the target measure against
-slurXoffset2 and the closest match is selected. The last-note/rest fallback only fires when
-no note in the target measure can be found (e.g. all notes have xoffset=0).
+**Slur endpoint.** Resolution depends on the format, because the reliability of the stored
+coordinates differs:
+
+- **v0xC4 / SCO5 (pixel-span heuristic).** `slurXoffset2 - slurXoffset` equals
+  `endNote.xoffset - firstNote.xoffset`. Recover end tick via
+  `target = firstNote.xoffset + (slurXoffset2 - slurXoffset)` and snap to the nearest note.
+  This applies when alMezuro == 0 (same-measure). For cross-measure slurs (alMezuro > 0), compare
+  each note in the target measure against xoffset2 directly and pick the closest. The
+  last-note/rest fallback only fires when no note in the target measure can be found.
+
+- **v0xC2 (reliable +16 count).** The absolute xoffset2 is stale here, so it is not matched.
+  Instead the +16 measure-count (copied into alMezuro by the parser) drives resolution:
+  - count > 0 (cross-measure): the slur is a note-1 → note-1 arc between bar starts; anchor the
+    end to the downbeat (first chord) of measure start+count, with both endpoints set explicitly.
+  - count == 0 (within-measure): a tiny pixel span (|slurXoffset2 - slurXoffset| ≤ 2) means a
+    short note-to-next-note slur, so the end is the next note on the staff after the start; a
+    grace note co-located at the start instead resolves grace-to-main (zero span).
 
 `xoffset` is stored as a signed byte but must be read as unsigned for the pixel-span computation:
 values > 127 are stored negative (e.g. 0x8A = -118 signed = 138 unsigned). Using signed arithmetic

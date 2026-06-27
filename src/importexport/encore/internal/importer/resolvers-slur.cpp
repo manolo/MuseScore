@@ -24,6 +24,9 @@
 #include "../parser/elem.h"
 #include "../parser/ticks.h"
 #include <optional>
+#include <set>
+#include <cstdlib>
+#include "engraving/dom/chord.h"
 #include "engraving/dom/slur.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/masterscore.h"
@@ -60,11 +63,16 @@ static int getLineSlot(const EncMeasureElem* em, const std::array<int, 256>& lin
     return (slot >= 0) ? slot : static_cast<int>(em->staffIdx);
 }
 
-static void removeOrphanSlurs(MasterScore* score)
+static void removeOrphanSlurs(MasterScore* score, const std::set<const Spanner*>& explicitSlurs)
 {
     std::vector<Spanner*> toRemove;
     for (auto& [tick, spanner] : score->spannerMap().map()) {
         if (spanner->isSlur()) {
+            // Slurs anchored to explicit chord elements (reliable measure-count path): keep as-is,
+            // recompute would null them out at bar boundaries.
+            if (explicitSlurs.count(spanner)) {
+                continue;
+            }
             // Grace start: computeStartElement() uses tick2segment(), which returns the regular chord,
             // not the grace sub-chord. Skip it when start element was set explicitly.
             const bool graceStart = spanner->startElement()
@@ -183,6 +191,27 @@ static std::optional<Fraction> resolveLastChordInMeasure(const PendingSlur& ps, 
     return lastSeg->tick();
 }
 
+// First chord at or after `from` on any voice of the staff within the measure.
+// Sets outTrack to the voice that carries it. Returns nullptr if none.
+// Iterates ChordRest segments directly because tick2segment is unreliable at bar boundaries.
+static Chord* firstChordOnStaffFrom(Measure* m, int staffIdx, const Fraction& from, track_idx_t& outTrack)
+{
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        if (s->tick() < from) {
+            continue;
+        }
+        for (int v = 0; v < static_cast<int>(VOICES); ++v) {
+            track_idx_t t = static_cast<track_idx_t>(staffIdx * VOICES + v);
+            EngravingItem* el = s->element(t);
+            if (el && el->isChord()) {
+                outTrack = t;
+                return toChord(el);
+            }
+        }
+    }
+    return nullptr;
+}
+
 void resolveSlurs(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
@@ -198,6 +227,10 @@ void resolveSlurs(BuildCtx& ctx)
             lineSlotByRawByte[static_cast<unsigned char>(sd[s].instrStaffIdx)] = s;
         }
     }
+
+    // Slurs whose endpoints were set explicitly (reliable measure-count path); excluded from
+    // the recompute in removeOrphanSlurs.
+    std::set<const Spanner*> explicitSlurs;
 
     // .enc has no SLURSTOP; endpoint derived from alMezuro (target measure) + xoffset heuristic.
     for (const PendingSlur& ps : ctx.pendingSlurs) {
@@ -215,6 +248,34 @@ void resolveSlurs(BuildCtx& ctx)
         Measure* endMeas = ctx.measuresByIdx[clampedEndMeasIdx];
         Fraction endTick;
         bool resolved = false;
+
+        // v0xC2 reliable forward measure-count (element +16): Encore draws these as
+        // note-1→note-1 arcs between bar starts; xoffset2 is stale in this format, so anchor
+        // explicitly to the downbeat chord of the target measure rather than guessing by
+        // coordinate. v0xC4/SCO5 keep the xoffset2 heuristic (reliable there).
+        // tick2segment is unreliable at bar boundaries (computeEndElement returns null there),
+        // so locate both endpoints by iterating ChordRest segments and set the slur elements
+        // explicitly; these are protected from recompute in removeOrphanSlurs.
+        if (enc.header.chuMagio == 0xC2 && ps.alMezuroValid && ps.alMezuro > 0
+            && ps.startMeasIdx >= 0
+            && ps.startMeasIdx < static_cast<int>(ctx.measuresByIdx.size())) {
+            Measure* startMeas = ctx.measuresByIdx[ps.startMeasIdx];
+            track_idx_t st = 0, et = 0;
+            Chord* sc = firstChordOnStaffFrom(startMeas, ps.staffIdx, ps.startTick, st);
+            Chord* ec = firstChordOnStaffFrom(endMeas, ps.staffIdx, endMeas->tick(), et);
+            if (sc && ec && ec->tick() > sc->tick()) {
+                Slur* slur = Factory::createSlur(score->dummy());
+                slur->setTrack(st);
+                slur->setTrack2(et);
+                slur->setTick(sc->tick());
+                slur->setTick2(ec->tick());
+                slur->setStartElement(sc);
+                slur->setEndElement(ec);
+                score->addSpanner(slur, false);   // explicit endpoints: skip recompute
+                explicitSlurs.insert(slur);
+                continue;
+            }
+        }
 
         // Same-measure heuristic: find the note closest to first_note_xoff + pixelSpan.
         // Skipped for cross-measure slurs with a reliable alMezuro count (alMezuro > 0) because
@@ -263,6 +324,13 @@ void resolveSlurs(BuildCtx& ctx)
                 // Use slurXoffset2 directly as the arc-end target instead.
                 const bool usedTinyPixelSpan = (pixelSpan >= 0 && pixelSpan <= 2
                                                 && firstNoteXoff < ps.slurXoffset);
+                // v0xC2 short slur: pixelSpan is the only origin-independent signal, and beyond
+                // "short vs long" it is unreliable, while the absolute slurXoffset2 lives in a
+                // stale ornament-coordinate origin (matching it over-extends, e.g. n1→n2 read as
+                // n1→n4). A tiny span means a note-to-next-note slur, so anchor the endpoint to
+                // the next note on the staff instead of the coordinate search.
+                const bool v0c2ShortSlur = (enc.header.chuMagio == 0xC2)
+                                           && (std::abs(pixelSpan) <= 2);
                 const int targetEndXoff = usedTinyPixelSpan
                                           ? ps.slurXoffset2
                                           : firstNoteXoff + pixelSpan;
@@ -302,6 +370,14 @@ void resolveSlurs(BuildCtx& ctx)
                         if (static_cast<int>(em->tick) <= startEncTick) {
                             continue;
                         }
+                        if (v0c2ShortSlur) {
+                            // Next-note rule: pick the earliest note after the start.
+                            if (bestEncTick < 0 || static_cast<int>(em->tick) < bestEncTick) {
+                                bestEncTick = static_cast<int>(em->tick);
+                                bestDist = 0;
+                            }
+                            continue;
+                        }
                         const int dist = std::abs(xoff - targetEndXoff);
                         if (dist < bestDist) {
                             bestDist = dist;
@@ -310,9 +386,12 @@ void resolveSlurs(BuildCtx& ctx)
                     }
                     // Grace-to-main: grace + regular share startEncTick and regular is closest match → zero-span.
                     // If a later note is closer, resolve as grace-to-later instead.
+                    // For a v0xC2 short slur the next-note rule sets bestDist=0, so the distance
+                    // comparison can never pick grace-to-main; a grace at the start is the strong
+                    // signal that the slur ornaments its own main note, so prefer zero-span there.
                     if (hasGraceAtStart && regularXoffAtStart >= 0) {
                         const int regularDist = std::abs(regularXoffAtStart - targetEndXoff);
-                        if (regularDist < bestDist) {
+                        if (v0c2ShortSlur || regularDist < bestDist) {
                             endTick  = ps.startTick;
                             resolved = true;
                         }
@@ -422,6 +501,6 @@ void resolveSlurs(BuildCtx& ctx)
     }
 
     // Remove slurs with missing start/end note (corrupted files cause NaN in Bezier layout).
-    removeOrphanSlurs(score);
+    removeOrphanSlurs(score, explicitSlurs);
 }
 } // namespace mu::iex::enc

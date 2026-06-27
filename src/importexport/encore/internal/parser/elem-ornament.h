@@ -30,6 +30,7 @@ struct EncOrnament : EncMeasureElem {
     // Field names follow the Encore binary format notation used throughout the spec
     quint8 tipo      { 0 };
     qint16 yoffset   { 0 };  // signed 16-bit Cartesian y (positive = upward in Encore)
+    quint8 altMezuro    { 0 };  // v0xC2 spanning measure-count lives at element +16 (not +18)
     quint8 alMezuro     { 0 };
     bool alMezuroValid  { true };  // false when format cannot guarantee measure-count semantics (v0xC2)
     quint8 xoffset2  { 0 };

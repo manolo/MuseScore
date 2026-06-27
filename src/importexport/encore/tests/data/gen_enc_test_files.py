@@ -273,13 +273,15 @@ def ornament_v0c4_voice4_staffhi(tick, staffIdx, tipo):
     return bytes(d)
 
 
-def ornament_v0c4(tick, voice, staffIdx, tipo, xoffset=0, alMezuro=0, xoffset2=0, speguleco=0, yoffset=0):
+def ornament_v0c4(tick, voice, staffIdx, tipo, xoffset=0, alMezuro=0, xoffset2=0, speguleco=0, yoffset=0, altMezuro=0):
     """33-byte ORNAMENT element (type=5).
     Layout from elemStart (= tick offset 0):
       d[0:2]=tick, d[2]=typeVoice, d[3]=size, d[4]=staffIdx,
       d[5]=tipo, d[6..9]=skip, d[10]=xoffset, d[11]=skip,
-      d[12:14]=yoffset s16, d[14..17]=skip,
-      d[18]=alMezuro, d[19]=skip, d[20]=xoffset2, d[21..25]=skip,
+      d[12:14]=yoffset s16, d[14..15]=skip,
+      d[16]=altMezuro (v0xC2 spanning measure-count), d[17]=skip,
+      d[18]=alMezuro (v0xC4 spanning measure-count), d[19]=skip,
+      d[20]=xoffset2, d[21..25]=skip,
       d[26]=speguleco, d[27..32]=zeros.
     """
     d = bytearray(33)
@@ -290,6 +292,7 @@ def ornament_v0c4(tick, voice, staffIdx, tipo, xoffset=0, alMezuro=0, xoffset2=0
     d[5] = tipo
     d[10] = xoffset
     struct.pack_into('<h', d, 12, yoffset)
+    d[16] = altMezuro
     d[18] = alMezuro
     d[20] = xoffset2
     d[26] = speguleco & 3
@@ -7149,15 +7152,20 @@ def gen_v0c2_orn_c4_accent():
 # Replaces personal file XEQUEABU.ENC.
 # ===========================================================================
 def gen_v0c2_cross_measure_slur():
-    # Measure 0: quarter note (xoffset=0) + SLURSTART with xoffset2=50.
-    # pixelSpan = xoffset2 - xoffset = 50 - 0 = 50.
-    # targetEndXoff = firstNoteXoff(0) + pixelSpan(50) = 50 > maxXoffInMeas(0).
-    # This triggers the cross-measure extension in resolveSlurs.
-    m0 = (note_v0c2(0, 0, 0, fv=3, pitch=60)
-          + ornament_v0c4(0, 0, 0, tipo=0x21, alMezuro=1, xoffset2=50)
+    # Reproduces the XEQUEABU.ENC pattern: a v0xC2 slur whose spanning measure-count
+    # (element byte +16 = altMezuro = 1) marks it as ending one bar later. Encore draws
+    # these note-1 -> note-1 arcs between bar starts, and their xoffset2 is unreliable, so
+    # the importer anchors the endpoint to the downbeat (first chord) of the target measure.
+    # Measure 0: note@0 + SLURSTART(altMezuro=1) + three more quarter notes (fill 4/4 so
+    # adjustPickupMeasure does not shrink m0).  Measure 1: note@0 = the downbeat endpoint.
+    m0 = (note_v0c2_xoff(  0, 0, 0, fv=3, pitch=60, xoffset=3)
+          + ornament_v0c4(  0, 0, 0, tipo=0x21, xoffset=1, xoffset2=5, altMezuro=1)
+          + note_v0c2_xoff(240, 0, 0, fv=3, pitch=62, xoffset=2)
+          + note_v0c2_xoff(480, 0, 0, fv=3, pitch=64, xoffset=3)
+          + note_v0c2_xoff(720, 0, 0, fv=3, pitch=65, xoffset=4)
           + end_marker())
-    # Measure 1: quarter note that is the slur target
-    m1 = note_v0c2(0, 0, 0, fv=3, pitch=62) + end_marker()
+    # Measure 1: note@0 is the downbeat endpoint of the cross-measure slur.
+    m1 = note_v0c2_xoff(0, 0, 0, fv=3, pitch=67, xoffset=7) + end_marker()
     hdr = meas_hdr(4, 4)
     return assemble(0xC2, [(hdr, m0), (hdr, m1)], fill_ts=(4, 4))
 
