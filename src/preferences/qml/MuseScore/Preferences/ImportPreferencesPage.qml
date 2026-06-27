@@ -190,6 +190,7 @@ PreferencesPage {
             currentOverfillStrategy: importPreferencesModel.encoreOverfillStrategy
 
             firstMeasureIsPickup: importPreferencesModel.encoreFirstMeasureIsPickup
+            mergeVoices: importPreferencesModel.encoreMergeVoices
 
             navigation.section: root.navigationSection
             navigation.order: root.navigationOrderStart + 6
@@ -234,6 +235,10 @@ PreferencesPage {
                 importPreferencesModel.encoreFirstMeasureIsPickup = value
             }
 
+            onMergeVoicesChangeRequested: function(value) {
+                importPreferencesModel.encoreMergeVoices = value
+            }
+
             onResetToDefaultRequested: {
                 importPreferencesModel.encoreImportPageLayout = true
                 importPreferencesModel.encoreImportPageBreaks = true
@@ -245,6 +250,7 @@ PreferencesPage {
                 importPreferencesModel.encoreUnderfillStrategy = 2      // IrregularMeasure
                 importPreferencesModel.encoreOverfillStrategy = 2       // IrregularMeasure
                 importPreferencesModel.encoreFirstMeasureIsPickup = true
+                importPreferencesModel.encoreMergeVoices = true
             }
 
             onFocusChanged: {

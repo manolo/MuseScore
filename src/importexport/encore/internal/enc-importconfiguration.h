@@ -70,6 +70,10 @@ public:
     void setFirstMeasureIsPickup(bool value) override;
     muse::async::Channel<bool> firstMeasureIsPickupChanged() const override;
 
+    bool mergeVoices() const override;
+    void setMergeVoices(bool value) override;
+    muse::async::Channel<bool> mergeVoicesChanged() const override;
+
 private:
     muse::async::Channel<bool> m_importPageLayoutChanged;
     muse::async::Channel<bool> m_importPageBreaksChanged;
@@ -81,5 +85,6 @@ private:
     muse::async::Channel<UnderfillStrategy> m_underfillMeasureStrategyChanged;
     muse::async::Channel<OverfillStrategy> m_overfillMeasureStrategyChanged;
     muse::async::Channel<bool> m_firstMeasureIsPickupChanged;
+    muse::async::Channel<bool> m_mergeVoicesChanged;
 };
 } // namespace mu::iex::enc

@@ -65,6 +65,14 @@ struct EncImportOptions {
     UnderfillStrategy underfillMeasureStrategy = UnderfillStrategy::InvisibleRests;
     OverfillStrategy overfillMeasureStrategy  = OverfillStrategy::Truncate;
     bool firstMeasureIsPickup = true;  // shorten first measure as pickup; false = pad with rests
+
+    // Voice consolidation. When a staff splits its content across several voices
+    // that never sound at the same time, collapse them back into voice 1. A staff
+    // is only collapsed when ALL of its voices fit into voice 1 with no timing
+    // change (notes that genuinely overlap leave the staff untouched). This struct
+    // value is the in-code fallback used by tests (off, so existing fixtures keep
+    // their voices); the shipped (GUI) default is true (see enc-importconfiguration.cpp).
+    bool mergeVoices = false;
 };
 } // namespace enc
 } // namespace iex

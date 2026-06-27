@@ -73,5 +73,9 @@ public:
     virtual bool firstMeasureIsPickup() const = 0;
     virtual void setFirstMeasureIsPickup(bool value) = 0;
     virtual muse::async::Channel<bool> firstMeasureIsPickupChanged() const = 0;
+
+    virtual bool mergeVoices() const = 0;
+    virtual void setMergeVoices(bool value) = 0;
+    virtual muse::async::Channel<bool> mergeVoicesChanged() const = 0;
 };
 } // namespace mu::iex::enc
