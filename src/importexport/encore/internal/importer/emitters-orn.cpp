@@ -21,6 +21,7 @@
  */
 
 #include "emitters-internal.h"
+#include "coords.h"
 #include "../parser/ticks.h"
 #include "mappers.h"
 #include "engraving/dom/dynamic.h"
@@ -37,80 +38,6 @@
 
 namespace mu::iex::enc {
 using namespace mu::engraving;
-
-// Snap a dynamic/ORN tick to the chord-rest whose xoffset matches its drawn position.
-// ORN xoffset < chord xoffset means the glyph belongs to the preceding chord.
-// Scans all voices so ORNs on staves whose notes are in voice=1+ are placed correctly.
-static Fraction snapTickByXoffset(Fraction defaultTick, int /*dynEncTick*/,
-                                  const EncMeasure& encMeas, int staffIdx,
-                                  const EncOrnament* eo, Fraction measTick)
-{
-    if (encMeas.beatTicks == 0 || encMeas.timeSigDen == 0) {
-        return defaultTick;
-    }
-    const int wholeTicks2 = encMeas.beatTicks * encMeas.timeSigDen;
-    const Fraction relTick = defaultTick - measTick;
-    const int defaultEncTick = (relTick.numerator() * wholeTicks2)
-                               / std::max(1, relTick.denominator());
-    const int ornXoff = static_cast<int>(eo->xoffset);
-
-    // Find the note/rest at defaultEncTick on the same staff (any voice).
-    int defaultCrXoff = -1;
-    for (const auto& elem : encMeas.elements) {
-        const EncMeasureElem* em = elem.get();
-        if (em->type != static_cast<quint8>(EncElemType::NOTE)
-            && em->type != static_cast<quint8>(EncElemType::REST)) {
-            continue;
-        }
-        if (static_cast<int>(em->staffIdx) != staffIdx) {
-            continue;
-        }
-        if (static_cast<int>(em->tick) != defaultEncTick) {
-            continue;
-        }
-        if (em->type == static_cast<quint8>(EncElemType::NOTE)) {
-            defaultCrXoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
-        } else {
-            defaultCrXoff = static_cast<int>(static_cast<const EncRest*>(em)->xoffset);
-        }
-        break;
-    }
-    if (defaultCrXoff >= 0 && ornXoff >= defaultCrXoff) {
-        return defaultTick;
-    }
-    // Find the latest note/rest before defaultEncTick on the same staff (any voice)
-    // whose xoffset <= ornXoff. Also handles WEDGESTART at durTicks (no CR at default tick).
-    int bestTick = -1;
-    for (const auto& elem : encMeas.elements) {
-        const EncMeasureElem* em = elem.get();
-        if (em->type != static_cast<quint8>(EncElemType::NOTE)
-            && em->type != static_cast<quint8>(EncElemType::REST)) {
-            continue;
-        }
-        if (static_cast<int>(em->staffIdx) != staffIdx) {
-            continue;
-        }
-        if (static_cast<int>(em->tick) >= defaultEncTick) {
-            continue;
-        }
-        int xoff = 0;
-        if (em->type == static_cast<quint8>(EncElemType::NOTE)) {
-            xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
-        } else {
-            xoff = static_cast<int>(static_cast<const EncRest*>(em)->xoffset);
-        }
-        if (xoff > ornXoff) {
-            continue;
-        }
-        if (static_cast<int>(em->tick) > bestTick) {
-            bestTick = static_cast<int>(em->tick);
-        }
-    }
-    if (bestTick < 0) {
-        return defaultTick;
-    }
-    return measTick + Fraction(bestTick, wholeTicks2);
-}
 
 static void handleDynamicOrnament(BuildCtx& /*ctx*/, MeasEmitCtx& mc,
                                   NoteElemCtx& ec, const EncOrnament* eo,
@@ -161,8 +88,8 @@ static void handleDynamicOrnament(BuildCtx& /*ctx*/, MeasEmitCtx& mc,
     }
     // Use enc tick as the base: cumTick for voice=0 may be 0 when notes are in other voices.
     const Fraction dynBase = measTick + Fraction(static_cast<int>(e->tick), kEncWholeTicks);
-    Fraction placeTick = snapTickByXoffset(dynBase, static_cast<int>(e->tick),
-                                           encMeas, staffIdx, eo, measTick);
+    Fraction placeTick = snapStartTickByXoffset(dynBase, encMeas, staffIdx,
+                                                static_cast<int>(eo->xoffset), measTick);
     // Section-end dynamics are stored at measureDurTicks; clamp back to the last ChordRest.
     if (placeTick >= measTick + measure->ticks()) {
         Segment* last = measure->last(SegmentType::ChordRest);
@@ -312,8 +239,8 @@ static void handleTempoOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
         // may sit to the LEFT of that note, over an earlier downbeat rest. Snap to the chord-rest
         // whose xoffset matches the drawn position (same logic as dynamics), so the tempo lands on
         // the rest it visually governs rather than the later note.
-        Fraction placeTick = snapTickByXoffset(elemTick, static_cast<int>(eo->tick),
-                                               encMeas, ec.staffIdx, eo, measTick);
+        Fraction placeTick = snapStartTickByXoffset(elemTick, encMeas, ec.staffIdx,
+                                                    static_cast<int>(eo->xoffset), measTick);
         Segment* seg = measure->getSegment(SegmentType::ChordRest, placeTick);
         if (!seg) {
             seg = measure->getSegment(SegmentType::ChordRest, measTick);
@@ -367,8 +294,8 @@ static void handleWedgeStart(BuildCtx& ctx, const MeasEmitCtx& mc,
     }
     Measure* endMeas = ctx.measuresByIdx[endIdx];
     Fraction maxEnd = endMeas->tick() + endMeas->ticks();
-    const Fraction snappedStart = snapTickByXoffset(rawElemTick, static_cast<int>(e->tick),
-                                                    encMeas, staffIdx, eo, measTick);
+    const Fraction snappedStart = snapStartTickByXoffset(rawElemTick, encMeas, staffIdx,
+                                                         static_cast<int>(eo->xoffset), measTick);
     if (maxEnd <= snappedStart) {
         return;
     }
@@ -542,8 +469,8 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
             }
             constexpr int TRILL_SNAP_THRESHOLD = 20;
             if (crXoffAtTick >= 0 && ornXoff < crXoffAtTick - TRILL_SNAP_THRESHOLD) {
-                pt.tick = snapTickByXoffset(elemTick, static_cast<int>(e->tick),
-                                            encMeas, staffIdx, eo, measTick);
+                pt.tick = snapStartTickByXoffset(elemTick, encMeas, staffIdx,
+                                                 static_cast<int>(eo->xoffset), measTick);
             } else {
                 pt.tick = elemTick;
             }
