@@ -4364,6 +4364,27 @@ def gen_v0c4_instr_clarinet_midi72_key_neg2():
     return pre + body + SKELETON_POST
 
 
+# ===========================================================================
+# instruments_instr_recorder_midi75_trackname.enc
+# Instrument named "Txistu" with MIDI program 75 (1-indexed = Recorder). The
+# name matches no template, so only MIDI step 5 fires and selects the bare
+# "recorder" template. That template carries no <trackName>/<longName> in
+# instruments.xml (its UI name comes from muse_instruments), so before the fix
+# the imported part kept an empty track name and the mixer/instruments panel
+# showed a blank instrument name. The importer must backfill the track name
+# from the Encore instrument name.
+# ===========================================================================
+def gen_v0c4_instr_recorder_midi75_trackname():
+    name = 'Txistu'.encode('utf-16-le') + b'\x00\x00'
+    pre  = _patch_tk00(name)
+    pre  = _patch_midi_program(pre, 0, 75)    # 1-indexed = Recorder
+    pre  = _patch_key_transpose(pre, 0, 0)    # sounds as written
+    e    = end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
 def gen_v0c4_lyrics():
     e  = lyric_v0c4(  0, 0, 0, 'do')
     e += note_v0c4(   0, 0, 0, fv=3, pitch=60)
@@ -8639,6 +8660,7 @@ if __name__=='__main__':
     write("instruments_instr_clarinet_midi72_key0.enc",         gen_v0c4_instr_clarinet_midi72_key0())
     write("instruments_instr_empty_name_midi_clarinet.enc",     gen_v0c4_instr_empty_name_midi_clarinet())
     write("instruments_instr_clarinet_midi72_key_neg2.enc",     gen_v0c4_instr_clarinet_midi72_key_neg2())
+    write("instruments_instr_recorder_midi75_trackname.enc",    gen_v0c4_instr_recorder_midi75_trackname())
     write("instruments_no_tk_blocks_midi_key.enc",              gen_v0c4_no_tk_blocks_midi_key())
     write("instruments_no_tk_name_recovered.enc",               gen_v0c4_no_tk_name_recovered())
     write("instruments_unique_name_beats_midi.enc",             gen_v0c4_unique_name_beats_midi())

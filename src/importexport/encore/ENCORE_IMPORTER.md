@@ -236,6 +236,19 @@ program Encore recorded. The chain falls through to Grand Piano only
 when both name and MIDI give no result; the original label is preserved
 and the user can reassign from the instrument browser.
 
+**Display names.** Once a template is chosen, the part's long name is set
+to the Encore instrument name and the short name is cleared. A few generic
+templates in `instruments.xml` (recorder, clarinet, trumpet, double bass,
+and similar) carry no track name of their own because their user-facing
+name is supplied by the bundled muse instruments rather than the XML, and
+those are unavailable while reading a file. Selecting such a template would
+leave the mixer and the Instruments panel showing a blank entry, so when
+the chosen template's track name is empty the importer derives the
+sounding instrument's name from the template id ("bass-clarinet" becomes
+"Bass Clarinet"). The Encore instrument name is kept as the part long name,
+not copied into the track name, so the track name always reflects the
+instrument that will play rather than the user's part label.
+
 ## STAFFTEXT placement and tempo promotion
 
 For STAFFTEXT ornaments (subtype `0x1E`):
