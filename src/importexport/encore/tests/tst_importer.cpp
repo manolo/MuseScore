@@ -40,6 +40,7 @@
 #include "engraving/dom/measure.h"
 #include "engraving/dom/note.h"
 #include "engraving/dom/part.h"
+#include "engraving/dom/repeatlist.h"
 #include "engraving/dom/segment.h"
 #include "engraving/dom/slur.h"
 #include "engraving/dom/spanner.h"
@@ -2350,5 +2351,42 @@ TEST_F(Tst_Importer, v0c4_2_2_beatticks240_gap_snap_no_false_fire)
         EXPECT_FALSE(elements[i].second) << "element " << i << " must be a chord";
     }
 
+    delete score;
+}
+
+// Regression: the importer left a stale repeat list cached during layout (computed
+// before the voltas were anchored), so on the repeat the 1st ending was replayed
+// instead of skipped. The file read path invalidates the repeat list after load; the
+// importer now does the same. After import, the unrolled repeat list must play the
+// 1st ending exactly once (1st pass) and skip it on the second pass.
+TEST_F(Tst_Importer, v0c4_volta_repeat_skips_first_ending_on_replay)
+{
+    MasterScore* score = readEncoreScore("structure_volta_repeat_playback.enc");
+    ASSERT_NE(score, nullptr);
+    score->setExpandRepeats(true);
+
+    const Volta* firstEnding = nullptr;
+    for (const auto& p : score->spanner()) {
+        const Spanner* sp = p.second;
+        if (sp && sp->isVolta()) {
+            const Volta* v = toVolta(sp);
+            if (v->endings().size() == 1 && v->endings()[0] == 1) {
+                firstEnding = v;
+                break;
+            }
+        }
+    }
+    ASSERT_NE(firstEnding, nullptr) << "expected a 1st-ending volta (endings == {1})";
+    const int firstEndingTick = firstEnding->tick().ticks();
+
+    int firstEndingPlays = 0;
+    for (const RepeatSegment* rs : score->repeatList()) {
+        if (rs->tick <= firstEndingTick && firstEndingTick < rs->endTick()) {
+            ++firstEndingPlays;
+        }
+    }
+    EXPECT_EQ(firstEndingPlays, 1)
+        << "1st ending must play once and be skipped on the repeat; a stale cached "
+        "repeat list replays it on every pass (got " << firstEndingPlays << " plays)";
     delete score;
 }
