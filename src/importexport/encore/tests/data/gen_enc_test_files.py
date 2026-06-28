@@ -6024,6 +6024,54 @@ def gen_v0c4_volta_coalesce_and_text():
 
 
 # ===========================================================================
+# structure_volta_repeat_playback.enc
+# A repeat with 1st/2nd endings:  ||: m0  1.[m1] :||  2.[m2]
+#   m0: repeat-start barline (start byte 0x0C = 2)
+#   m1: 1st ending (repeatAlternative 0x01) + repeat-end barline (barTypeEnd = 4)
+#   m2: 2nd ending (repeatAlternative 0x02)
+# Regression: the importer left a stale repeat list cached during layout (computed
+# before the voltas were anchored), so the 1st ending replayed on the repeat instead
+# of being skipped. The expanded play order must skip m1 on the second pass.
+# A leading multi-measure rest enables createMultiMeasureRests, matching the real-world
+# files where the repeat list is built over the MM measure list during import.
+# ===========================================================================
+def gen_v0c4_volta_repeat_playback():
+    def cs(tick, text):
+        raw = (text.encode('latin-1') + b'\x00' * 36)[:36]
+        return chordsym_v0c4(tick, 0, 0, raw)
+
+    def body(withChord=False):
+        e = b''
+        if withChord:
+            e += cs(0, "C")
+        e += (note_v0c4(0,   0, 0, fv=3, pitch=60)
+              + note_v0c4(240, 0, 0, fv=3, pitch=62)
+              + note_v0c4(480, 0, 0, fv=3, pitch=64)
+              + note_v0c4(720, 0, 0, fv=3, pitch=65)
+              + end_marker())
+        return e
+
+    h0 = bytearray(meas_hdr(4, 4))
+    h0[0x0C] = 2                       # m0: REPEATSTART at measure start
+
+    h1 = bytearray(meas_hdr(4, 4, barTypeEnd=4))  # m1: REPEATEND at measure end
+    h1[0x0F] = 0x01                    # repeatAlternative = volta 1
+
+    h2 = bytearray(meas_hdr(4, 4))
+    h2[0x0F] = 0x02                    # m2: repeatAlternative = volta 2
+
+    mrest = rest_v0c4_mrest(0, 0, 0, fv=2, mrestCount=2) + end_marker()
+
+    custom = [
+        (bytes(meas_hdr(4, 4)), mrest),
+        (bytes(h0), body(withChord=True)),
+        (bytes(h1), body()),
+        (bytes(h2), body()),
+    ]
+    return assemble(0xC4, custom, fill_ts=(4, 4))
+
+
+# ===========================================================================
 # importer_to_coda_vs_coda_marker.enc
 # Encore distinguishes the source measure of "To Coda" from the destination
 # measure carrying the Coda glyph by two distinct coda-byte values in the
@@ -8590,6 +8638,7 @@ if __name__=='__main__':
     write("importer_header_measure_count_truncates_ghost_measures.enc",
           gen_v0c4_header_measure_count_truncates_ghost_measures())
     write("importer_volta_coalesce_and_text.enc",         gen_v0c4_volta_coalesce_and_text())
+    write("structure_volta_repeat_playback.enc",          gen_v0c4_volta_repeat_playback())
     write("importer_to_coda_vs_coda_marker.enc",          gen_v0c4_to_coda_vs_coda_marker())
     write("text_text_block_latin1_decoding.enc",      gen_v0c4_text_block_latin1_decoding())
     write("importer_two_dynamics_in_one_measure.enc",     gen_v0c4_two_dynamics_in_one_measure())

@@ -736,6 +736,12 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
         mergeNonOverlappingVoices(score);
         score->doLayout();
     }
+
+    // doLayout computes and caches the repeat list; at that point voltas may not yet be
+    // anchored, so the cached expansion ignores 1st/2nd endings and replays the 1st
+    // ending on every pass. The file read path invalidates the repeat list after load
+    // for the same reason; do the same here so playback right after import is correct.
+    score->masterScore()->invalidateRepeatList();
 }
 
 Err importEncore(MasterScore* score, const QString& path, const EncImportOptions& opts)
