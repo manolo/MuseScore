@@ -166,8 +166,7 @@ static void logEncRootInfo(const EncRoot& enc)
 
     const char* encVer = (h.chuVersio >= 1000) ? "Encore 5.x"
                          : (h.chuVersio >= 700) ? "Encore 4.x"
-                         : (h.chuVersio >= 580) ? "Encore 4.0"
-                         : "Encore 3.x or older";
+                         : "Encore 2.x/3.x (legacy)";
 
     LOGD() << "---- Encore file info ----";
     LOGD() << "  Magic:" << h.magic.toStdString()

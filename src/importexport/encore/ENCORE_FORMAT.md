@@ -28,8 +28,8 @@ Byte at file offset 4 identifies the version:
 
 | Byte   | Version   | Encore release        |
 |--------|-----------|-----------------------|
-| 0xA6   | v0xA6     | Encore 2.x to 4.0 (legacy; app version 0x28 = 592 for 4.0) |
-| 0xC2   | v0xC2     | Encore 3.x / 4.x      |
+| 0xA6   | v0xA6     | Encore 2.x / 3.x (legacy; app version 0x28 = 592). Pre-4.x: Encore 4.5 prompts a font conversion and re-saves these as v0xC2/v0xC4. |
+| 0xC2   | v0xC2     | Encore 4.x (incl. 4.5; app version 0x28 = 773/775) |
 | 0xC4   | v0xC4     | Encore 5.x            |
 
 File magic at offset 0 (byte order of multi-byte integers follows the magic):
@@ -57,7 +57,7 @@ The plaintext `SCOW` equivalent is structurally different, so re-saving from Enc
 |----------|--------|-----------------------------------------|
 | 0x00     | 4      | magic (`SCOW` or `SCO5`)                |
 | 0x04     | 1      | format version (see above)              |
-| 0x28     | 2      | Encore application version (uint16 LE): 592=4.0 773/775=4.x 1056=5.0 |
+| 0x28     | 2      | Encore application version (uint16 LE): 592=2.x/3.x legacy (v0xA6) 773/775=4.x (v0xC2) 1056=5.0 (v0xC4) |
 | 0x2A     | 2      | purpose unconfirmed (varies per file, possibly total LINE-staff entries) |
 | 0x2C     | 2      | default beatTicks for measures (uint16 LE): 240=quarter-note grid (0x00F0), matches MEAS header +0x04 |
 | 0x2E     | 2      | number of system blocks                 |
@@ -232,7 +232,7 @@ layout (no size, clef, or staff-type bytes). Consequently:
   unproven. One observation is consistent with the instrument-derived hypothesis but does not prove
   it: a file whose last staff (name "Bajo", MIDI program 59) opens in Encore as the Tuba instrument
   and shows bass clef, which is the Tuba default. This should be investigated once an Encore version
-  that writes v0xA6 (Encore 2.x to 4.0) is available: save the same score twice changing only one
+  that writes v0xA6 (Encore 2.x/3.x) is available: save the same score twice changing only one
   staff's clef and diff the files; a changed byte is the clef field, no change means it is
   instrument-derived. (Encore 5.x always saves as v0xC4, where the clef IS stored explicitly at LINE
   entry +14, so it cannot run this test.)
