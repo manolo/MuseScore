@@ -156,14 +156,16 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         // Step 2: name+MIDI score with transposition filter.
         if (!tmpl) {
             bool nameExact = false;
-            const InstrumentTemplate* nameTmpl = findEncoreInstrumentTemplate(instr.name, encMidi, encKey, &nameExact);
+            bool nameUnique = false;
+            const InstrumentTemplate* nameTmpl = findEncoreInstrumentTemplate(instr.name, encMidi, encKey, &nameExact, &nameUnique);
             // A contains-only (substring) name match can outrank the GM instrument via the MIDI
             // bonus: e.g. "Bajo" hits "Contrabajo"/"Clarín contrabajo" (a treble bugle sharing the
             // tuba's program) instead of the bass-clef Tuba. When the name match is not exact,
             // prefer the MIDI-program instrument if it differs. Exact matches are kept as-is, so
             // the deliberate "Bass" -> acoustic-bass MIDI tiebreak (findTemplateByMidi returns the
-            // same template) is unaffected.
-            if (nameTmpl && !nameExact && !isRhythm && instr.midiProgram > 0) {
+            // same template) is unaffected. A unique name match (a needle no other template's name
+            // contains, e.g. "Dulzaina") is as trustworthy as an exact one, so it is kept too.
+            if (nameTmpl && !nameExact && !nameUnique && !isRhythm && instr.midiProgram > 0) {
                 const InstrumentTemplate* midiTmpl = findTemplateByMidi(instr.midiProgram - 1);
                 if (midiTmpl && midiTmpl != nameTmpl) {
                     LOGD() << "  instrument \"" << instr.name.toStdString()

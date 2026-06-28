@@ -4164,6 +4164,42 @@ def gen_v0c4_no_tk_name_recovered():
 # → probeUtf16LE returns false, isLatin1 = true → name decoded as Latin-1.
 # "Tamboril" (pure ASCII) stored at NAME_BASE=202. Must be recovered as-is.
 # ===========================================================================
+def gen_v0c4_unique_name_beats_midi():
+    # Instrument named "Dulzaina" with MIDI 69 (1-indexed) = Oboe (GM 68).
+    # "Dulzaina" is a substring of exactly one template ("Castilian Dulzaina"), so the
+    # name match is unique/distinctive. The importer must keep the dulzaina template and
+    # NOT let the Oboe MIDI program override it. (Ambiguous substrings like "Bajo", which
+    # hit many templates, still defer to MIDI.)
+    pre = bytearray(SKELETON_PRE)
+    pre[194:198] = b'\x00\x00\x00\x00'  # zero TK magic -> name recovered from NAME_BASE
+    name_utf16 = 'Dulzaina'.encode('utf-16-le') + b'\x00\x00'
+    pre[202:202 + len(name_utf16)] = name_utf16
+    while len(pre) <= 2278:
+        pre.extend(b'\x00' * 64)
+    pre[2278] = 69                       # MIDI 69 (1-indexed) = Oboe at large-TK position
+    e = note_v0c4(0, 0, 0, fv=3, pitch=60)
+    e += end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return bytes(pre) + body + SKELETON_POST
+
+
+def gen_v0c4_fuzzy_name_match():
+    # Name "Clarynet" is a one-substitution typo of "Clarinet" and is NOT a substring of any
+    # template name, so the exact/contains search finds nothing. With no MIDI program either,
+    # the only way to reach a clarinet is the last-resort Levenshtein (edit-distance) pass;
+    # without it the instrument falls back to Grand Piano.
+    pre = bytearray(SKELETON_PRE)
+    pre[194:198] = b'\x00\x00\x00\x00'  # zero TK magic -> name recovered from NAME_BASE
+    name_utf16 = 'Clarynet'.encode('utf-16-le') + b'\x00\x00'
+    pre[202:202 + len(name_utf16)] = name_utf16
+    e = note_v0c4(0, 0, 0, fv=3, pitch=60)
+    e += end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return bytes(pre) + body + SKELETON_POST
+
+
 def gen_v0c4_no_tk_name_latin1():
     pre = bytearray(SKELETON_PRE)
     pre[194:198] = b'\x00\x00\x00\x00'
@@ -8555,6 +8591,8 @@ if __name__=='__main__':
     write("instruments_instr_clarinet_midi72_key_neg2.enc",     gen_v0c4_instr_clarinet_midi72_key_neg2())
     write("instruments_no_tk_blocks_midi_key.enc",              gen_v0c4_no_tk_blocks_midi_key())
     write("instruments_no_tk_name_recovered.enc",               gen_v0c4_no_tk_name_recovered())
+    write("instruments_unique_name_beats_midi.enc",             gen_v0c4_unique_name_beats_midi())
+    write("instruments_fuzzy_name_match.enc",                   gen_v0c4_fuzzy_name_match())
     write("instruments_no_tk_name_latin1.enc",                  gen_v0c4_no_tk_name_latin1())
     write("instruments_no_tk_name_fallback.enc",                gen_v0c4_no_tk_name_fallback())
     write("notes_transposing_written_tpc.enc",                  gen_v0c4_transposing_written_tpc())
