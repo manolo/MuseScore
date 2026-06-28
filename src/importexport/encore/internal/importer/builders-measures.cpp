@@ -252,6 +252,17 @@ void buildInitialSignatures(BuildCtx& ctx)
                                 : pickStaffClef(sd.clef, cClef, tClef, keyOffset);
             addInitialClef(score, si, ct);
         }
+
+        // v0xA6: staffData is empty (its header staffPerSystem reads 0 and the staff entry
+        // layout differs), so the loop above adds no key signature. The per-staff written
+        // key was parsed separately into staffKeys; apply it here. Clefs still come from the
+        // instrument template, handled by the !haveLineClefs block below.
+        if (firstLine.staffData.empty() && !firstLine.staffKeys.empty()) {
+            for (int si = 0; si < ctx.totalStaves; ++si) {
+                const size_t ki = std::min(static_cast<size_t>(si), firstLine.staffKeys.size() - 1);
+                addInitialKeySig(score, si, firstLine.staffKeys[ki]);
+            }
+        }
     }
 
     // Files without per-staff LINE clef data (v0xA6): the initial clef comes from the

@@ -178,4 +178,30 @@ void EncFormatReader_V0xA6::readKeyFromTKBlock(EncInstrument& instr,
     }
     ds.device()->seek(contentStart);
 }
+
+void EncFormatReader_V0xA6::readLineStaffKeys(EncLine& line, QDataStream& ds, qint64 lineContentStart) const
+{
+    // v0xA6: header.staffPerSystem reads 0 and the LINE staff entry layout differs (22 bytes,
+    // written key index at offset 14), so staffData stays empty. Parse the key out of each
+    // 22-byte entry directly so initial key signatures import. Entries begin 14 bytes into the
+    // content and carry a 0x0E 0xFC marker at offset 16, which bounds the run. staffData is
+    // intentionally left empty (v0xA6 staff routing uses TK blocks, not the LINE block).
+    QIODevice* dev = ds.device();
+    const qint64 savedPos = dev->pos();
+    const qint64 entriesStart = lineContentStart + 14;
+    for (int i = 0; i < 64; ++i) {
+        if (!dev->seek(entriesStart + static_cast<qint64>(i) * 22)) {
+            break;
+        }
+        unsigned char buf[18];
+        if (dev->read(reinterpret_cast<char*>(buf), 18) != 18) {
+            break;
+        }
+        if (buf[16] != 0x0E || buf[17] != 0xFC) {
+            break;
+        }
+        line.staffKeys.push_back(buf[14]);
+    }
+    dev->seek(savedPos);
+}
 } // namespace mu::iex::enc

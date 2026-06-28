@@ -80,6 +80,10 @@ struct EncLine {
     quint16 start        { 0 };
     quint8 measureCount { 0 };
     std::vector<EncLineStaffData> staffData;
+    // v0xA6 only: per-staff written key index (Encore key index 0-14), parsed directly
+    // from the 22-byte staff entries because v0xA6's header staffPerSystem and LINE staff
+    // layout differ from v0xC2/C4, which leaves staffData empty. See parsers-root.cpp.
+    std::vector<quint8> staffKeys;
 
     bool read(QDataStream& ds, quint32 vs, int staffPerSystem);
 };

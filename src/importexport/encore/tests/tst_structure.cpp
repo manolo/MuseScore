@@ -161,6 +161,24 @@ TEST_F(Tst_Structure, key_sig_no_invalid_large_values)
     delete score;
 }
 
+// FIX: v0xA6 (MusicTime / Encore 2.x-3.x) stores the written key signature at offset 14 of
+// each 22-byte LINE staff entry, not where v0xC2/C4 keep it; its header staffPerSystem also
+// reads 0, so the generic parse leaves staffData empty and the key was lost (imported as the
+// wrong key / no signature). keyIndex 10 = A major; every staff must import as 3 sharps.
+TEST_F(Tst_Structure, key_sig_v0xa6_from_line_entry)
+{
+    MasterScore* score = readEncoreScore("structure_v0xa6_key_signature.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_GT(score->nstaves(), 0u);
+    for (size_t i = 0; i < score->nstaves(); ++i) {
+        Staff* st = score->staff(i);
+        ASSERT_NE(st, nullptr);
+        EXPECT_EQ(int(st->key(Fraction(0, 1))), 3)
+            << "v0xA6 staff " << i << " must import A major (3 sharps) from LINE entry offset 14";
+    }
+    delete score;
+}
+
 // ===========================================================================
 // FIX: KEYCHANGE tipo=0 (C major modulation) must be emitted; previous guard silently dropped it.
 // ===========================================================================

@@ -477,9 +477,11 @@ def gen_v0xa6_basic():
 # staff-size selector at byte 0x8D, plus 64-byte TK blocks with MIDI at
 # content+52. Reproduces the on-disk v0xA6 instrument/header layout.
 # ---------------------------------------------------------------------------
-def build_v0xa6(instruments, meas_list, staff_size=1):
+def build_v0xa6(instruments, meas_list, staff_size=1, keyIndex=0):
     """instruments: list of (name:str, midi_1indexed:int, key_signed:int).
-    staff_size: global 1-4 selector at header 0x8D (1=60%, 2=75%, 3=100%, 4=130%)."""
+    staff_size: global 1-4 selector at header 0x8D (1=60%, 2=75%, 3=100%, 4=130%).
+    keyIndex: Encore key-signature index (0=C, 2=Bb, 9=D, 10=A, 11=E...) written at
+    offset 14 of every 22-byte LINE staff entry, the real v0xA6 key-signature location."""
     n = len(instruments)
     hdr = bytearray(0xA6)
     hdr[0:4] = b'SCOW'
@@ -501,9 +503,18 @@ def build_v0xa6(instruments, meas_list, staff_size=1):
         content[52] = midi & 0xFF               # MIDI program (content+52 == block+60)
         magic = ('TK%02d' % i).encode('ascii')
         tks += magic + struct.pack('<I', 64) + bytes(content)
-    line = bytearray(28)                        # minimal LINE (no per-staff size in v0xA6)
+    # v0xA6 LINE: 14-byte pre-header (skip10 + start u16 + measureCount u8 + pad), then one
+    # 22-byte staff entry per instrument. The written key index sits at entry offset 14 and a
+    # 0x0E 0xFC marker at offset 16 bounds the run (matches real MusicTime/Encore-2.x files).
+    line = bytearray(14)
     struct.pack_into('<H', line, 10, 0)         # start
     line[12] = len(meas_list) & 0xFF            # measureCount
+    for _ in range(n):
+        ent = bytearray(22)
+        ent[14] = keyIndex & 0xFF
+        ent[16] = 0x0E
+        ent[17] = 0xFC
+        line += ent
     line_block = b'LINE' + struct.pack('<I', len(line)) + bytes(line)
     body = b''.join(meas_list)
     return bytes(hdr) + tks + line_block + body
@@ -532,6 +543,15 @@ def gen_v0xa6_midi_program():
 def gen_v0xa6_score_size():
     m = _meas_a6([(0, 0, 0, 4, 0), (0, 0, 1, 4, 7)])
     return build_v0xa6([('Vz1', 0, 0), ('Vz2', 0, 0)], [m], staff_size=1)
+
+# structure_v0xa6_key_signature.enc
+# v0xA6 stores the written key signature at offset 14 of each 22-byte LINE staff entry,
+# NOT where v0xC2/C4 keep it (the generic 30-byte parse reads garbage there, and v0xA6's
+# header staffPerSystem reads 0 so staffData is empty). keyIndex=10 = A major (3 sharps).
+# Both staves must import with concert key = 3 sharps.
+def gen_v0xa6_key_signature():
+    m = _meas_a6([(0, 0, 0, 4, 0), (0, 0, 1, 4, 7)])
+    return build_v0xa6([('Vz1', 0, 0), ('Vz2', 0, 0)], [m], staff_size=1, keyIndex=10)
 
 # ---------------------------------------------------------------------------
 # File generators, new set (replacing Encore 5 example files)
@@ -8502,6 +8522,7 @@ if __name__=='__main__':
     write("structure_v0xa6_basic.enc",        gen_v0xa6_basic())
     write("instruments_v0xa6_midi_program.enc",   gen_v0xa6_midi_program())
     write("structure_v0xa6_score_size.enc",       gen_v0xa6_score_size())
+    write("structure_v0xa6_key_signature.enc",    gen_v0xa6_key_signature())
     write("notes_corrupted.enc",     gen_v0c4_corrupted())
     write("notes_swing.enc",         gen_v0c4_swing())
     write("notes_grace.enc",             gen_v0c4_grace())
