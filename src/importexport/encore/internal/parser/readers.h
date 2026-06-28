@@ -35,6 +35,7 @@ namespace mu::iex::enc {
 struct EncMeasureElem;
 struct EncInstrument;
 struct EncRoot;
+struct EncLine;
 
 // EncFormatReader: per-format binary parsing strategy. Register a new version in EncFormatReader::create().
 struct EncFormatReader
@@ -99,6 +100,14 @@ struct EncFormatReader
     virtual void readKeyFromTKBlock(EncInstrument& /*instr*/,
                                     QDataStream& /*ds*/,
                                     qint64 /*contentStart*/) const {}
+
+    // Reads per-staff written key indices from a LINE block into EncLine::staffKeys.
+    // v0xA6 stores them in its 22-byte staff entries; other formats fill staffData during
+    // EncLine::read and leave staffKeys empty. The override seeks within the stream and must
+    // restore the position before returning. See ENCORE_FORMAT.md §v0xA6 staff size and clef.
+    virtual void readLineStaffKeys(EncLine& /*line*/,
+                                   QDataStream& /*ds*/,
+                                   qint64 /*lineContentStart*/) const {}
 
     // Format capability queries, see ENCORE_FORMAT.md §Known quirks for per-version details.
     virtual bool hasGraceTimeBorrowing() const { return false; }  // v0xA6: grace borrows rdur from next note

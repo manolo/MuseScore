@@ -213,8 +213,16 @@ The staff type is constant across all LINE blocks for the same staff position.
 
 ### v0xA6 staff size and clef
 
-v0xA6 reports `staffPerSystem = 0` and its LINE staff entries are a 22-byte positioning-only
-layout (no size, clef, or staff-type bytes). Consequently:
+v0xA6 reports `staffPerSystem = 0` and its LINE staff entries use a 22-byte layout (different
+from the 30-byte v0xC2/C4 entry above). Each entry carries a `0x0E 0xFC` marker at offset 16,
+which bounds the run of entries. Consequently:
+- **Key signature**: the written key index is at **offset 14** of each 22-byte staff entry
+  (same index encoding as the v0xC2/C4 key field: 0=C, 1=F, 2=Bb ... 8=G, 9=D, 10=A, 11=E ...).
+  This is NOT where v0xC2/C4 keep it, and because `staffPerSystem` reads 0 the generic 30-byte
+  parse leaves `staffData` empty, so the importer reads the key directly from these entries.
+  Confirmed across 310 corpus v0xA6 files: offset 14 is always a valid key index (0-14) with a
+  realistic distribution, and matches Encore's displayed key on verified files (A major, C major,
+  D major, ...).
 - **Staff size**: single global value at header byte 0x8D (see Header), applied to all staves.
 - **Clef (location not decoded)**: a per-staff clef field has **not been located** in v0xA6. This
   is an open gap, not proof that the clef is absent: Encore renders the correct clefs from these

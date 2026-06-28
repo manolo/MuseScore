@@ -204,8 +204,12 @@ bool EncRoot::read(QDataStream& ds)
         ds >> varSize;
 
         if (nextId == "LINE") {
+            const qint64 lineContentStart = ds.device()->pos();
             EncLine line;
             line.read(ds, varSize, header.staffPerSystem);
+            // Some formats (v0xA6) store per-staff key indices in the LINE block rather than in
+            // staffData; let the format reader extract them. No-op for v0xC2/C4.
+            fmt->readLineStaffKeys(line, ds, lineContentStart);
             lines.push_back(std::move(line));
         } else if (nextId == "MEAS") {
             EncMeasure meas;

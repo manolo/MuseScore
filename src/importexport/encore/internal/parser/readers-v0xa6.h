@@ -49,6 +49,8 @@ struct EncFormatReader_V0xA6 final : EncFormatReader
 
     void readKeyFromTKBlock(EncInstrument& instr, QDataStream& ds, qint64 contentStart) const override;
 
+    void readLineStaffKeys(EncLine& line, QDataStream& ds, qint64 lineContentStart) const override;
+
     bool hasGraceTimeBorrowing() const override { return true; }
     const char* formatName() const override { return "v0xA6"; }
 
