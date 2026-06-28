@@ -415,6 +415,40 @@ TEST_F(Tst_Instruments, transposition_filter_prefers_compatible_key)
         << "Unfiltered call must also find Castilian Dulzaina (chromatic=6)";
 }
 
+// Regression: a distinctive name match (a needle unique to a single template, e.g.
+// "Dulzaina" -> only "Castilian Dulzaina") must NOT be overridden by the MIDI program.
+// The instrument is named "Dulzaina" with MIDI 69 (Oboe); before the fix the contains-only
+// match was treated as weak and replaced by Oboe. Ambiguous substrings ("Bajo") still defer
+// to MIDI; see instrument_name_midi_tiebreaks_to_acoustic_bass and the tuba test.
+TEST_F(Tst_Instruments, unique_name_match_not_overridden_by_midi)
+{
+    MasterScore* score = readEncoreScore("instruments_unique_name_beats_midi.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(inst->id().contains(String(u"dulzaina")))
+        << "unique name 'Dulzaina' must win over the Oboe MIDI program; got "
+        << inst->id().toStdString();
+    delete score;
+}
+
+// FEATURE: last-resort fuzzy (edit-distance) name match for spelling typos the exact/contains
+// search misses. "Clarynet" (one substitution from "Clarinet") has no substring match and no
+// MIDI program, so without the fuzzy pass it falls back to Grand Piano; it must map to a clarinet.
+TEST_F(Tst_Instruments, fuzzy_name_match_typo)
+{
+    MasterScore* score = readEncoreScore("instruments_fuzzy_name_match.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(inst->id().contains(String(u"clarinet")))
+        << "typo 'Clarynet' must fuzzy-match a clarinet, not fall back to piano; got "
+        << inst->id().toStdString();
+    delete score;
+}
+
 // ===========================================================================
 // FIX: v0xC4 files with no TK blocks use fallback instruments (contentFilePos=-1,
 // offset=0). The compact MIDI/Key offsets (390/367) have 0, but the standard

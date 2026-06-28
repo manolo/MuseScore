@@ -73,8 +73,12 @@ constexpr int ENC_KEY_NO_FILTER = 0x7FFFFFFF;
 // Find best non-drumset template by name+MIDI score; applies transposition filter when encKeySemitones != ENC_KEY_NO_FILTER.
 // When outExactName is non-null, it is set to true if the returned template matched the instrument
 // name exactly (track/long/short name equality) rather than only via a substring ("contains").
+// When outUniqueName is non-null, it is set to true if the returned template matched via a
+// "distinctive" needle, i.e. a word no other template's name contains (e.g. "Dulzaina" hits only
+// "Castilian Dulzaina"). Such a contains-match is as trustworthy as an exact match.
 const mu::engraving::InstrumentTemplate* findEncoreInstrumentTemplate(
-    const QString& encName, int encMidiProgram = -1, int encKeySemitones = ENC_KEY_NO_FILTER, bool* outExactName = nullptr);
+    const QString& encName, int encMidiProgram = -1, int encKeySemitones = ENC_KEY_NO_FILTER, bool* outExactName = nullptr,
+    bool* outUniqueName = nullptr);
 
 // Same as findEncoreInstrumentTemplate but restricted to useDrumset templates.
 const mu::engraving::InstrumentTemplate* findDrumsetTemplate(const QString& encName);

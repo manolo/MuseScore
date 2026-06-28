@@ -22,7 +22,11 @@
 
 #include "mappers.h"
 
+#include <algorithm>
+
 #include <QRegularExpression>
+
+#include "global/stringutils.h"
 
 #include "engraving/dom/instrtemplate.h"
 #include "engraving/dom/instrument.h"
@@ -90,10 +94,14 @@ static constexpr int kScoreCommonGenre   = 1;  // "common" genre tag
 // With encKeySemitones filter, prefers transposition-compatible match; falls back to best name+MIDI
 // match when no compatible match exists (e.g. encKey=0 and no C-pitched variant for this MIDI program).
 const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, int encMidiProgram,
-                                                       int encKeySemitones, bool* outExactName)
+                                                       int encKeySemitones, bool* outExactName,
+                                                       bool* outUniqueName)
 {
     if (outExactName) {
         *outExactName = false;
+    }
+    if (outUniqueName) {
+        *outUniqueName = false;
     }
     if (encName.isEmpty()) {
         return nullptr;
@@ -207,11 +215,101 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
             }
         }
     }
+    // Last resort: when neither exact nor substring matched any template, try an edit-distance
+    // (Levenshtein) match for spelling typos and close inflections (e.g. "Clarynet" -> "Clarinet",
+    // "Guitarra" -> "Guitar"). Only sufficiently long words count (>= 75% similar, <= 2 edits,
+    // both words >= 5 chars). This catches typos and near roots but NOT distant cross-language
+    // roots (e.g. "Gitarre"/"Chitarra" are too far from "Guitar"), which would need a synonym table.
+    // A fuzzy hit is weak (not exact, not unique), so the MIDI program can still override it.
+    if (!best) {
+        static const QRegularExpression fuzzyWordSplit(QStringLiteral("[^\\p{L}\\p{N}]+"));
+        constexpr double kFuzzyMinSim = 0.75;
+        constexpr int kFuzzyMaxDist = 2;
+        constexpr int kFuzzyMinLen = 5;
+        double bestSim = 0.0;
+        for (const InstrumentGroup* g : instrumentGroups) {
+            for (const InstrumentTemplate* it : g->instrumentTemplates) {
+                if (it->useDrumset) {
+                    continue;
+                }
+                const QString nt = normalizeForCompare(it->trackName.toQString());
+                const QString nl = normalizeForCompare(it->instrumentName.longName().toQString());
+                double sim = 0.0;
+                for (const QString& needle : needles) {
+                    if (needle.length() < kFuzzyMinLen) {
+                        continue;
+                    }
+                    for (const QString& field : { nt, nl }) {
+                        for (const QString& w : field.split(fuzzyWordSplit, Qt::SkipEmptyParts)) {
+                            if (w.length() < kFuzzyMinLen) {
+                                continue;
+                            }
+                            const int dist = static_cast<int>(
+                                muse::strings::levenshteinDistance(needle.toStdString(), w.toStdString()));
+                            if (dist < 1 || dist > kFuzzyMaxDist) {
+                                continue;
+                            }
+                            const double s = 1.0 - static_cast<double>(dist)
+                                             / std::max(needle.length(), w.length());
+                            sim = std::max(sim, s);
+                        }
+                    }
+                }
+                if (sim > bestSim) {
+                    bestSim = sim;
+                    best = it;
+                    bestExact = false;
+                }
+            }
+        }
+        if (bestSim < kFuzzyMinSim) {
+            best = nullptr;
+        }
+    }
+
     const bool useCompatible = filterTransp && bestCompatible;
     if (outExactName) {
         *outExactName = useCompatible ? bestCompatibleExact : bestExact;
     }
-    return useCompatible ? bestCompatible : best;
+
+    const InstrumentTemplate* result = useCompatible ? bestCompatible : best;
+
+    // A contains-only name match is "weak" in general, but a needle that no other template's
+    // name contains (e.g. "dulzaina" -> only "Castilian Dulzaina") identifies the instrument as
+    // confidently as an exact match. Report that so callers do not let the MIDI program override
+    // it. Ambiguous needles ("bajo" hits many templates) stay weak and still defer to MIDI.
+    if (outUniqueName && result) {
+        auto needleMatches = [](const QString& needle, const InstrumentTemplate* it) {
+            const QString nt = normalizeForCompare(it->trackName.toQString());
+            const QString nl = normalizeForCompare(it->instrumentName.longName().toQString());
+            const QString ns = normalizeForCompare(it->instrumentName.shortName().toQString());
+            return nt == needle || nt.contains(needle)
+                   || nl == needle || nl.contains(needle)
+                   || ns == needle;
+        };
+        for (const QString& needle : needles) {
+            if (!needleMatches(needle, result)) {
+                continue;
+            }
+            int freq = 0;
+            for (const InstrumentGroup* g : instrumentGroups) {
+                for (const InstrumentTemplate* it : g->instrumentTemplates) {
+                    if (!it->useDrumset && needleMatches(needle, it) && ++freq > 1) {
+                        break;
+                    }
+                }
+                if (freq > 1) {
+                    break;
+                }
+            }
+            if (freq == 1) {
+                *outUniqueName = true;
+                break;
+            }
+        }
+    }
+
+    return result;
 }
 
 // Find best drumset template by name score (exact match only, no substring).
