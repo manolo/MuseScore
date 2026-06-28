@@ -557,6 +557,34 @@ def gen_v0xa6_key_signature():
 # File generators, new set (replacing Encore 5 example files)
 # ---------------------------------------------------------------------------
 
+def gen_v0c4_underfill_irregular_sparse_with_empty_staff():
+    # 2 instruments. Bar 1 (mid-score, 4/4 nominal) has a single quarter note on staff0 (1/4 of
+    # content) while staff1 is EMPTY (a silent instrument = a whole-bar rest = the full 4/4). The
+    # longest staff is the full bar, so IrregularMeasure underfill must NOT shrink bar 1: it stays
+    # 4/4 with staff0 padded by a 3/4 rest and staff1 a whole-bar rest. The bug measured only the
+    # note-bearing staff (1/4), shrank the bar, shifted every following measure and corrupted them.
+    # Bar 0 leads (so the sparse bar is not the pickup); bars 2-3 are full and must stay intact.
+    pre = bytearray(SKELETON_PRE)
+    pre[0x32] = 2
+    pre = _patch_instrument_name(bytes(pre), 1, 'Staff2')
+
+    def full():
+        e = b''
+        for t in (0, 240, 480, 720):
+            e += note_v0c4(t, 0, 0, fv=3, pitch=60)
+            e += note_v0c4(t, 0, 1, fv=3, pitch=55)
+        return e + end_marker()
+
+    sparse  = note_v0c4(0, 0, 0, fv=3, pitch=60)   # staff0: one quarter; staff1: nothing
+    sparse += end_marker()
+
+    body  = meas_block(meas_hdr(4, 4), full())     # bar 0 (full, not pickup)
+    body += meas_block(meas_hdr(4, 4), sparse)     # bar 1 (sparse staff0 + silent staff1)
+    body += meas_block(meas_hdr(4, 4), full())     # bar 2
+    body += meas_block(meas_hdr(4, 4), full())     # bar 3
+    return pre + body + SKELETON_POST
+
+
 def gen_v0c4_corrupted():
     """Exercises: tuplet=0xFF, invalid faceValue=0, voice>=4, open SLURSTART.
     Replaces: Beethoven.enc, Opus 27 First Movement.enc.
@@ -8523,6 +8551,7 @@ if __name__=='__main__':
     write("instruments_v0xa6_midi_program.enc",   gen_v0xa6_midi_program())
     write("structure_v0xa6_score_size.enc",       gen_v0xa6_score_size())
     write("structure_v0xa6_key_signature.enc",    gen_v0xa6_key_signature())
+    write("options_underfill_irregular_empty_staff.enc",   gen_v0c4_underfill_irregular_sparse_with_empty_staff())
     write("notes_corrupted.enc",     gen_v0c4_corrupted())
     write("notes_swing.enc",         gen_v0c4_swing())
     write("notes_grace.enc",             gen_v0c4_grace())

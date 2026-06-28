@@ -494,6 +494,55 @@ TEST_F(Tst_Options, underfill_irregular_measure_passes_sanity_check)
     delete score;
 }
 
+// A bar where only one staff has (sparse) notes and another staff is silent must NOT be
+// shrunk by IrregularMeasure: the silent staff is a whole-bar rest, so the longest staff is
+// the full bar. The bug measured only the note-bearing staff, shrank the whole bar, shifted
+// every following measure and corrupted them. Guards both the no-shrink decision and that the
+// following full bars survive intact.
+TEST_F(Tst_Options, underfill_irregular_does_not_shrink_bar_with_silent_staff)
+{
+    EncImportOptions opts;
+    opts.underfillMeasureStrategy = UnderfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("options_underfill_irregular_empty_staff.enc", opts);
+    ASSERT_NE(score, nullptr);
+
+    const muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "silent-staff bar corrupted the score: " << ret.text();
+
+    auto staffSum = [](Measure* m, size_t st) {
+        Fraction sum(0, 1);
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* e = s->element(static_cast<track_idx_t>(st * VOICES));
+            if (e && e->isChordRest()) {
+                sum += toChordRest(e)->actualTicks();
+            }
+        }
+        return sum;
+    };
+
+    // Bar 1 (sparse staff0 + silent staff1) keeps its nominal 4/4; both staves fill it.
+    Measure* m0 = score->firstMeasure();
+    ASSERT_NE(m0, nullptr);
+    Measure* m1 = m0->nextMeasure();
+    ASSERT_NE(m1, nullptr);
+    EXPECT_EQ(m1->ticks(), Fraction(4, 4)) << "bar with a silent staff must not shrink";
+    for (size_t st = 0; st < score->nstaves(); ++st) {
+        EXPECT_EQ(staffSum(m1, st), Fraction(4, 4)) << "sparse bar staff " << st << " must fill the bar";
+    }
+
+    // The surrounding full bars (0, 2, 3) keep their 4/4 content intact.
+    for (Measure* m = m0; m; m = m->nextMeasure()) {
+        if (m == m1) {
+            continue;
+        }
+        EXPECT_EQ(m->ticks(), Fraction(4, 4)) << "full bar must stay 4/4";
+        for (size_t st = 0; st < score->nstaves(); ++st) {
+            EXPECT_EQ(staffSum(m, st), Fraction(4, 4)) << "full bar staff " << st << " content lost";
+        }
+    }
+    delete score;
+}
+
 // ===========================================================================
 // overfillMeasureStrategy, reserved variants: sanity-only tests
 // (StretchLastNote and IrregularMeasure are not yet fully implemented)
