@@ -248,7 +248,7 @@ static void logEncRootInfo(const EncRoot& enc)
         }
         LOGD() << "  WINI: top=" << ps.top << "  left=" << ps.left
                << "  bottomEdge=" << ps.bottomEdge << "  rightEdge=" << ps.rightEdge << marginStr;
-    } else if (enc.header.magic == "SCO5") {
+    } else if (enc.fmt && enc.fmt->usesUniformPageMargins()) {
         LOGD() << "  WINI: absent, margins set to 0.25 inches";
     } else {
         LOGD() << "  WINI: absent, margins from MuseScore defaults";
@@ -702,7 +702,7 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
         // files have no PREC at all. Apply a clean, symmetric 0.25" margin: forcing 0 looks
         // cramped (edge to edge), and MuseScore's default margins are tuned for A4 so they
         // come out asymmetric on Letter. A small uniform margin is the better default.
-        if (enc.header.magic == "SCO5") {
+        if (enc.fmt && enc.fmt->usesUniformPageMargins()) {
             constexpr double kMacMarginIn = 0.25;
             const double pageWIn = score->style().styleD(Sid::pageWidth);
             score->style().set(Sid::pageOddTopMargin,     kMacMarginIn);

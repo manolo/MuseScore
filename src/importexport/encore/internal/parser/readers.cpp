@@ -29,10 +29,16 @@
 
 namespace mu::iex::enc {
 
-// Maps magic byte to format reader; add new format cases here.
-std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 magic)
+// Selects a format reader. SCO5 (macOS Encore 5) is identified by its magic string rather than
+// chuMagio (which is not 0xC4 in those files); it shares the v0xC4 binary format and differs
+// only in page-margin handling. Otherwise the format byte (chuMagio) picks the reader; add new
+// format cases here.
+std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 chuMagio, const QString& magic)
 {
-    switch (magic) {
+    if (magic == "SCO5") {
+        return makeFormatReader_SCO5();
+    }
+    switch (chuMagio) {
     case static_cast<quint8>(EncFormatVersion::V2_X):
         return std::make_unique<EncFormatReader_V0xA6>();
     case static_cast<quint8>(EncFormatVersion::V3_4_X):
@@ -41,7 +47,7 @@ std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 magic)
         return makeFormatReader_V0xC4();
     default:
         LOGW() << QString("Encore: unsupported format version 0x%1 - import may fail")
-                      .arg(magic, 2, 16, QChar('0'));
+                      .arg(chuMagio, 2, 16, QChar('0'));
         return makeFormatReader_V0xC4();
     }
 }

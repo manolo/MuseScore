@@ -256,7 +256,7 @@ void resolveSlurs(BuildCtx& ctx)
         // tick2segment is unreliable at bar boundaries (computeEndElement returns null there),
         // so locate both endpoints by iterating ChordRest segments and set the slur elements
         // explicitly; these are protected from recompute in removeOrphanSlurs.
-        if (enc.header.chuMagio == 0xC2 && ps.alMezuroValid && ps.alMezuro > 0
+        if (enc.fmt->slurXoffset2Stale() && ps.alMezuroValid && ps.alMezuro > 0
             && ps.startMeasIdx >= 0
             && ps.startMeasIdx < static_cast<int>(ctx.measuresByIdx.size())) {
             Measure* startMeas = ctx.measuresByIdx[ps.startMeasIdx];
@@ -329,7 +329,7 @@ void resolveSlurs(BuildCtx& ctx)
                 // stale ornament-coordinate origin (matching it over-extends, e.g. n1→n2 read as
                 // n1→n4). A tiny span means a note-to-next-note slur, so anchor the endpoint to
                 // the next note on the staff instead of the coordinate search.
-                const bool v0c2ShortSlur = (enc.header.chuMagio == 0xC2)
+                const bool v0c2ShortSlur = enc.fmt->slurXoffset2Stale()
                                            && (std::abs(pixelSpan) <= 2);
                 const int targetEndXoff = usedTinyPixelSpan
                                           ? ps.slurXoffset2
