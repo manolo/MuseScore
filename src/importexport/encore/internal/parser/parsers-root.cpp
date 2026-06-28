@@ -189,7 +189,7 @@ bool EncRoot::read(QDataStream& ds)
     if (!header.readMagicAndVersion(ds)) {
         return false;
     }
-    fmt = EncFormatReader::create(header.chuMagio);
+    fmt = EncFormatReader::create(header.chuMagio, header.magic);
     if (!header.read(ds, *fmt)) {
         return false;
     }

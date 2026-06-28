@@ -109,6 +109,15 @@ struct EncFormatReader
                                    QDataStream& /*ds*/,
                                    qint64 /*lineContentStart*/) const {}
 
+    // True when a slur's stored xoffset2 lives in a stale coordinate origin and the endpoint
+    // must be anchored explicitly (to the target measure / next note) instead of by coordinate
+    // search. v0xC2 only. See ENCORE_FORMAT.md §Slur.
+    virtual bool slurXoffset2Stale() const { return false; }
+
+    // True when the file stores no importable document margins and a uniform 0.25" default is
+    // preferred over MuseScore's A4-tuned defaults. SCO5 (macOS Encore 5) only.
+    virtual bool usesUniformPageMargins() const { return false; }
+
     // Format capability queries, see ENCORE_FORMAT.md §Known quirks for per-version details.
     virtual bool hasGraceTimeBorrowing() const { return false; }  // v0xA6: grace borrows rdur from next note
     virtual const char* formatName() const { return "v0xC4"; }    // for logging
@@ -124,8 +133,10 @@ struct EncFormatReader
 
     virtual ~EncFormatReader() = default;
 
-    // Factory: returns the reader for the given magic byte (chuMagio).
-    static std::unique_ptr<EncFormatReader> create(quint8 magic);
+    // Factory: returns the reader for the file. The 4-char magic string is needed because some
+    // formats are not distinguished by chuMagio (SCO5/macOS Encore 5 shares the v0xC4 format but
+    // does not carry chuMagio 0xC4). See create() in readers.cpp.
+    static std::unique_ptr<EncFormatReader> create(quint8 chuMagio, const QString& magic);
 };
 } // namespace mu::iex::enc
 

@@ -160,6 +160,10 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
     const char* formatName() const override { return "v0xC2"; }
     quint8 lyricTextGapAfterKie() const override { return 7; }
 
+    // v0xC2 slur xoffset2 lives in a stale ornament-coordinate origin; anchor endpoints
+    // explicitly (forward measure-count / next note) instead of by coordinate search.
+    bool slurXoffset2Stale() const override { return true; }
+
     bool postProcessElement(EncMeasureElem* elem, QDataStream& ds, qint64 rawElemStart) const override
     {
         if (EncOrnament* orn = dynamic_cast<EncOrnament*>(elem)) {
