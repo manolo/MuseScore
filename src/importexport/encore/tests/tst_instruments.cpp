@@ -271,6 +271,30 @@ TEST_F(Tst_Instruments, instrument_empty_name_midi_resolves_to_cello)
 }
 
 // ===========================================================================
+// FIX: a matched template with no <trackName> (e.g. the bare "recorder"
+// template, whose UI name comes from muse_instruments, not instruments.xml)
+// must not leave the imported part with an empty track name. The importer
+// backfills the track name from the Encore instrument name so the mixer and
+// the Instruments panel show a name instead of a blank entry.
+// ===========================================================================
+TEST_F(Tst_Instruments, instrument_recorder_midi75_keeps_track_name)
+{
+    MasterScore* score = readEncoreScore("instruments_instr_recorder_midi75_trackname.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts().front()->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->id(), String(u"recorder"))
+        << "MIDI 75 must resolve to the recorder template via step5";
+    EXPECT_EQ(inst->trackName(), String(u"Recorder"))
+        << "recorder template has no trackName; importer must derive the sounding "
+        "instrument name from the template id, not from the Encore part label";
+    EXPECT_EQ(inst->nameAsPlainText(), String(u"Txistu"))
+        << "the Encore instrument name stays as the part long name";
+    delete score;
+}
+
+// ===========================================================================
 // FIX: Bb clarinet (MIDI 72, Key=0) must not fall back to Grand Piano, and
 // its transposition must be zeroed (encKey=0 means 'sounds as written' in
 // Encore so no chromatic shift should be applied at display time).

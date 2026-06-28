@@ -77,6 +77,25 @@
 using namespace mu::engraving;
 
 namespace mu::iex::enc {
+// Build a human-readable instrument name from a template id slug
+// ("bass-clarinet" -> "Bass Clarinet"). Used only when a matched template
+// carries no track name of its own (see applyInstrumentOrFallback).
+static String humanizeTemplateId(const String& id)
+{
+    QString out;
+    bool startWord = true;
+    for (const QChar& ch : id.toQString()) {
+        if (ch == u'-' || ch == u'_') {
+            out.append(u' ');
+            startWord = true;
+        } else {
+            out.append(startWord ? ch.toUpper() : ch);
+            startWord = false;
+        }
+    }
+    return String(out);
+}
+
 // Apply a found template (or fallback to Grand Piano) and set the instrument's long name.
 static void applyInstrumentOrFallback(Part* part, const InstrumentTemplate* tmpl,
                                       const EncInstrument& instr, int matchStep)
@@ -92,12 +111,20 @@ static void applyInstrumentOrFallback(Part* part, const InstrumentTemplate* tmpl
         ins.instrumentLabel().setAllowGroupName(false);
     };
     if (tmpl) {
+        Instrument ins = Instrument::fromTemplate(tmpl);
+        setInstrName(ins);
+        // A few generic templates (recorder, clarinet, trumpet, ...) carry no
+        // track name in instruments.xml because their UI name is supplied by the
+        // muse instruments, which are unavailable here. That would leave the
+        // mixer and Instruments panel blank, so derive the sounding instrument's
+        // name from the template id rather than from the Encore part label.
+        if (ins.trackName().isEmpty()) {
+            ins.setTrackName(humanizeTemplateId(tmpl->id));
+        }
         LOGD() << "  instrument \"" << instr.name.toStdString()
                << "\": step" << matchStep << "(" << stepDesc[matchStep]
                << (matchStep == 5 ? QString(" %1").arg(instr.midiProgram).toStdString() : std::string())
-               << ")" << " -> " << tmpl->trackName.toStdString();
-        Instrument ins = Instrument::fromTemplate(tmpl);
-        setInstrName(ins);
+               << ")" << " -> " << ins.trackName().toStdString();
         part->setInstrument(ins);
         return;
     }
