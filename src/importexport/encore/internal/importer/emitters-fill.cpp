@@ -109,17 +109,29 @@ void fillTrailingGaps(BuildCtx& ctx, Measure* measure, Fraction measTick)
     }
 
     if (irregular) {
-        // Shrink the measure to the maximum voice content position.
+        // Shrink the measure to the longest staff's content, but ONLY when every staff is
+        // genuinely short. A staff with no content is a whole-bar rest = the full nominal
+        // length, so it is the longest staff and the bar is not short: leave the measure at
+        // its nominal length (the short staves are filled to it by checkMeasure). Measuring
+        // only the note-bearing staves used to shrink such bars and shift every following
+        // measure, corrupting them.
         Fraction maxPos { 0, 1 };
-        for (int si = 0; si < ctx.totalStaves; ++si) {
+        bool anyStaffSilent = false;
+        for (int si = 0; si < ctx.totalStaves && !anyStaffSilent; ++si) {
+            Fraction staffLen { 0, 1 };
             for (voice_idx_t v = 0; v < VOICES; ++v) {
                 const auto k = std::make_pair(si, static_cast<int>(v));
-                if (ctx.cumTick.count(k) && ctx.cumTick.at(k) > maxPos) {
-                    maxPos = ctx.cumTick.at(k);
+                if (ctx.cumTick.count(k) && ctx.cumTick.at(k) > staffLen) {
+                    staffLen = ctx.cumTick.at(k);
                 }
             }
+            if (staffLen <= Fraction(0, 1)) {
+                anyStaffSilent = true;   // whole-bar rest: this staff fills the nominal length
+            } else if (staffLen > maxPos) {
+                maxPos = staffLen;
+            }
         }
-        if (maxPos > Fraction(0, 1) && maxPos < measure->ticks()) {
+        if (!anyStaffSilent && maxPos > Fraction(0, 1) && maxPos < measure->ticks()) {
             const Fraction delta = measure->ticks() - maxPos;
             measure->setTicks(maxPos);
             for (Measure* m = measure->nextMeasure(); m; m = m->nextMeasure()) {
