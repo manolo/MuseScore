@@ -717,6 +717,27 @@ static void handleClefChange(BuildCtx& ctx, const MeasEmitCtx& mc,
     seg->add(clef);
 }
 
+// Set the staff key and add a KeySig segment element. Shared by the immediate key change
+// and the deferred flush (a key change in a rest-only measure is held until the next measure
+// with notes, so it does not break MMRest condensation).
+static void placeKeySig(MasterScore* score, Measure* measure, Fraction tick,
+                        int staffIdx, track_idx_t track, Key concertKey, Key writtenKey)
+{
+    Staff* staff = score->staff(staffIdx);
+    if (!staff) {
+        return;
+    }
+    KeySigEvent ke;
+    ke.setConcertKey(concertKey);
+    ke.setKey(writtenKey);
+    staff->setKey(tick, ke);
+    Segment* seg = measure->getSegment(SegmentType::KeySig, tick);
+    KeySig* ks = Factory::createKeySig(seg);
+    ks->setTrack(track);
+    ks->setKey(concertKey, writtenKey);
+    seg->add(ks);
+}
+
 static void handleKeyChange(BuildCtx& ctx, const MeasEmitCtx& mc,
                             const NoteElemCtx& ec, const EncMeasureElem* e,
                             std::vector<DeferredKeySig>& pendingKeySigs)
@@ -738,15 +759,7 @@ static void handleKeyChange(BuildCtx& ctx, const MeasEmitCtx& mc,
         return;
     }
 
-    KeySigEvent ke;
-    ke.setConcertKey(concertKey);
-    ke.setKey(writtenKey);
-    staff->setKey(ec.elemTick, ke);
-    Segment* seg = mc.measure->getSegment(SegmentType::KeySig, ec.elemTick);
-    KeySig* ks = Factory::createKeySig(seg);
-    ks->setTrack(ec.track);
-    ks->setKey(concertKey, writtenKey);
-    seg->add(ks);
+    placeKeySig(score, mc.measure, ec.elemTick, ec.staffIdx, ec.track, concertKey, writtenKey);
 }
 
 // Runs at the end of each MEAS block after all elements are placed.
@@ -842,19 +855,8 @@ void emitMeasures(BuildCtx& ctx)
 
         if (!pendingKeySigs.empty() && hasPitchedNotes(encMeas)) {
             for (const DeferredKeySig& dks : pendingKeySigs) {
-                Staff* dksStaff = score->staff(dks.staffIdx);
-                if (!dksStaff) {
-                    continue;
-                }
-                KeySigEvent ke;
-                ke.setConcertKey(dks.concertKey);
-                ke.setKey(dks.writtenKey);
-                dksStaff->setKey(measTick, ke);
-                Segment* seg = measure->getSegment(SegmentType::KeySig, measTick);
-                KeySig* ks = Factory::createKeySig(seg);
-                ks->setTrack(dks.staffIdx * VOICES);
-                ks->setKey(dks.concertKey, dks.writtenKey);
-                seg->add(ks);
+                placeKeySig(score, measure, measTick, dks.staffIdx,
+                            dks.staffIdx * VOICES, dks.concertKey, dks.writtenKey);
             }
             pendingKeySigs.clear();
         }
