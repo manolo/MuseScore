@@ -33,6 +33,7 @@
 #include "engraving/dom/articulation.h"
 
 #include <map>
+#include <optional>
 
 using namespace mu::engraving;
 
@@ -80,57 +81,50 @@ static Chord* findFirstChordInMeasure(Measure* m, track_idx_t preferTrack,
     return nullptr;
 }
 
-static void correctBowingTickFromXoffset(
-    PendingBowing& pb,
-    const std::vector<PendingBowing>& allBowings,
-    const BuildCtx& ctx)
+// Pre-check: a note on the ORN's own staff at the ORN's raw Encore tick names the beat the mark
+// sits on directly. The raw enc tick is an explicit per-ORN value and a far more reliable anchor
+// than the xoffset heuristic: ornXoffset and note xoffset use different horizontal origins (in real
+// files the offset between them is a per-file constant, not zero), so an xoffset-proximity test
+// misfires and snaps a first-beat mark onto a later note. Correction is only useful when the ORN's
+// own staff has no note at its raw tick (the beat is empty, so the stored tick can't be trusted).
+static bool bowingHasNoteAtRawTick(const PendingBowing& pb, const BuildCtx& ctx)
 {
-    // When xoffset == 0 the ornament has no visual displacement data, it is
-    // already tagged at its correct note tick, so no correction is needed.
-    if (pb.ornXoffset == 0) {
-        return;
+    const int staffIdx = static_cast<int>(pb.track / VOICES);
+    auto it = ctx.noteXoffByMeasStaff.find({ pb.measIdx, staffIdx });
+    if (it == ctx.noteXoffByMeasStaff.end()) {
+        return false;
     }
-    // Pre-check: if there is a note on the ORN's own staff at the ORN's raw
-    // Encore tick, that tick directly names the beat the mark sits on, trust it
-    // and skip all correction.  The raw enc tick is an explicit per-ORN value and
-    // is a far more reliable anchor than the xoffset heuristic: ornXoffset and
-    // note xoffset use different horizontal origins (in real files the offset
-    // between them is a per-file constant, not zero), so an xoffset-proximity
-    // test misfires and snaps a first-beat mark onto a later note.  Correction is
-    // only useful when the ORN's own staff has no note at its raw tick (the beat
-    // is empty, so the stored tick cannot be taken literally).
-    static constexpr int BOW_XOFF_CLUSTER = 6;
-    {
-        const int staffIdx2 = static_cast<int>(pb.track / VOICES);
-        auto noteIt = ctx.noteXoffByMeasStaff.find({ pb.measIdx, staffIdx2 });
-        if (noteIt != ctx.noteXoffByMeasStaff.end()) {
-            for (const auto& np : noteIt->second) {
-                if (np.first == pb.encTickRaw) {
-                    return;  // a note exists at the ORN's own beat: trust the raw tick
-                }
-            }
+    for (const auto& np : it->second) {
+        if (np.first == pb.encTickRaw) {
+            return true;
         }
     }
-    // Phase 1: anchor from same-measure ORN with matching xoffset.
-    bool fixed = false;
+    return false;
+}
+
+// Phase 1: borrow the tick of a same-measure bowing ORN whose xoffset clusters with this one.
+static std::optional<Fraction> bowingTickFromMatchingOrn(const PendingBowing& pb,
+                                                         const std::vector<PendingBowing>& allBowings)
+{
+    static constexpr int BOW_XOFF_CLUSTER = 6;
     for (const PendingBowing& anchor : allBowings) {
         if (&anchor == &pb || anchor.measIdx != pb.measIdx || anchor.encTickRaw == 0) {
             continue;
         }
         if (std::abs(anchor.ornXoffset - pb.ornXoffset) <= BOW_XOFF_CLUSTER) {
-            pb.tick = anchor.tick;
-            fixed = true;
-            break;
+            return anchor.tick;
         }
     }
-    if (fixed) {
-        return;
-    }
-    // Phase 2: match via closest note xoffset on the same staff.
+    return std::nullopt;
+}
+
+// Phase 2: snap to the note whose xoffset is the closest one at or left of the ORN's xoffset.
+static std::optional<Fraction> bowingTickFromNoteXoffset(const PendingBowing& pb, const BuildCtx& ctx)
+{
     const int staffIdx = static_cast<int>(pb.track / VOICES);
     auto it = ctx.noteXoffByMeasStaff.find({ pb.measIdx, staffIdx });
     if (it == ctx.noteXoffByMeasStaff.end()) {
-        return;
+        return std::nullopt;
     }
     int bestTick = -1;
     int bestDiff = INT_MAX;
@@ -141,13 +135,36 @@ static void correctBowingTickFromXoffset(
             bestTick = p.first;
         }
     }
-    if (bestTick >= 0) {
-        const int wholeTicks = kEncWholeTicks;  // bowing snaps to the same 960-tick note grid
-        const Measure* m = (pb.measIdx >= 0 && pb.measIdx < static_cast<int>(ctx.measuresByIdx.size()))
-                           ? ctx.measuresByIdx[pb.measIdx] : nullptr;
-        if (m) {
-            pb.tick = m->tick() + Fraction(bestTick, wholeTicks);
-        }
+    if (bestTick < 0) {
+        return std::nullopt;
+    }
+    const Measure* m = (pb.measIdx >= 0 && pb.measIdx < static_cast<int>(ctx.measuresByIdx.size()))
+                       ? ctx.measuresByIdx[pb.measIdx] : nullptr;
+    if (!m) {
+        return std::nullopt;
+    }
+    return m->tick() + Fraction(bestTick, kEncWholeTicks);  // bowing snaps to the 960-tick note grid
+}
+
+static void correctBowingTickFromXoffset(
+    PendingBowing& pb,
+    const std::vector<PendingBowing>& allBowings,
+    const BuildCtx& ctx)
+{
+    // When xoffset == 0 the ornament has no visual displacement data, it is
+    // already tagged at its correct note tick, so no correction is needed.
+    if (pb.ornXoffset == 0) {
+        return;
+    }
+    if (bowingHasNoteAtRawTick(pb, ctx)) {
+        return;  // a note exists at the ORN's own beat: trust the raw tick
+    }
+    if (std::optional<Fraction> t = bowingTickFromMatchingOrn(pb, allBowings)) {
+        pb.tick = *t;
+        return;
+    }
+    if (std::optional<Fraction> t = bowingTickFromNoteXoffset(pb, ctx)) {
+        pb.tick = *t;
     }
 }
 
