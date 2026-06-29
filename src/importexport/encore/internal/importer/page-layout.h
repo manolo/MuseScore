@@ -28,11 +28,22 @@
 namespace mu::iex::enc {
 struct BuildCtx;
 struct EncPrintSetup;
+struct EncRoot;
 
 // Resolve the page size (inches) from the PREC (DEVMODE) block: dmPaperSize enum, falling back
 // to dmPaperLength/Width for custom sizes, with the landscape swap applied. Returns false when
 // PREC has no usable size. Exposed for the import debug summary; applyPageSetup uses it too.
 bool precPageSizeInches(const EncPrintSetup& pr, double& wIn, double& hIn);
+
+// Derive the display size index (1-4) for an instrument: per-instrument LINE staff-size hint
+// when present, otherwise the global header score-size fallback. Used by applyStaffScale and
+// the import debug summary.
+int staffDisplaySize(const EncRoot& enc, int instrIdx);
+
+// Resolve the WINI margin unit (units per inch) from the printable extent: (rightEdge + left)
+// over the page width is ~72 when WINI is in typographic points and ~84 when it is screen
+// pixels at the monitor DPI. The near-72 case snaps to exactly 72.
+double winiUnitsPerInch(int rightEdge, int left, double pageWIn);
 
 // Apply Encore's page geometry to the score in buildScore's layout phase: page
 // size/orientation/scale (PREC), margins (WINI), the SCO5 uniform-margin default, and the

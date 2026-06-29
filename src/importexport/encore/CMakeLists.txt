@@ -63,6 +63,8 @@ target_sources(iex_encore PRIVATE
     internal/importer/import.cpp
     internal/importer/page-layout.h
     internal/importer/page-layout.cpp
+    internal/importer/debug-dump.h
+    internal/importer/debug-dump.cpp
     internal/importer/ctx.h
     internal/importer/builders.h
     internal/importer/builders-parts.cpp

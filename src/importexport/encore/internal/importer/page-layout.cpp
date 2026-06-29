@@ -229,6 +229,34 @@ static bool applyPagePrintSetup(MasterScore* score, const EncPrintSetup& pr)
     return true;
 }
 
+// Derive display size (1-4) for a given instrument index.
+// LINE staff entry byte +13 (0-indexed 0-3) holds per-instrument size in both 4.x and 5.x.
+// header.scoreSize (byte 0x52) is a global fallback for files without LINE data.
+int staffDisplaySize(const EncRoot& enc, int instrIdx)
+{
+    if (!enc.lines.empty()) {
+        for (const EncLineStaffData& lsd : enc.lines[0].staffData) {
+            if (static_cast<int>(lsd.instrumentIndex()) == instrIdx) {
+                return std::clamp(static_cast<int>(lsd.staffSizeHint) + 1, 1, 4);
+            }
+        }
+    }
+    return std::clamp(static_cast<int>(enc.header.scoreSize), 1, 4);
+}
+
+double winiUnitsPerInch(int rightEdge, int left, double pageWIn)
+{
+    if (pageWIn <= 0.0) {
+        return 72.0;
+    }
+    // (rightEdge + left) / pageWidth ≈ 72 means the WINI is in typographic points; a clearly
+    // larger value (~84) means screen pixels at the monitor DPI. Snap the near-72 case to exactly
+    // 72. The pixel estimate is exact only when left/right margins are symmetric; with asymmetric
+    // margins it is ~2% low.
+    const double est = static_cast<double>(rightEdge + left) / pageWIn;
+    return (est <= 76.0) ? 72.0 : est;
+}
+
 static void applyPageMargins(MasterScore* score, const EncPageSetup& ps, bool pageSizeLocked)
 {
     if (!ps.hasData) {
@@ -258,12 +286,8 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps, bool pa
     double scaleUpi = 72.0;
     if (pageSizeLocked) {
         // The page size is known (from PREC), so derive the WINI unit directly from the printable
-        // extent rather than guessing: (rightEdge + left) / pageWidth ≈ 72 means the WINI is in
-        // typographic points, a clearly larger value (~84) means screen pixels at the monitor DPI.
-        // Snap the near-72 case to exactly 72 (points). The pixel estimate is exact only when the
-        // left/right margins are symmetric; with asymmetric margins it is ~2% low.
-        const double estUpi = static_cast<double>(ps.rightEdge + ps.left) / pageWIn;
-        scaleUpi = (estUpi <= 76.0) ? 72.0 : estUpi;
+        // extent rather than guessing whether it is points or screen pixels.
+        scaleUpi = winiUnitsPerInch(ps.rightEdge, ps.left, pageWIn);
     } else if (screenPixelFmt) {
         const int pageWUnits = ps.rightEdge + ps.left;
         const int pageHUnits = ps.bottomEdge + ps.top;
