@@ -22,6 +22,7 @@
 
 #include "emitters-internal.h"
 
+#include "../parser/ticks.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/harmony.h"
 #include "engraving/dom/masterscore.h"
@@ -42,7 +43,7 @@ void handleChordSym(BuildCtx& ctx, const MeasEmitCtx& mc, const NoteElemCtx& ec)
     if (raw.isEmpty()) {
         return;
     }
-    static constexpr int wt = 960;   // Encore whole note = 960 ticks
+    const int wt = kEncWholeTicks;   // chord symbols anchor to the same 960-tick note grid
     const int bt = static_cast<int>(mc.encMeas->beatTicks ? mc.encMeas->beatTicks : 240);
     const int chdEncTick = static_cast<int>(ec.e->tick);
     const int beatStart  = (chdEncTick / bt) * bt;

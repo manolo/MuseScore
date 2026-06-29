@@ -22,6 +22,7 @@
 
 #include "resolvers.h"
 #include "../parser/elem.h"
+#include "../parser/ticks.h"
 #include "engraving/dom/chord.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/fingering.h"
@@ -143,7 +144,7 @@ static void correctBowingTickFromXoffset(
         }
     }
     if (bestTick >= 0) {
-        static constexpr int wholeTicks = 960;  // emitMeasures uses 960 ticks/whole
+        const int wholeTicks = kEncWholeTicks;  // bowing snaps to the same 960-tick note grid
         const Measure* m = (pb.measIdx >= 0 && pb.measIdx < static_cast<int>(ctx.measuresByIdx.size()))
                            ? ctx.measuresByIdx[pb.measIdx] : nullptr;
         if (m) {

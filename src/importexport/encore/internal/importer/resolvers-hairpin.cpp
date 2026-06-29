@@ -21,6 +21,7 @@
  */
 
 #include "resolvers.h"
+#include "coords.h"
 #include "../parser/elem.h"
 #include "engraving/dom/hairpin.h"
 #include "engraving/dom/factory.h"
@@ -45,11 +46,7 @@ static Fraction resolveHairpinEndByXoffset(
         return currentEndTick;
     }
     const EncMeasure& endEncMeas = enc.measures[static_cast<size_t>(ph.endMeasIdx)];
-    if (!endEncMeas.beatTicks || !endEncMeas.timeSigDen) {
-        return currentEndTick;
-    }
-    const int wholeTicks = static_cast<int>(endEncMeas.beatTicks)
-                           * static_cast<int>(endEncMeas.timeSigDen);
+    const int wholeTicks = encWholeNoteTicks(endEncMeas);
     const int xoff2 = ph.hairpinXoffset2;
     int bestEncTick     = -1;
     int bestXoff        = -1;

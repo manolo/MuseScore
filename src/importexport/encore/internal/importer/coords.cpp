@@ -25,17 +25,24 @@
 #include <limits>
 
 #include "../parser/elem.h"
+#include "../parser/ticks.h"
 
 using namespace mu::engraving;
 
 namespace mu::iex::enc {
+int encWholeNoteTicks(const EncMeasure& measure)
+{
+    if (measure.durTicks && measure.timeSigNum && measure.timeSigDen) {
+        return (static_cast<int>(measure.durTicks) * static_cast<int>(measure.timeSigDen))
+               / static_cast<int>(measure.timeSigNum);
+    }
+    return kEncWholeTicks;
+}
+
 Fraction snapStartTickByXoffset(Fraction defaultTick, const EncMeasure& encMeas,
                                 int staffIdx, int ornXoffset, Fraction measTick)
 {
-    if (encMeas.beatTicks == 0 || encMeas.timeSigDen == 0) {
-        return defaultTick;
-    }
-    const int wholeTicks = static_cast<int>(encMeas.beatTicks) * static_cast<int>(encMeas.timeSigDen);
+    const int wholeTicks = encWholeNoteTicks(encMeas);
     const Fraction relTick = defaultTick - measTick;
     const int defaultEncTick = (relTick.numerator() * wholeTicks)
                                / std::max(1, relTick.denominator());

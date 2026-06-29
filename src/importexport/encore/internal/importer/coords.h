@@ -26,6 +26,15 @@
 namespace mu::iex::enc {
 struct EncMeasure;
 
+// Encore ticks per whole note for a measure. Encore stores element ticks on a fixed
+// 960-ticks-per-whole grid (kEncWholeTicks). When the measure carries a usable time
+// signature this is re-derived as durTicks x timeSigDen / timeSigNum, which yields the
+// same 960 for a well-formed bar and stays correct for compound meters, where
+// beatTicks x timeSigDen does NOT. Falls back to kEncWholeTicks otherwise. Single source
+// of truth for the "ticks per whole note" conversion used when snapping spanners and
+// ornaments to Encore element ticks.
+int encWholeNoteTicks(const EncMeasure& measure);
+
 // ---------------------------------------------------------------------------
 // Coordinate-based anchoring helpers (shared)
 //

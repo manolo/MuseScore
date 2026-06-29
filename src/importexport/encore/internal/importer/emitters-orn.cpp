@@ -280,9 +280,7 @@ static void handleWedgeStart(BuildCtx& ctx, const MeasEmitCtx& mc,
     // actual notes (which may be in voice=1+).  Compute the tick directly from the raw Encore
     // element tick so hairpins in the second half of a grand-staff measure get the right start.
     // For single-staff instruments (staffWithin == 0) cumTick is correct; use ec.elemTick.
-    const int wholeTicks2 = (e->staffWithin > 0 && encMeas.beatTicks > 0 && encMeas.timeSigDen > 0)
-                            ? static_cast<int>(encMeas.beatTicks) * static_cast<int>(encMeas.timeSigDen)
-                            : 0;
+    const int wholeTicks2 = (e->staffWithin > 0) ? encWholeNoteTicks(encMeas) : 0;
     const Fraction rawElemTick = (wholeTicks2 > 0)
                                  ? measTick + Fraction(static_cast<int>(e->tick), wholeTicks2).reduced()
                                  : ec.elemTick;
@@ -390,11 +388,8 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         }
         PendingSlur ps;
         // Use raw eo->tick (not elemTick): elemTick is cumTick-based and wrong when voice 0 is empty.
-        // durTicks*timeSigDen/timeSigNum = 960 ticks/whole regardless of compound beat storage.
         {
-            const int wt = (encMeas.durTicks && encMeas.timeSigNum && encMeas.timeSigDen)
-                           ? (static_cast<int>(encMeas.durTicks) * encMeas.timeSigDen)
-                           / encMeas.timeSigNum : 960;
+            const int wt = encWholeNoteTicks(encMeas);
             ps.startTick = measTick
                            + Fraction(static_cast<int>(eo->tick), wt).reduced();
         }

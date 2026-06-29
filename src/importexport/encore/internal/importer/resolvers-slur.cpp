@@ -21,8 +21,8 @@
  */
 
 #include "resolvers.h"
+#include "coords.h"
 #include "../parser/elem.h"
-#include "../parser/ticks.h"
 #include <optional>
 #include <set>
 #include <cstdlib>
@@ -155,9 +155,7 @@ static std::optional<Fraction> resolveCrossMeasureXoffset(
     const PendingSlur& ps, const EncMeasure& endEncMeas,
     Measure* endMeas, const std::array<int, 256>& lineSlotByRawByte)
 {
-    const int wholeTicks = (endEncMeas.durTicks && endEncMeas.timeSigNum && endEncMeas.timeSigDen)
-                           ? (static_cast<int>(endEncMeas.durTicks) * endEncMeas.timeSigDen)
-                           / endEncMeas.timeSigNum : kEncWholeTicks;
+    const int wholeTicks = encWholeNoteTicks(endEncMeas);
     int bestDist = std::numeric_limits<int>::max();
     int bestEncTick = -1;
     for (const auto& elem : endEncMeas.elements) {
@@ -287,11 +285,7 @@ void resolveSlurs(BuildCtx& ctx)
             const EncMeasure& startEncMeas = enc.measures[ps.startMeasIdx];
             int firstNoteXoff = -1;
             const Fraction relStartTick = ps.startTick - ctx.measuresByIdx[ps.startMeasIdx]->tick();
-            // Whole-note ticks: durTicks × timeSigDen / timeSigNum (e.g. 6/8: 720×8/6=960).
-            // beatTicks × timeSigDen is WRONG for compound meters.
-            const int wt = (startEncMeas.durTicks && startEncMeas.timeSigNum && startEncMeas.timeSigDen)
-                           ? (static_cast<int>(startEncMeas.durTicks) * startEncMeas.timeSigDen)
-                           / startEncMeas.timeSigNum : kEncWholeTicks;
+            const int wt = encWholeNoteTicks(startEncMeas);
             const int startEncTick = (relStartTick.numerator() * wt)
                                      / std::max(1, relStartTick.denominator());
             for (const auto& elem : startEncMeas.elements) {
@@ -435,12 +429,7 @@ void resolveSlurs(BuildCtx& ctx)
                              && nextMIdx < static_cast<int>(ctx.measuresByIdx.size());
                              ++nextMIdx) {
                             const EncMeasure& nextEncMeas = enc.measures[nextMIdx];
-                            const int nextWt
-                                = (nextEncMeas.durTicks && nextEncMeas.timeSigNum
-                                   && nextEncMeas.timeSigDen)
-                                  ? (static_cast<int>(nextEncMeas.durTicks)
-                                     * nextEncMeas.timeSigDen)
-                                  / nextEncMeas.timeSigNum : kEncWholeTicks;
+                            const int nextWt = encWholeNoteTicks(nextEncMeas);
                             Measure* nextMs = ctx.measuresByIdx[nextMIdx];
                             for (const auto& elem : nextEncMeas.elements) {
                                 const EncMeasureElem* em = elem.get();
