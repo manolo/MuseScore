@@ -198,7 +198,7 @@ system's `start` (and to the total measure count for the last system) so line br
 
 | Offset | Size | Description                                                                    |
 |--------|------|--------------------------------------------------------------------------------|
-| +13    | 1    | **staff display size (0-indexed)**: 0=Size1/60%, 1=Size2/70%, 2=Size3/75%, 3=Size4/100%. Populated in both 4.x and 5.x files; this is the authoritative per-instrument size source. header byte 0x52 is a global fallback used only when LINE data is absent. Confirmed across 8 reference files with known Staff Sheet values. |
+| +13    | 1    | **staff display size (0-indexed)**: 0=Size1/60%, 1=Size2/75%, 2=Size3/100%, 3=Size4/130%. Populated in both 4.x and 5.x files; this is the authoritative per-instrument size source. header byte 0x52 is a global fallback used only when LINE data is absent. Confirmed across 8 reference files with known Staff Sheet values. |
 | +14    | 1    | clef type                                                                      |
 | +15    | 1    | key signature                                                                  |
 | +16    | 1    | page-row counter (varies per system; NOT the page number and NOT a fixed property) |
@@ -328,8 +328,16 @@ An unrelated layout field at +0x18 always holds 200 in v0xC4 files, do not confu
 
 ### Element body
 
-Each element: 2-byte tick + 1 type/voice byte (high nibble = type, low nibble = voice). `0xFFFF` tick terminates.
-After the 3-byte header every element starts with: 1-byte size + 1-byte **staff byte**.
+Each element begins with a fixed 5-byte header:
+
+| Offset | Size | Field                                                                   |
+|--------|------|-------------------------------------------------------------------------|
+| +0     | 2    | tick (uint16 LE); a tick of `0xFFFF` terminates the element stream      |
+| +2     | 1    | type/voice byte (high nibble = type, low nibble = voice)                |
+| +3     | 1    | size (total element length in bytes, counted from +0)                   |
+| +4     | 1    | staff byte (see encoding below)                                         |
+
+The element body follows at +5. **Every element table in this document gives offsets relative to the element start (+0 = the first tick byte), so the first body byte is always +5.**
 
 **Staff byte encoding** (same format as `instrStaffIdx` in the LINE block):
 
@@ -398,20 +406,20 @@ on-grid position rather than turned into rests.
 
 Type 7. Variable size. Encodes a chord symbol (harmony marking) above the staff.
 
-### Byte layout (content bytes, after the 5-byte element header)
+### Byte layout
 
 | Offset | Size | Field    | Description |
 |--------|------|----------|-------------|
-| +0     | 1    | `toniko` | Chord quality type (index 0-62 into the quality table below) |
-| +1     | 1    | `tipo`   | Flags: bit 0 = text present, bit 1 = bass note present |
-| +2-4   | 3    |, | skipped |
-| +5     | 1    | `xoffset`| Horizontal display offset |
-| +6     | 1    |, | skipped |
-| +7     | 1    | `radiko` | Root note (see note encoding below) |
-| +8     | 1    | `baso`   | Bass note for slash chords (same encoding as `radiko`; valid only when `tipo & 0x02`) |
-| +9     | 36   | `teksto` | Chord text slot (only present when `tipo & 0x01`; UTF-16 LE or Latin-1, byte 0/1 probe) |
+| +5     | 1    | `toniko` | Chord quality type (index 0-62 into the quality table below) |
+| +6     | 1    | `tipo`   | Flags: bit 0 = text present, bit 1 = bass note present |
+| +7-9   | 3    |, | skipped |
+| +10    | 1    | `xoffset`| Horizontal display offset |
+| +11    | 1    |, | skipped |
+| +12    | 1    | `radiko` | Root note (see note encoding below) |
+| +13    | 1    | `baso`   | Bass note for slash chords (same encoding as `radiko`; valid only when `tipo & 0x02`) |
+| +14    | 36   | `teksto` | Chord text slot (only present when `tipo & 0x01`; UTF-16 LE or Latin-1, byte 0/1 probe) |
 
-Trailing bytes (beyond `+9` when no text, beyond `+45` when text is present) are skipped using the element `size` field.
+Trailing bytes (beyond `+14` when no text, beyond `+50` when text is present) are skipped using the element `size` field.
 
 ### Root note encoding (`radiko` / `baso`)
 
@@ -1044,7 +1052,7 @@ Byte +11 is the playable MIDI value.
 | Offset   | Size   | Description                                                                      |
 |----------|--------|----------------------------------------------------------------------------------|
 | +5       | 1      | face value, same encoding as Note element                                       |
-| +10      | 1      | layout x-position                                                                |
+| +10      | 2      | layout x-position                                                                |
 | +13      | 1      | tuplet byte, high nibble = actualN, low nibble = normalN (same as note)         |
 | +14      | 1      | dotControl, **bitmask flag, NOT a tick count**. Bit 0 = dotted display hint.   |
 | +15      | 1      | **mrestCount**, Encore multi-measure rest display count. When > 1, this single MEAS block represents that many consecutive empty display measures (Encore draws one rest symbol with this count above it). Multi-staff files emit one REST element per staff, so the MEAS block can contain N elements (all REST, all with the same mrestCount). The count is read from the first element. Expansion is applied when ALL elements are REST and `mrestCount > 1`. The only suppression case is when the predecessor MEAS block is itself a multi-measure rest (all-REST, mrestCount > 1), which prevents cascading in the rare event Encore writes consecutive mrest blocks. A predecessor that is a plain single-measure rest (mrestCount == 1) does NOT suppress expansion. The successor content never affects validity, `mrestCount` is authoritative regardless of what follows. |
@@ -1222,7 +1230,7 @@ Detection: `rdur == beatTicks × (normalN / actualN)` (one beat per tuplet slot)
 
 **Dotted notes.** Dot count at +14.
 Can be inferred from `playbackTicks == faceTicks × 3/2` (one dot), `7/4` (two dots), with ±1-tick
-tolerance. For rests, dotControl (+10) is a bitmask flag, NOT a tick count; use
+tolerance. For rests, dotControl (+14) is a bitmask flag, NOT a tick count; use
 `calcDotsSnap(realDuration, fv)` as the authoritative dot source.
 
 **Ghost rest filter.** `calculateRealDurations` sets a REST's rdur to `nextTick - tick` (the
