@@ -96,13 +96,37 @@ static String humanizeTemplateId(const String& id)
     return String(out);
 }
 
+// Which matching rule selected the instrument template, in source-evaluation order.
+// Used only for the debug log; an enum (not a bare int + parallel label array) keeps the
+// label switch compiler-checked so reordering or adding a step cannot index out of range.
+enum class MatchStep {
+    None,
+    PercClef,       // PERC clef or GM percussive range -> drumset
+    NameMidiScore,  // name+MIDI score match
+    DrumsetName,    // name scoring over drumset templates
+    PercKeyword,    // generic percussion keyword in the name -> drumset
+    RhythmStaff,    // RHYTHM staff -> snare-drum
+    MidiProgram,    // MIDI program lookup
+};
+
+static const char* matchStepLabel(MatchStep step)
+{
+    switch (step) {
+    case MatchStep::None:          return "";
+    case MatchStep::PercClef:      return "PERC clef";
+    case MatchStep::NameMidiScore: return "name+MIDI score";
+    case MatchStep::DrumsetName:   return "drumset name";
+    case MatchStep::PercKeyword:   return "perc keyword";
+    case MatchStep::RhythmStaff:   return "RHYTHM staff";
+    case MatchStep::MidiProgram:   return "MIDI program";
+    }
+    return "";
+}
+
 // Apply a found template (or fallback to Grand Piano) and set the instrument's long name.
 static void applyInstrumentOrFallback(Part* part, const InstrumentTemplate* tmpl,
-                                      const EncInstrument& instr, int matchStep)
+                                      const EncInstrument& instr, MatchStep matchStep)
 {
-    static const char* stepDesc[] = {
-        "", "PERC clef", "name+MIDI score", "drumset name", "perc keyword", "MIDI program", "RHYTHM staff"
-    };
     auto setInstrName = [&](Instrument& ins) {
         if (!instr.name.isEmpty()) {
             ins.setLongName(String(instr.name));
@@ -122,8 +146,8 @@ static void applyInstrumentOrFallback(Part* part, const InstrumentTemplate* tmpl
             ins.setTrackName(humanizeTemplateId(tmpl->id));
         }
         LOGD() << "  instrument \"" << instr.name.toStdString()
-               << "\": step" << matchStep << "(" << stepDesc[matchStep]
-               << (matchStep == 5 ? QString(" %1").arg(instr.midiProgram).toStdString() : std::string())
+               << "\": step(" << matchStepLabel(matchStep)
+               << (matchStep == MatchStep::MidiProgram ? QString(" %1").arg(instr.midiProgram).toStdString() : std::string())
                << ")" << " -> " << ins.trackName().toStdString();
         part->setInstrument(ins);
         return;
@@ -145,6 +169,73 @@ static void applyInstrumentOrFallback(Part* part, const InstrumentTemplate* tmpl
     }
 }
 
+// Step 2: name+MIDI score with transposition filter. A contains-only (substring) name match can
+// outrank the GM instrument via the MIDI bonus: e.g. "Bajo" hits "Contrabajo"/"Clarín contrabajo"
+// (a treble bugle sharing the tuba's program) instead of the bass-clef Tuba. When the name match
+// is not exact, prefer the MIDI-program instrument if it differs. Exact matches are kept as-is, so
+// the deliberate "Bass" -> acoustic-bass MIDI tiebreak (findTemplateByMidi returns the same
+// template) is unaffected. A unique name match (a needle no other template's name contains, e.g.
+// "Dulzaina") is as trustworthy as an exact one, so it is kept too.
+static const InstrumentTemplate* tryNameMidiScore(const EncInstrument& instr, int encMidi,
+                                                  int encKey, bool isRhythm)
+{
+    bool nameExact = false;
+    bool nameUnique = false;
+    const InstrumentTemplate* nameTmpl = findEncoreInstrumentTemplate(instr.name, encMidi, encKey, &nameExact, &nameUnique);
+    if (nameTmpl && !nameExact && !nameUnique && !isRhythm && instr.midiProgram > 0) {
+        const InstrumentTemplate* midiTmpl = findTemplateByMidi(instr.midiProgram - 1);
+        if (midiTmpl && midiTmpl != nameTmpl) {
+            LOGD() << "  instrument \"" << instr.name.toStdString()
+                   << "\": weak name match \"" << nameTmpl->trackName.toStdString()
+                   << "\" overridden by MIDI " << instr.midiProgram << " -> "
+                   << midiTmpl->trackName.toStdString();
+            nameTmpl = midiTmpl;
+        }
+    }
+    if (!nameTmpl && !instr.name.trimmed().isEmpty()) {
+        const InstrumentTemplate* rejected = findEncoreInstrumentTemplate(instr.name, encMidi);
+        if (rejected) {
+            LOGD() << "  instrument \"" << instr.name.toStdString()
+                   << "\": MIDI " << instr.midiProgram << " match \""
+                   << rejected->trackName.toStdString()
+                   << "\" rejected (template chromatic=" << rejected->transpose.chromatic
+                   << " vs encKey=" << encKey << "), trying MIDI";
+        }
+    }
+    return nameTmpl;
+}
+
+// Step 4: generic percussion keyword in the instrument name.
+static bool nameHasPercKeyword(const EncInstrument& instr)
+{
+    const QString lname = instr.name.toLower();
+    return lname.contains(QStringLiteral("perc"))
+           || lname.contains(QStringLiteral("drum"))
+           || lname.contains(QStringLiteral("bater"));
+}
+
+// Step 6: MIDI program lookup (logs a transposition mismatch against the Encore key).
+static const InstrumentTemplate* tryMidiProgram(const EncInstrument& instr, int encKey)
+{
+    if (instr.midiProgram <= 0) {
+        return nullptr;
+    }
+    const InstrumentTemplate* midiTmpl = findTemplateByMidi(instr.midiProgram - 1);
+    if (midiTmpl) {
+        const int tmplChr = midiTmpl->transpose.chromatic;
+        const bool transpMismatch = (tmplChr % 12 != 0) && (encKey % 12 != 0)
+                                    && ((((encKey % 12) + 12) % 12) != (((tmplChr % 12) + 12) % 12));
+        if (transpMismatch) {
+            LOGD() << "  instrument \"" << instr.name.toStdString()
+                   << "\": MIDI " << instr.midiProgram << " match \""
+                   << midiTmpl->trackName.toStdString()
+                   << "\" transposition differs (template chromatic=" << tmplChr
+                   << " vs encKey=" << encKey << ")";
+        }
+    }
+    return midiTmpl;
+}
+
 static const InstrumentTemplate* applyBestInstrument(Part* part,
                                                      const EncInstrument& instr,
                                                      bool isPercByClef,
@@ -154,7 +245,7 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
 {
     // Piano mode: skip all matching and go straight to fallback.
     if (searchMode == InstrumentSearchMode::Piano) {
-        applyInstrumentOrFallback(part, nullptr, instr, 0);
+        applyInstrumentOrFallback(part, nullptr, instr, MatchStep::None);
         return nullptr;
     }
 
@@ -164,8 +255,8 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
     const bool useNameSearch = (searchMode == InstrumentSearchMode::NameAndMidi);
 
     const InstrumentTemplate* tmpl = nullptr;
-    int matchStep = 0;
-    auto tryStep = [&](int step, const InstrumentTemplate* candidate) {
+    MatchStep matchStep = MatchStep::None;
+    auto tryStep = [&](MatchStep step, const InstrumentTemplate* candidate) {
         if (!tmpl && candidate) {
             tmpl = candidate;
             matchStep = step;
@@ -175,81 +266,32 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
     // Step 1: PERC clef or GM Percussive range (113 to 128 1-indexed) → drumset.
     static constexpr int GM_PERC_FIRST = 113;
     if (isPercByClef || instr.midiProgram >= GM_PERC_FIRST) {
-        tryStep(1, searchTemplate(String(u"drumset")));
+        tryStep(MatchStep::PercClef, searchTemplate(String(u"drumset")));
     }
 
     // Steps 2-4: name-based matching (skipped in MidiOnly mode).
     if (useNameSearch) {
-        // Step 2: name+MIDI score with transposition filter.
         if (!tmpl) {
-            bool nameExact = false;
-            bool nameUnique = false;
-            const InstrumentTemplate* nameTmpl = findEncoreInstrumentTemplate(instr.name, encMidi, encKey, &nameExact, &nameUnique);
-            // A contains-only (substring) name match can outrank the GM instrument via the MIDI
-            // bonus: e.g. "Bajo" hits "Contrabajo"/"Clarín contrabajo" (a treble bugle sharing the
-            // tuba's program) instead of the bass-clef Tuba. When the name match is not exact,
-            // prefer the MIDI-program instrument if it differs. Exact matches are kept as-is, so
-            // the deliberate "Bass" -> acoustic-bass MIDI tiebreak (findTemplateByMidi returns the
-            // same template) is unaffected. A unique name match (a needle no other template's name
-            // contains, e.g. "Dulzaina") is as trustworthy as an exact one, so it is kept too.
-            if (nameTmpl && !nameExact && !nameUnique && !isRhythm && instr.midiProgram > 0) {
-                const InstrumentTemplate* midiTmpl = findTemplateByMidi(instr.midiProgram - 1);
-                if (midiTmpl && midiTmpl != nameTmpl) {
-                    LOGD() << "  instrument \"" << instr.name.toStdString()
-                           << "\": weak name match \"" << nameTmpl->trackName.toStdString()
-                           << "\" overridden by MIDI " << instr.midiProgram << " -> "
-                           << midiTmpl->trackName.toStdString();
-                    nameTmpl = midiTmpl;
-                }
-            }
-            tryStep(2, nameTmpl);
-            if (!tmpl && !instr.name.trimmed().isEmpty()) {
-                const InstrumentTemplate* rejected = findEncoreInstrumentTemplate(instr.name, encMidi);
-                if (rejected) {
-                    LOGD() << "  instrument \"" << instr.name.toStdString()
-                           << "\": MIDI " << instr.midiProgram << " match \""
-                           << rejected->trackName.toStdString()
-                           << "\" rejected (template chromatic=" << rejected->transpose.chromatic
-                           << " vs encKey=" << encKey << "), trying MIDI";
-                }
-            }
+            tryStep(MatchStep::NameMidiScore, tryNameMidiScore(instr, encMidi, encKey, isRhythm));
         }
         // Step 3: name scoring over drumset templates.
         if (!nameTooShort) {
-            tryStep(3, findDrumsetTemplate(instr.name));
+            tryStep(MatchStep::DrumsetName, findDrumsetTemplate(instr.name));
         }
         // Step 4: generic percussion keywords.
-        if (!tmpl && !nameTooShort) {
-            const QString lname = instr.name.toLower();
-            if (lname.contains(QStringLiteral("perc"))
-                || lname.contains(QStringLiteral("drum"))
-                || lname.contains(QStringLiteral("bater"))) {
-                tryStep(4, searchTemplate(String(u"drumset")));
-            }
+        if (!tmpl && !nameTooShort && nameHasPercKeyword(instr)) {
+            tryStep(MatchStep::PercKeyword, searchTemplate(String(u"drumset")));
         }
     }
 
     // Step 5 (RHYTHM): snare-drum; skip MIDI to avoid program-0 piano override.
     if (isRhythm) {
-        tryStep(6, searchTemplate(String(u"snare-drum")));
+        tryStep(MatchStep::RhythmStaff, searchTemplate(String(u"snare-drum")));
     }
 
-    // Step 5: MIDI program lookup (skipped for RHYTHM staves).
-    if (!tmpl && !isRhythm && instr.midiProgram > 0) {
-        const InstrumentTemplate* midiTmpl = findTemplateByMidi(instr.midiProgram - 1);
-        if (midiTmpl) {
-            const int tmplChr = midiTmpl->transpose.chromatic;
-            const bool transpMismatch = (tmplChr % 12 != 0) && (encKey % 12 != 0)
-                                        && ((((encKey % 12) + 12) % 12) != (((tmplChr % 12) + 12) % 12));
-            if (transpMismatch) {
-                LOGD() << "  instrument \"" << instr.name.toStdString()
-                       << "\": MIDI " << instr.midiProgram << " match \""
-                       << midiTmpl->trackName.toStdString()
-                       << "\" transposition differs (template chromatic=" << tmplChr
-                       << " vs encKey=" << encKey << ")";
-            }
-            tryStep(5, midiTmpl);
-        }
+    // Step 6: MIDI program lookup (skipped for RHYTHM staves).
+    if (!tmpl && !isRhythm) {
+        tryStep(MatchStep::MidiProgram, tryMidiProgram(instr, encKey));
     }
 
     // Encore stores the staff's notation/tablature choice in the clef; a name/MIDI match may
