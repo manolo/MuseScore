@@ -25,6 +25,7 @@
 #include "durations.h"
 
 #include <cstdlib>
+#include <utility>
 
 #include "../parser/ticks.h"
 
@@ -183,58 +184,28 @@ bool isStandardExplicitTuplet(int actualN, int normalN)
     if (actualN < 2 || normalN < 1) {
         return false;
     }
-    // Common tuplets (the "standard 4" always supported)
-    if ((actualN == 3 && normalN == 2)
-        || (actualN == 4 && normalN == 3)
-        || (actualN == 5 && normalN == 4)
-        || (actualN == 6 && normalN == 4)) {
-        return true;
-    }
-    // normalN must yield a TDuration-aligned fraction (normalN × baseLen).
-    // normalN=5,10,15,20 give 5/(2^k), which is not representable; 7 is safe (double-dotted).
+    // normalN must yield a TDuration-aligned fraction (normalN x baseLen). normalN=5,10,15,20 give
+    // 5/(2^k), not representable; 10/15/20 are rejected outright (the few valid 5:x and 9:5 ratios
+    // are whitelisted below), while 7 is safe (double-dotted).
     if (normalN == 10 || normalN == 15 || normalN == 20) {
         return false;
     }
-
-    // Duplets: 2 in the time of 1 (dosillo), or 2 in time of 3 (compound-meter duplet)
-    if (actualN == 2 && (normalN == 1 || normalN == 3)) {
-        return true;
+    // Whitelisted ratios whose normalN is NOT in {4,6,8} (those are covered by the blanket rule
+    // below). With normalN in {1,2,3,5,7} only these specific pairs are TDuration-aligned:
+    //   3:2, 4:3 (common); 2:1/2:3 (duplets); 5:2/5:3; 6:7; 9:5; 4:1/4:2 (observed).
+    static const std::pair<int, int> kStandardRatios[] = {
+        { 3, 2 }, { 4, 3 }, { 2, 1 }, { 2, 3 }, { 5, 2 }, { 5, 3 }, { 6, 7 }, { 9, 5 }, { 4, 1 }, { 4, 2 },
+    };
+    for (const auto& r : kStandardRatios) {
+        if (actualN == r.first && normalN == r.second) {
+            return true;
+        }
     }
-    // 2:4 (dosillo spanning a full measure's face value)
-    if (actualN == 2 && normalN == 4) {
-        return true;
-    }
-    // Quintuplets with safe normalN: 5:2, 5:3, 5:6, 5:8
-    if (actualN == 5 && (normalN == 2 || normalN == 3 || normalN == 6 || normalN == 8)) {
-        return true;
-    }
-    // Sextuplets: 6:5 excluded (normalN=5 unsafe); 6:7, 6:8 safe
-    if (actualN == 6 && (normalN == 7 || normalN == 8)) {
-        return true;
-    }
-    // Septuplets: 7:4, 7:6, 7:8
-    if (actualN == 7 && (normalN == 4 || normalN == 6 || normalN == 8)) {
-        return true;
-    }
-    // Octuplets: 8:4, 8:6
-    if (actualN == 8 && (normalN == 4 || normalN == 6)) {
-        return true;
-    }
-    // Segment-override groups: normalN in {4,6,8} always yields a standard TDuration.
+    // Blanket rule: normalN in {4,6,8} always yields a standard TDuration for 2..64-tuplets. This
+    // does NOT subsume the whitelist above, which uses normalN in {1,2,3,5,7}. Covers e.g. 5:4/6:4,
+    // 2:4, 5:6/5:8, 6:8, 7:4/7:6/7:8, 8:4/8:6, 9:4/9:6/9:8, 10:6/10:8.
     if ((normalN == 4 || normalN == 6 || normalN == 8)
         && actualN >= 2 && actualN <= 64) {
-        return true;
-    }
-    // 9:5 is non-TDuration-aligned but closeTuplet sets ticks after placement (same as sanitizeTuplet).
-    if (actualN == 9 && (normalN == 4 || normalN == 5 || normalN == 6 || normalN == 8)) {
-        return true;
-    }
-    // Decuplets with safe normalN: 10:6, 10:8
-    if (actualN == 10 && (normalN == 6 || normalN == 8)) {
-        return true;
-    }
-    // Unusual observed: 4:1, 4:2
-    if (actualN == 4 && (normalN == 1 || normalN == 2)) {
         return true;
     }
     return false;

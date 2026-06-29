@@ -217,6 +217,18 @@ static void resolveStaccatos(MasterScore* score,
     }
 }
 
+// True when a non-alt trill on the same track starts before pt, so pt's alt glyph sits within
+// that earlier trill's span (Ornament glyph only, no new spanner).
+static bool hasEarlierTrillStart(const std::vector<PendingTrill>& pendingTrills, const PendingTrill& pt)
+{
+    for (const PendingTrill& other : pendingTrills) {
+        if (!other.isAlt && other.track == pt.track && other.tick < pt.tick) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void resolveTrillsWithSpans(MasterScore* score,
                                    const std::vector<PendingTrill>& pendingTrills,
                                    std::map<track_idx_t, std::vector<Fraction> >& pendingTrillEnds,
@@ -252,14 +264,7 @@ static void resolveTrillsWithSpans(MasterScore* score,
             }
         }
 
-        const bool altWithinSpan = pt.isAlt && [&]() {
-            for (const PendingTrill& other : pendingTrills) {
-                if (!other.isAlt && other.track == pt.track && other.tick < pt.tick) {
-                    return true;
-                }
-            }
-            return false;
-        } ();
+        const bool altWithinSpan = pt.isAlt && hasEarlierTrillStart(pendingTrills, pt);
         const bool standaloneAlt = pt.isAlt && !altWithinSpan;
 
         Fraction endTick;
