@@ -33,6 +33,7 @@
 #include <utility>
 #include <vector>
 #include <array>
+#include <optional>
 
 namespace mu::engraving {
 class Measure;
@@ -117,12 +118,20 @@ void enqueueLyric(BuildCtx& ctx, const EncLyric* el, mu::engraving::track_idx_t 
 // Attach queued lyrics to the nearest chords in the measure. (emitters-lyrics.cpp)
 void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc);
 
+// Resolved MuseScore destination for an element: staff/voice and the derived track + lookup keys.
+struct RoutedTrack {
+    int staffIdx { 0 };
+    int voice { 0 };
+    int msVoice { 0 };
+    mu::engraving::track_idx_t track { 0 };
+    std::pair<int, int> trackKey;     // (staffIdx, msVoice)
+    std::pair<int, int> encVoiceKey;  // (staffIdx, voice)
+};
+
 // Route an element's raw (staffIdx, voice, staffWithin) to a MuseScore (staffIdx, voice, track).
-// Returns false if the element should be skipped. (emitters.cpp)
-bool routeElementStaffVoice(
-    const EncMeasureElem* e, bool isNoteOrRest, const std::array<int, 256>& lineSlotByRawByte, const MeasEmitCtx& mc, const BuildCtx& ctx,
-    int& staffIdx, int& voice, int& msVoice, mu::engraving::track_idx_t& track, std::pair<int, int>& trackKey, std::pair<int,
-                                                                                                                         int>& encVoiceKey);
+// Returns nullopt if the element should be skipped. (emitters.cpp)
+std::optional<RoutedTrack> routeElementStaffVoice(
+    const EncMeasureElem* e, bool isNoteOrRest, const std::array<int, 256>& lineSlotByRawByte, const MeasEmitCtx& mc, const BuildCtx& ctx);
 
 // Case-B pickup adjustment: shorten measure 0 if loop placed less than its nominal length. (emitters-fill.cpp)
 void adjustPickupMeasure(BuildCtx& ctx, mu::engraving::Measure* measure, int measIdx);

@@ -93,18 +93,15 @@ static std::map<int, std::vector<int> > buildEncNoteTicksByStaff(
         if (e->type != static_cast<quint8>(EncElemType::NOTE)) {
             continue;
         }
-        int rStaff = 0, rVoice = 0, rMsVoice = 0;
-        track_idx_t rTrack = 0;
-        std::pair<int, int> rTrackKey, rEncVoiceKey;
-        if (!mc.lineSlotByRawByte
-            || !routeElementStaffVoice(e, /*isNoteOrRest*/ true, *mc.lineSlotByRawByte, mc, ctx,
-                                       rStaff, rVoice, rMsVoice, rTrack, rTrackKey, rEncVoiceKey)) {
+        if (!mc.lineSlotByRawByte) {
             continue;
         }
-        if (rMsVoice != 0) {
-            continue;   // lyrics anchor to voice-0 chords
+        std::optional<RoutedTrack> routed
+            = routeElementStaffVoice(e, /*isNoteOrRest*/ true, *mc.lineSlotByRawByte, mc, ctx);
+        if (!routed || routed->msVoice != 0) {
+            continue;   // skip unroutable; lyrics anchor to voice-0 chords
         }
-        auto& tickList = encNoteTicksByStaff[rStaff];
+        auto& tickList = encNoteTicksByStaff[routed->staffIdx];
         const int t = static_cast<int>(e->tick);
         if (tickList.empty() || tickList.back() != t) {
             tickList.push_back(t);

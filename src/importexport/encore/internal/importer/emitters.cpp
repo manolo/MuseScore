@@ -340,26 +340,20 @@ static bool shouldIncludeElement(const EncMeasureElem* e, const EncMeasure& encM
 
 // Returns false if the element should be skipped (staffIdx out of range or voice invalid).
 // On success, fills staffIdx, voice, msVoice, track, trackKey, encVoiceKey.
-bool routeElementStaffVoice(
+std::optional<RoutedTrack> routeElementStaffVoice(
     const EncMeasureElem* e,
     bool isNoteOrRest,
     const std::array<int, 256>& lineSlotByRawByte,
     const MeasEmitCtx& mc,
-    const BuildCtx& ctx,
-    int& staffIdx,
-    int& voice,
-    int& msVoice,
-    track_idx_t& track,
-    std::pair<int, int>& trackKey,
-    std::pair<int, int>& encVoiceKey)
+    const BuildCtx& ctx)
 {
     const EncRoot& enc = ctx.enc;
     const int nLineStaves = mc.nLineStaves;
     const std::vector<int>& lineStaffInstrIdx = *mc.lineStaffInstrIdx;
     const std::vector<int>& lineStaffWithin   = *mc.lineStaffWithin;
 
-    staffIdx = static_cast<int>(e->staffIdx);
-    voice    = static_cast<int>(e->voice);
+    int staffIdx = static_cast<int>(e->staffIdx);
+    int voice    = static_cast<int>(e->voice);
 
     // Translate rawStaff byte (staffWithin<<6)|instrIdx to LINE slot; apply case-B voice remap when origStaffWithin > 0.
     const quint8 rawNoteStaff = e->rawStaffByte();
@@ -377,7 +371,7 @@ bool routeElementStaffVoice(
     }
 
     if (staffIdx >= ctx.totalStaves) {
-        return false;
+        return std::nullopt;
     }
     // Multi-staff routing:
     // (A) voice >= VOICES: route to staffIdx+1, voice=0.
@@ -413,14 +407,18 @@ bool routeElementStaffVoice(
         }
     }
 
-    encVoiceKey = std::make_pair(staffIdx, voice);
-    msVoice = voice;
+    const int msVoice = voice;
     if (msVoice >= static_cast<int>(VOICES)) {
-        return false;  // voice out of range
+        return std::nullopt;  // voice out of range
     }
-    track    = static_cast<track_idx_t>(staffIdx * VOICES + msVoice);
-    trackKey = std::make_pair(staffIdx, msVoice);
-    return true;
+    RoutedTrack r;
+    r.staffIdx    = staffIdx;
+    r.voice       = voice;
+    r.msVoice     = msVoice;
+    r.track       = static_cast<track_idx_t>(staffIdx * VOICES + msVoice);
+    r.trackKey    = std::make_pair(staffIdx, msVoice);
+    r.encVoiceKey = std::make_pair(staffIdx, voice);
+    return r;
 }
 
 // Returns the MuseScore tick where this element should be placed.
@@ -837,13 +835,16 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
         return;
     }
 
-    int staffIdx = 0, voice = 0, msVoice = 0;
-    track_idx_t track = 0;
-    std::pair<int, int> trackKey, encVoiceKey;
-    if (!routeElementStaffVoice(e, isNoteOrRest, lineSlotByRawByte, mc, ctx,
-                                staffIdx, voice, msVoice, track, trackKey, encVoiceKey)) {
+    std::optional<RoutedTrack> routed = routeElementStaffVoice(e, isNoteOrRest, lineSlotByRawByte, mc, ctx);
+    if (!routed) {
         return;
     }
+    const int staffIdx = routed->staffIdx;
+    const int voice = routed->voice;
+    const int msVoice = routed->msVoice;
+    const track_idx_t track = routed->track;
+    const std::pair<int, int> trackKey = routed->trackKey;
+    const std::pair<int, int> encVoiceKey = routed->encVoiceKey;
 
     // Near-simultaneous notes (< CHORD_MIDI_THRESHOLD) extend the chord; same Encore voice required.
     constexpr int CHORD_MIDI_THRESHOLD = 2 * CHORD_CLUSTER_THRESHOLD;  // = 8
