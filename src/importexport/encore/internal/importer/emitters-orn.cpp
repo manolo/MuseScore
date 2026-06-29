@@ -314,6 +314,107 @@ static void handleWedgeStart(BuildCtx& ctx, const MeasEmitCtx& mc,
     ctx.pendingHairpins.push_back(ph);
 }
 
+static void handleTrillOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
+                                const NoteElemCtx& ec, const EncOrnament* eo)
+{
+    const EncMeasure& encMeas = *mc.encMeas;
+    const Fraction measTick = mc.measTick;
+    const Fraction elemTick = ec.elemTick;
+    const int staffIdx = ec.staffIdx;
+    const int voice = ec.voice;
+    const track_idx_t track = ec.track;
+    const int measIdx = mc.measIdx;
+    const EncMeasureElem* e = ec.e;
+
+    // TRILL_START: spanner when TRILL_END or alMezuro marks the end; TRILL_ALT: always Ornament glyph;
+    // TRILL_TR/TRILL_SHORT: standalone glyph only, never a spanner. Chord deferred to post-pass.
+    PendingTrill pt;
+    pt.isAlt    = (eo->ornType() != EncOrnamentType::TRILL_START);
+    pt.isSimple = (eo->ornType() == EncOrnamentType::TRILL_TR
+                   || eo->ornType() == EncOrnamentType::TRILL_SHORT);
+    if (pt.isSimple) {
+        // Snap to visual position; 20px threshold ignores small alignment nudges.
+        const int ornXoff = static_cast<int>(eo->xoffset);
+        int crXoffAtTick = -1;
+        for (const auto& elem : encMeas.elements) {
+            const EncMeasureElem* em = elem.get();
+            if (static_cast<int>(em->tick) != static_cast<int>(e->tick)) {
+                continue;
+            }
+            if (em->staffIdx != staffIdx || em->voice != voice) {
+                continue;
+            }
+            if (em->type == static_cast<quint8>(EncElemType::NOTE)) {
+                crXoffAtTick = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
+                break;
+            } else if (em->type == static_cast<quint8>(EncElemType::REST)) {
+                crXoffAtTick = static_cast<int>(static_cast<const EncRest*>(em)->xoffset);
+                break;
+            }
+        }
+        constexpr int TRILL_SNAP_THRESHOLD = 20;
+        if (crXoffAtTick >= 0 && ornXoff < crXoffAtTick - TRILL_SNAP_THRESHOLD) {
+            pt.tick = snapStartTickByXoffset(elemTick, encMeas, staffIdx,
+                                             static_cast<int>(eo->xoffset), measTick);
+        } else {
+            pt.tick = elemTick;
+        }
+        pt.simpleSymId = (eo->ornType() == EncOrnamentType::TRILL_SHORT)
+                         ? SymId::ornamentShortTrill
+                         : SymId::ornamentTrill;
+    } else {
+        pt.tick = elemTick;
+    }
+    pt.track   = track;
+    if (!pt.isAlt) {
+        pt.alMezuro = static_cast<int>(eo->alMezuro);
+        pt.measIdx  = static_cast<size_t>(measIdx);
+        pt.xoffset2 = static_cast<int>(eo->xoffset2);
+    }
+    ctx.pendingTrills.push_back(pt);
+}
+
+static void handleStringNumberOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
+                                       const NoteElemCtx& ec, const EncOrnament* eo)
+{
+    const Fraction elemTick = ec.elemTick;
+    const track_idx_t track = ec.track;
+    const int measIdx = mc.measIdx;
+
+    const int sn = static_cast<int>(eo->ornType())
+                   - static_cast<int>(EncOrnamentType::STRING_NUMBER_2) + 2;
+    ctx.pendingOrnFingerings.push_back({ elemTick, track, sn, measIdx, false, false, true });
+}
+
+static void handleFingerOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
+                                 const NoteElemCtx& ec, const EncOrnament* eo)
+{
+    const EncMeasureElem* e = ec.e;
+    const Fraction elemTick = ec.elemTick;
+    const track_idx_t track = ec.track;
+    const int measIdx = mc.measIdx;
+    const std::set<int>& voice4NoteTicks = mc.voice4NoteTicks;
+    const std::map<int, int>& v0NoteCountAtTick = mc.v0NoteCountAtTick;
+    const std::map<int, int>& ornFingCountAtTick = mc.ornFingCountAtTick;
+    const int maxVoice0Tick = mc.maxVoice0Tick;
+
+    const int n = static_cast<int>(eo->ornType())
+                  - static_cast<int>(EncOrnamentType::FINGER_1) + 1;
+    const int orn_tick = static_cast<int>(e->tick);
+    // cm: ORN at last voice=0 tick with no voice=4 note there; belongs to first chord of next measure.
+    const bool cm = !voice4NoteTicks.empty()
+                    && !voice4NoteTicks.count(orn_tick)
+                    && orn_tick == maxVoice0Tick;
+    // ps: excess FINGER ORNs beyond voice=0 note count target the voice=4 (2nd staff) chord.
+    const bool ps = !cm
+                    && voice4NoteTicks.count(orn_tick)
+                    && ornFingCountAtTick.count(orn_tick)
+                    && v0NoteCountAtTick.count(orn_tick)
+                    && ornFingCountAtTick.at(orn_tick)
+                    > v0NoteCountAtTick.at(orn_tick);
+    ctx.pendingOrnFingerings.push_back({ elemTick, track, n, measIdx, cm, ps });
+}
+
 void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
 {
     MasterScore* score = ctx.score;
@@ -322,10 +423,6 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
     const Fraction measTick = mc.measTick;
     const int measIdx = mc.measIdx;
     const std::set<int>& noteTicks = mc.noteTicks;
-    const std::set<int>& voice4NoteTicks = mc.voice4NoteTicks;
-    const std::map<int, int>& v0NoteCountAtTick = mc.v0NoteCountAtTick;
-    const std::map<int, int>& ornFingCountAtTick = mc.ornFingCountAtTick;
-    int maxVoice0Tick = mc.maxVoice0Tick;
     const EncMeasureElem* e = ec.e;
     int& staffIdx = ec.staffIdx;          // mutable ref (dynamic rerouting)
     int voice = ec.voice;
@@ -406,55 +503,9 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
     case EncOrnamentType::TRILL_START:
     case EncOrnamentType::TRILL_ALT:
     case EncOrnamentType::TRILL_TR:
-    case EncOrnamentType::TRILL_SHORT: {
-        // TRILL_START: spanner when TRILL_END or alMezuro marks the end; TRILL_ALT: always Ornament glyph;
-        // TRILL_TR/TRILL_SHORT: standalone glyph only, never a spanner. Chord deferred to post-pass.
-        PendingTrill pt;
-        pt.isAlt    = (eo->ornType() != EncOrnamentType::TRILL_START);
-        pt.isSimple = (eo->ornType() == EncOrnamentType::TRILL_TR
-                       || eo->ornType() == EncOrnamentType::TRILL_SHORT);
-        if (pt.isSimple) {
-            // Snap to visual position; 20px threshold ignores small alignment nudges.
-            const int ornXoff = static_cast<int>(eo->xoffset);
-            int crXoffAtTick = -1;
-            for (const auto& elem : encMeas.elements) {
-                const EncMeasureElem* em = elem.get();
-                if (static_cast<int>(em->tick) != static_cast<int>(e->tick)) {
-                    continue;
-                }
-                if (em->staffIdx != staffIdx || em->voice != voice) {
-                    continue;
-                }
-                if (em->type == static_cast<quint8>(EncElemType::NOTE)) {
-                    crXoffAtTick = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
-                    break;
-                } else if (em->type == static_cast<quint8>(EncElemType::REST)) {
-                    crXoffAtTick = static_cast<int>(static_cast<const EncRest*>(em)->xoffset);
-                    break;
-                }
-            }
-            constexpr int TRILL_SNAP_THRESHOLD = 20;
-            if (crXoffAtTick >= 0 && ornXoff < crXoffAtTick - TRILL_SNAP_THRESHOLD) {
-                pt.tick = snapStartTickByXoffset(elemTick, encMeas, staffIdx,
-                                                 static_cast<int>(eo->xoffset), measTick);
-            } else {
-                pt.tick = elemTick;
-            }
-            pt.simpleSymId = (eo->ornType() == EncOrnamentType::TRILL_SHORT)
-                             ? SymId::ornamentShortTrill
-                             : SymId::ornamentTrill;
-        } else {
-            pt.tick = elemTick;
-        }
-        pt.track   = track;
-        if (!pt.isAlt) {
-            pt.alMezuro = static_cast<int>(eo->alMezuro);
-            pt.measIdx  = static_cast<size_t>(measIdx);
-            pt.xoffset2 = static_cast<int>(eo->xoffset2);
-        }
-        ctx.pendingTrills.push_back(pt);
+    case EncOrnamentType::TRILL_SHORT:
+        handleTrillOrnament(ctx, mc, ec, eo);
         break;
-    }
     case EncOrnamentType::TRILL_END:
         ctx.pendingTrillEnds[track].push_back(elemTick);
         break;
@@ -474,14 +525,12 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         ctx.pendingStaccatos.push_back({ elemTick, track });
         break;
     }
-    case EncOrnamentType::FERMATA_ABOVE: {
-        ctx.pendingFermatas.push_back({ elemTick, track, SymId::fermataAbove });
+    case EncOrnamentType::FERMATA_ABOVE:
+    case EncOrnamentType::FERMATA_BELOW:
+        ctx.pendingFermatas.push_back({ elemTick, track,
+                                        eo->ornType() == EncOrnamentType::FERMATA_ABOVE
+                                        ? SymId::fermataAbove : SymId::fermataBelow });
         break;
-    }
-    case EncOrnamentType::FERMATA_BELOW: {
-        ctx.pendingFermatas.push_back({ elemTick, track, SymId::fermataBelow });
-        break;
-    }
     case EncOrnamentType::REPEAT_MEASURE: {
         bool already = false;
         for (const auto& pmr : ctx.pendingMeasureRepeats) {
@@ -495,14 +544,12 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         }
         break;
     }
-    case EncOrnamentType::CAESURA: {
-        ctx.pendingBreaths.push_back({ elemTick, track, SymId::caesura });
+    case EncOrnamentType::CAESURA:
+    case EncOrnamentType::BREATH_COMMA:
+        ctx.pendingBreaths.push_back({ elemTick, track,
+                                       eo->ornType() == EncOrnamentType::CAESURA
+                                       ? SymId::caesura : SymId::breathMarkComma });
         break;
-    }
-    case EncOrnamentType::BREATH_COMMA: {
-        ctx.pendingBreaths.push_back({ elemTick, track, SymId::breathMarkComma });
-        break;
-    }
     case EncOrnamentType::ACCENT:               pushBowing(SymId::articAccentAbove);
         break;
     case EncOrnamentType::DOWNBOW:              pushBowing(SymId::stringsDownBow);
@@ -544,12 +591,9 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
     case EncOrnamentType::STRING_NUMBER_3:
     case EncOrnamentType::STRING_NUMBER_4:
     case EncOrnamentType::STRING_NUMBER_5:
-    case EncOrnamentType::STRING_NUMBER_6: {
-        const int sn = static_cast<int>(eo->ornType())
-                       - static_cast<int>(EncOrnamentType::STRING_NUMBER_2) + 2;
-        ctx.pendingOrnFingerings.push_back({ elemTick, track, sn, measIdx, false, false, true });
+    case EncOrnamentType::STRING_NUMBER_6:
+        handleStringNumberOrnament(ctx, mc, ec, eo);
         break;
-    }
     case EncOrnamentType::OTTAVA_ALTA:
     case EncOrnamentType::OTTAVA_BASSA: {
         const OttavaType ot = (eo->ornType() == EncOrnamentType::OTTAVA_ALTA)
@@ -564,24 +608,9 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
     case EncOrnamentType::FINGER_2:
     case EncOrnamentType::FINGER_3:
     case EncOrnamentType::FINGER_4:
-    case EncOrnamentType::FINGER_5: {
-        const int n = static_cast<int>(eo->ornType())
-                      - static_cast<int>(EncOrnamentType::FINGER_1) + 1;
-        const int orn_tick = static_cast<int>(e->tick);
-        // cm: ORN at last voice=0 tick with no voice=4 note there; belongs to first chord of next measure.
-        const bool cm = !voice4NoteTicks.empty()
-                        && !voice4NoteTicks.count(orn_tick)
-                        && orn_tick == maxVoice0Tick;
-        // ps: excess FINGER ORNs beyond voice=0 note count target the voice=4 (2nd staff) chord.
-        const bool ps = !cm
-                        && voice4NoteTicks.count(orn_tick)
-                        && ornFingCountAtTick.count(orn_tick)
-                        && v0NoteCountAtTick.count(orn_tick)
-                        && ornFingCountAtTick.at(orn_tick)
-                        > v0NoteCountAtTick.at(orn_tick);
-        ctx.pendingOrnFingerings.push_back({ elemTick, track, n, measIdx, cm, ps });
+    case EncOrnamentType::FINGER_5:
+        handleFingerOrnament(ctx, mc, ec, eo);
         break;
-    }
     case EncOrnamentType::DYN_PPP:
     case EncOrnamentType::DYN_PP:
     case EncOrnamentType::DYN_P:
