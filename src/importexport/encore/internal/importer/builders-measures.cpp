@@ -115,39 +115,30 @@ static int encMeasDisplayCount(const EncMeasure& m, const EncMeasure* prev)
     return cnt;
 }
 
+// Time signature of a measure, with a 4/4 fallback when the stored num/den are 0.
+static Fraction encMeasTimeSig(const EncMeasure& m)
+{
+    const int num = m.timeSigNum > 0 ? m.timeSigNum : 4;
+    const int den = m.timeSigDen > 0 ? m.timeSigDen : 4;
+    return Fraction(num, den);
+}
+
 void buildMeasures(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
     const EncRoot& enc = ctx.enc;
 
-    // Pickup measure: measure 0 holds the short duration, measure 1 the real sig.
-    {
-        int n0 = !enc.measures.empty() && enc.measures[0].timeSigNum > 0
-                 ? enc.measures[0].timeSigNum : 4;
-        int d0 = !enc.measures.empty() && enc.measures[0].timeSigDen > 0
-                 ? enc.measures[0].timeSigDen : 4;
-        ctx.nominalTimeSig = Fraction(n0, d0);
-        if (enc.measures.size() >= 2) {
-            int n1 = enc.measures[1].timeSigNum > 0 ? enc.measures[1].timeSigNum : 4;
-            int d1 = enc.measures[1].timeSigDen > 0 ? enc.measures[1].timeSigDen : 4;
-            Fraction ts1(n1, d1);
-            if (ts1 != ctx.nominalTimeSig) {
-                ctx.nominalTimeSig = ts1;
-            }
-        }
-    }
+    // Pickup measure: measure 0 holds the short duration, measure 1 the real sig. The "nominal"
+    // sig is measure 1's when present (it survives a pickup in measure 0), else measure 0's.
+    const Fraction sig0 = enc.measures.empty() ? Fraction(4, 4) : encMeasTimeSig(enc.measures[0]);
+    ctx.nominalTimeSig = (enc.measures.size() >= 2) ? encMeasTimeSig(enc.measures[1]) : sig0;
 
-    // Nominal time sig type; use measure [1] when [0] is a pickup.
-    {
-        const size_t nomIdx = (enc.measures.size() >= 2
-                               && ctx.nominalTimeSig != Fraction(
-                                   enc.measures[0].timeSigNum > 0 ? enc.measures[0].timeSigNum : 4,
-                                   enc.measures[0].timeSigDen > 0 ? enc.measures[0].timeSigDen : 4))
-                              ? 1 : 0;
-        if (nomIdx < enc.measures.size()) {
-            ctx.nominalTimeSigType = encTimeSigGlyph2Type(enc.measures[nomIdx].timeSigGlyph,
-                                                          ctx.nominalTimeSig);
-        }
+    // Nominal time-sig type: use measure 1's glyph when its sig differs from measure 0 (pickup),
+    // otherwise measure 0's.
+    const size_t nomIdx = (enc.measures.size() >= 2 && ctx.nominalTimeSig != sig0) ? 1 : 0;
+    if (nomIdx < enc.measures.size()) {
+        ctx.nominalTimeSigType = encTimeSigGlyph2Type(enc.measures[nomIdx].timeSigGlyph,
+                                                      ctx.nominalTimeSig);
     }
 
     int currentTick = 0;
