@@ -159,15 +159,24 @@ static std::optional<Fraction> resolveCrossMeasureXoffset(
     int bestEncTick = -1;
     for (const auto& elem : endEncMeas.elements) {
         const EncMeasureElem* em = elem.get();
-        if (em->type != static_cast<quint8>(EncElemType::NOTE)) { continue; }
-        if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) { continue; }
+        if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
+            continue;
+        }
+        if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
+            continue;
+        }
         const int xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
         const int dist = std::abs(xoff - ps.slurXoffset2);
-        if (dist <= bestDist) { bestDist = dist; bestEncTick = static_cast<int>(em->tick); }
+        if (dist <= bestDist) {
+            bestDist = dist;
+            bestEncTick = static_cast<int>(em->tick);
+        }
     }
     if (bestEncTick >= 0 && wholeTicks > 0) {
         const Fraction candidate = endMeas->tick() + Fraction(bestEncTick, wholeTicks).reduced();
-        if (candidate > ps.startTick) { return candidate; }
+        if (candidate > ps.startTick) {
+            return candidate;
+        }
     }
     return std::nullopt;
 }
@@ -181,10 +190,15 @@ static std::optional<Fraction> resolveLastChordInMeasure(const PendingSlur& ps, 
          s = s->next(SegmentType::ChordRest)) {
         for (int v = 0; v < static_cast<int>(VOICES); ++v) {
             track_idx_t t = static_cast<track_idx_t>(ps.staffIdx * VOICES + v);
-            if (s->element(t) && s->element(t)->isChord()) { lastSeg = s; break; }
+            if (s->element(t) && s->element(t)->isChord()) {
+                lastSeg = s;
+                break;
+            }
         }
     }
-    if (!lastSeg) { return std::nullopt; }
+    if (!lastSeg) {
+        return std::nullopt;
+    }
     return lastSeg->tick();
 }
 
@@ -207,6 +221,202 @@ static Chord* firstChordOnStaffFrom(Measure* m, int staffIdx, const Fraction& fr
         }
     }
     return nullptr;
+}
+
+// Same-measure slur endpoint via the xoffset heuristic: find the note whose horizontal
+// position best matches first_note_xoff + pixelSpan, optionally extending one or two measures
+// past the start when the arc clearly does. Used when alMezuro is not a reliable measure count
+// (xoffsets reset at barlines). Returns the resolved end tick, or nullopt when it cannot place
+// the endpoint (the caller then tries the cross-measure-xoffset and last-chord fallbacks).
+static std::optional<Fraction> resolveSameMeasureHeuristic(
+    BuildCtx& ctx, const PendingSlur& ps, const std::array<int, 256>& lineSlotByRawByte)
+{
+    MasterScore* score = ctx.score;
+    const EncRoot& enc = ctx.enc;
+    const bool tryHeuristic = (!ps.alMezuroValid || ps.alMezuro == 0)
+                              && ps.startMeasIdx >= 0
+                              && ps.startMeasIdx < static_cast<int>(enc.measures.size());
+    if (!tryHeuristic) {
+        return std::nullopt;
+    }
+    Fraction endTick;
+    bool resolved = false;
+
+    const EncMeasure& startEncMeas = enc.measures[ps.startMeasIdx];
+    int firstNoteXoff = -1;
+    const Fraction relStartTick = ps.startTick - ctx.measuresByIdx[ps.startMeasIdx]->tick();
+    const int wt = encWholeNoteTicks(startEncMeas);
+    const int startEncTick = (relStartTick.numerator() * wt)
+                             / std::max(1, relStartTick.denominator());
+    for (const auto& elem : startEncMeas.elements) {
+        const EncMeasureElem* em = elem.get();
+        if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
+            continue;
+        }
+        // Search all voices: slur ORN encVoice is the arc position, not necessarily the note voice.
+        if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
+            continue;
+        }
+        if (static_cast<int>(em->tick) != startEncTick) {
+            continue;
+        }
+        const EncNote* en = static_cast<const EncNote*>(em);
+        const int xoff = static_cast<int>(en->xoffset);
+        if (en->graceType() != EncGraceType::NORMAL) {
+            // v0xC4: regular note appears before grace in binary; prefer grace xoffset
+            // as arc-start reference to avoid inflating targetEndXoff.
+            firstNoteXoff = xoff;
+            break;
+        }
+        if (firstNoteXoff < 0) {
+            firstNoteXoff = xoff;   // regular: tentative, keep searching
+        }
+    }
+    if (firstNoteXoff >= 0) {
+        const int pixelSpan = ps.slurXoffset2 - ps.slurXoffset;
+        // Tiny pixelSpan (0-2) with note before arc start: firstNoteXoff+pixelSpan ≈ 0 matches a decoy.
+        // Use slurXoffset2 directly as the arc-end target instead.
+        const bool usedTinyPixelSpan = (pixelSpan >= 0 && pixelSpan <= 2
+                                        && firstNoteXoff < ps.slurXoffset);
+        // v0xC2 short slur: pixelSpan is the only origin-independent signal, and beyond
+        // "short vs long" it is unreliable, while the absolute slurXoffset2 lives in a
+        // stale ornament-coordinate origin (matching it over-extends, e.g. n1→n2 read as
+        // n1→n4). A tiny span means a note-to-next-note slur, so anchor the endpoint to
+        // the next note on the staff instead of the coordinate search.
+        const bool v0c2ShortSlur = enc.fmt->slurXoffset2Stale()
+                                   && (std::abs(pixelSpan) <= 2);
+        const int targetEndXoff = usedTinyPixelSpan
+                                  ? ps.slurXoffset2
+                                  : firstNoteXoff + pixelSpan;
+        // Single pass: find best later-note endpoint + detect grace/regular co-location for grace-to-main shortcut.
+        {
+            int bestDist = std::numeric_limits<int>::max();
+            int bestEncTick = -1;
+            int maxXoffInMeas = -1;
+            bool hasGraceAtStart = false;
+            int regularXoffAtStart = -1;
+            for (const auto& elem : startEncMeas.elements) {
+                const EncMeasureElem* em = elem.get();
+                if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
+                    continue;
+                }
+                if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
+                    continue;
+                }
+                const int xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
+                if (xoff > maxXoffInMeas) {
+                    maxXoffInMeas = xoff;
+                }
+                if (static_cast<int>(em->tick) == startEncTick) {
+                    const EncNote* en = static_cast<const EncNote*>(em);
+                    if (en->graceType() != EncGraceType::NORMAL) {
+                        hasGraceAtStart = true;
+                    } else {
+                        // Gap notes often have xoffset=0; keep the best-matching regular note.
+                        const int thisDist = std::abs(xoff - targetEndXoff);
+                        if (regularXoffAtStart < 0
+                            || thisDist < std::abs(regularXoffAtStart - targetEndXoff)) {
+                            regularXoffAtStart = xoff;
+                        }
+                    }
+                }
+                // Only notes strictly after the start can be endpoints.
+                if (static_cast<int>(em->tick) <= startEncTick) {
+                    continue;
+                }
+                if (v0c2ShortSlur) {
+                    // Next-note rule: pick the earliest note after the start.
+                    if (bestEncTick < 0 || static_cast<int>(em->tick) < bestEncTick) {
+                        bestEncTick = static_cast<int>(em->tick);
+                        bestDist = 0;
+                    }
+                    continue;
+                }
+                const int dist = std::abs(xoff - targetEndXoff);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestEncTick = static_cast<int>(em->tick);
+                }
+            }
+            // Grace-to-main: grace + regular share startEncTick and regular is closest match → zero-span.
+            // If a later note is closer, resolve as grace-to-later instead.
+            // For a v0xC2 short slur the next-note rule sets bestDist=0, so the distance
+            // comparison can never pick grace-to-main; a grace at the start is the strong
+            // signal that the slur ornaments its own main note, so prefer zero-span there.
+            if (hasGraceAtStart && regularXoffAtStart >= 0) {
+                const int regularDist = std::abs(regularXoffAtStart - targetEndXoff);
+                if (v0c2ShortSlur || regularDist < bestDist) {
+                    endTick  = ps.startTick;
+                    resolved = true;
+                }
+            }
+            if (!resolved && bestEncTick > startEncTick) {
+                const Fraction endRel(bestEncTick, wt);
+                const Fraction candidate = ctx.measuresByIdx[ps.startMeasIdx]->tick()
+                                           + endRel;
+                // Snap to chord segment: grace notes steal time, shifting cumTick earlier than proportional tick.
+                Measure* sMeas = ctx.measuresByIdx[ps.startMeasIdx];
+                Segment* snappedSeg = score->tick2leftSegment(
+                    candidate, false, SegmentType::ChordRest);
+                if (snappedSeg && snappedSeg->measure() == sMeas
+                    && snappedSeg->tick() >= ps.startTick) {
+                    bool hasChord = false;
+                    for (int v = 0; v < static_cast<int>(VOICES) && !hasChord; ++v) {
+                        track_idx_t t = static_cast<track_idx_t>(
+                            ps.staffIdx * VOICES + v);
+                        if (snappedSeg->element(t)
+                            && snappedSeg->element(t)->isChord()) {
+                            hasChord = true;
+                        }
+                    }
+                    endTick = hasChord ? snappedSeg->tick() : candidate;
+                } else {
+                    endTick = candidate;
+                }
+                resolved = true;
+            }
+            // Cross-measure extension when alMezuro is unreliable and the arc endpoint clearly
+            // exceeds the start measure. Excluded for tiny-pixelspan slurs (ornament placed after
+            // first note) because their targetEndXoff is slurXoffset2, which may be in the next
+            // measure's coordinate space and would produce a false positive. Also excluded when
+            // the same-measure search already resolved to a zero-span (grace-to-main) endpoint.
+            if (!ps.alMezuroValid && !usedTinyPixelSpan && bestDist > 0
+                && (targetEndXoff > maxXoffInMeas || bestEncTick < 0)
+                && !(resolved && endTick == ps.startTick)) {
+                for (int nextMIdx = ps.startMeasIdx + 1;
+                     nextMIdx <= ps.startMeasIdx + 2
+                     && nextMIdx < static_cast<int>(enc.measures.size())
+                     && nextMIdx < static_cast<int>(ctx.measuresByIdx.size());
+                     ++nextMIdx) {
+                    const EncMeasure& nextEncMeas = enc.measures[nextMIdx];
+                    const int nextWt = encWholeNoteTicks(nextEncMeas);
+                    Measure* nextMs = ctx.measuresByIdx[nextMIdx];
+                    for (const auto& elem : nextEncMeas.elements) {
+                        const EncMeasureElem* em = elem.get();
+                        if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
+                            continue;
+                        }
+                        if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
+                            continue;
+                        }
+                        const int xoff = static_cast<int>(
+                            static_cast<const EncNote*>(em)->xoffset);
+                        const int dist = std::abs(xoff - targetEndXoff);
+                        if (dist < bestDist) {
+                            bestDist = dist;
+                            const Fraction endRel(static_cast<int>(em->tick), nextWt);
+                            endTick = nextMs->tick() + endRel.reduced();
+                            resolved = true;
+                        }
+                    }
+                    if (bestDist == 0) {
+                        break;
+                    }
+                }
+            }
+        } // integrated endpoint-search block
+    }
+    return resolved ? std::optional<Fraction>(endTick) : std::nullopt;
 }
 
 void resolveSlurs(BuildCtx& ctx)
@@ -267,187 +477,9 @@ void resolveSlurs(BuildCtx& ctx)
             }
         }
 
-        // Same-measure heuristic: find the note closest to first_note_xoff + pixelSpan.
-        // Skipped for cross-measure slurs with a reliable alMezuro count (alMezuro > 0) because
-        // xoffsets reset at barlines.
-        const bool tryHeuristic = (!ps.alMezuroValid || ps.alMezuro == 0)
-                                  && ps.startMeasIdx >= 0
-                                  && ps.startMeasIdx < static_cast<int>(enc.measures.size());
-        if (tryHeuristic) {
-            const EncMeasure& startEncMeas = enc.measures[ps.startMeasIdx];
-            int firstNoteXoff = -1;
-            const Fraction relStartTick = ps.startTick - ctx.measuresByIdx[ps.startMeasIdx]->tick();
-            const int wt = encWholeNoteTicks(startEncMeas);
-            const int startEncTick = (relStartTick.numerator() * wt)
-                                     / std::max(1, relStartTick.denominator());
-            for (const auto& elem : startEncMeas.elements) {
-                const EncMeasureElem* em = elem.get();
-                if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
-                    continue;
-                }
-                // Search all voices: slur ORN encVoice is the arc position, not necessarily the note voice.
-                if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
-                    continue;
-                }
-                if (static_cast<int>(em->tick) != startEncTick) {
-                    continue;
-                }
-                const EncNote* en = static_cast<const EncNote*>(em);
-                const int xoff = static_cast<int>(en->xoffset);
-                if (en->graceType() != EncGraceType::NORMAL) {
-                    // v0xC4: regular note appears before grace in binary; prefer grace xoffset
-                    // as arc-start reference to avoid inflating targetEndXoff.
-                    firstNoteXoff = xoff;
-                    break;
-                }
-                if (firstNoteXoff < 0) {
-                    firstNoteXoff = xoff;   // regular: tentative, keep searching
-                }
-            }
-            if (firstNoteXoff >= 0) {
-                const int pixelSpan = ps.slurXoffset2 - ps.slurXoffset;
-                // Tiny pixelSpan (0-2) with note before arc start: firstNoteXoff+pixelSpan ≈ 0 matches a decoy.
-                // Use slurXoffset2 directly as the arc-end target instead.
-                const bool usedTinyPixelSpan = (pixelSpan >= 0 && pixelSpan <= 2
-                                                && firstNoteXoff < ps.slurXoffset);
-                // v0xC2 short slur: pixelSpan is the only origin-independent signal, and beyond
-                // "short vs long" it is unreliable, while the absolute slurXoffset2 lives in a
-                // stale ornament-coordinate origin (matching it over-extends, e.g. n1→n2 read as
-                // n1→n4). A tiny span means a note-to-next-note slur, so anchor the endpoint to
-                // the next note on the staff instead of the coordinate search.
-                const bool v0c2ShortSlur = enc.fmt->slurXoffset2Stale()
-                                           && (std::abs(pixelSpan) <= 2);
-                const int targetEndXoff = usedTinyPixelSpan
-                                          ? ps.slurXoffset2
-                                          : firstNoteXoff + pixelSpan;
-                // Single pass: find best later-note endpoint + detect grace/regular co-location for grace-to-main shortcut.
-                {
-                    int bestDist = std::numeric_limits<int>::max();
-                    int bestEncTick = -1;
-                    int maxXoffInMeas = -1;
-                    bool hasGraceAtStart = false;
-                    int regularXoffAtStart = -1;
-                    for (const auto& elem : startEncMeas.elements) {
-                        const EncMeasureElem* em = elem.get();
-                        if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
-                            continue;
-                        }
-                        if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
-                            continue;
-                        }
-                        const int xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
-                        if (xoff > maxXoffInMeas) {
-                            maxXoffInMeas = xoff;
-                        }
-                        if (static_cast<int>(em->tick) == startEncTick) {
-                            const EncNote* en = static_cast<const EncNote*>(em);
-                            if (en->graceType() != EncGraceType::NORMAL) {
-                                hasGraceAtStart = true;
-                            } else {
-                                // Gap notes often have xoffset=0; keep the best-matching regular note.
-                                const int thisDist = std::abs(xoff - targetEndXoff);
-                                if (regularXoffAtStart < 0
-                                    || thisDist < std::abs(regularXoffAtStart - targetEndXoff)) {
-                                    regularXoffAtStart = xoff;
-                                }
-                            }
-                        }
-                        // Only notes strictly after the start can be endpoints.
-                        if (static_cast<int>(em->tick) <= startEncTick) {
-                            continue;
-                        }
-                        if (v0c2ShortSlur) {
-                            // Next-note rule: pick the earliest note after the start.
-                            if (bestEncTick < 0 || static_cast<int>(em->tick) < bestEncTick) {
-                                bestEncTick = static_cast<int>(em->tick);
-                                bestDist = 0;
-                            }
-                            continue;
-                        }
-                        const int dist = std::abs(xoff - targetEndXoff);
-                        if (dist < bestDist) {
-                            bestDist = dist;
-                            bestEncTick = static_cast<int>(em->tick);
-                        }
-                    }
-                    // Grace-to-main: grace + regular share startEncTick and regular is closest match → zero-span.
-                    // If a later note is closer, resolve as grace-to-later instead.
-                    // For a v0xC2 short slur the next-note rule sets bestDist=0, so the distance
-                    // comparison can never pick grace-to-main; a grace at the start is the strong
-                    // signal that the slur ornaments its own main note, so prefer zero-span there.
-                    if (hasGraceAtStart && regularXoffAtStart >= 0) {
-                        const int regularDist = std::abs(regularXoffAtStart - targetEndXoff);
-                        if (v0c2ShortSlur || regularDist < bestDist) {
-                            endTick  = ps.startTick;
-                            resolved = true;
-                        }
-                    }
-                    if (!resolved && bestEncTick > startEncTick) {
-                        const Fraction endRel(bestEncTick, wt);
-                        const Fraction candidate = ctx.measuresByIdx[ps.startMeasIdx]->tick()
-                                                   + endRel;
-                        // Snap to chord segment: grace notes steal time, shifting cumTick earlier than proportional tick.
-                        Measure* sMeas = ctx.measuresByIdx[ps.startMeasIdx];
-                        Segment* snappedSeg = score->tick2leftSegment(
-                            candidate, false, SegmentType::ChordRest);
-                        if (snappedSeg && snappedSeg->measure() == sMeas
-                            && snappedSeg->tick() >= ps.startTick) {
-                            bool hasChord = false;
-                            for (int v = 0; v < static_cast<int>(VOICES) && !hasChord; ++v) {
-                                track_idx_t t = static_cast<track_idx_t>(
-                                    ps.staffIdx * VOICES + v);
-                                if (snappedSeg->element(t)
-                                    && snappedSeg->element(t)->isChord()) {
-                                    hasChord = true;
-                                }
-                            }
-                            endTick = hasChord ? snappedSeg->tick() : candidate;
-                        } else {
-                            endTick = candidate;
-                        }
-                        resolved = true;
-                    }
-                    // Cross-measure extension when alMezuro is unreliable and the arc endpoint clearly
-                    // exceeds the start measure. Excluded for tiny-pixelspan slurs (ornament placed after
-                    // first note) because their targetEndXoff is slurXoffset2, which may be in the next
-                    // measure's coordinate space and would produce a false positive. Also excluded when
-                    // the same-measure search already resolved to a zero-span (grace-to-main) endpoint.
-                    if (!ps.alMezuroValid && !usedTinyPixelSpan && bestDist > 0
-                        && (targetEndXoff > maxXoffInMeas || bestEncTick < 0)
-                        && !(resolved && endTick == ps.startTick)) {
-                        for (int nextMIdx = ps.startMeasIdx + 1;
-                             nextMIdx <= ps.startMeasIdx + 2
-                             && nextMIdx < static_cast<int>(enc.measures.size())
-                             && nextMIdx < static_cast<int>(ctx.measuresByIdx.size());
-                             ++nextMIdx) {
-                            const EncMeasure& nextEncMeas = enc.measures[nextMIdx];
-                            const int nextWt = encWholeNoteTicks(nextEncMeas);
-                            Measure* nextMs = ctx.measuresByIdx[nextMIdx];
-                            for (const auto& elem : nextEncMeas.elements) {
-                                const EncMeasureElem* em = elem.get();
-                                if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
-                                    continue;
-                                }
-                                if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
-                                    continue;
-                                }
-                                const int xoff = static_cast<int>(
-                                    static_cast<const EncNote*>(em)->xoffset);
-                                const int dist = std::abs(xoff - targetEndXoff);
-                                if (dist < bestDist) {
-                                    bestDist = dist;
-                                    const Fraction endRel(static_cast<int>(em->tick), nextWt);
-                                    endTick = nextMs->tick() + endRel.reduced();
-                                    resolved = true;
-                                }
-                            }
-                            if (bestDist == 0) {
-                                break;
-                            }
-                        }
-                    }
-                } // integrated endpoint-search block
-            }
+        if (auto t = resolveSameMeasureHeuristic(ctx, ps, lineSlotByRawByte)) {
+            endTick = *t;
+            resolved = true;
         }
 
         const track_idx_t startTrack = resolveChordTrack(score, ps.startTick, ps.staffIdx, ps.track);
@@ -455,7 +487,7 @@ void resolveSlurs(BuildCtx& ctx)
         // Fallback 1: cross-measure xoffset2 matching.
         if (!resolved && clampedEndMeasIdx < static_cast<int>(enc.measures.size())) {
             if (auto t = resolveCrossMeasureXoffset(ps, enc.measures[clampedEndMeasIdx],
-                                                     endMeas, lineSlotByRawByte)) {
+                                                    endMeas, lineSlotByRawByte)) {
                 endTick = *t;
                 resolved = true;
             }
