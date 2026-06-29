@@ -23,7 +23,6 @@
 #include "elem-ornament.h"
 
 namespace mu::iex::enc {
-
 bool EncOrnament::read(QDataStream& ds)
 {
     EncMeasureElem::read(ds);
@@ -52,11 +51,7 @@ bool EncOrnament::read(QDataStream& ds)
     } else {
         tind = tempo;
     }
-    int toSkip = static_cast<int>(size) - 5 - (static_cast<int>(size) >= 33 ? 28 : 26);
-    if (toSkip > 0) {
-        ds.skipRawData(toSkip);
-    }
+    // No trailing skip: the element loop reseeks to the element end after read().
     return true;
 }
-
 } // namespace mu::iex::enc

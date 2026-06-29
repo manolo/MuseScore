@@ -33,10 +33,7 @@ bool EncLyric::read(QDataStream& ds)
     const int fixedReads = 5 + 1 + static_cast<int>(textGapAfterKie);
     int remaining = static_cast<int>(size) - 5;
     if (remaining < fixedReads) {
-        if (remaining > 0) {
-            ds.skipRawData(remaining);
-        }
-        return true;
+        return true;   // too short to carry text; element loop reseeks past it
     }
 
     ds.skipRawData(5);
@@ -45,10 +42,7 @@ bool EncLyric::read(QDataStream& ds)
     remaining -= fixedReads;
 
     text = readEncodedStringRemaining(ds, remaining);
-
-    if (remaining > 0) {
-        ds.skipRawData(remaining);
-    }
+    // No trailing skip: the element loop reseeks to the element end after read().
     return true;
 }
 
@@ -94,17 +88,8 @@ bool EncTie::read(QDataStream& ds)
         quint8 sp = 0;
         ds >> sp;                   // offset +14
         sourcePosition = static_cast<qint8>(sp);
-        const int toSkip = static_cast<int>(size) - 15;  // skip offsets +15..end
-        if (toSkip > 0) {
-            ds.skipRawData(toSkip);
-        }
-    } else {
-        const int consumed = (size > 5 ? 1 : 0) + (size > 6 ? 1 : 0);
-        const int toSkip = static_cast<int>(size) - 5 - consumed;
-        if (toSkip > 0) {
-            ds.skipRawData(toSkip);
-        }
     }
+    // No trailing skip: the element loop reseeks to the element end after read().
     return true;
 }
 } // namespace mu::iex::enc

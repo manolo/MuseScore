@@ -126,16 +126,8 @@ bool EncChordSym::read(QDataStream& ds)
     if (hasText) {
         // 36-byte slot; UTF-16 LE in modern files, Latin-1 in legacy scores.
         teksto = readEncodedStringFixed(ds, 36);
-        int toSkip = static_cast<int>(size) - 5 - 9 - 36;
-        if (toSkip > 0) {
-            ds.skipRawData(toSkip);
-        }
-    } else {
-        int toSkip = static_cast<int>(size) - 5 - 9;
-        if (toSkip > 0) {
-            ds.skipRawData(toSkip);
-        }
     }
+    // No trailing skip: the element loop reseeks to the element end after read().
     return true;
 }
 
