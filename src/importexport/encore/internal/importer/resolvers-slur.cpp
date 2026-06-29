@@ -57,8 +57,7 @@ static track_idx_t resolveChordTrack(MasterScore* score, Fraction tick, int staf
 
 static int getLineSlot(const EncMeasureElem* em, const std::array<int, 256>& lineSlotByRawByte)
 {
-    const quint8 raw = (static_cast<quint8>(em->staffWithin) << 6)
-                       | static_cast<quint8>(em->staffIdx);
+    const quint8 raw = em->rawStaffByte();
     const int slot = lineSlotByRawByte[static_cast<unsigned char>(raw)];
     return (slot >= 0) ? slot : static_cast<int>(em->staffIdx);
 }
@@ -215,16 +214,9 @@ void resolveSlurs(BuildCtx& ctx)
     MasterScore* score = ctx.score;
     const EncRoot& enc = ctx.enc;
 
-    // Build compact-rawStaff → LINE-slot lookup (same logic as emitters.cpp).
-    // (staffWithin<<6)|instrIdx is the raw staff byte; without this, comparisons mismatch beyond the first instrument.
+    // Raw-staff-byte → LINE-slot lookup (shared with the emitter's staff/voice routing).
     std::array<int, 256> lineSlotByRawByte;
-    lineSlotByRawByte.fill(-1);
-    if (!enc.lines.empty()) {
-        const auto& sd = enc.lines[0].staffData;
-        for (int s = 0; s < static_cast<int>(sd.size()); ++s) {
-            lineSlotByRawByte[static_cast<unsigned char>(sd[s].instrStaffIdx)] = s;
-        }
-    }
+    buildLineSlotByRawByte(enc, lineSlotByRawByte);
 
     // Slurs whose endpoints were set explicitly (reliable measure-count path); excluded from
     // the recompute in removeOrphanSlurs.

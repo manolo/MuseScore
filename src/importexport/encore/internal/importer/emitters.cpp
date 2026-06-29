@@ -259,8 +259,7 @@ static void collectTieStartPositions(const MeasureElemRefVec& sortedElems,
             if (et->isTieStart) {
                 int si = static_cast<int>(e->staffIdx);
                 int v  = static_cast<int>(e->voice);
-                const quint8 tiRawByte = (static_cast<quint8>(e->staffWithin) << 6)
-                                         | static_cast<quint8>(e->staffIdx);
+                const quint8 tiRawByte = e->rawStaffByte();
                 const int tiOrigSW = static_cast<int>(e->staffWithin);
                 bool tiResolved = false;
                 if (lineSlotByRawByte[tiRawByte] >= 0) {
@@ -367,8 +366,7 @@ bool routeElementStaffVoice(
     voice    = static_cast<int>(e->voice);
 
     // Translate rawStaff byte (staffWithin<<6)|instrIdx to LINE slot; apply case-B voice remap when origStaffWithin > 0.
-    const quint8 rawNoteStaff = (static_cast<quint8>(e->staffWithin) << 6)
-                                | static_cast<quint8>(e->staffIdx);
+    const quint8 rawNoteStaff = e->rawStaffByte();
     const int origStaffWithin  = static_cast<int>(e->staffWithin);
     bool rawByteResolved = false;
     if (lineSlotByRawByte[rawNoteStaff] >= 0) {
@@ -532,14 +530,7 @@ static void initLineStaffMappings(
         lineStaffWithin[s]   = static_cast<int>(enc.lines[0].staffData[s].staffIndex());
     }
 
-    // Raw staff byte carries (staffWithin<<6)|instrIdx (same as instrStaffIdx in LINE blocks).
-    // Reverse map translates it to a LINE slot before voice routing.
-    // Needed for multi-instrument files where earlier instruments have >1 staff (e.g. piano+organ: organ instrIdx=1 but LINE slot 2).
-    lineSlotByRawByte.fill(-1);
-    for (int s = 0; s < nLineStaves; ++s) {
-        const quint8 key = enc.lines[0].staffData[s].instrStaffIdx;
-        lineSlotByRawByte[static_cast<unsigned char>(key)] = s;
-    }
+    buildLineSlotByRawByte(enc, lineSlotByRawByte);
 }
 
 static void fillExpandedMrestMeasure(Measure* vm, int totalStaves)

@@ -25,6 +25,7 @@
 
 #include "import-options.h"
 
+#include <array>
 #include <map>
 #include <set>
 #include <memory>
@@ -49,6 +50,23 @@
 using namespace mu::engraving;
 
 namespace mu::iex::enc {
+// Build the reverse map from a raw staff byte ((staffWithin<<6)|instrIdx, identical to
+// instrStaffIdx in the LINE block) to its LINE slot index; -1 = no staff with that byte.
+// Needed for multi-instrument files where an earlier instrument has more than one staff
+// (e.g. piano+organ: organ instrIdx=1 but LINE slot 2). Shared by the staff/voice routing
+// in the emitter and the slur resolver.
+inline void buildLineSlotByRawByte(const EncRoot& enc, std::array<int, 256>& out)
+{
+    out.fill(-1);
+    if (enc.lines.empty()) {
+        return;
+    }
+    const auto& sd = enc.lines[0].staffData;
+    for (int s = 0; s < static_cast<int>(sd.size()); ++s) {
+        out[static_cast<unsigned char>(sd[s].instrStaffIdx)] = s;
+    }
+}
+
 struct PendingSlur {
     Fraction startTick;
     track_idx_t track;

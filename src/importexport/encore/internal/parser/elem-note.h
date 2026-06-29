@@ -51,6 +51,13 @@ struct EncMeasureElem {
     quint8 xoffset  { 0 };
     qint16 realDuration { -1 };
 
+    // Raw staff byte (staffWithin<<6)|staffIdx, identical to instrStaffIdx in the LINE block.
+    // Importers reverse-map it to a LINE slot (see buildLineSlotByRawByte).
+    quint8 rawStaffByte() const
+    {
+        return static_cast<quint8>((static_cast<quint8>(staffWithin) << 6) | static_cast<quint8>(staffIdx));
+    }
+
     // Nonzero = tuplet member; sort tuplet notes first at their tick so they create the chord.
     virtual quint8 tupletByte() const { return 0; }
 
