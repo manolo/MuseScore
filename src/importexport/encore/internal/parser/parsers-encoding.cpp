@@ -23,7 +23,6 @@
 #include "parsers-encoding.h"
 
 namespace mu::iex::enc {
-
 bool probeUtf16LE(quint8 b0, quint8 b1)
 {
     return b0 >= 0x20 && b0 < 0x7F && b1 == 0x00;
@@ -35,16 +34,19 @@ QString readEncodedStringRemaining(QDataStream& ds, int& remaining)
         return {};
     }
 
-    // Peek at first two bytes to detect encoding.
+    // Peek at the first one or two bytes to detect encoding (peek leaves the cursor in place
+    // and works on non-seekable devices, expressing intent better than read + seek-back).
     quint8 b0 = 0, b1 = 0;
-    if (remaining >= 2) {
-        const qint64 savedPos = ds.device()->pos();
-        ds >> b0 >> b1;
-        ds.device()->seek(savedPos);
-    } else if (remaining == 1) {
-        const qint64 savedPos = ds.device()->pos();
-        ds >> b0;
-        ds.device()->seek(savedPos);
+    {
+        char buf[2] = { 0, 0 };
+        const qint64 want = (remaining >= 2) ? 2 : 1;
+        const qint64 n = ds.device()->peek(buf, want);
+        if (n >= 1) {
+            b0 = static_cast<quint8>(buf[0]);
+        }
+        if (n >= 2) {
+            b1 = static_cast<quint8>(buf[1]);
+        }
     }
     const bool utf16 = probeUtf16LE(b0, b1);
 
@@ -118,5 +120,4 @@ QString readEncodedStringFixed(QDataStream& ds, int fixedLen)
     }
     return result;
 }
-
 } // namespace mu::iex::enc
