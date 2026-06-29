@@ -146,7 +146,7 @@ void buildMeasures(BuildCtx& ctx)
                               ? 1 : 0;
         if (nomIdx < enc.measures.size()) {
             ctx.nominalTimeSigType = encTimeSigGlyph2Type(enc.measures[nomIdx].timeSigGlyph,
-                                                           ctx.nominalTimeSig);
+                                                          ctx.nominalTimeSig);
         }
     }
 
@@ -229,10 +229,6 @@ void buildInitialSignatures(BuildCtx& ctx)
         for (int si = 0; si < static_cast<int>(firstLine.staffData.size()) && si < ctx.totalStaves; ++si) {
             const auto& sd = firstLine.staffData[si];
             addInitialKeySig(score, si, sd.key);
-            const ClefType cClef = si < static_cast<int>(ctx.staffTemplateConcertClef.size())
-                                   ? ctx.staffTemplateConcertClef[si] : ClefType::INVALID;
-            const ClefType tClef = si < static_cast<int>(ctx.staffTemplateTransposingClef.size())
-                                   ? ctx.staffTemplateTransposingClef[si] : ClefType::INVALID;
             const int keyOffset = si < static_cast<int>(ctx.staffPitchOffset.size())
                                   ? ctx.staffPitchOffset[si] : 0;
             // Drumset instruments always use PERC clef; LINE block clefs must not override it.
@@ -240,7 +236,7 @@ void buildInitialSignatures(BuildCtx& ctx)
             const bool hasDrumset = st && st->part() && st->part()->instrument()
                                     && st->part()->instrument()->drumset();
             const ClefType ct = hasDrumset ? ClefType::PERC
-                                : pickStaffClef(sd.clef, cClef, tClef, keyOffset);
+                                : pickStaffClef(sd.clef, keyOffset);
             addInitialClef(score, si, ct);
         }
 

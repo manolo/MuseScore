@@ -222,7 +222,6 @@ struct BuildCtx
     int totalStaves = 0;
     std::vector<int> staffPitchOffset {};
     std::vector<ClefType> staffTemplateConcertClef {};
-    std::vector<ClefType> staffTemplateTransposingClef {};
 
     // Nominal time sig of the score (differs from measures[0] when the first measure is a pickup).
     Fraction nominalTimeSig { 4, 4 };

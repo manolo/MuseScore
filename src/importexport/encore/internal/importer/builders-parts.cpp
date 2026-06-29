@@ -386,14 +386,10 @@ void buildParts(BuildCtx& ctx)
             }
             ctx.staffPitchOffset.push_back(pitchOffset);
             ClefType cClef = ClefType::INVALID;
-            ClefType tClef = ClefType::INVALID;
             if (tmpl) {
-                const ClefTypeList ctl = tmpl->clefType(static_cast<staff_idx_t>(s));
-                cClef = ctl.concertClef;
-                tClef = ctl.transposingClef;
+                cClef = tmpl->clefType(static_cast<staff_idx_t>(s)).concertClef;
             }
             ctx.staffTemplateConcertClef.push_back(cClef);
-            ctx.staffTemplateTransposingClef.push_back(tClef);
             ++ctx.totalStaves;
         }
         score->appendPart(part);

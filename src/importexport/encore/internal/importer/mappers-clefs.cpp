@@ -213,8 +213,7 @@ ClefType applyOctaveToClef(ClefType base, int keyOffsetSemitones)
     return base;
 }
 
-ClefType pickStaffClef(EncClefType encClef, ClefType /*concertClef*/, ClefType /*transposingClef*/,
-                       int keyOffsetSemitones)
+ClefType pickStaffClef(EncClefType encClef, int keyOffsetSemitones)
 {
     return applyOctaveToClef(encClef2MuseScore(encClef), keyOffsetSemitones);
 }
