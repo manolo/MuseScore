@@ -768,19 +768,6 @@ void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         return;
     }
 
-    // Explicit tuplet notes: faceValue drives dt (rdur may be truncated by the next MIDI event).
-    {
-        int preA = en->actualNotes(), preN = en->normalNotes();
-        if (!isStandardExplicitTuplet(preA, preN)) {
-            preA = 0;
-            preN = 0;
-        }
-        if (preA == 0 && (fvLow(en->faceValue)) >= 4 && mc.validTupletGroupMember.count(e)) {
-            preA = detectImpliedTuplet(en->realDuration, en->faceValue, preN);
-        }
-        (void)preA;
-        (void)preN;
-    }
     TupletDecision dec;
     dec.actualN = en->actualNotes();
     dec.normalN = en->normalNotes();
