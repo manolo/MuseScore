@@ -60,6 +60,10 @@ struct EncMeasureElem {
 
     // Nonzero = tuplet member; sort tuplet notes first at their tick so they create the chord.
     virtual quint8 tupletByte() const { return 0; }
+    // Raw faceValue byte (low nibble = duration, high nibble = notehead); 0 for elements without one.
+    virtual quint8 faceValueByte() const { return 0; }
+    // True when the parser pre-marked this element as an implied-tuplet member.
+    virtual bool impliedTupletMember() const { return false; }
 
     EncMeasureElem() = default;
     EncMeasureElem(quint16 t, quint8 tp, quint8 v)
@@ -100,6 +104,8 @@ struct EncNote : EncMeasureElem {
     using EncMeasureElem::EncMeasureElem;
 
     quint8 tupletByte() const override { return tuplet; }
+    quint8 faceValueByte() const override { return faceValue; }
+    bool impliedTupletMember() const override { return isImpliedTupletMember; }
     int actualNotes() const { return tuplet >> 4; }
     int normalNotes() const { return tuplet & 0x0F; }
 
@@ -123,6 +129,8 @@ struct EncRest : EncMeasureElem {
     using EncMeasureElem::EncMeasureElem;
 
     quint8 tupletByte() const override { return tuplet; }
+    quint8 faceValueByte() const override { return faceValue; }
+    bool impliedTupletMember() const override { return isImpliedTupletMember; }
     int actualNotes() const { return tuplet >> 4; }
     int normalNotes() const { return tuplet & 0x0F; }
 

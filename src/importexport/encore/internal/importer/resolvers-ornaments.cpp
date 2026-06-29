@@ -42,9 +42,8 @@
 using namespace mu::engraving;
 
 namespace mu::iex::enc {
-
 static void resolveArpeggios(MasterScore* score,
-                              const std::vector<PendingArpeggio>& pendingArpeggios)
+                             const std::vector<PendingArpeggio>& pendingArpeggios)
 {
     // ORN precedes chord in MEAS order, so deferred to resolve phase.
     for (const PendingArpeggio& pa : pendingArpeggios) {
@@ -60,7 +59,7 @@ static void resolveArpeggios(MasterScore* score,
 }
 
 static void resolveSingleChordTremolos(MasterScore* score,
-                                        const std::vector<PendingOrnTremolo>& pendingOrnTremolos)
+                                       const std::vector<PendingOrnTremolo>& pendingOrnTremolos)
 {
     // See ENCORE_FORMAT.md §Ornament element.
     // ORN may land at durTicks or in voice 0 even when the note is in another voice.
@@ -136,7 +135,7 @@ static void resolveSingleChordTremolos(MasterScore* score,
 }
 
 static void resolveMarkers(MasterScore* score,
-                            const std::vector<PendingMarker>& pendingMarkers)
+                           const std::vector<PendingMarker>& pendingMarkers)
 {
     for (const PendingMarker& pm : pendingMarkers) {
         Measure* m = score->tick2measure(pm.tick);
@@ -150,8 +149,32 @@ static void resolveMarkers(MasterScore* score,
     }
 }
 
+// True when seg already carries a Fermata with this symId (a per-note artic byte may have
+// produced the same glyph; dedup against it).
+static bool segmentHasFermata(const Segment* seg, SymId symId)
+{
+    for (EngravingItem* e : seg->annotations()) {
+        if (e->isFermata() && toFermata(e)->symId() == symId) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// True when chord c already carries an Articulation with this symId (dedup against a
+// per-note artic byte that produced the same glyph).
+static bool chordHasArticulation(const Chord* c, SymId symId)
+{
+    for (Articulation* a : c->articulations()) {
+        if (a->symId() == symId) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void resolveFermatas(MasterScore* score,
-                             const std::vector<PendingFermata>& pendingFermatas)
+                            const std::vector<PendingFermata>& pendingFermatas)
 {
     for (const PendingFermata& pf : pendingFermatas) {
         Chord* c = findChordAt(score, pf.tick, pf.track);
@@ -159,14 +182,7 @@ static void resolveFermatas(MasterScore* score,
             continue;
         }
         Segment* seg = c->segment();
-        bool alreadyHas = false;
-        for (EngravingItem* e : seg->annotations()) {
-            if (e->isFermata() && toFermata(e)->symId() == pf.symId) {
-                alreadyHas = true;
-                break;
-            }
-        }
-        if (alreadyHas) {
+        if (segmentHasFermata(seg, pf.symId)) {
             continue;
         }
         const bool isBelow = (pf.symId == SymId::fermataBelow
@@ -182,7 +198,7 @@ static void resolveFermatas(MasterScore* score,
 }
 
 static void resolveStaccatos(MasterScore* score,
-                              const std::vector<PendingStaccato>& pendingStaccatos)
+                             const std::vector<PendingStaccato>& pendingStaccatos)
 {
     // Dedup: artic byte 0x1D produces the same glyph.
     for (const PendingStaccato& ps : pendingStaccatos) {
@@ -190,15 +206,8 @@ static void resolveStaccatos(MasterScore* score,
         if (!c) {
             continue;
         }
-        bool alreadyHas = false;
-        for (Articulation* a : c->articulations()) {
-            if (a->symId() == SymId::articStaccatoAbove
-                || a->symId() == SymId::articStaccatoBelow) {
-                alreadyHas = true;
-                break;
-            }
-        }
-        if (alreadyHas) {
+        if (chordHasArticulation(c, SymId::articStaccatoAbove)
+            || chordHasArticulation(c, SymId::articStaccatoBelow)) {
             continue;
         }
         Articulation* art = Factory::createArticulation(c);
@@ -209,9 +218,9 @@ static void resolveStaccatos(MasterScore* score,
 }
 
 static void resolveTrillsWithSpans(MasterScore* score,
-                                    const std::vector<PendingTrill>& pendingTrills,
-                                    std::map<track_idx_t, std::vector<Fraction>>& pendingTrillEnds,
-                                    const std::vector<Measure*>& measuresByIdx)
+                                   const std::vector<PendingTrill>& pendingTrills,
+                                   std::map<track_idx_t, std::vector<Fraction> >& pendingTrillEnds,
+                                   const std::vector<Measure*>& measuresByIdx)
 {
     // (A) TRILL_ALT within a prior TRILL_START span: Ornament glyph only.
     // (B) TRILL_ALT standalone: spanner on note duration.
@@ -321,7 +330,7 @@ static void resolveTrillsWithSpans(MasterScore* score,
 }
 
 static void resolveUnconsumedTrillEnds(MasterScore* score,
-                                        std::map<track_idx_t, std::vector<Fraction>>& pendingTrillEnds)
+                                       std::map<track_idx_t, std::vector<Fraction> >& pendingTrillEnds)
 {
     // TRILL_END markers not consumed by TRILL_START: create a spanner on the note's duration.
     for (auto& [trTrack, endTicks] : pendingTrillEnds) {
@@ -347,7 +356,7 @@ static void resolveUnconsumedTrillEnds(MasterScore* score,
 }
 
 static void resolveBreaths(MasterScore* score,
-                            const std::vector<PendingBreath>& pendingBreaths)
+                           const std::vector<PendingBreath>& pendingBreaths)
 {
     // pb.tick is the following note; attach after the preceding chord.
     // If pb.tick is at a measure boundary, that chord is in the prior measure.
@@ -394,7 +403,7 @@ static void resolveBreaths(MasterScore* score,
 }
 
 static void resolveMeasureRepeats(MasterScore* score,
-                                   const std::vector<PendingMeasureRepeat>& pendingMeasureRepeats)
+                                  const std::vector<PendingMeasureRepeat>& pendingMeasureRepeats)
 {
     // Replace measure content with "%" symbol.
     for (const PendingMeasureRepeat& pmr : pendingMeasureRepeats) {
@@ -430,5 +439,4 @@ void resolveOrnaments(BuildCtx& ctx)
     resolveBreaths(score, ctx.pendingBreaths);
     resolveMeasureRepeats(score, ctx.pendingMeasureRepeats);
 }
-
 } // namespace mu::iex::enc

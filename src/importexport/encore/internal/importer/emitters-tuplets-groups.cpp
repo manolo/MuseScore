@@ -33,7 +33,6 @@
 using namespace mu::engraving;
 
 namespace mu::iex::enc {
-
 // Explicit tuplet ratio from the tup byte (high nibble = actual, low nibble = normal).
 static void getExplicit(const std::vector<const EncMeasureElem*>& grp,
                         int& outActual, int& outNormal)
@@ -44,13 +43,7 @@ static void getExplicit(const std::vector<const EncMeasureElem*>& grp,
         return;
     }
     const EncMeasureElem* e = grp[0];
-    EncElemType et = static_cast<EncElemType>(e->type);
-    quint8 tup = 0;
-    if (et == EncElemType::NOTE) {
-        tup = static_cast<const EncNote*>(e)->tuplet;
-    } else if (et == EncElemType::REST) {
-        tup = static_cast<const EncRest*>(e)->tuplet;
-    }
+    const quint8 tup = e->tupletByte();
     int a = tup >> 4, n = tup & 0x0F;
     if (isStandardExplicitTuplet(a, n)) {
         outActual = a;
@@ -71,25 +64,11 @@ static void getImplied(const std::vector<const EncMeasureElem*>& grp,
         return;
     }
     const EncMeasureElem* e = grp[0];
-    EncElemType et = static_cast<EncElemType>(e->type);
-    bool isMarked = false;
-    if (et == EncElemType::NOTE) {
-        isMarked = static_cast<const EncNote*>(e)->isImpliedTupletMember;
-    } else if (et == EncElemType::REST) {
-        isMarked = static_cast<const EncRest*>(e)->isImpliedTupletMember;
-    }
-    if (!isMarked) {
+    if (!e->impliedTupletMember()) {
         return;
     }
-    quint8 fv = 0;
-    qint16 rdur = 0;
-    if (et == EncElemType::NOTE) {
-        fv   = static_cast<const EncNote*>(e)->faceValue & 0x0F;
-        rdur = e->realDuration;
-    } else if (et == EncElemType::REST) {
-        fv   = static_cast<const EncRest*>(e)->faceValue & 0x0F;
-        rdur = e->realDuration;
-    }
+    const quint8 fv = fvLow(e->faceValueByte());
+    const qint16 rdur = e->realDuration;
     if (fv >= 4) {
         outActual = detectImpliedTuplet(rdur, fv, outNormal);
     }
@@ -101,14 +80,7 @@ static Fraction getFaceValue(const std::vector<const EncMeasureElem*>& grp)
     if (grp.empty()) {
         return Fraction(0, 1);
     }
-    const EncMeasureElem* e = grp[0];
-    EncElemType et = static_cast<EncElemType>(e->type);
-    quint8 fv = 0;
-    if (et == EncElemType::NOTE) {
-        fv = static_cast<const EncNote*>(e)->faceValue & 0x0F;
-    } else if (et == EncElemType::REST) {
-        fv = static_cast<const EncRest*>(e)->faceValue & 0x0F;
-    }
+    const quint8 fv = fvLow(grp[0]->faceValueByte());
     return faceValue2DurationType(fv) == DurationType::V_INVALID ? Fraction(0, 1)
            : TDuration(faceValue2DurationType(fv)).fraction();
 }
@@ -123,16 +95,8 @@ static int actualDurEnc(int k,
         return 0;
     }
     const EncMeasureElem* ch = chords[k][0];
-    EncElemType et = static_cast<EncElemType>(ch->type);
-    quint8 fv = 0;
-    quint8 tupByte = 0;
-    if (et == EncElemType::NOTE) {
-        fv      = static_cast<const EncNote*>(ch)->faceValue & 0x0F;
-        tupByte = static_cast<const EncNote*>(ch)->tuplet;
-    } else if (et == EncElemType::REST) {
-        fv      = static_cast<const EncRest*>(ch)->faceValue & 0x0F;
-        tupByte = static_cast<const EncRest*>(ch)->tuplet;
-    }
+    const quint8 fv = fvLow(ch->faceValueByte());
+    const quint8 tupByte = ch->tupletByte();
     const int fvt = faceValue2ticks(fv);
     const int an2 = tupByte >> 4, nn2 = tupByte & 0x0F;
     if (an2 > 0 && nn2 > 0) {
@@ -528,5 +492,4 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
     }
     return result;
 }
-
 } // namespace mu::iex::enc

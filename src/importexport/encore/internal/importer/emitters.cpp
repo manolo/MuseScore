@@ -236,12 +236,8 @@ static void sortMeasureElements(const EncMeasure& encMeas, MeasureElemRefVec& so
             return aTuplet;   // tuplet note first
         }
         // Shortest faceValue first: chord root drives cumTick by minimum step.
-        const quint8 aFv = static_cast<EncElemType>(a->type) == EncElemType::NOTE
-                           ? (static_cast<const EncNote*>(a)->faceValue & 0x0F)
-                           : (static_cast<const EncRest*>(a)->faceValue & 0x0F);
-        const quint8 bFv = static_cast<EncElemType>(b->type) == EncElemType::NOTE
-                           ? (static_cast<const EncNote*>(b)->faceValue & 0x0F)
-                           : (static_cast<const EncRest*>(b)->faceValue & 0x0F);
+        const quint8 aFv = fvLow(a->faceValueByte());
+        const quint8 bFv = fvLow(b->faceValueByte());
         if (aFv != bFv) {
             return aFv > bFv;  // higher number = shorter duration = comes first
         }
