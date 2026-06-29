@@ -193,6 +193,13 @@ struct PendingLyric {
     bool hyphenAfter;
 };
 
+// A grace chord held detached until the next normal chord, paired with the EncNote it came
+// from so its articulations can be applied after attachment (see pendingGraces).
+struct PendingGrace {
+    mu::engraving::Chord* gc { nullptr };
+    const EncNote* en { nullptr };
+};
+
 struct BuildCtx
 {
     mu::engraving::MasterScore* score;
@@ -260,8 +267,10 @@ struct BuildCtx
     // Encore voices route to the same MuseScore voice.
     std::map<std::pair<int, int>, int> prevRestTick {};
 
-    // Grace chords held detached; attached to the next normal chord.
-    std::map<std::pair<int, int>, std::vector<Chord*> > pendingGraces {};
+    // Grace chords held detached; attached to the next normal chord. The source EncNote is
+    // kept so articulations/ornaments/fermatas are applied once the grace has a real segment
+    // (a detached grace only sees the dummy segment, where fermatas cannot anchor).
+    std::map<std::pair<int, int>, std::vector<PendingGrace> > pendingGraces {};
     // Ticks borrowed by grace notes; suppresses spurious gap-snap rests after a grace group.
     std::map<std::pair<int, int>, int> graceStolenTicks {};
     // Inner (nested) TupletTrackers; cleared each measure alongside tuplets.

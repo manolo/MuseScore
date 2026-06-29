@@ -84,16 +84,8 @@ bool tryHandleGraceNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec,
     applyConcertPitch(gnote, en->semiTonePitch + ctx.staffPitchOffset[ec.staffIdx]);
     gc->add(gnote);
 
-    for (quint8 ab : { en->articulationUp, en->articulationDown }) {
-        for (SymId sid : encArticulation2SymIds(ab)) {
-            if (sid == SymId::noSym) {
-                continue;
-            }
-            Articulation* art = Factory::createArticulation(gc);
-            art->setSymId(sid);
-            gc->add(art);
-        }
-    }
+    // Articulations are applied after attachment (below / at the pending-grace flush): a
+    // detached grace chord only sees the dummy segment, where fermatas cannot anchor.
 
     // Retroactive attachment: main note already placed at elemTick (isChordExt=TRUE).
     if (ec.isChordExt) {
@@ -103,15 +95,15 @@ bool tryHandleGraceNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec,
             if (existingEl && existingEl->isChord()) {
                 gc->setGraceIndex(0);
                 toChord(existingEl)->add(gc);
+                applyNoteArticulations(ctx, gnote, gc, en, ec.track, mc);
                 ctx.graceStolenTicks[trackKey] += faceValue2ticks(en->faceValue & 0x0F);
                 return true;
             }
         }
     }
 
-    ctx.pendingGraces[trackKey].push_back(gc);
+    ctx.pendingGraces[trackKey].push_back({ gc, en });
     ctx.graceStolenTicks[trackKey] += faceValue2ticks(en->faceValue & 0x0F);
     return true;
 }
-
 } // namespace mu::iex::enc

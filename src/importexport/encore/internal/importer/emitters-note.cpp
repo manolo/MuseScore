@@ -96,12 +96,18 @@ static bool isCascadeFilteredTieReceiver(const EncNote* en,
 // Attaches any pending grace notes for trackKey to chord.
 static void attachPendingGracesToChord(BuildCtx& ctx,
                                        const std::pair<int, int>& trackKey,
-                                       Chord* chord)
+                                       Chord* chord,
+                                       const MeasEmitCtx& mc)
 {
     auto& pg = ctx.pendingGraces[trackKey];
-    for (Chord* gc : pg) {
-        gc->setGraceIndex(chord->graceNotes().size());
-        chord->add(gc);
+    for (PendingGrace& g : pg) {
+        g.gc->setGraceIndex(chord->graceNotes().size());
+        chord->add(g.gc);
+        // Now that the grace is parented under a chord, gc->segment() resolves to the parent
+        // segment, so the full articulation/ornament/fermata handling can run.
+        if (!g.gc->notes().empty()) {
+            applyNoteArticulations(ctx, g.gc->notes().front(), g.gc, g.en, g.gc->track(), mc);
+        }
     }
     pg.clear();
     // DO NOT erase ctx.graceStolenTicks yet: the snap guard
@@ -811,7 +817,7 @@ void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
     }
 
     // Insert at END to preserve ascending-tick order (default graceIndex=0 prepends, reversing the group).
-    attachPendingGracesToChord(ctx, trackKey, chord);
+    attachPendingGracesToChord(ctx, trackKey, chord, mc);
 
     const int concertPitch = en->semiTonePitch + ctx.staffPitchOffset[staffIdx];
     if (chord->findNote(concertPitch)) {

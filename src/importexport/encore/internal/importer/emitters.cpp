@@ -618,10 +618,10 @@ static void resetPerMeasureState(BuildCtx& ctx, int measIdx)
 
     // Unattached grace chords are not in the score tree and need explicit deletion.
     for (auto& [key, vec] : ctx.pendingGraces) {
-        for (Chord* gc : vec) {
+        for (PendingGrace& g : vec) {
             LOGW() << "Encore import: discarding dangling grace chord at measure " << measIdx
                    << " (staff " << key.first << ", voice " << key.second << ")";
-            delete gc;
+            delete g.gc;
         }
     }
     ctx.pendingGraces.clear();
@@ -973,10 +973,10 @@ void emitMeasures(BuildCtx& ctx)
 
     // Dangling graces after the final measure have no score-tree parent; delete explicitly.
     for (auto& [key, vec] : ctx.pendingGraces) {
-        for (Chord* gc : vec) {
+        for (PendingGrace& g : vec) {
             LOGW() << "Encore import: discarding dangling grace chord at end of score"
                    << " (staff " << key.first << ", voice " << key.second << ")";
-            delete gc;
+            delete g.gc;
         }
     }
     ctx.pendingGraces.clear();

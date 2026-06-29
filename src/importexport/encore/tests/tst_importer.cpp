@@ -22,9 +22,11 @@
 
 #include <gtest/gtest.h>
 
+#include "engraving/dom/articulation.h"
 #include "engraving/dom/barline.h"
 #include "engraving/dom/chord.h"
 #include "engraving/dom/clef.h"
+#include "engraving/dom/ornament.h"
 #include "engraving/dom/keysig.h"
 #include "engraving/dom/dynamic.h"
 #include "engraving/dom/hairpin.h"
@@ -173,6 +175,43 @@ TEST_F(Tst_Importer, grace_with_beamed_eighths_no_layout_crash)
         }
     }
     EXPECT_TRUE(foundGrace) << "Grace eighth should be attached as a graceNotes() child";
+    delete score;
+}
+
+// FIX: the grace path applied articulations to a still-detached grace chord, where it could
+// only create plain Articulations. A trill byte therefore produced a plain Articulation
+// (isOrnament()==false) instead of an Ornament. Articulations are now applied after the grace
+// is attached, sharing the main note path, so ornaments/fermatas/dedup work on grace notes.
+// Fixture: a normal note + an acciaccatura grace carrying artic byte 0x04 (ornamentTrill).
+TEST_F(Tst_Importer, grace_articulation_becomes_ornament)
+{
+    MasterScore* score = readEncoreScore("grace_ornament.enc");
+    ASSERT_NE(score, nullptr);
+
+    bool foundOrnamentOnGrace = false;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->elist()) {
+                if (!e || !e->isChord()) {
+                    continue;
+                }
+                for (Chord* gc : toChord(e)->graceNotes()) {
+                    for (Articulation* a : gc->articulations()) {
+                        if (a->isOrnament()) {
+                            foundOrnamentOnGrace = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_TRUE(foundOrnamentOnGrace)
+        << "trill artic byte on a grace note must become an Ornament, not a plain Articulation";
+
     delete score;
 }
 
