@@ -221,10 +221,9 @@ static DurationType resolveBeatRelativeFaceValue(
     const int faceTicks = (static_cast<int>(en->realDuration) * preACheck
                            + preNCheck / 2) / preNCheck;
     // Choose fv to avoid the "realDur < faceValue2ticks(fv)" fallback in realDuration2DurationType.
-    static constexpr int kFaceTicks[] = { 0, 960, 480, 240, 120, 60, 30, 15, 7 };
     quint8 computedFv = en->faceValue;
     for (int f = 1; f <= 8; ++f) {
-        if (kFaceTicks[f] <= faceTicks) {
+        if (faceValue2ticks(static_cast<quint8>(f)) <= faceTicks) {
             computedFv = static_cast<quint8>(f);
             break;
         }
