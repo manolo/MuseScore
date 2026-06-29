@@ -693,6 +693,36 @@ TEST_F(Tst_Structure, system_breaks_from_line_start_deltas_when_count_zero)
 }
 
 // ===========================================================================
+// FIX: page-break detection must use the same start-delta fallback as the
+// system-lock pass. SCO5 (big-endian Encore 5) reports measureCount 0, so the
+// old "lastBlock = firstBlock + measureCount - 1" left lastBlock < firstBlock
+// and silently dropped every page break. The line span must be recovered from
+// the start deltas, the same way system locks already do.
+// Fixture: same 6 measures / 2 systems as structure_page_break.enc but with
+// every LINE measureCount byte zeroed; the page break after system 0 must remain.
+// ===========================================================================
+TEST_F(Tst_Structure, page_break_from_line_start_deltas_when_count_zero)
+{
+    MasterScore* score = readEncoreScore("structure_page_break_mcount_zero.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    bool foundPageBreak = false;
+    for (Measure* m = score->firstMeasure(); m && !foundPageBreak; m = m->nextMeasure()) {
+        for (EngravingItem* e : m->el()) {
+            if (e && e->isLayoutBreak() && toLayoutBreak(e)->isPageBreak()) {
+                foundPageBreak = true;
+                break;
+            }
+        }
+    }
+    EXPECT_TRUE(foundPageBreak)
+        << "page break must be recovered from line start deltas when measureCount is 0";
+
+    delete score;
+}
+
+// ===========================================================================
 // SCO5 (big-endian macOS Encore 5): page size + orientation come from the PREC
 // macOS plist (Letter portrait here); document margins are not stored anywhere
 // importable, so the importer applies a clean, symmetric 0.25" margin (better UX

@@ -326,6 +326,29 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps, bool pa
     score->style().set(Sid::pageEvenBottomMargin, bottomIn);
 }
 
+// Inclusive [firstBlock, lastBlock] MEAS-block range covered by line[li]. Prefer the stored
+// per-line measure count, but fall back to the gap to the next line's start (or to
+// totalBlocks for the last line) when it is absent (0). SCO5 (big-endian Encore 5) does not
+// surface measureCount, yet the line start indices are correct, so the start delta recovers
+// each system's length. lastBlock < firstBlock when the line spans nothing.
+struct LineBlockSpan {
+    int firstBlock;
+    int lastBlock;
+};
+
+static LineBlockSpan lineSpanBlocks(const std::vector<EncLine>& lines, size_t li, int totalBlocks)
+{
+    const int firstBlock = static_cast<int>(lines[li].start);
+    int span = static_cast<int>(lines[li].measureCount);
+    if (span <= 0) {
+        const int nextStart = (li + 1 < lines.size())
+                              ? static_cast<int>(lines[li + 1].start)
+                              : totalBlocks;
+        span = nextStart - firstBlock;
+    }
+    return { firstBlock, firstBlock + span - 1 };
+}
+
 // SystemLocks enforce Encore's line layout as hard constraints so the engine compresses
 // spacing within the system rather than redistributing measures across lines.
 static void applySystemLocksFromLines(BuildCtx& ctx)
@@ -335,23 +358,7 @@ static void applySystemLocksFromLines(BuildCtx& ctx)
     const int totalMeas = static_cast<int>(ctx.measuresByIdx.size());
 
     for (size_t li = 0; li < lines.size(); ++li) {
-        const auto& line = lines[li];
-        const int firstBlock = static_cast<int>(line.start);
-        // System span in MEAS blocks. Prefer the stored per-line measure count, but fall
-        // back to the gap to the next line's start when it is absent (0). SCO5 (big-endian
-        // Encore 5) does not surface measureCount, yet the line start indices are correct,
-        // so the start delta recovers each system's length.
-        int span = static_cast<int>(line.measureCount);
-        if (span <= 0) {
-            const int nextStart = (li + 1 < lines.size())
-                                  ? static_cast<int>(lines[li + 1].start)
-                                  : static_cast<int>(enc2ms.size());
-            span = nextStart - firstBlock;
-        }
-        if (span <= 0) {
-            continue;
-        }
-        const int lastBlock = firstBlock + span - 1;
+        const auto [firstBlock, lastBlock] = lineSpanBlocks(lines, li, static_cast<int>(enc2ms.size()));
 
         if (firstBlock < 0 || lastBlock < firstBlock
             || firstBlock >= static_cast<int>(enc2ms.size())
@@ -403,8 +410,7 @@ static void applyPageBreaksFromLines(BuildCtx& ctx)
         }
 
         // Page break: add LayoutBreak to the last measure of line[li-1].
-        const int firstBlock = static_cast<int>(prev.start);
-        const int lastBlock  = firstBlock + static_cast<int>(prev.measureCount) - 1;
+        const auto [firstBlock, lastBlock] = lineSpanBlocks(lines, li - 1, static_cast<int>(enc2ms.size()));
         if (firstBlock < 0 || lastBlock < firstBlock
             || lastBlock >= static_cast<int>(enc2ms.size())) {
             continue;

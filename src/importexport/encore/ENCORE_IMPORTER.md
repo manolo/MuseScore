@@ -2020,7 +2020,7 @@ The Preferences UI (Phase 2) will read these values from `IEncoreImportConfigura
 | Field | Default | Effect when changed |
 |---|---|---|
 | `importPageLayout` | `true` | When `false`, `applyPageMargins()` is skipped; MuseScore default margins apply. |
-| `importPageBreaks` | `true` | When `true`, a `LayoutBreak::PAGE` is inserted after the last measure of each system where the LINE block `pageIdx` resets (row-on-page counter decreases or stays the same), indicating a new page. When `false`, no page breaks are added and MuseScore paginates freely. |
+| `importPageBreaks` | `true` | When `true`, a `LayoutBreak::PAGE` is inserted after the last measure of each system where the LINE block `pageIdx` resets (row-on-page counter decreases or stays the same), indicating a new page. The last measure of each system is found from the line span, which prefers the per-line measure count but falls back to the gap to the next line's start when the count is absent (0), so page breaks survive on SCO5 (big-endian Encore 5) where the count is not stored. When `false`, no page breaks are added and MuseScore paginates freely. |
 | `importSystemLocks` | `true` | When `false`, `applySystemLocksFromLines()` is skipped; MuseScore freely reflows measures across systems. |
 | `importStaffSize` | `true` | When `false`, `applyStaffScale()` is skipped; all staves keep MAG 1.0. |
 

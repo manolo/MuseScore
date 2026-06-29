@@ -32,6 +32,87 @@
 #include "engraving/dom/tuplet.h"
 
 namespace mu::iex::enc {
+// Resize `measure` to `newLen` and propagate the change. Shrinking or extending a measure
+// moves the absolute tick of everything that follows it, so the following measures shift by
+// the signed delta and so does every pending element that caches an absolute tick. Only
+// pending hairpins used to be shifted; pending slurs, ornaments, markers and the rest carry
+// absolute ticks too and were silently corrupted by a measure resize. Forward ticks at or
+// after the measure's content boundary shift; ticks inside the kept content never move.
+static void resizeMeasureAndShift(BuildCtx& ctx, Measure* measure, Fraction newLen)
+{
+    const Fraction oldLen = measure->ticks();
+    const Fraction delta = newLen - oldLen;
+    if (delta == Fraction(0, 1)) {
+        return;
+    }
+    const Fraction measTick = measure->tick();
+    // Content boundary: positions before it are inside the kept part of the measure and never
+    // move; positions at/after it belong to following measures and shift by delta. Shrinking
+    // removes the [newEnd, oldEnd) span, so a tick exactly at the new end stays put (strict >);
+    // extending inserts space at the old end, so a tick there is the next downbeat and moves (>=).
+    const bool shrinking = delta < Fraction(0, 1);
+    const Fraction boundary = measTick + std::min(oldLen, newLen);
+
+    measure->setTicks(newLen);
+    for (Measure* m = measure->nextMeasure(); m; m = m->nextMeasure()) {
+        m->setTick(m->tick() + delta);
+    }
+
+    auto shift = [&](Fraction& t) {
+        const bool past = shrinking ? (t > boundary) : (t >= boundary);
+        if (past) {
+            t += delta;
+        }
+    };
+
+    for (PendingHairpin& p : ctx.pendingHairpins) {
+        shift(p.startTick);
+        shift(p.maxEndTick);
+    }
+    for (PendingSlur& p : ctx.pendingSlurs) {
+        shift(p.startTick);
+    }
+    for (PendingArpeggio& p : ctx.pendingArpeggios) {
+        shift(p.tick);
+    }
+    for (PendingOrnTremolo& p : ctx.pendingOrnTremolos) {
+        shift(p.tick);
+        shift(p.measTick);
+    }
+    for (PendingTrill& p : ctx.pendingTrills) {
+        shift(p.tick);
+    }
+    for (auto& [tr, ends] : ctx.pendingTrillEnds) {
+        for (Fraction& e : ends) {
+            shift(e);
+        }
+    }
+    for (PendingStaccato& p : ctx.pendingStaccatos) {
+        shift(p.tick);
+    }
+    for (PendingFermata& p : ctx.pendingFermatas) {
+        shift(p.tick);
+    }
+    for (PendingBreath& p : ctx.pendingBreaths) {
+        shift(p.tick);
+    }
+    for (PendingMeasureRepeat& p : ctx.pendingMeasureRepeats) {
+        shift(p.measTick);
+    }
+    for (PendingBowing& p : ctx.pendingBowings) {
+        shift(p.tick);
+    }
+    for (PendingOrnFingering& p : ctx.pendingOrnFingerings) {
+        shift(p.tick);
+    }
+    for (PendingOttava& p : ctx.pendingOttavas) {
+        shift(p.startTick);
+    }
+    for (PendingMarker& p : ctx.pendingMarkers) {
+        shift(p.tick);
+    }
+}
+
 // Case B pickup adjustment: if measure 0 has the same timesig as measure 1 but
 // the note loop placed less content than the full measure, shorten it to the
 // actual cumTick. Update all subsequent measures' tick positions accordingly.
@@ -52,19 +133,7 @@ void adjustPickupMeasure(BuildCtx& ctx, Measure* measure, int measIdx)
     if (maxCumTick <= Fraction(0, 1) || maxCumTick >= measure->ticks()) {
         return;
     }
-    const Fraction delta = measure->ticks() - maxCumTick;
-    measure->setTicks(maxCumTick);
-    for (Measure* m = measure->nextMeasure(); m; m = m->nextMeasure()) {
-        m->setTick(m->tick() - delta);
-    }
-    // Any PendingHairpin whose maxEndTick reaches past the shortened measure 0 must
-    // be adjusted by the same delta so resolution searches the correct range.
-    const Fraction m0End = measure->tick() + maxCumTick;
-    for (PendingHairpin& ph : ctx.pendingHairpins) {
-        if (ph.maxEndTick > m0End) {
-            ph.maxEndTick -= delta;
-        }
-    }
+    resizeMeasureAndShift(ctx, measure, maxCumTick);
 }
 
 // Pre-fill trailing silence with rests so checkMeasure does not add its own.
@@ -132,16 +201,7 @@ void fillTrailingGaps(BuildCtx& ctx, Measure* measure, Fraction measTick)
             }
         }
         if (!anyStaffSilent && maxPos > Fraction(0, 1) && maxPos < measure->ticks()) {
-            const Fraction delta = measure->ticks() - maxPos;
-            measure->setTicks(maxPos);
-            for (Measure* m = measure->nextMeasure(); m; m = m->nextMeasure()) {
-                m->setTick(m->tick() - delta);
-            }
-            for (PendingHairpin& ph : ctx.pendingHairpins) {
-                if (ph.maxEndTick > measTick + maxPos) {
-                    ph.maxEndTick -= delta;
-                }
-            }
+            resizeMeasureAndShift(ctx, measure, maxPos);
         }
     }
 }
@@ -227,16 +287,7 @@ void extendMeasureIrregular(BuildCtx& ctx, Measure* measure)
         }
     }
     if (maxVoiceSum > mLen) {
-        const Fraction delta = maxVoiceSum - mLen;
-        measure->setTicks(maxVoiceSum);
-        for (Measure* m = measure->nextMeasure(); m; m = m->nextMeasure()) {
-            m->setTick(m->tick() + delta);
-        }
-        for (PendingHairpin& ph : ctx.pendingHairpins) {
-            if (ph.maxEndTick >= measTick + mLen) {
-                ph.maxEndTick += delta;
-            }
-        }
+        resizeMeasureAndShift(ctx, measure, maxVoiceSum);
         // Fill all voices that fall short of the extended measure length.
         // Staves whose content stopped at the original measure length now sit
         // inside a longer measure; a visible rest covers the added time.
