@@ -573,7 +573,7 @@ Type 5. Variable size. Offsets from element start:
 | +20      | 1      | xoffset2, end x-position in the target measure            |
 | +26      | 1      | speguleco, bit 0: 0 = crescendo, 1 = diminuendo           |
 | +28      | 1      | noto, tempo beat unit (TEMPO subtype): low 7 bits = note value (0 = whole, 1 = half, 2 = quarter, 3 = eighth, ...), high bit 0x80 = dotted. So 0x02 is a quarter, 0x82 a dotted quarter, 0x81 a dotted half. A value of 0 (or an out-of-range byte from an older format) means no explicit unit. |
-| +30      | 2      | BPM (TEMPO subtype only, v0xC4), expressed in the beat unit from +28. In v0xC2 (Encore 3.x/4.x) the BPM is instead at +28 and this +30 slot holds a constant unrelated byte (observed 0x34 = 52); read +28 for v0xC2 tempo marks. |
+| +30      | 2      | BPM (TEMPO subtype), expressed in the beat unit from +28. v0xC2 (Encore 3.x/4.x) has two layouts. Newer files match v0xC4: the BPM is here at +30 and +28 holds a beat-unit code (low 7 bits in 0..6). Older files store the BPM directly at +28 and leave a constant unrelated byte (observed 0x34 = 52) in this +30 slot. Distinguish by +28: when it is a valid beat-unit code the BPM is at +30; otherwise the +28 byte itself is the BPM. |
 | +32      | 1      | TEXT block entry index (STAFFTEXT subtype)                 |
 
 ### Ornament subtypes

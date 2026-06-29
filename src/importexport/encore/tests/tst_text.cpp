@@ -713,6 +713,43 @@ TEST_F(Tst_Text, tempo_orn_v0c2_reads_bpm_from_offset_28)
 }
 
 // ===========================================================================
+// FIX: some v0xC2 (Encore 4.x) files store the tempo mark the v0xC4 way: a small
+// beat-unit code at ORN +28 (noto, e.g. 0x02 = quarter) and the real BPM at +30.
+// The earlier v0xC2 rule moved +28 into the tempo unconditionally, so a quarter=158
+// mark imported as quarter=2 (the beat-unit code). The reader keeps the +30 BPM when
+// +28 is a valid beat-unit code, and only moves +28 across when it is not.
+// Fixture: 4/4 v0xC2, header bpm=0, ORN TEMPO with noto=0x02 at +28 and BPM=158 at +30.
+// Expected: TempoText quarter=158, BPS=158/60; not quarter=2.
+// ===========================================================================
+TEST_F(Tst_Text, tempo_orn_v0c2_keeps_bpm_at_offset_30_when_28_is_beat_unit)
+{
+    MasterScore* score = readEncoreScore("text_tempo_orn_v0c2_v0c4_layout.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    TempoText* tt = nullptr;
+    for (MeasureBase* mb = score->first(); mb && !tt; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s && !tt; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isTempoText()) {
+                    tt = toTempoText(e);
+                    break;
+                }
+            }
+        }
+    }
+    ASSERT_NE(tt, nullptr) << "No TempoText found in score";
+    EXPECT_EQ(tt->xmlText(), u"<sym>metNoteQuarterUp</sym> = 158")
+        << "v0xC2 with a beat-unit code at +28 keeps the BPM at +30 (158), not the unit (2)";
+    EXPECT_NEAR(tt->tempo().val, 158.0 / 60.0, 1e-6);
+
+    delete score;
+}
+
+// ===========================================================================
 // BUG FIX: MEAS-header and ORN tempo texts used a raw Unicode note symbol
 // (U+2669 "♩") in their xmlText.  TempoText::updateTempo() matches against
 // TempoPattern strings that use <sym>metNoteQuarterUp</sym>, so the Unicode

@@ -184,12 +184,20 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
             } else {
                 orn->alMezuroValid = false;
             }
-            // v0xC2 stores the TEMPO BPM at element +28 (read into `noto`); the +30 slot that
-            // carries the BPM in v0xC4 holds a constant unrelated byte here. Move it across so
-            // the tempo mark shows the real BPM (e.g. 80) instead of that constant (52).
+            // v0xC2 has two TEMPO layouts. Older files store the BPM directly at element +28
+            // (read into `noto`), with a constant unrelated byte (observed 0x34 = 52) in the
+            // +30 slot that carries the BPM in v0xC4. Newer Encore 4.x files instead use the
+            // v0xC4 layout: a beat-unit code at +28 (e.g. 0x02 = quarter) and the real BPM at
+            // +30. Tell them apart by whether +28 holds a valid beat-unit code (low 7 bits in
+            // 0..6): if so, keep the BPM already read from +30 and the unit in `noto`;
+            // otherwise the +28 byte IS the BPM, so move it across (e.g. 80 instead of 52).
             if (orn->tipo == static_cast<quint8>(EncOrnamentType::TEMPO)) {
-                orn->tempo = orn->noto;
-                orn->noto = 0;   // v0xC2 has no per-mark beat unit; fall back to the meter
+                const quint8 beatUnitCode = orn->noto & 0x7F;
+                const bool validBeatUnit = (orn->noto != 0) && (beatUnitCode <= 6);
+                if (!validBeatUnit) {
+                    orn->tempo = orn->noto;
+                    orn->noto = 0;   // older layout: no per-mark beat unit; fall back to the meter
+                }
             }
             return false;
         }
