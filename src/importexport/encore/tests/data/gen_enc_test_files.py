@@ -85,6 +85,128 @@ def meas_hdr(timeSigNum, timeSigDen, bpm=100, barTypeEnd=0, beatTicks=None, durT
 def meas_block(hdr54, elems):
     return b'MEAS' + struct.pack('<I', len(elems)) + hdr54 + elems
 
+# ---------------------------------------------------------------------------
+# Encore on-disk layout pass (v0xC4)
+#
+# The MuseScore importer recomputes note positions from tick + face value, so
+# it ignores the on-disk layout fields.  Real Encore 5 instead renders straight
+# from them, so synthetic files that leave them zero collapse every note onto
+# the first tick.  This pass fills the layout fields the way Encore writes them
+# (validated by cutting + pasting notes in Encore and re-reading its output):
+#
+#   * note/rest x-position (+10): linear in tick, xpos = round(12 + tick*0.153)
+#   * measure width (@0x10):      xpos(durTicks); the last note then keeps its
+#                                 own duration as trailing space before the bar
+#   * note diatonic staff position (+12): clef-relative diatonic step from MIDI
+#   * accidental glyph (+21):     1 sharp / 2 flat (black keys, sharp spelling)
+#   * dot control (+14):          0x1d (even position) / 0x19 (odd) for 1 dot
+#
+# Every field is filled only when it is still zero, so fixtures that set an
+# explicit xoffset / position / dotControl for an importer regression keep their
+# value.  The importer ignores all of these (xoffset feeds only spanner-anchor
+# heuristics, dotControl falls back to tick-gap snapping), so the pass is a
+# pure display addition.
+# ---------------------------------------------------------------------------
+ENC_XPOS_SLOPE = 0.153
+ENC_XPOS_BASE  = 12
+
+# semitone -> diatonic letter index (C=0 .. B=6), sharp spelling, and the
+# accidental glyph for that semitone (1 = sharp on a black key, else 0).
+_PC_LETTER = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6]
+_PC_SHARP  = [0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0]
+# clef byte -> absolute-diatonic-index of staff position 0.  G=C4, F=E2,
+# G8M=C3 (octave down), G8P=C5 (octave up).  PERC(7)/TAB(8)/other: no pitch
+# mapping, skip.
+_CLEF_ORIGIN = {0: 28, 1: 16, 4: 35, 5: 21}
+
+def _enc_xpos(tick):
+    return round(ENC_XPOS_BASE + tick * ENC_XPOS_SLOPE)
+
+def _abs_diatonic(midi):
+    return (midi // 12 - 1) * 7 + _PC_LETTER[midi % 12]
+
+def _face_ticks(fv):
+    return {1: 960, 2: 480, 3: 240, 4: 120, 5: 60, 6: 30, 7: 15}.get(fv & 0x0F, 0)
+
+def _dots_from_gap(gap, fv):
+    base = _face_ticks(fv)
+    if base <= 0 or gap <= 0:
+        return 0
+    if abs(gap - base) <= 1:
+        return 0
+    if abs(gap - base * 3 // 2) <= 1:
+        return 1
+    if (base * 7) % 4 == 0 and abs(gap - base * 7 // 4) <= 1:
+        return 2
+    if (base * 15) % 8 == 0 and abs(gap - base * 15 // 8) <= 1:
+        return 3
+    return 0
+
+def _staff0_clef(data):
+    """Clef byte of the first staff entry of the first LINE block."""
+    p = data.find(b'LINE')
+    if p < 0:
+        return 0
+    content_off = p + 8 + 13          # 13-byte LINE header before staff entries
+    clef_off = content_off + 14       # byte 14 of the 30-byte staff entry
+    return data[clef_off] if clef_off < len(data) else 0
+
+def apply_encore_layout(data):
+    """Fill Encore display-layout fields in every v0xC4 MEAS block in `data`."""
+    if len(data) < 5 or data[4] != 0xC4:
+        return data
+    out = bytearray(data)
+    clef = _staff0_clef(out)
+    origin = _CLEF_ORIGIN.get(clef)   # None for PERC/TAB -> skip pitch mapping
+    pos = 0
+    while True:
+        m = out.find(b'MEAS', pos)
+        if m < 0:
+            break
+        size = struct.unpack('<I', out[m + 4:m + 8])[0]
+        hdr = m + 8
+        elem_start = hdr + 0x36
+        elem_end = elem_start + size
+        dur_ticks = struct.unpack('<H', out[hdr + 6:hdr + 8])[0]
+        # measure width = x-position of the measure end
+        struct.pack_into('<I', out, hdr + 0x10, _enc_xpos(dur_ticks))
+        # collect note/rest elements; track per (rawStaff, voice) for dots
+        groups = {}
+        i = elem_start
+        while i + 4 <= elem_end:
+            if out[i:i + 2] == b'\xff\xff':
+                break
+            tv = out[i + 2]
+            typ = tv >> 4
+            voice = tv & 0x0F
+            esize = out[i + 3]
+            if esize == 0:
+                break
+            if typ in (8, 9) and esize >= 12:
+                tick = struct.unpack('<H', out[i:i + 2])[0]
+                # x-position
+                if struct.unpack('<H', out[i + 10:i + 12])[0] == 0:
+                    struct.pack_into('<H', out, i + 10, _enc_xpos(tick))
+                if typ == 9 and esize >= 16:
+                    midi = out[i + 15]
+                    # diatonic staff position + accidental (sharp spelling)
+                    if origin is not None and out[i + 12] == 0 and midi:
+                        out[i + 12] = (_abs_diatonic(midi) - origin) & 0xFF
+                        if _PC_SHARP[midi % 12] and out[i + 21] == 0:
+                            out[i + 21] = 1
+                    groups.setdefault((out[i + 4], voice), []).append((tick, i, out[i + 5] & 0x0F))
+            i += esize
+        # dots: derive from the tick gap to the next event in the same voice
+        for evts in groups.values():
+            evts.sort()
+            for k, (tick, off, fv) in enumerate(evts):
+                nxt = evts[k + 1][0] if k + 1 < len(evts) else dur_ticks
+                dots = _dots_from_gap(nxt - tick, fv)
+                if dots > 0 and out[off + 14] == 0:
+                    out[off + 14] = 0x1d if out[off + 12] % 2 == 0 else 0x19
+        pos = elem_end
+    return bytes(out)
+
 def empty_meas(tsNum=4, tsDen=4):
     return meas_block(meas_hdr(tsNum, tsDen), b'\xff\xff')
 
@@ -3434,11 +3556,11 @@ def gen_v0c4_articulations_combo():
         (  0, 0x25, 60),  # marcato + tenuto → articMarcatoTenutoAbove
         (240, 0x2A, 62),  # staccatissimo + accent (two elements)
         (480, 0x2C, 64),  # tenuto + staccatissimo (two elements)
+        (720, 0x22, 65),  # tenuto + accent → articTenutoAccentBelow
     ]
     e4 = b''
     for tick, byte, pitch in combos4:
         e4 += note_v0c4_artic(tick, 0, 0, fv=3, pitch=pitch, articDown=byte)
-    e4 += rest_v0c4(720, 0, 0, fv=3)
     e4 += end_marker()
     return assemble(0xC4, [m1, (meas_hdr(4, 4), e2), (meas_hdr(4, 4), e3),
                             (meas_hdr(4, 4), e4)], fill_ts=(4, 4))
@@ -8424,7 +8546,13 @@ def gen_v0c4_structure_clef_trailing_cautionary():
     return assemble(0xC4, [(meas_hdr(2, 4), e0), (meas_hdr(2, 4), e1)], fill_ts=(2, 4))
 
 
-def write(name,data):
+def write(name,data,layout=True):
+    # `layout=False` skips the Encore display-layout pass for fixtures whose
+    # importer regression depends on notes carrying a zero xoffset (the pass
+    # would change spanner-anchor snapping). Those fixtures test importer logic,
+    # not Encore rendering, so leaving them un-laid-out is intentional.
+    if layout:
+        data = apply_encore_layout(data)
     path=os.path.join(OUT_DIR,name)
     with open(path,'wb') as f: f.write(data)
     print(f"  {name}  ({len(data):,} bytes)")
@@ -8672,7 +8800,7 @@ if __name__=='__main__':
     write("instruments_tk_onebyte_name.enc",  gen_v0c4_tk_onebyte_name())
     write("ornaments_beamed_triplet_capped.enc", gen_v0c4_beamed_triplet_capped())
     write("ornaments_zero_hairpin.enc",           gen_v0c4_zero_hairpin())
-    write("ornaments_multi_measure_hairpin.enc",  gen_v0c4_multi_measure_hairpin())
+    write("ornaments_multi_measure_hairpin.enc",  gen_v0c4_multi_measure_hairpin(), layout=False)
     write("ornaments_grace_slur_to_main.enc",      gen_v0c4_grace_slur_to_main())
     write("ornaments_grace_slur_to_later.enc",     gen_v0c4_grace_slur_to_later())
     write("ornaments_multi_measure_slur.enc",     gen_v0c4_multi_measure_slur())
@@ -8827,10 +8955,14 @@ if __name__=='__main__':
     write("structure_sco5_macos.enc",             gen_sco5_macos_page_setup())
     write("text_lyrics_grandstaff_routed_notes.enc", gen_v0c4_lyrics_grandstaff_routed_notes())
     write("importer_inner_tuplet_note_level_cap.enc", gen_v0c4_inner_tuplet_note_level_cap())
-    write("importer_score_size2.enc", set_score_size(assemble(0xC4, [(meas_hdr(4, 4),
-        note_v0c4(0, 0, 0, fv=3, pitch=60) + end_marker())], fill_ts=(4, 4)), sz=2))
-    write("importer_score_size3.enc", set_score_size(assemble(0xC4, [(meas_hdr(4, 4),
-        note_v0c4(0, 0, 0, fv=3, pitch=60) + end_marker())], fill_ts=(4, 4)), sz=3))
+    # The importer derives staff scale from the LINE staffSizeHint (byte 13,
+    # 0-indexed) when LINE data is present; header 0x52 is only a fallback. So
+    # the staffSizeHint must match the intended Size: size 2 (75 %) = hint 1,
+    # size 3 (100 %) = hint 2.
+    write("importer_score_size2.enc", set_line_staff_size_hint(set_score_size(assemble(0xC4, [(meas_hdr(4, 4),
+        note_v0c4(0, 0, 0, fv=3, pitch=60) + end_marker())], fill_ts=(4, 4)), sz=2), sz0indexed=1))
+    write("importer_score_size3.enc", set_line_staff_size_hint(set_score_size(assemble(0xC4, [(meas_hdr(4, 4),
+        note_v0c4(0, 0, 0, fv=3, pitch=60) + end_marker())], fill_ts=(4, 4)), sz=3), sz0indexed=2))
     # Encore 4.x (version=775): size from LINE staff entry byte[13], NOT header 0x52.
     # 0x52 stores an unrelated field; values 1-8 map irregularly to Size 1-4.
     # byte[13]=1 (0-indexed) -> Size=2 -> 70%; byte[13]=2 -> Size=3 -> 75%.
