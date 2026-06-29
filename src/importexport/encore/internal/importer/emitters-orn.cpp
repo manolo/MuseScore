@@ -56,36 +56,7 @@ static void handleDynamicOrnament(BuildCtx& /*ctx*/, MeasEmitCtx& mc,
         staffIdx -= 1;
         track = static_cast<track_idx_t>(staffIdx * VOICES + msVoice);
     }
-    DynamicType dt = DynamicType::OTHER;
-    switch (eo->ornType()) {
-    case EncOrnamentType::DYN_PPP:  dt = DynamicType::PPP;
-        break;
-    case EncOrnamentType::DYN_PP:   dt = DynamicType::PP;
-        break;
-    case EncOrnamentType::DYN_P:    dt = DynamicType::P;
-        break;
-    case EncOrnamentType::DYN_MP:   dt = DynamicType::MP;
-        break;
-    case EncOrnamentType::DYN_MF:   dt = DynamicType::MF;
-        break;
-    case EncOrnamentType::DYN_F:    dt = DynamicType::F;
-        break;
-    case EncOrnamentType::DYN_FF:   dt = DynamicType::FF;
-        break;
-    case EncOrnamentType::DYN_FFF:  dt = DynamicType::FFF;
-        break;
-    case EncOrnamentType::DYN_SFZ:  dt = DynamicType::SFZ;
-        break;
-    case EncOrnamentType::DYN_SFFZ: dt = DynamicType::SFFZ;
-        break;
-    case EncOrnamentType::DYN_FP:   dt = DynamicType::FP;
-        break;
-    case EncOrnamentType::DYN_FZ:   dt = DynamicType::FZ;
-        break;
-    case EncOrnamentType::DYN_SF:   dt = DynamicType::SF;
-        break;
-    default: break;
-    }
+    const DynamicType dt = encOrnType2DynamicType(eo->ornType());
     // Use enc tick as the base: cumTick for voice=0 may be 0 when notes are in other voices.
     const Fraction dynBase = measTick + Fraction(static_cast<int>(e->tick), kEncWholeTicks);
     Fraction placeTick = snapStartTickByXoffset(dynBase, encMeas, staffIdx,

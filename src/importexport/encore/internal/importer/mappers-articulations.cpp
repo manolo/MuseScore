@@ -144,4 +144,24 @@ mu::engraving::OrnamentInterval encArticByteToTrillInterval(quint8 articByte)
     default:   return {};   // AUTO (default)
     }
 }
+
+DynamicType encOrnType2DynamicType(EncOrnamentType ot)
+{
+    switch (ot) {
+    case EncOrnamentType::DYN_PPP:  return DynamicType::PPP;
+    case EncOrnamentType::DYN_PP:   return DynamicType::PP;
+    case EncOrnamentType::DYN_P:    return DynamicType::P;
+    case EncOrnamentType::DYN_MP:   return DynamicType::MP;
+    case EncOrnamentType::DYN_MF:   return DynamicType::MF;
+    case EncOrnamentType::DYN_F:    return DynamicType::F;
+    case EncOrnamentType::DYN_FF:   return DynamicType::FF;
+    case EncOrnamentType::DYN_FFF:  return DynamicType::FFF;
+    case EncOrnamentType::DYN_SFZ:  return DynamicType::SFZ;
+    case EncOrnamentType::DYN_SFFZ: return DynamicType::SFFZ;
+    case EncOrnamentType::DYN_FP:   return DynamicType::FP;
+    case EncOrnamentType::DYN_FZ:   return DynamicType::FZ;
+    case EncOrnamentType::DYN_SF:   return DynamicType::SF;
+    default:                        return DynamicType::OTHER;
+    }
+}
 } // namespace mu::iex::enc

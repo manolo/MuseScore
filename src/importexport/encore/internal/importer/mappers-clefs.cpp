@@ -123,6 +123,17 @@ void addInitialTimeSig(MasterScore* score, int nstaves, Fraction ts, TimeSigType
     }
 }
 
+// Encore encodes common time as 0x43 ('C') or 0x63 ('c'); 0x00 means normal numeric.
+// Cut time (alla breve) uses a glyph value not yet confirmed in the format, so it is not
+// mapped here and falls through to NORMAL (shown as numeric 2/2).
+TimeSigType encTimeSigGlyph2Type(quint8 glyph, Fraction ts)
+{
+    if ((glyph == 0x43 || glyph == 0x63) && ts == Fraction(4, 4)) {
+        return TimeSigType::FOUR_FOUR;
+    }
+    return TimeSigType::NORMAL;
+}
+
 static int clefOctaveOffset(ClefType ct)
 {
     switch (ct) {
