@@ -180,6 +180,9 @@ struct EncPageSetup {
     qint32 left       { 0 };   // left margin in pts
     qint32 bottomEdge { 0 };   // pageHeight_pts - bottomMargin_pts
     qint32 rightEdge  { 0 };   // pageWidth_pts  - rightMargin_pts
+
+    // Decode the WINI block margins in place; consumes the whole block (clamped to the stream).
+    void read(QDataStream& ds, quint32 varSize);
 };
 
 // PREC block: a Windows DEVMODE. Page size, orientation and notation scale.

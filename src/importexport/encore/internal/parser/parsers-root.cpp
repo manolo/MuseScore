@@ -58,6 +58,31 @@ static bool skipBlock(QDataStream& ds, qint64 size)
     return true;
 }
 
+// WINI page-setup block. Layout: 21 uint16 LE values (42 bytes). The margins are int32 LE (two
+// adjacent uint16s, high word always 0): [12,13]=top, [14,15]=left, [16,17]=pageHeight_pts -
+// bottomMargin, [18,19]=pageWidth_pts - rightMargin. All values in typographic points (1/72 inch).
+void EncPageSetup::read(QDataStream& ds, quint32 varSize)
+{
+    if (varSize < 40) {
+        skipBlock(ds, varSize);
+        return;
+    }
+    qint32 t = 0, l = 0, b = 0, r = 0;
+    ds.skipRawData(24);   // skip fields 0..11 (window/screen data)
+    ds >> t >> l >> b >> r;
+    // The four margins come from an attacker-controlled block at a magic offset;
+    // only trust them when the reads stayed within the stream.
+    const bool ok = (ds.status() == QDataStream::Ok);
+    skipBlock(ds, static_cast<qint64>(varSize) - 40);
+    if (ok && b > 0 && r > 0 && b > t && r > l) {
+        hasData    = true;
+        top        = t;
+        left       = l;
+        bottomEdge = b;
+        rightEdge  = r;
+    }
+}
+
 bool isInstrumentMagic(const QString& magic)
 {
     return magic.length() == 4
@@ -179,6 +204,23 @@ bool parsePrecPlist(const QByteArray& buf, EncPrintSetup& out)
     return true;
 }
 
+// PREC carries page orientation, paper size and notation scale. SCOW stores it as a Windows
+// DEVMODE; SCO5 (macOS Encore 5) stores it as an NSPrintInfo XML plist. Detect by content.
+static void readPrintSetup(QDataStream& ds, quint32 varSize, EncPrintSetup& out)
+{
+    QByteArray buf(static_cast<int>(varSize), '\0');
+    const int n = ds.readRawData(buf.data(), static_cast<int>(varSize));
+    if (n <= 0) {
+        return;
+    }
+    buf.resize(n);
+    if (buf.startsWith("<?xml") || buf.contains("<plist")) {
+        parsePrecPlist(buf, out);
+    } else {
+        parsePrecDevmode(buf, out);
+    }
+}
+
 void addSpannerEnds(std::vector<EncMeasure>& measures)
 {
     std::vector<MeasureElemVec> extra(measures.size());
@@ -273,42 +315,9 @@ bool EncRoot::read(QDataStream& ds)
                 textBlock = std::move(tmp);
             }
         } else if (nextId == "WINI") {
-            // WINI: page setup block. Layout: 21 uint16 LE values (42 bytes).
-            // Margins as int32 LE (two adjacent uint16s, high word always 0):
-            //   [12,13] = top margin, [14,15] = left margin,
-            //   [16,17] = page_height_pts - bottom_margin, [18,19] = page_width_pts - right_margin.
-            // All values in typographic points (1/72 inch).
-            if (varSize >= 40) {
-                qint32 top = 0, left = 0, bottomEdge = 0, rightEdge = 0;
-                ds.skipRawData(24);   // skip fields 0..11 (window/screen data)
-                ds >> top >> left >> bottomEdge >> rightEdge;
-                // The four margins come from an attacker-controlled block at a magic offset;
-                // only trust them when the reads stayed within the stream.
-                const bool ok = (ds.status() == QDataStream::Ok);
-                skipBlock(ds, static_cast<qint64>(varSize) - 40);
-                if (ok && bottomEdge > 0 && rightEdge > 0 && bottomEdge > top && rightEdge > left) {
-                    pageSetup.hasData    = true;
-                    pageSetup.top        = top;
-                    pageSetup.left       = left;
-                    pageSetup.bottomEdge = bottomEdge;
-                    pageSetup.rightEdge  = rightEdge;
-                }
-            } else {
-                skipBlock(ds, varSize);
-            }
+            pageSetup.read(ds, varSize);
         } else if (nextId == "PREC") {
-            // PREC carries page orientation, paper size and notation scale. SCOW stores it as a
-            // Windows DEVMODE; SCO5 (macOS Encore 5) stores it as an NSPrintInfo XML plist.
-            QByteArray buf(static_cast<int>(varSize), '\0');
-            const int n = ds.readRawData(buf.data(), static_cast<int>(varSize));
-            if (n > 0) {
-                buf.resize(n);
-                if (buf.startsWith("<?xml") || buf.contains("<plist")) {
-                    parsePrecPlist(buf, printSetup);
-                } else {
-                    parsePrecDevmode(buf, printSetup);
-                }
-            }
+            readPrintSetup(ds, varSize, printSetup);
         } else if (isInstrumentMagic(nextId)) {
             EncInstrument instr;
             instr.contentFilePos = ds.device()->pos();
