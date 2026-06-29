@@ -47,7 +47,7 @@ enum class InstrumentSearchMode {
 struct EncImportOptions {
     // Layout group
     bool importPageLayout = true;   // apply page size and margins from the Encore file
-    bool importPageBreaks = true;   // import page breaks (requires future implementation)
+    bool importPageBreaks = true;   // apply page breaks derived from the Encore LINE blocks
     bool importStaffSize  = true;   // apply staff size scaling from the Encore file
 
     // Layout group (continued)
