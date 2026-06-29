@@ -30,6 +30,40 @@
 
 namespace mu::iex::enc {
 namespace {
+// Read the 1-byte MIDI program at absolute offset off. Returns the program number when it is
+// a valid 1..128 value, or 0 otherwise (including a seek failure). Callers keep their own
+// off-in-bounds check; this just collapses the repeated seek + read + range-validate idiom.
+static int readMidiByteAt(QDataStream& ds, qint64 off)
+{
+    if (!ds.device()->seek(off)) {
+        return 0;
+    }
+    char b = 0;
+    if (ds.device()->read(&b, 1) != 1) {
+        return 0;
+    }
+    const quint8 prg = static_cast<quint8>(b);
+    return (prg >= 1 && prg <= 128) ? static_cast<int>(prg) : 0;
+}
+
+// Read the 1-byte signed key-transpose value at absolute offset off. Returns true and sets
+// out (-33..24) when valid; returns false otherwise (including a seek failure). Key 0 is a
+// valid value, so a bool/out-param is used rather than a sentinel return.
+static bool readKeyByteAt(QDataStream& ds, qint64 off, qint8& out)
+{
+    if (!ds.device()->seek(off)) {
+        return false;
+    }
+    quint8 raw = 0;
+    ds >> raw;
+    const qint8 sv = static_cast<qint8>(raw);
+    if (sv >= -33 && sv <= 24) {
+        out = sv;
+        return true;
+    }
+    return false;
+}
+
 // Scans the first 4096 bytes for PAGE/LINE/MEAS block magic; returns ds.device()->size() if not found.
 // includePageBlock=false skips PAGE (used by the compact-layout MIDI scan).
 static qint64 findFirstBlockOffset(QDataStream& ds, bool includePageBlock = true)
@@ -200,14 +234,8 @@ static void readMidiProgramsNoTk(
             if (off >= effectiveFirstBlock || off >= static_cast<qint64>(ds.device()->size())) {
                 break;
             }
-            if (!ds.device()->seek(off)) {
-                break;
-            }
-            char clt = 0;
-            ds.device()->read(&clt, 1);
-            const quint8 prg = static_cast<quint8>(clt);
-            if (prg >= 1 && prg <= 128) {
-                instruments[n].midiProgram = static_cast<int>(prg);
+            if (int prg = readMidiByteAt(ds, off)) {
+                instruments[n].midiProgram = prg;
             }
         }
     } else {
@@ -233,14 +261,8 @@ static void readMidiProgramsNoTk(
                 if (off >= effectiveFirstBlock || off >= static_cast<qint64>(ds.device()->size())) {
                     break;
                 }
-                if (!ds.device()->seek(off)) {
-                    break;
-                }
-                char cp = 0;
-                ds.device()->read(&cp, 1);
-                const quint8 prg = static_cast<quint8>(cp);
-                if (prg >= 1 && prg <= 128) {
-                    instruments[n].midiProgram = static_cast<int>(prg);
+                if (int prg = readMidiByteAt(ds, off)) {
+                    instruments[n].midiProgram = prg;
                 }
             }
         } else if (tildeOff < 0) {
@@ -258,14 +280,8 @@ static void readMidiProgramsNoTk(
                 if (off >= static_cast<qint64>(ds.device()->size())) {
                     break;
                 }
-                if (!ds.device()->seek(off)) {
-                    break;
-                }
-                char cp2 = 0;
-                ds.device()->read(&cp2, 1);
-                const quint8 prg = static_cast<quint8>(cp2);
-                if (prg >= 1 && prg <= 128) {
-                    instruments[n].midiProgram = static_cast<int>(prg);
+                if (int prg = readMidiByteAt(ds, off)) {
+                    instruments[n].midiProgram = prg;
                 }
             }
         } else {
@@ -300,14 +316,8 @@ static void readMidiProgramsNoTk(
                 if (mOff >= static_cast<qint64>(ds.device()->size())) {
                     continue;
                 }
-                if (!ds.device()->seek(mOff)) {
-                    continue;
-                }
-                char cm = 0;
-                ds.device()->read(&cm, 1);
-                const quint8 prm = static_cast<quint8>(cm);
-                if (prm >= 1 && prm <= 128) {
-                    instruments[n].midiProgram = static_cast<int>(prm);
+                if (int prm = readMidiByteAt(ds, mOff)) {
+                    instruments[n].midiProgram = prm;
                 }
             }
 
@@ -326,14 +336,8 @@ static void readMidiProgramsNoTk(
                 if (off >= static_cast<qint64>(ds.device()->size())) {
                     break;
                 }
-                if (!ds.device()->seek(off)) {
-                    break;
-                }
-                char cp2 = 0;
-                ds.device()->read(&cp2, 1);
-                const quint8 prg = static_cast<quint8>(cp2);
-                if (prg >= 1 && prg <= 128) {
-                    instruments[nextTarget].midiProgram = static_cast<int>(prg);
+                if (int prg = readMidiByteAt(ds, off)) {
+                    instruments[nextTarget].midiProgram = prg;
                 }
                 ++nextTarget;
             }
@@ -381,13 +385,8 @@ static void readMidiProgramsSmallTk(
         if (off >= static_cast<qint64>(ds.device()->size())) {
             continue;
         }
-        if (!ds.device()->seek(off)) {
-            continue;
-        }
-        quint8 prg;
-        ds >> prg;
-        if (prg >= 1 && prg <= 128) {
-            instr.midiProgram = static_cast<int>(prg);
+        if (int prg = readMidiByteAt(ds, off)) {
+            instr.midiProgram = prg;
         }
     }
 }
@@ -430,14 +429,8 @@ void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds)
                 if (off >= static_cast<qint64>(ds.device()->size())) {
                     break;
                 }
-                if (!ds.device()->seek(off)) {
-                    break;
-                }
-                char cp2 = 0;
-                ds.device()->read(&cp2, 1);
-                const quint8 prg = static_cast<quint8>(cp2);
-                if (prg >= 1 && prg <= 128) {
-                    instruments[nextTarget].midiProgram = static_cast<int>(prg);
+                if (int prg = readMidiByteAt(ds, off)) {
+                    instruments[nextTarget].midiProgram = prg;
                 }
                 ++nextTarget;
             }
@@ -461,13 +454,8 @@ void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds)
         if (off >= static_cast<qint64>(ds.device()->size())) {
             break;
         }
-        if (!ds.device()->seek(off)) {
-            break;
-        }
-        quint8 prg;
-        ds >> prg;
-        if (prg >= 1 && prg <= 128) {
-            instruments[n].midiProgram = static_cast<int>(prg);
+        if (int prg = readMidiByteAt(ds, off)) {
+            instruments[n].midiProgram = prg;
         }
     }
 }
@@ -483,13 +471,8 @@ static void readKeyTranspositionsNoTk(std::vector<EncInstrument>& instruments, Q
             if (off < 0 || off >= static_cast<qint64>(ds.device()->size())) {
                 continue;
             }
-            if (!ds.device()->seek(off)) {
-                continue;
-            }
-            quint8 raw;
-            ds >> raw;
-            const qint8 sv = static_cast<qint8>(raw);
-            if (sv >= -33 && sv <= 24) {
+            qint8 sv;
+            if (readKeyByteAt(ds, off, sv)) {
                 instruments[n].keyTransposeSemitones = sv;
             }
         }
@@ -501,13 +484,8 @@ static void readKeyTranspositionsNoTk(std::vector<EncInstrument>& instruments, Q
         if (off >= static_cast<qint64>(ds.device()->size())) {
             return;
         }
-        if (!ds.device()->seek(off)) {
-            return;
-        }
-        quint8 raw;
-        ds >> raw;
-        const qint8 sv = static_cast<qint8>(raw);
-        if (sv >= -33 && sv <= 24) {
+        qint8 sv;
+        if (readKeyByteAt(ds, off, sv)) {
             instruments[0].keyTransposeSemitones = sv;
         }
     }
@@ -531,13 +509,8 @@ static void readKeyTranspositionsSmallTk(std::vector<EncInstrument>& instruments
         if (off < 0 || off >= static_cast<qint64>(ds.device()->size())) {
             continue;
         }
-        if (!ds.device()->seek(off)) {
-            continue;
-        }
-        quint8 raw;
-        ds >> raw;
-        const qint8 sv = static_cast<qint8>(raw);
-        if (sv >= -33 && sv <= 24) {
+        qint8 sv;
+        if (readKeyByteAt(ds, off, sv)) {
             instr.keyTransposeSemitones = sv;
         }
     }
@@ -553,13 +526,8 @@ static void readKeyTranspositionsCompact(std::vector<EncInstrument>& instruments
     if (off >= static_cast<qint64>(ds.device()->size())) {
         return;
     }
-    if (!ds.device()->seek(off)) {
-        return;
-    }
-    quint8 raw;
-    ds >> raw;
-    const qint8 sv = static_cast<qint8>(raw);
-    if (sv >= -33 && sv <= 24) {
+    qint8 sv;
+    if (readKeyByteAt(ds, off, sv)) {
         instruments[0].keyTransposeSemitones = sv;
     }
 }
@@ -594,13 +562,8 @@ void readKeyTranspositions(std::vector<EncInstrument>& instruments, QDataStream&
         if (off < 0 || off >= static_cast<qint64>(ds.device()->size())) {
             continue;
         }
-        if (!ds.device()->seek(off)) {
-            continue;
-        }
-        quint8 raw;
-        ds >> raw;
-        const qint8 sv = static_cast<qint8>(raw);
-        if (sv >= -33 && sv <= 24) {
+        qint8 sv;
+        if (readKeyByteAt(ds, off, sv)) {
             instruments[n].keyTransposeSemitones = sv;
         }
     }
