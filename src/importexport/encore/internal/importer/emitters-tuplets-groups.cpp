@@ -245,6 +245,119 @@ static void processImpliedTupletGroup(
     }
 }
 
+// Nested-tuplet: the current group closed via a no-downdate reduction, and the next
+// (actualN - 1) notes also share innerBaseLen -> record NestedTupletInfo for the emitters
+// and pull the peeked-ahead notes into the result set.
+static void detectNestedTuplet(
+    std::vector<NestedTupletInfo>* nestedInfos,
+    int innerGroupStartIdx, Fraction innerBaseLen, Fraction originalBaseLen,
+    int actualN, int normalN, int i, int n,
+    const std::vector<std::vector<const EncMeasureElem*> >& chords,
+    std::set<const EncMeasureElem*>& result)
+{
+    if (!(nestedInfos && innerGroupStartIdx >= 2
+          && innerBaseLen > Fraction(0, 1)
+          && innerBaseLen < originalBaseLen)) {
+        return;
+    }
+    int peekAhead = actualN - (i - innerGroupStartIdx);  // remaining notes needed to complete inner group
+    bool innerOk = (peekAhead >= 0);
+    int innerEndIdx = i - 1;  // last note of inner group so far (= end of current group)
+    if (innerOk && peekAhead > 0) {
+        innerOk = false;
+        if (i + peekAhead <= n) {
+            innerOk = true;
+            for (int p = 0; p < peekAhead && innerOk; ++p) {
+                int a3 = 0, n3 = 0;
+                getExplicit(chords[i + p], a3, n3);
+                if (a3 != actualN || n3 != normalN) {
+                    innerOk = false;
+                } else {
+                    const Fraction fvp = getFaceValue(chords[i + p]);
+                    if (fvp != innerBaseLen) {
+                        innerOk = false;
+                    }
+                }
+            }
+            if (innerOk) {
+                innerEndIdx = i + peekAhead - 1;
+            }
+        }
+    }
+    if (innerOk && innerEndIdx >= innerGroupStartIdx) {
+        NestedTupletInfo ni;
+        ni.outerActualN = actualN;
+        ni.outerNormalN = normalN;
+        ni.innerActualN = actualN;
+        ni.innerNormalN = normalN;
+        if (!chords[innerGroupStartIdx].empty()) {
+            ni.innerFirst = chords[innerGroupStartIdx][0];
+        }
+        if (!chords[innerEndIdx].empty()) {
+            ni.innerLast = chords[innerEndIdx][0];
+        }
+        if (ni.innerFirst && ni.innerLast) {
+            nestedInfos->push_back(ni);
+            // Include peeked-ahead notes in result.
+            for (int p = 0; p < peekAhead; ++p) {
+                for (const EncMeasureElem* e2 : chords[i + p]) {
+                    result.insert(e2);
+                }
+            }
+        }
+    }
+}
+
+// Partial end group: when realDuration fills to the measure end while the face-value sum would
+// overflow without tuplet scaling, mark [groupStart, i) as an incomplete implied tuplet.
+static void detectPartialEndGroup(
+    int groupStart, int i,
+    const std::vector<std::vector<const EncMeasureElem*> >& chords,
+    const EncMeasure& encMeas, bool seenCompleteGroup,
+    std::set<const EncMeasureElem*>* partialEndGroup,
+    std::set<const EncMeasureElem*>& result)
+{
+    if (i <= groupStart) {
+        return;
+    }
+    int startTick = 0;
+    if (!chords[groupStart].empty()) {
+        startTick = static_cast<int>(chords[groupStart][0]->tick);
+    }
+    int rdurSum = 0;
+    int faceTickSum = 0;
+    for (int j = groupStart; j < i; ++j) {
+        if (!chords[j].empty()) {
+            const EncMeasureElem* ch = chords[j][0];
+            rdurSum += std::max(0, static_cast<int>(ch->realDuration));
+            EncElemType cht = static_cast<EncElemType>(ch->type);
+            quint8 fv = 0;
+            if (cht == EncElemType::NOTE) {
+                fv = static_cast<const EncNote*>(ch)->faceValue & 0x0F;
+            } else if (cht == EncElemType::REST) {
+                fv = static_cast<const EncRest*>(ch)->faceValue & 0x0F;
+            }
+            faceTickSum += faceValue2ticks(fv);
+        }
+    }
+    const bool rdurFillsMeasure = (rdurSum > 0)
+                                  && (startTick + rdurSum == static_cast<int>(encMeas.durTicks));
+    const bool faceWouldOverflow = (startTick + faceTickSum
+                                    > static_cast<int>(encMeas.durTicks));
+    // Guard: skip when a complete group was already found (tail MIDI notes after
+    // a full group can accidentally satisfy rdurFillsMeasure).
+    if (rdurFillsMeasure && faceWouldOverflow && !seenCompleteGroup) {
+        for (int j = groupStart; j < i; ++j) {
+            for (const EncMeasureElem* e2 : chords[j]) {
+                result.insert(e2);
+                if (partialEndGroup) {
+                    partialEndGroup->insert(e2);
+                }
+            }
+        }
+    }
+}
+
 std::set<const EncMeasureElem*> computeImpliedTupletMembers(
     const MeasureElemRefVec& sortedElems,
     const EncMeasure& encMeas,
@@ -380,58 +493,8 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                         }
                     }
 
-                    // Nested-tuplet: group closed via no-downdate reduction, and the next (actualN-1)
-                    // notes also share innerBaseLen -> record NestedTupletInfo for the emitters.
-                    if (nestedInfos && innerGroupStartIdx >= 2
-                        && innerBaseLen > Fraction(0, 1)
-                        && innerBaseLen < originalBaseLen) {
-                        int peekAhead = actualN - (i - innerGroupStartIdx);  // remaining notes needed to complete inner group
-                        bool innerOk = (peekAhead >= 0);
-                        int innerEndIdx = i - 1;  // last note of inner group so far (= end of current group)
-                        if (innerOk && peekAhead > 0) {
-                            innerOk = false;
-                            if (i + peekAhead <= n) {
-                                innerOk = true;
-                                for (int p = 0; p < peekAhead && innerOk; ++p) {
-                                    int a3 = 0, n3 = 0;
-                                    getExplicit(chords[i + p], a3, n3);
-                                    if (a3 != actualN || n3 != normalN) {
-                                        innerOk = false;
-                                    } else {
-                                        const Fraction fvp = getFaceValue(chords[i + p]);
-                                        if (fvp != innerBaseLen) {
-                                            innerOk = false;
-                                        }
-                                    }
-                                }
-                                if (innerOk) {
-                                    innerEndIdx = i + peekAhead - 1;
-                                }
-                            }
-                        }
-                        if (innerOk && innerEndIdx >= innerGroupStartIdx) {
-                            NestedTupletInfo ni;
-                            ni.outerActualN = actualN;
-                            ni.outerNormalN = normalN;
-                            ni.innerActualN = actualN;
-                            ni.innerNormalN = normalN;
-                            if (!chords[innerGroupStartIdx].empty()) {
-                                ni.innerFirst = chords[innerGroupStartIdx][0];
-                            }
-                            if (!chords[innerEndIdx].empty()) {
-                                ni.innerLast = chords[innerEndIdx][0];
-                            }
-                            if (ni.innerFirst && ni.innerLast) {
-                                nestedInfos->push_back(ni);
-                                // Include peeked-ahead notes in result.
-                                for (int p = 0; p < peekAhead; ++p) {
-                                    for (const EncMeasureElem* e2 : chords[i + p]) {
-                                        result.insert(e2);
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    detectNestedTuplet(nestedInfos, innerGroupStartIdx, innerBaseLen,
+                                       originalBaseLen, actualN, normalN, i, n, chords, result);
 
                     faceSum   = Fraction(0, 1);
                     groupStart = i;
@@ -446,45 +509,8 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                         originalBaseLen = baseLen;
                     }
                 }
-                // Partial end group: rdur fills to measure end AND face-value sum overflows without tuplet scaling.
-                if (i > groupStart) {
-                    int startTick = 0;
-                    if (!chords[groupStart].empty()) {
-                        startTick = static_cast<int>(chords[groupStart][0]->tick);
-                    }
-                    int rdurSum = 0;
-                    int faceTickSum = 0;
-                    for (int j = groupStart; j < i; ++j) {
-                        if (!chords[j].empty()) {
-                            const EncMeasureElem* ch = chords[j][0];
-                            rdurSum += std::max(0, static_cast<int>(ch->realDuration));
-                            EncElemType cht = static_cast<EncElemType>(ch->type);
-                            quint8 fv = 0;
-                            if (cht == EncElemType::NOTE) {
-                                fv = static_cast<const EncNote*>(ch)->faceValue & 0x0F;
-                            } else if (cht == EncElemType::REST) {
-                                fv = static_cast<const EncRest*>(ch)->faceValue & 0x0F;
-                            }
-                            faceTickSum += faceValue2ticks(fv);
-                        }
-                    }
-                    const bool rdurFillsMeasure = (rdurSum > 0)
-                                                  && (startTick + rdurSum == static_cast<int>(encMeas.durTicks));
-                    const bool faceWouldOverflow = (startTick + faceTickSum
-                                                    > static_cast<int>(encMeas.durTicks));
-                    // Guard: skip when a complete group was already found (tail MIDI notes after
-                    // a full group can accidentally satisfy rdurFillsMeasure).
-                    if (rdurFillsMeasure && faceWouldOverflow && !seenCompleteGroup) {
-                        for (int j = groupStart; j < i; ++j) {
-                            for (const EncMeasureElem* e2 : chords[j]) {
-                                result.insert(e2);
-                                if (partialEndGroup) {
-                                    partialEndGroup->insert(e2);
-                                }
-                            }
-                        }
-                    }
-                }
+                detectPartialEndGroup(groupStart, i, chords, encMeas, seenCompleteGroup,
+                                      partialEndGroup, result);
             } else {
                 processImpliedTupletGroup(i, actualN, normalN, chords, n, result);
             }
