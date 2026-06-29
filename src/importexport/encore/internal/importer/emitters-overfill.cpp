@@ -65,7 +65,7 @@ static Fraction largestDottedLE(const Fraction& f, int maxDots)
 // Dissolve a tuplet: detach every member so it reverts to its plain face value, then
 // remove the (now empty) tuplet from its parent and delete it. A tuplet is atomic, so it
 // is dissolved whole rather than leaving a partial tuplet behind.
-static void dissolveTuplet(Tuplet* t)
+void dissolveTuplet(Tuplet* t)
 {
     if (!t) {
         return;
@@ -104,7 +104,7 @@ static void detachSpannersAt(ChordRest* cr)
 }
 
 // Collect the ordered ChordRests of one track in a measure and their total actual ticks.
-static Fraction collectVoice(Measure* measure, track_idx_t tr, std::vector<ChordRest*>& out)
+Fraction collectVoice(Measure* measure, track_idx_t tr, std::vector<ChordRest*>& out)
 {
     out.clear();
     Fraction sum(0, 1);

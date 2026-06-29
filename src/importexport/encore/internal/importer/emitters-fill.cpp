@@ -160,24 +160,16 @@ void correctMeasureLength(BuildCtx& ctx, Measure* measure)
     for (int si = 0; si < ctx.totalStaves; ++si) {
         for (voice_idx_t v = 0; v < VOICES; ++v) {
             track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
-            Fraction voiceSum(0, 1);
-            bool hasContent = false;
-            std::vector<Rest*> gapRests;
-            for (Segment* seg = measure->first(SegmentType::ChordRest);
-                 seg; seg = seg->next(SegmentType::ChordRest)) {
-                EngravingItem* el = seg->element(tr);
-                if (!el) {
-                    continue;
-                }
-                hasContent = true;
-                ChordRest* cr = toChordRest(el);
-                voiceSum += cr->actualTicks();
-                if (el->isRest() && toRest(el)->isGap()) {
-                    gapRests.push_back(toRest(el));
-                }
+            std::vector<ChordRest*> crs;
+            Fraction voiceSum = collectVoice(measure, tr, crs);
+            if (crs.empty()) {
+                continue;   // no content in this voice
             }
-            if (!hasContent) {
-                continue;
+            std::vector<Rest*> gapRests;
+            for (ChordRest* cr : crs) {
+                if (cr->isRest() && toRest(cr)->isGap()) {
+                    gapRests.push_back(toRest(cr));
+                }
             }
             // Overshoot: remove gap rests smallest-first.
             // Skip for IrregularMeasure overfill, capMeasureLength will extend instead.
@@ -224,18 +216,11 @@ void extendMeasureIrregular(BuildCtx& ctx, Measure* measure)
     const Fraction mLen = measure->ticks();
     const Fraction measTick = measure->tick();
 
+    std::vector<ChordRest*> crs;
     Fraction maxVoiceSum { 0, 1 };
     for (int si = 0; si < ctx.totalStaves; ++si) {
         for (voice_idx_t v = 0; v < VOICES; ++v) {
-            const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
-            Fraction voiceSum { 0, 1 };
-            for (Segment* seg = measure->first(SegmentType::ChordRest);
-                 seg; seg = seg->next(SegmentType::ChordRest)) {
-                EngravingItem* el = seg->element(tr);
-                if (el) {
-                    voiceSum += toChordRest(el)->actualTicks();
-                }
-            }
+            const Fraction voiceSum = collectVoice(measure, static_cast<track_idx_t>(si * VOICES + v), crs);
             if (voiceSum > maxVoiceSum) {
                 maxVoiceSum = voiceSum;
             }
@@ -258,14 +243,7 @@ void extendMeasureIrregular(BuildCtx& ctx, Measure* measure)
         for (int si = 0; si < ctx.totalStaves; ++si) {
             for (voice_idx_t v = 0; v < VOICES; ++v) {
                 const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
-                Fraction voiceSum { 0, 1 };
-                for (Segment* seg = measure->first(SegmentType::ChordRest);
-                     seg; seg = seg->next(SegmentType::ChordRest)) {
-                    EngravingItem* el = seg->element(tr);
-                    if (el) {
-                        voiceSum += toChordRest(el)->actualTicks();
-                    }
-                }
+                const Fraction voiceSum = collectVoice(measure, tr, crs);
                 if (voiceSum <= Fraction(0, 1) || voiceSum >= maxVoiceSum) {
                     continue;
                 }
@@ -303,27 +281,19 @@ void capMeasureLength(BuildCtx& ctx, Measure* measure)
         for (voice_idx_t v = 0; v < VOICES; ++v) {
             const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
             std::vector<ChordRest*> crs;
-            Fraction voiceSum(0, 1);
-            for (Segment* seg = measure->first(SegmentType::ChordRest);
-                 seg; seg = seg->next(SegmentType::ChordRest)) {
-                EngravingItem* el = seg->element(tr);
-                if (!el) {
-                    continue;
-                }
-                ChordRest* cr = toChordRest(el);
-                crs.push_back(cr);
-                voiceSum += cr->actualTicks();
-            }
+            Fraction voiceSum = collectVoice(measure, tr, crs);
             if (voiceSum <= mLen || crs.empty()) {
                 continue;
             }
             while (voiceSum > mLen && !crs.empty()) {
                 ChordRest* last = crs.back();
-                // A tuplet is atomic: stop trimming at its boundary rather than removing a
-                // single member and leaving an invalid partial tuplet behind. Overfull
-                // tuplets are dissolved whole by fitOverfullMeasure's removeExtraNotes path.
+                // A tuplet is atomic: dissolve it whole (members revert to plain face value)
+                // rather than removing one member and leaving an invalid partial tuplet, then
+                // re-collect and keep trimming the now-plain notes.
                 if (last->tuplet()) {
-                    break;
+                    dissolveTuplet(last->tuplet());
+                    voiceSum = collectVoice(measure, tr, crs);
+                    continue;
                 }
                 crs.pop_back();
                 voiceSum -= last->actualTicks();

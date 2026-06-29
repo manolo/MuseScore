@@ -37,6 +37,8 @@
 namespace mu::engraving {
 class Measure;
 class Note;
+class ChordRest;
+class Tuplet;
 }
 
 namespace mu::iex::enc {
@@ -134,6 +136,14 @@ void extendMeasureIrregular(BuildCtx& ctx, mu::engraving::Measure* measure);
 void capMeasureLength(BuildCtx& ctx, mu::engraving::Measure* measure);
 // Resolve overfull voices per the overfill strategy (Remove / Stretch / Irregular). (emitters-overfill.cpp)
 void fitOverfullMeasure(BuildCtx& ctx, mu::engraving::Measure* measure);
+
+// Collect the ordered ChordRests of one track in a measure; returns their total actual ticks. (emitters-overfill.cpp)
+mu::engraving::Fraction collectVoice(mu::engraving::Measure* measure, mu::engraving::track_idx_t tr,
+                                     std::vector<mu::engraving::ChordRest*>& out);
+
+// Dissolve a tuplet whole: detach every member (revert to plain face value), remove the empty
+// tuplet from its parent and delete it. A tuplet is atomic, never leave a partial one. (emitters-overfill.cpp)
+void dissolveTuplet(mu::engraving::Tuplet* t);
 
 // Apply per-measure BPM marks as TempoText elements. (emitters-tempo.cpp)
 void applyMeasureBpmMarks(BuildCtx& ctx);
