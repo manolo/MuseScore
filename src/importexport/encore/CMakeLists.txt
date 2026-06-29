@@ -61,6 +61,8 @@ target_sources(iex_encore PRIVATE
     internal/notationencreader.cpp
     internal/notationencreader.h
     internal/importer/import.cpp
+    internal/importer/page-layout.h
+    internal/importer/page-layout.cpp
     internal/importer/ctx.h
     internal/importer/builders.h
     internal/importer/builders-parts.cpp

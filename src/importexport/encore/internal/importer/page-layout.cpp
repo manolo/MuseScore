@@ -1,0 +1,473 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-only
+ * MuseScore-Studio-CLA-applies
+ *
+ * MuseScore Studio
+ * Music Composition & Notation
+ *
+ * Copyright (C) 2026 MuseScore Limited and others
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 3 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+// Page and printer geometry for the Encore importer (see page-layout.h).
+
+#include "page-layout.h"
+
+#include <algorithm>
+#include <cmath>
+#include <set>
+
+#include <QPageSize>
+
+#include "ctx.h"
+#include "../parser/elem.h"
+#include "../parser/readers.h"
+
+#include "engraving/dom/factory.h"
+#include "engraving/dom/layoutbreak.h"
+#include "engraving/dom/masterscore.h"
+#include "engraving/dom/measure.h"
+#include "engraving/dom/systemlock.h"
+#include "engraving/style/style.h"
+
+#include "log.h"
+
+using namespace mu::engraving;
+
+namespace mu::iex::enc {
+// Find the smallest standard page (in pts) whose printable area contains the WINI edges.
+static bool detectPtsPageSize(qint32 rightEdge, qint32 bottomEdge,
+                              double& outWidthIn, double& outHeightIn)
+{
+    static constexpr double kTol = 1.0;   // pts tolerance for metric rounding
+    double bestArea = 1e18;
+    bool found = false;
+    for (int id = 0; id <= static_cast<int>(QPageSize::LastPageSize); ++id) {
+        if (id == static_cast<int>(QPageSize::Custom)) {
+            continue;
+        }
+        const QSizeF sz = QPageSize::size(static_cast<QPageSize::PageSizeId>(id),
+                                          QPageSize::Inch);
+        const double wPts = sz.width() * 72.0;
+        const double hPts = sz.height() * 72.0;
+        if (wPts + kTol < static_cast<double>(rightEdge)
+            || hPts + kTol < static_cast<double>(bottomEdge)) {
+            continue;
+        }
+        const double area = wPts * hPts;
+        if (area < bestArea) {
+            bestArea    = area;
+            outWidthIn  = sz.width();
+            outHeightIn = sz.height();
+            found       = true;
+        }
+    }
+    return found;
+}
+
+// Try to identify the paper size from WINI screen-pixel coordinates.
+// pageWUnits = rightEdge + left, pageHUnits = bottomEdge + top.
+//
+// Two-pass approach:
+//   Pass 1, ISO A-series only (A0..A10).  All AN sizes share the 1:√2 aspect
+//   ratio, so for A-series WINI data the only ambiguity is WHICH AN size, and
+//   that is resolved by smallest |dpiW−dpiH|.  Checking A-series first prevents
+//   non-A formats (e.g. 12"×18") from incorrectly winning when their
+//   accidentally smaller delta would beat the correct AN with a unified scan.
+//   Pass 2, all remaining standard sizes, pick smallest delta.
+//
+// Returns false when no standard size matches within tolerance (custom page).
+static bool detectWiniPageSize(int pageWUnits, int pageHUnits,
+                               double& outWidthIn, double& outHeightIn)
+{
+    static constexpr double kDpiMin   = 60.0;   // minimum plausible screen DPI
+    static constexpr double kDpiMax   = 135.0;  // maximum plausible screen DPI
+    static constexpr double kMaxDelta = 6.0;    // max |dpiW - dpiH|
+
+    // ISO A-series IDs in Qt's QPageSize enum (Qt 6).
+    static const QPageSize::PageSizeId kASeriesIds[] = {
+        QPageSize::A0, QPageSize::A1, QPageSize::A2, QPageSize::A3,
+        QPageSize::A4, QPageSize::A5, QPageSize::A6, QPageSize::A7,
+        QPageSize::A8, QPageSize::A9, QPageSize::A10,
+    };
+
+    auto tryCandidate = [&](QPageSize::PageSizeId id,
+                            double& bestDelta,
+                            double& bestW, double& bestH) -> bool {
+        const QSizeF sz = QPageSize::size(id, QPageSize::Inch);
+        const double w  = sz.width();
+        const double h  = sz.height();
+        if (w <= 0.0 || h <= 0.0) {
+            return false;
+        }
+        const double dpiW = pageWUnits / w;
+        const double dpiH = pageHUnits / h;
+        if (dpiW < kDpiMin || dpiW > kDpiMax || dpiH < kDpiMin || dpiH > kDpiMax) {
+            return false;
+        }
+        const double delta = std::abs(dpiW - dpiH);
+        if (delta < kMaxDelta && delta < bestDelta) {
+            bestDelta = delta;
+            bestW = w;
+            bestH = h;
+            return true;
+        }
+        return false;
+    };
+
+    // Build a set of A-series IDs for fast exclusion in pass 2.
+    std::set<int> aSeriesSet;
+    for (const auto id : kASeriesIds) {
+        aSeriesSet.insert(static_cast<int>(id));
+    }
+
+    // Pass 1: ISO A-series.
+    double bestDelta = kMaxDelta;
+    bool found = false;
+    for (const auto id : kASeriesIds) {
+        if (tryCandidate(id, bestDelta, outWidthIn, outHeightIn)) {
+            found = true;
+        }
+    }
+    if (found) {
+        return true;
+    }
+
+    // Pass 2: all other standard sizes (Letter, Legal, B-series, etc.).
+    for (int id = 0; id <= static_cast<int>(QPageSize::LastPageSize); ++id) {
+        if (id == static_cast<int>(QPageSize::Custom)) {
+            continue;
+        }
+        if (aSeriesSet.count(id)) {
+            continue;   // already tried in pass 1
+        }
+        if (tryCandidate(static_cast<QPageSize::PageSizeId>(id), bestDelta, outWidthIn, outHeightIn)) {
+            found = true;
+        }
+    }
+    return found;
+}
+
+// Map a Windows DEVMODE dmPaperSize (DMPAPER_*) to a Qt page size. Returns Custom for
+// values without a standard mapping; the caller then falls back to dmPaperLength/Width or
+// to the WINI geometry heuristic.
+static QPageSize::PageSizeId dmPaperToQt(int dmPaper)
+{
+    switch (dmPaper) {
+    case 1:  return QPageSize::Letter;
+    case 5:  return QPageSize::Legal;
+    case 7:  return QPageSize::Executive;
+    case 8:  return QPageSize::A3;
+    case 9:  return QPageSize::A4;
+    case 11: return QPageSize::A5;
+    case 12: return QPageSize::B4;     // DMPAPER_B4 (JIS)
+    case 13: return QPageSize::B5;     // DMPAPER_B5 (JIS)
+    default: return QPageSize::Custom;
+    }
+}
+
+// Resolve the page size (inches) from the PREC (DEVMODE) block: dmPaperSize enum, falling back
+// to dmPaperLength/Width (tenths of a millimetre) for custom sizes, with the landscape swap
+// applied. Returns false when PREC has no usable size (caller falls back to WINI geometry).
+bool precPageSizeInches(const EncPrintSetup& pr, double& wIn, double& hIn)
+{
+    if (!pr.hasData) {
+        return false;
+    }
+    const QPageSize::PageSizeId id = dmPaperToQt(pr.paperSize);
+    if (id != QPageSize::Custom) {
+        const QSizeF sz = QPageSize::size(id, QPageSize::Inch);
+        wIn = sz.width();
+        hIn = sz.height();
+    } else if (pr.paperLength > 0 && pr.paperWidth > 0) {
+        wIn = pr.paperWidth / 254.0;
+        hIn = pr.paperLength / 254.0;
+    } else {
+        return false;
+    }
+    if (pr.orientation == 2) {   // DMORIENT_LANDSCAPE
+        std::swap(wIn, hIn);
+    }
+    return true;
+}
+
+// Apply page size, orientation and notation scale from the PREC (DEVMODE) block. Returns
+// true when the page size was set (so the WINI margin pass must not override it). PREC is
+// present in almost every Encore file across all formats, while WINI (margins) exists only
+// in v0xC4, so this is the primary source of the page size for v0xA6/v0xC2 and for the
+// many v0xC4 files without a WINI block.
+static bool applyPagePrintSetup(MasterScore* score, const EncPrintSetup& pr)
+{
+    double wIn = 0.0, hIn = 0.0;
+    if (!precPageSizeInches(pr, wIn, hIn)) {
+        return false;   // unknown paper: let the WINI geometry heuristic decide
+    }
+    score->style().set(Sid::pageWidth,  wIn);
+    score->style().set(Sid::pageHeight, hIn);
+    // NOT IMPLEMENTED: dmScale (the score "Zoom" / notation-size percent the user sets in Encore)
+    // is parsed and logged but not applied. MuseScore has no global percentage scale; the closest
+    // equivalent is the page "Staff space" (spatium), expressed in inches/mm, not a percent. Applying
+    // dmScale would mean converting the percent into a spatium reduction factor and reconciling it
+    // with the per-staff size from applyStaffScale (Pid::MAG), which would otherwise compound. That
+    // mapping needs investigation, so for now the value is only surfaced in the debug log.
+    LOGD() << "  PREC: orientation=" << pr.orientation << " paperSize=" << pr.paperSize
+           << " paper=" << pr.paperWidth << "x" << pr.paperLength << "(0.1mm)"
+           << " scale(zoom)=" << pr.scale << "%"
+           << " -> " << QString::number(wIn, 'f', 2).toStdString()
+           << "x" << QString::number(hIn, 'f', 2).toStdString() << "in";
+    return true;
+}
+
+static void applyPageMargins(MasterScore* score, const EncPageSetup& ps, bool pageSizeLocked)
+{
+    if (!ps.hasData) {
+        return;
+    }
+    // WINI fields are nominally in typographic points (1/72 inch), but some
+    // Encore versions store them in screen pixels at the monitor's DPI (~84-85
+    // PPI on older hardware).  Symptom: rightEdge or bottomEdge exceeds the
+    // page dimensions in pts (e.g. rightEdge=672 > A4_width_pts=595).
+    //
+    // For pts format: detectPtsPageSize picks the smallest standard page that
+    // contains the printable area, which is locale-independent.
+    // For screen-pixel format: detectWiniPageSize matches via DPI ratio.
+    // Cap each margin to a fraction of the page so a misread WINI cannot produce an absurd
+    // margin, while still allowing legitimately large margins (2"+ are common on A3/landscape).
+    static constexpr double kMaxMarginFrac = 0.45;
+
+    double pageHIn = score->style().styleD(Sid::pageHeight);
+    double pageWIn = score->style().styleD(Sid::pageWidth);
+
+    // 1 pt tolerance mirrors detectPtsPageSize: metric page heights convert to
+    // fractional pts (A4 297mm = 841.89pt → stored as 842) so the integer
+    // WINI value can exceed floor(pageH*72) by 1 without being screen-pixels.
+    static constexpr double kPixelTol = 1.0;
+    const bool screenPixelFmt = (ps.rightEdge > static_cast<qint32>(pageWIn * 72.0 + kPixelTol))
+                                || (ps.bottomEdge > static_cast<qint32>(pageHIn * 72.0 + kPixelTol));
+    double scaleUpi = 72.0;
+    if (pageSizeLocked) {
+        // The page size is known (from PREC), so derive the WINI unit directly from the printable
+        // extent rather than guessing: (rightEdge + left) / pageWidth ≈ 72 means the WINI is in
+        // typographic points, a clearly larger value (~84) means screen pixels at the monitor DPI.
+        // Snap the near-72 case to exactly 72 (points). The pixel estimate is exact only when the
+        // left/right margins are symmetric; with asymmetric margins it is ~2% low.
+        const double estUpi = static_cast<double>(ps.rightEdge + ps.left) / pageWIn;
+        scaleUpi = (estUpi <= 76.0) ? 72.0 : estUpi;
+    } else if (screenPixelFmt) {
+        const int pageWUnits = ps.rightEdge + ps.left;
+        const int pageHUnits = ps.bottomEdge + ps.top;
+        double detectedW = 0.0, detectedH = 0.0;
+        if (detectWiniPageSize(pageWUnits, pageHUnits, detectedW, detectedH)) {
+            pageWIn  = detectedW;
+            pageHIn  = detectedH;
+            score->style().set(Sid::pageWidth,  pageWIn);
+            score->style().set(Sid::pageHeight, pageHIn);
+        }
+        scaleUpi = static_cast<double>(pageWUnits) / pageWIn;
+    } else {
+        double detectedW = 0.0, detectedH = 0.0;
+        if (detectPtsPageSize(ps.rightEdge, ps.bottomEdge, detectedW, detectedH)) {
+            pageWIn  = detectedW;
+            pageHIn  = detectedH;
+            score->style().set(Sid::pageWidth,  pageWIn);
+            score->style().set(Sid::pageHeight, pageHIn);
+        }
+        // scaleUpi stays 72.0 (pts = 1/72 inch by definition)
+    }
+
+    double topIn  = ps.top / scaleUpi;
+    double leftIn = ps.left / scaleUpi;
+    double printW = (ps.rightEdge - ps.left) / scaleUpi;
+    double printH = (ps.bottomEdge - ps.top) / scaleUpi;
+
+    LOGD() << "  enc margins (in): T=" << QString::number(topIn,  'f', 3).toStdString()
+           << "  L=" << QString::number(leftIn, 'f', 3).toStdString()
+           << "  R=" << QString::number(pageWIn - leftIn - printW, 'f', 3).toStdString()
+           << "  B=" << QString::number(pageHIn - topIn - printH, 'f', 3).toStdString()
+           << "  paper=" << QString::number(pageWIn * 25.4, 'f', 1).toStdString()
+           << "x" << QString::number(pageHIn * 25.4, 'f', 1).toStdString() << "mm"
+           << (screenPixelFmt ? "  [pixels]" : "  [pts]");
+
+    topIn  = std::clamp(topIn,  0.0, pageHIn * kMaxMarginFrac);
+    leftIn = std::clamp(leftIn, 0.0, pageWIn * kMaxMarginFrac);
+
+    const double maxPrintW = pageWIn - leftIn;
+    if (printW > maxPrintW) {
+        printW = maxPrintW;
+    }
+
+    double bottomIn = std::max(0.0, pageHIn - topIn - printH);
+    bottomIn = std::min(bottomIn, pageHIn * kMaxMarginFrac);
+
+    LOGD() << "  applied (in):     T=" << QString::number(topIn,   'f', 3).toStdString()
+           << "  L=" << QString::number(leftIn,   'f', 3).toStdString()
+           << "  R=" << QString::number(pageWIn - leftIn - printW, 'f', 3).toStdString()
+           << "  B=" << QString::number(bottomIn, 'f', 3).toStdString()
+           << "  paper=" << QString::number(pageWIn * 25.4, 'f', 1).toStdString()
+           << "x" << QString::number(pageHIn * 25.4, 'f', 1).toStdString() << "mm";
+
+    score->style().set(Sid::pageOddTopMargin,     topIn);
+    score->style().set(Sid::pageEvenTopMargin,    topIn);
+    score->style().set(Sid::pageOddLeftMargin,    leftIn);
+    score->style().set(Sid::pageEvenLeftMargin,   leftIn);
+    score->style().set(Sid::pagePrintableWidth,   printW);
+    score->style().set(Sid::pageOddBottomMargin,  bottomIn);
+    score->style().set(Sid::pageEvenBottomMargin, bottomIn);
+}
+
+// SystemLocks enforce Encore's line layout as hard constraints so the engine compresses
+// spacing within the system rather than redistributing measures across lines.
+static void applySystemLocksFromLines(BuildCtx& ctx)
+{
+    const auto& lines  = ctx.enc.lines;
+    const auto& enc2ms = ctx.encToMsIdx;
+    const int totalMeas = static_cast<int>(ctx.measuresByIdx.size());
+
+    for (size_t li = 0; li < lines.size(); ++li) {
+        const auto& line = lines[li];
+        const int firstBlock = static_cast<int>(line.start);
+        // System span in MEAS blocks. Prefer the stored per-line measure count, but fall
+        // back to the gap to the next line's start when it is absent (0). SCO5 (big-endian
+        // Encore 5) does not surface measureCount, yet the line start indices are correct,
+        // so the start delta recovers each system's length.
+        int span = static_cast<int>(line.measureCount);
+        if (span <= 0) {
+            const int nextStart = (li + 1 < lines.size())
+                                  ? static_cast<int>(lines[li + 1].start)
+                                  : static_cast<int>(enc2ms.size());
+            span = nextStart - firstBlock;
+        }
+        if (span <= 0) {
+            continue;
+        }
+        const int lastBlock = firstBlock + span - 1;
+
+        if (firstBlock < 0 || lastBlock < firstBlock
+            || firstBlock >= static_cast<int>(enc2ms.size())
+            || lastBlock >= static_cast<int>(enc2ms.size())) {
+            continue;
+        }
+
+        const int firstMsIdx = static_cast<int>(enc2ms[static_cast<size_t>(firstBlock)]);
+        // Last MuseScore measure = first of the last MEAS block's range, plus however
+        // many MuseScore measures that block produces (gap to next block, or to end).
+        // Last MS measure = first MS index of last block's range plus the block's span.
+        const int nextBlockMs = (lastBlock + 1 < static_cast<int>(enc2ms.size()))
+                                ? static_cast<int>(enc2ms[static_cast<size_t>(lastBlock + 1)])
+                                : totalMeas;
+        const int lastMsIdx = nextBlockMs - 1;
+
+        if (firstMsIdx < 0 || lastMsIdx < firstMsIdx
+            || firstMsIdx >= totalMeas || lastMsIdx >= totalMeas) {
+            continue;
+        }
+
+        Measure* firstM = ctx.measuresByIdx[static_cast<size_t>(firstMsIdx)];
+        Measure* lastM  = ctx.measuresByIdx[static_cast<size_t>(lastMsIdx)];
+        if (!firstM || !lastM) {
+            continue;
+        }
+        ctx.score->addSystemLock(new SystemLock(firstM, lastM));
+    }
+}
+
+// pageIdx in EncLineStaffData is the row-on-page counter (0-based, resets each page).
+// A page break is placed at the end of line[i] whenever line[i+1].pageIdx <= line[i].pageIdx
+// (the counter did not increment, meaning a new page started).
+static void applyPageBreaksFromLines(BuildCtx& ctx)
+{
+    const auto& lines  = ctx.enc.lines;
+    const auto& enc2ms = ctx.encToMsIdx;
+    const int totalMeas = static_cast<int>(ctx.measuresByIdx.size());
+
+    for (size_t li = 1; li < lines.size(); ++li) {
+        const EncLine& prev = lines[li - 1];
+        const EncLine& curr = lines[li];
+
+        if (prev.staffData.empty() || curr.staffData.empty()) {
+            continue;
+        }
+        if (curr.staffData[0].pageIdx > prev.staffData[0].pageIdx) {
+            continue;   // same page: row counter incremented normally
+        }
+
+        // Page break: add LayoutBreak to the last measure of line[li-1].
+        const int firstBlock = static_cast<int>(prev.start);
+        const int lastBlock  = firstBlock + static_cast<int>(prev.measureCount) - 1;
+        if (firstBlock < 0 || lastBlock < firstBlock
+            || lastBlock >= static_cast<int>(enc2ms.size())) {
+            continue;
+        }
+        const int nextBlockMs = (lastBlock + 1 < static_cast<int>(enc2ms.size()))
+                                ? static_cast<int>(enc2ms[static_cast<size_t>(lastBlock + 1)])
+                                : totalMeas;
+        const int lastMsIdx = nextBlockMs - 1;
+        if (lastMsIdx < 0 || lastMsIdx >= totalMeas) {
+            continue;
+        }
+        Measure* lastM = ctx.measuresByIdx[static_cast<size_t>(lastMsIdx)];
+        if (!lastM) {
+            continue;
+        }
+        bool alreadyHasPageBreak = false;
+        for (EngravingItem* e : lastM->el()) {
+            if (e && e->isLayoutBreak() && toLayoutBreak(e)->isPageBreak()) {
+                alreadyHasPageBreak = true;
+                break;
+            }
+        }
+        if (!alreadyHasPageBreak) {
+            LayoutBreak* lb = Factory::createLayoutBreak(lastM);
+            lb->setLayoutBreakType(LayoutBreakType::PAGE);
+            lb->setTrack(0);
+            lastM->add(lb);
+        }
+    }
+}
+
+void applyPageSetup(BuildCtx& ctx)
+{
+    MasterScore* score = ctx.score;
+    const EncRoot& enc = ctx.enc;
+
+    LOGD() << "  importPageLayout=" << (ctx.opts.importPageLayout ? "true" : "false");
+    if (ctx.opts.importPageLayout) {
+        const bool sizeFromPrec = applyPagePrintSetup(score, enc.printSetup);
+        applyPageMargins(score, enc.pageSetup, sizeFromPrec);
+        // SCO5 (macOS Encore 5) does not store document margins in any importable block:
+        // WINI holds only window state, the PREC plist holds only printer rects, and some
+        // files have no PREC at all. Apply a clean, symmetric 0.25" margin: forcing 0 looks
+        // cramped (edge to edge), and MuseScore's default margins are tuned for A4 so they
+        // come out asymmetric on Letter. A small uniform margin is the better default.
+        if (enc.fmt && enc.fmt->usesUniformPageMargins()) {
+            constexpr double kMacMarginIn = 0.25;
+            const double pageWIn = score->style().styleD(Sid::pageWidth);
+            score->style().set(Sid::pageOddTopMargin,     kMacMarginIn);
+            score->style().set(Sid::pageEvenTopMargin,    kMacMarginIn);
+            score->style().set(Sid::pageOddLeftMargin,    kMacMarginIn);
+            score->style().set(Sid::pageEvenLeftMargin,   kMacMarginIn);
+            score->style().set(Sid::pageOddBottomMargin,  kMacMarginIn);
+            score->style().set(Sid::pageEvenBottomMargin, kMacMarginIn);
+            score->style().set(Sid::pagePrintableWidth,   pageWIn - 2.0 * kMacMarginIn);
+        }
+    }
+
+    if (ctx.opts.importSystemLocks) {
+        applySystemLocksFromLines(ctx);
+    }
+    if (ctx.opts.importPageBreaks) {
+        applyPageBreaksFromLines(ctx);
+    }
+}
+} // namespace mu::iex::enc
