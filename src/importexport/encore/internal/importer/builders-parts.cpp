@@ -276,24 +276,17 @@ void buildParts(BuildCtx& ctx)
         int ns = instr.nstaves > 0 ? instr.nstaves : 1;
         Part* part = new Part(score);
 
-        const bool isPercByClef = !enc.lines.empty()
-                                  && cumStaffIdx < static_cast<int>(enc.lines[0].staffData.size())
-                                  && enc.lines[0].staffData[cumStaffIdx].clef == EncClefType::PERC;
-        const bool isRhythm = !enc.lines.empty()
-                              && cumStaffIdx < static_cast<int>(enc.lines[0].staffData.size())
-                              && enc.lines[0].staffData[cumStaffIdx].staffType == EncStaffType::RHYTHM;
+        const EncLineStaffData* lsd = lineStaffDataAt(enc, cumStaffIdx);
+        const bool isPercByClef = lsd && lsd->clef == EncClefType::PERC;
+        const bool isRhythm = lsd && lsd->staffType == EncStaffType::RHYTHM;
         // Tablature only when Encore explicitly marks it (clef==TAB or staffType==TAB). v0xA6
         // has no per-staff clef in the LINE block, so it defaults to standard notation.
-        const bool encWantsTab = !enc.lines.empty()
-                                 && cumStaffIdx < static_cast<int>(enc.lines[0].staffData.size())
-                                 && (enc.lines[0].staffData[cumStaffIdx].clef == EncClefType::TAB
-                                     || enc.lines[0].staffData[cumStaffIdx].staffType == EncStaffType::TAB);
+        const bool encWantsTab = lsd && (lsd->clef == EncClefType::TAB
+                                         || lsd->staffType == EncStaffType::TAB);
         const InstrumentTemplate* tmpl = applyBestInstrument(part, instr, isPercByClef, isRhythm,
                                                              encWantsTab, ctx.opts.instrumentSearchMode);
 
-        const bool showFromLine = enc.lines.empty()
-                                  || cumStaffIdx >= static_cast<int>(enc.lines[0].staffData.size())
-                                  || enc.lines[0].staffData[cumStaffIdx].showStaff;
+        const bool showFromLine = !lsd || lsd->showStaff;
         if (!showFromLine) {
             part->setShow(false);
         }

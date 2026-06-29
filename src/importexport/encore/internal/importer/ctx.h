@@ -67,6 +67,18 @@ inline void buildLineSlotByRawByte(const EncRoot& enc, std::array<int, 256>& out
     }
 }
 
+// LINE staff-data entry for the given running staff index, or nullptr when the file has no
+// LINE block or the index is out of range. Centralizes the "lines non-empty + index in range"
+// guard repeated by the part/staff routing.
+inline const EncLineStaffData* lineStaffDataAt(const EncRoot& enc, int idx)
+{
+    if (enc.lines.empty() || idx < 0
+        || idx >= static_cast<int>(enc.lines[0].staffData.size())) {
+        return nullptr;
+    }
+    return &enc.lines[0].staffData[static_cast<size_t>(idx)];
+}
+
 struct PendingSlur {
     Fraction startTick;
     track_idx_t track;
