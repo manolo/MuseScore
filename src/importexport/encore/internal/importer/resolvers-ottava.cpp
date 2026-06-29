@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Post-pass: resolve ottava (8va/8vb) line spanner endpoints.
+
 #include "resolvers.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/masterscore.h"

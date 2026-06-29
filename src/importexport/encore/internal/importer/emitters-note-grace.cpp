@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Emit grace-note chords and attach them to their principal chord.
+
 #include "emitters-internal.h"
 #include "mappers.h"
 #include "../parser/ticks.h"

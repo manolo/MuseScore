@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Build MuseScore measures from EncMeasure data: time signatures, barlines, multi-measure-rest expansion, and initial clefs/keys.
+
 #include "builders.h"
 #include "ctx.h"
 #include "import.h"

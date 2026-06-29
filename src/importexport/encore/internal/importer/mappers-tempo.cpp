@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Map Encore tempo text and BPM values to MuseScore tempo semantics.
+
 #include "mappers.h"
 
 using namespace mu::engraving;

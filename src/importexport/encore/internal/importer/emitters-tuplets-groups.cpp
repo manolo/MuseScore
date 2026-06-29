@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Detect implied and explicit tuplet groupings across a measure's note runs.
+
 #include "emitters-tuplets.h"
 
 #include <map>

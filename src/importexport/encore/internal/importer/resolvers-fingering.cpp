@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Post-pass: place pending fingerings and bowing/string marks on their chords.
+
 #include "resolvers.h"
 #include "../parser/elem.h"
 #include "../parser/ticks.h"

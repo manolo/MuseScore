@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Adjust measure length: pickup shortening, trailing-gap fill and over/undershoot correction.
+
 #include "emitters-internal.h"
 
 #include <algorithm>

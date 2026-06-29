@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Dispatch Encore ORNAMENT elements to dynamics, wedges, tempo, slurs, trills, markers and more.
+
 #include "emitters-internal.h"
 #include "coords.h"
 #include "../parser/ticks.h"

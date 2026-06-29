@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Map Encore title/subtitle/author/copyright blocks to a MuseScore title frame.
+
 #include "mappers.h"
 
 #include <QRegularExpression>

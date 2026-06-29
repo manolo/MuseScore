@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Emit notes: duration/tuplet resolution, ties, MIDI-artifact filtering and fingerings.
+
 #include "emitters-internal.h"
 #include "mappers.h"
 #include "../parser/ticks.h"

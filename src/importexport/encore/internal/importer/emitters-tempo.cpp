@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Apply per-measure BPM marks as TempoText and render tempo-text strings.
+
 #include "emitters-internal.h"
 
 #include <cmath>

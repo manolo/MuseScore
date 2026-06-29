@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Build score parts and staves, matching each Encore instrument to the best MuseScore instrument template.
+
 #include "builders.h"
 #include "ctx.h"
 #include "import.h"

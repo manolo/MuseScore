@@ -19,6 +19,8 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+// Convert Encore tick/xoffset coordinates to MuseScore Fractions and snapped tick positions.
+
 #include "coords.h"
 
 #include <cstdlib>

@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Emit chord symbols (Harmony) from Encore CHORD elements.
+
 #include "emitters-internal.h"
 
 #include "../parser/ticks.h"

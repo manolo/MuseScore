@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Map Encore articulation/ornament bytes to MuseScore SymIds, finger numbers and string numbers.
+
 #include "mappers.h"
 
 using namespace mu::engraving;

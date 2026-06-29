@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Map Encore clef and key-signature bytes to MuseScore clefs/keys, applying octave-clef rules.
+
 #include "mappers.h"
 
 #include "engraving/dom/clef.h"

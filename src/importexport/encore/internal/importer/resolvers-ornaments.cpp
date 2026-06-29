@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Post-pass: place pending ornaments, fermatas, tremolos, trills, arpeggios and breaths.
+
 #include "resolvers.h"
 #include "../parser/elem.h"
 #include "engraving/dom/arpeggio.h"

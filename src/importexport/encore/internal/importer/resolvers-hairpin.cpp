@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Post-pass: resolve hairpin (crescendo/diminuendo) spanner endpoints.
+
 #include "resolvers.h"
 #include "coords.h"
 #include "../parser/elem.h"

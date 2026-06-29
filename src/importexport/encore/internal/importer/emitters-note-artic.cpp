@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Apply articulations, ornaments, tremolos and string numbers to an emitted note/chord.
+
 #include "emitters-internal.h"
 #include "mappers.h"
 

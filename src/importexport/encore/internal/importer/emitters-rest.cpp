@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Emit rests, including multi-measure rests, from Encore REST elements.
+
 #include "emitters-internal.h"
 #include "mappers.h"
 #include "../parser/ticks.h"

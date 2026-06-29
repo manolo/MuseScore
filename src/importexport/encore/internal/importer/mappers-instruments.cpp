@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Match Encore instrument names and MIDI programs to MuseScore instrument templates.
+
 #include "mappers.h"
 
 #include <algorithm>

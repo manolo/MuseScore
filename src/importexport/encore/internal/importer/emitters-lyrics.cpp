@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Queue Encore LYRIC elements and attach syllables to the nearest chords in a measure.
+
 #include "emitters-internal.h"
 
 #include "engraving/dom/chord.h"

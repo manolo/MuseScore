@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// TupletTracker: build and close MuseScore tuplets as notes are emitted.
+
 #include "emitters-tuplets.h"
 
 #include "engraving/dom/factory.h"
