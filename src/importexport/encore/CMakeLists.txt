@@ -70,6 +70,8 @@ target_sources(iex_encore PRIVATE
     internal/importer/emitters-internal.h
     internal/importer/coords.h
     internal/importer/coords.cpp
+    internal/importer/durations.h
+    internal/importer/durations.cpp
     internal/importer/emitters-note.cpp
     internal/importer/emitters-note-grace.cpp
     internal/importer/emitters-note-artic.cpp

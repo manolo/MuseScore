@@ -25,29 +25,21 @@
 
 #include <QtGlobal>
 
-#include "engraving/dom/durationtype.h"
-
 namespace mu::iex::enc {
 
 // Encore's internal tick resolution: 960 ticks per whole note (= 240 per quarter).
 // This is fixed for all format versions and all time signatures.
 inline constexpr int kEncWholeTicks = 960;
 
+// Raw tick table: Encore face value (low nibble) to ticks. Pure integer model, no engraving
+// types, so the parser can use it without depending on engraving/dom. The rendering decisions
+// derived from these ticks (DurationType, dot count, tuplet shape) live in importer/durations.h.
 int faceValue2ticks(quint8 fv);
-mu::engraving::DurationType faceValue2DurationType(quint8 fv);
-mu::engraving::DurationType realDuration2DurationType(qint16 realDur, quint8 fv);
-int calcDots(qint16 realDur, quint8 fv);
-int calcDotsSnap(qint16 dur, quint8 fv);
+
+// Pure-integer implied-tuplet probe: returns the tuplet's actualN (with normalNotes set) when
+// realDur is a 3:2 or 5:4 augmentation of the face value, else 0. Used by the v0xC2 parser pass
+// and by the importer; carries no engraving dependency, so it stays in the parser layer.
 int detectImpliedTuplet(qint16 realDur, quint8 fv, int& normalNotes);
-mu::engraving::Fraction dottedAdvance(mu::engraving::DurationType durationType, int dots);
-
-// Dot-count computation for note/rest handlers. See ENCORE_FORMAT.md §Note element (dotControl).
-// When useBit0Fallback=true (notes only), bit 0 of dotControl is Encore's dotted flag.
-int computeDotCount(quint8 dotControl, qint16 realDuration, quint8 faceValue, bool useBit0Fallback = false);
-
-// Standard Encore tuplet ratios (3:2, 4:3, 5:4, 6:4).
-// Other actualN:normalN pairs are MIDI timing noise; caller should zero them.
-bool isStandardExplicitTuplet(int actualN, int normalN);
 } // namespace mu::iex::enc
 
 #endif // MU_IMPORTEXPORT_ENC_PARSER_TICKS_H

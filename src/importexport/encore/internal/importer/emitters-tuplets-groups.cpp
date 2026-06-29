@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "../parser/ticks.h"
+#include "durations.h"
 #include "engraving/dom/mscore.h"
 
 using namespace mu::engraving;

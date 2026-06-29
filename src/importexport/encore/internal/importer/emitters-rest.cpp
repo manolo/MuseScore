@@ -23,6 +23,7 @@
 #include "emitters-internal.h"
 #include "mappers.h"
 #include "../parser/ticks.h"
+#include "durations.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/rest.h"
 #include "engraving/dom/segment.h"

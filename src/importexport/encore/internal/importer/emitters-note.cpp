@@ -23,6 +23,7 @@
 #include "emitters-internal.h"
 #include "mappers.h"
 #include "../parser/ticks.h"
+#include "durations.h"
 #include "engraving/dom/arpeggio.h"
 #include "engraving/dom/chord.h"
 #include "engraving/dom/fermata.h"

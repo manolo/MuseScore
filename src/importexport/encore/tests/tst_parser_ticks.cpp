@@ -25,6 +25,7 @@
 #include "../internal/parser/ticks.h"
 #include "../internal/parser/elem.h"
 #include "../internal/importer/coords.h"
+#include "../internal/importer/durations.h"
 
 using namespace mu::engraving;
 using namespace mu::iex::enc;
