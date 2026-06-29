@@ -22,6 +22,9 @@
 
 #include "elem.h"
 
+#include <algorithm>
+#include <limits>
+
 #include <QRegularExpression>
 
 #include "readers.h"
@@ -30,6 +33,30 @@ namespace mu::iex::enc {
 // ---------------------------------------------------------------------------
 // EncRoot - top-level container
 // ---------------------------------------------------------------------------
+
+// Skip a file-supplied block size, clamped to the bytes actually remaining on the device.
+// The size comes from an untrusted file: a value larger than INT_MAX would wrap negative when
+// passed to QDataStream::skipRawData(int) (silently skipping nothing and desyncing the stream),
+// and any value past EOF must not seek beyond the device. Returns false when the requested size
+// exceeds what remains, so the caller can stop reading further blocks.
+static bool skipBlock(QDataStream& ds, qint64 size)
+{
+    QIODevice* dev = ds.device();
+    const qint64 remaining = dev->size() - dev->pos();
+    if (size < 0 || size > remaining) {
+        return false;
+    }
+    qint64 left = size;
+    while (left > 0) {
+        const int chunk = static_cast<int>(std::min<qint64>(left, std::numeric_limits<int>::max()));
+        const int n = ds.skipRawData(chunk);
+        if (n <= 0) {
+            return false;
+        }
+        left -= n;
+    }
+    return true;
+}
 
 bool isInstrumentMagic(const QString& magic)
 {
@@ -196,6 +223,11 @@ bool EncRoot::read(QDataStream& ds)
     EncCharSize charsize = EncCharSize::ONE_BYTE;
 
     while (!ds.atEnd()) {
+        // Truncated/corrupt input leaves the stream in a non-Ok state; stop rather than
+        // fabricate zero-filled "valid-looking" blocks from the past-EOF zero fill.
+        if (ds.status() != QDataStream::Ok) {
+            break;
+        }
         QString nextId = findNextKnownMagic(ds);
         if (nextId.isEmpty()) {
             break;
@@ -247,11 +279,14 @@ bool EncRoot::read(QDataStream& ds)
             //   [16,17] = page_height_pts - bottom_margin, [18,19] = page_width_pts - right_margin.
             // All values in typographic points (1/72 inch).
             if (varSize >= 40) {
-                qint32 top, left, bottomEdge, rightEdge;
+                qint32 top = 0, left = 0, bottomEdge = 0, rightEdge = 0;
                 ds.skipRawData(24);   // skip fields 0..11 (window/screen data)
                 ds >> top >> left >> bottomEdge >> rightEdge;
-                ds.skipRawData(static_cast<int>(varSize) - 40);
-                if (bottomEdge > 0 && rightEdge > 0 && bottomEdge > top && rightEdge > left) {
+                // The four margins come from an attacker-controlled block at a magic offset;
+                // only trust them when the reads stayed within the stream.
+                const bool ok = (ds.status() == QDataStream::Ok);
+                skipBlock(ds, static_cast<qint64>(varSize) - 40);
+                if (ok && bottomEdge > 0 && rightEdge > 0 && bottomEdge > top && rightEdge > left) {
                     pageSetup.hasData    = true;
                     pageSetup.top        = top;
                     pageSetup.left       = left;
@@ -259,7 +294,7 @@ bool EncRoot::read(QDataStream& ds)
                     pageSetup.rightEdge  = rightEdge;
                 }
             } else {
-                ds.skipRawData(varSize);
+                skipBlock(ds, varSize);
             }
         } else if (nextId == "PREC") {
             // PREC carries page orientation, paper size and notation scale. SCOW stores it as a
@@ -285,7 +320,7 @@ bool EncRoot::read(QDataStream& ds)
             charsize = instr.charSize();
             instruments.push_back(std::move(instr));
         } else {
-            ds.skipRawData(varSize);
+            skipBlock(ds, varSize);
         }
     }
 

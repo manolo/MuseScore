@@ -65,6 +65,11 @@ static void resolveSingleChordTremolos(MasterScore* score,
     // See ENCORE_FORMAT.md §Ornament element.
     // ORN may land at durTicks or in voice 0 even when the note is in another voice.
     for (const PendingOrnTremolo& pt : pendingOrnTremolos) {
+        // staffIdx/msVoice come from the file; skip any pending whose staff is out of range
+        // before deriving tracks for the element() scans below.
+        if (!validTrack(score, static_cast<track_idx_t>(pt.staffIdx) * VOICES)) {
+            continue;
+        }
         const track_idx_t trTrack = static_cast<track_idx_t>(pt.staffIdx * VOICES + pt.msVoice);
         Measure* m = score->tick2measure(pt.tick);
         if (!m) {

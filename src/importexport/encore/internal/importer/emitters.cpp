@@ -137,6 +137,9 @@ void MeasEmitCtx::closeTupletWithFill(BuildCtx& ctx, TupletTracker& tt,
                    && ctx.cumTick[trackKey] + perNote <= measure->ticks()) {
                 Fraction restTick = measure->tick() + ctx.cumTick[trackKey];
                 Segment* seg = measure->getSegment(SegmentType::ChordRest, restTick);
+                if (!seg) {
+                    break;
+                }
                 if (seg->element(trk)) {
                     break;
                 }

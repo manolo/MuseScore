@@ -319,12 +319,14 @@ void capMeasureLength(BuildCtx& ctx, Measure* measure)
             }
             while (voiceSum > mLen && !crs.empty()) {
                 ChordRest* last = crs.back();
+                // A tuplet is atomic: stop trimming at its boundary rather than removing a
+                // single member and leaving an invalid partial tuplet behind. Overfull
+                // tuplets are dissolved whole by fitOverfullMeasure's removeExtraNotes path.
+                if (last->tuplet()) {
+                    break;
+                }
                 crs.pop_back();
                 voiceSum -= last->actualTicks();
-                if (last->tuplet()) {
-                    last->tuplet()->remove(last);
-                    last->setTuplet(nullptr);
-                }
                 Segment* lseg = last->segment();
                 lseg->remove(last);
                 delete last;

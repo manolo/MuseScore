@@ -37,12 +37,23 @@ void resolveOrnaments(BuildCtx& ctx);
 void resolveFingeringAndBowing(BuildCtx& ctx);
 void resolveOttavas(BuildCtx& ctx);
 
+// A track derived from untrusted Encore staff/voice bytes can exceed the score's track
+// count; Segment::element(track) indexes a fixed-size vector, so an out-of-range track is
+// out-of-bounds. Every resolver must check this before any element(track) / spanner-track use.
+inline bool validTrack(const mu::engraving::Score* score, mu::engraving::track_idx_t track)
+{
+    return score && track < score->ntracks();
+}
+
 // Tick → measure → ChordRest segment → Chord lookup; shared by all resolver files.
 inline mu::engraving::Chord* findChordAt(mu::engraving::MasterScore* score,
                                          mu::engraving::Fraction tick,
                                          mu::engraving::track_idx_t track)
 {
     using namespace mu::engraving;
+    if (!validTrack(score, track)) {
+        return nullptr;
+    }
     Measure* m = score->tick2measure(tick);
     if (!m) {
         return nullptr;

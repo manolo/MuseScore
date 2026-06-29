@@ -152,7 +152,10 @@ bool EncMeasure::read(QDataStream& ds, const quint32 vs, const EncFormatReader& 
 
     const qint64 elemOffset = static_cast<qint64>(fmt.elemBlockOffset());
     ds.device()->seek(measStart + elemOffset);
-    qint64 measEnd = measStart + varsize + elemOffset;
+    // varsize is an untrusted file value; compute the end in qint64 and never let it run past
+    // the device so the element loop below is bounded even for a corrupt/oversized size.
+    qint64 measEnd = measStart + static_cast<qint64>(varsize) + elemOffset;
+    measEnd = std::min(measEnd, ds.device()->size());
 
     quint16 tick;
     ds >> tick;
@@ -165,6 +168,11 @@ bool EncMeasure::read(QDataStream& ds, const quint32 vs, const EncFormatReader& 
     int elemCount = 0;
 
     while (tick != 0xFFFF) {
+        // A read that ran past EOF (truncated/corrupt file) leaves the stream non-Ok; stop
+        // instead of fabricating zero-filled elements from the past-EOF zero fill.
+        if (ds.status() != QDataStream::Ok) {
+            break;
+        }
         if (++elemCount > MAX_ELEMENTS) {
             break;
         }

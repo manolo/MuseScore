@@ -33,7 +33,7 @@ struct EncFormatReader;   // defined in reader.h
 
 struct EncMeasure {
     QString m_id;
-    qint32 varsize           { 0 };
+    quint32 varsize           { 0 };
     quint16 bpm               { 0 };
     quint8 timeSigGlyph      { 0 };
     quint16 beatTicks         { 0 };

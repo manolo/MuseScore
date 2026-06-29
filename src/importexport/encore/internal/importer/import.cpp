@@ -102,7 +102,11 @@ bool isValidFaceValue(quint8 faceValue)
 
 void applyConcertPitch(Note* n, int semitone)
 {
-    n->setPitch(semitone);
+    // A transposed or garbage Encore semitone can land outside MIDI's [0,127]. Note::setPitch
+    // only asserts the range (no clamp), and downstream drumset lookups index a 128-entry table
+    // by pitch, so an out-of-range value is undefined behaviour. Clamp once, here, at the single
+    // choke point both the main and grace note paths go through.
+    n->setPitch(std::clamp(semitone, 0, 127));
     n->setTpcFromPitch();
 }
 

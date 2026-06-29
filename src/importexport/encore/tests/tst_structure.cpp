@@ -22,6 +22,10 @@
 
 #include <gtest/gtest.h>
 
+#include <QByteArray>
+#include <QFile>
+#include <QTemporaryDir>
+
 #include "engraving/dom/arpeggio.h"
 #include "engraving/dom/system.h"
 #include "engraving/dom/layoutbreak.h"
@@ -1239,4 +1243,70 @@ TEST_F(Tst_Structure, page_margins_wini_zero_margins)
     EXPECT_NEAR(score->style().styleD(Sid::pagePrintableWidth), pageWIn, 0.01);
 
     delete score;
+}
+
+// ---------------------------------------------------------------------------
+// Malformed-input robustness (crash safety on untrusted .enc files)
+// ---------------------------------------------------------------------------
+// A .enc file is untrusted binary input and must never crash, hang, or read out of bounds.
+// These tests derive corrupt variants from a good fixture at run time and assert the importer
+// returns a bounded result (a valid score or a clean null) rather than crashing or spinning.
+// On a debug build the engraving asserts fire on any bad track / out-of-range access, so
+// "the import ran to completion" is itself the assertion.
+
+static QByteArray readFixtureBytes(const QString& name)
+{
+    QFile f(ENC_DIR + name);
+    return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+}
+
+TEST_F(Tst_Structure, malformed_truncated_input_does_not_crash)
+{
+    const QByteArray good = readFixtureBytes("bando.enc");
+    ASSERT_GT(good.size(), 0);
+
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    setRootDir(tmp.path());
+
+    // Every prefix of a valid file, cut at many points, must import without crashing/hanging.
+    for (int frac = 1; frac < 10; ++frac) {
+        const QByteArray cut = good.left(good.size() * frac / 10);
+        const QString name = QString("trunc_%1.enc").arg(frac);
+        QFile f(tmp.path() + "/" + name);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+        f.write(cut);
+        f.close();
+        // May be null (clean reject) or a bounded score; the point is it returns at all.
+        delete readEncoreScore(name);
+    }
+
+    setRootDir(ENC_DIR);
+}
+
+TEST_F(Tst_Structure, malformed_oversized_block_size_does_not_crash)
+{
+    QByteArray data = readFixtureBytes("bando.enc");
+    ASSERT_GT(data.size(), 0);
+
+    // Overwrite the 4-byte little-endian size that follows the first MEAS magic with a value
+    // far larger than the file. The parser must clamp it to the device instead of seeking past
+    // EOF or wrapping the size negative when skipping.
+    const int idx = data.indexOf("MEAS");
+    ASSERT_GE(idx, 0);
+    ASSERT_LE(idx + 8, data.size());
+    for (int k = 0; k < 4; ++k) {
+        data[idx + 4 + k] = static_cast<char>(0xFF);
+    }
+
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    setRootDir(tmp.path());
+    QFile f(tmp.path() + "/oversized.enc");
+    ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    f.write(data);
+    f.close();
+
+    delete readEncoreScore("oversized.enc");
+    setRootDir(ENC_DIR);
 }

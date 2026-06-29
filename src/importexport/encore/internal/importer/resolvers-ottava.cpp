@@ -54,6 +54,12 @@ void resolveOttavas(BuildCtx& ctx)
     for (size_t i = 0; i < sorted.size(); ++i) {
         const PendingOttava& po = sorted[i];
 
+        // po.track is derived from file data; skip a spanner whose track is out of range
+        // rather than hand an out-of-bounds track to the engraving DOM.
+        if (!validTrack(score, po.track)) {
+            continue;
+        }
+
         // Endpoint: start of the next ottava on the same staff, or end of score.
         Fraction endTick = scoreEnd;
         if (i + 1 < sorted.size() && sorted[i + 1].staffIdx == po.staffIdx) {

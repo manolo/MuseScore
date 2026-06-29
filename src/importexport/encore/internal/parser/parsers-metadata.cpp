@@ -48,7 +48,11 @@ bool EncInstrument::read(QDataStream& ds, quint32 vs, bool probeEncoding)
     int nread = 8;
     QChar ch;
     bool done = false;
-    while (!done) {
+    // Bound the name scan by the block's declared content length (offset) and the stream
+    // status. Without this a file whose name field has no terminating NUL (and a non-EOF
+    // device) would spin forever; a truncated one would fabricate zeroed characters.
+    const int nameLimit = static_cast<int>(offset);
+    while (!done && nread < nameLimit && ds.status() == QDataStream::Ok) {
         if (cs == EncCharSize::ONE_BYTE) {
             quint8 b;
             ds >> b;
@@ -105,7 +109,14 @@ bool EncLine::read(QDataStream& ds, quint32 vs, int staffPerSystem)
     offset = vs;
     ds.skipRawData(10);
     ds >> start >> measureCount;
-    for (int i = 0; i < staffPerSystem; ++i) {
+    // staffPerSystem comes from the header; clamp it to the staff entries the block can
+    // actually hold (30 bytes each) so a corrupt count cannot spin the loop fabricating
+    // zeroed staves, and stop early if the stream runs out.
+    const int maxStaves = static_cast<int>(offset) / 30;
+    if (staffPerSystem > maxStaves) {
+        staffPerSystem = maxStaves;
+    }
+    for (int i = 0; i < staffPerSystem && ds.status() == QDataStream::Ok; ++i) {
         EncLineStaffData lsd;
         lsd.read(ds);
         staffData.push_back(lsd);

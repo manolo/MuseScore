@@ -47,17 +47,20 @@ static Chord* findFirstChordInMeasure(Measure* m, track_idx_t preferTrack,
     if (!m) {
         return nullptr;
     }
+    // Tracks are derived from untrusted file data; ignore any that fall outside the score.
+    const bool preferOk   = validTrack(m->score(), preferTrack);
+    const bool fallbackOk = validTrack(m->score(), fallbackTrack);
     Chord* preferred = nullptr;
     Chord* fallback  = nullptr;
     for (Segment* s = m->first(SegmentType::ChordRest);
          s; s = s->next(SegmentType::ChordRest)) {
-        if (!preferred) {
+        if (!preferred && preferOk) {
             EngravingItem* el = s->element(preferTrack);
             if (el && el->isChord()) {
                 preferred = toChord(el);
             }
         }
-        if (!fallback) {
+        if (!fallback && fallbackOk) {
             EngravingItem* el = s->element(fallbackTrack);
             if (el && el->isChord()) {
                 fallback = toChord(el);
@@ -287,6 +290,9 @@ static void applyPendingBowings(BuildCtx& ctx, MasterScore* score)
                     // ORN is always voice 0; scan all voices of own staff before sibling.
                     const track_idx_t staffBase = (pb.track / VOICES) * VOICES;
                     for (track_idx_t v = 0; v < VOICES && !c; ++v) {
+                        if (!validTrack(score, staffBase + v)) {
+                            break;
+                        }
                         EngravingItem* el = seg->element(staffBase + v);
                         if (el && el->isChord()) {
                             c = toChord(el);
@@ -296,6 +302,9 @@ static void applyPendingBowings(BuildCtx& ctx, MasterScore* score)
                     if (!c) {
                         const track_idx_t sibBase = staffBase + VOICES;
                         for (track_idx_t v = 0; v < VOICES && !c; ++v) {
+                            if (!validTrack(score, sibBase + v)) {
+                                break;
+                            }
                             EngravingItem* el = seg->element(sibBase + v);
                             if (el && el->isChord()) {
                                 c = toChord(el);
@@ -337,30 +346,25 @@ static void applyPendingFingeringOrns(BuildCtx& ctx, MasterScore* score)
             if (m) {
                 Segment* seg = m->findSegment(SegmentType::ChordRest, pf.tick);
                 if (seg) {
+                    // Both tracks come from file data; only consult the ones in range.
                     track_idx_t sibTrack = pf.track + VOICES;
+                    EngravingItem* sibEl = validTrack(score, sibTrack) ? seg->element(sibTrack) : nullptr;
+                    EngravingItem* ownEl = validTrack(score, pf.track) ? seg->element(pf.track) : nullptr;
                     if (pf.preferSibling) {
-                        EngravingItem* el = seg->element(sibTrack);
-                        if (el && el->isChord()) {
-                            c = toChord(el);
+                        if (sibEl && sibEl->isChord()) {
+                            c = toChord(sibEl);
                             useTrack = sibTrack;
-                        } else {
-                            el = seg->element(pf.track);
-                            if (el && el->isChord()) {
-                                c = toChord(el);
-                                useTrack = pf.track;
-                            }
+                        } else if (ownEl && ownEl->isChord()) {
+                            c = toChord(ownEl);
+                            useTrack = pf.track;
                         }
                     } else {
-                        EngravingItem* el = seg->element(pf.track);
-                        if (el && el->isChord()) {
-                            c = toChord(el);
+                        if (ownEl && ownEl->isChord()) {
+                            c = toChord(ownEl);
                             useTrack = pf.track;
-                        } else {
-                            el = seg->element(sibTrack);
-                            if (el && el->isChord()) {
-                                c = toChord(el);
-                                useTrack = sibTrack;
-                            }
+                        } else if (sibEl && sibEl->isChord()) {
+                            c = toChord(sibEl);
+                            useTrack = sibTrack;
                         }
                     }
                 }
