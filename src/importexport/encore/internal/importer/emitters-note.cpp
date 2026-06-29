@@ -148,15 +148,6 @@ static void applyFingeringsFromArtic(const NoteElemCtx& ec,
             note->add(fg);
             break;
         }
-        const int sn = encArticByteToStringNumber(ab);
-        if (sn > 0) {
-            Fingering* fg = Factory::createFingering(
-                note, mu::engraving::TextStyleType::STRING_NUMBER);
-            fg->setTrack(track);
-            fg->setXmlText(String::number(sn));
-            note->add(fg);
-            break;
-        }
     }
 }
 

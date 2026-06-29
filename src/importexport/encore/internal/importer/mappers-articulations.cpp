@@ -76,7 +76,7 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x30: return { SymId::brassMuteHalfClosed };   // technical/stopped (tick/half stopped)
     // String markings (m3, m4, m18): 0x1E/0x1F=harmonic, 0x44/0x45=thumb-position.
     // 0x46=open-string: handled in encArticByteIsOpenString() (no SymId; uses Fingering "0").
-    // 0x47=string-1: handled in encArticByteToStringNumber().
+    // 0x47=stick (drumstick technique): not a string number, left unmapped.
     case 0x1E:
     case 0x1F: return { SymId::stringsHarmonic };
     case 0x44:
@@ -103,14 +103,6 @@ bool encArticByteIsOpenString(quint8 articByte)
 {
     // 0x46=open-string; emitted as Fingering "0" (STRING_NUMBER style).
     return articByte == 0x46;
-}
-
-int encArticByteToStringNumber(quint8 articByte)
-{
-    // Open string (0x46) is handled separately as plain Fingering "0".
-    // 0x47 is "stick" (drumstick technique), not a string number; left unmapped.
-    (void)articByte;
-    return 0;
 }
 
 // Scale string-number artic bytes: 0x39-0x40 encode string numbers 1-8 as (byte - kStringArticBase).

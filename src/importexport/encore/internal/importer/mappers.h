@@ -116,9 +116,6 @@ int encArticByteToFingerNumber(quint8 articByte);
 // True when the articulation byte is an open-string marker (importer emits Fingering "0").
 bool encArticByteIsOpenString(quint8 articByte);
 
-// Returns the string number (1..N) for a string-number articulation byte, or 0 if not one.
-int encArticByteToStringNumber(quint8 articByte);
-
 // Returns the string number (1..8) for bytes in the 0x39..0x40 range (= byte - 0x38),
 // or 0 if the byte is not in that range.  These bytes are written by Encore as explicit
 // string-number anchors; when at least one is present in a measure, all notes in that
