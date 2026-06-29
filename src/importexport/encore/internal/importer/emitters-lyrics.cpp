@@ -69,31 +69,24 @@ void enqueueLyric(BuildCtx& ctx, const EncLyric* el, track_idx_t track)
     }
 }
 
-// Attach queued lyrics from ctx.pendingLyrics to the nearest chord in the measure.
-// Uses a "lyrics-first" greedy assignment: for each syllable in tick order, claim
-// the nearest available note within the threshold, so later syllables cannot steal
-// the note from an earlier one.
-void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
+// Build a sorted list of Encore NOTE encTicks for each MuseScore staff, so the
+// segEncTick lookup uses the actual Encore tick of each note rather than a
+// conversion of the MuseScore cumTick.  The cumTick-to-encTick conversion is
+// unreliable because the note loop accumulates durations (not Encore ticks),
+// and the relationship is not proportional when durations don't align with
+// the Encore tick grid (e.g. v0xC4 6/8 with beatTicks=240, lyric offset=51
+// while the first note is at encTick=0).
+//
+// The note is routed to its MuseScore (staff, voice) with the SAME logic as the
+// note loop (routeElementStaffVoice).  This matters for grand staves: a note can
+// reach a lower staff either via staffWithin (raw-byte slot) or via the voice>=VOICES
+// case, and a lyric can reach that staff by a different mechanism.  Keying the tick
+// list by raw encStaff (instead of the routed staff) put the lyrics' notes on the
+// wrong staff and reversed the syllables.  encNoteTicksByStaff[msStaff] holds the
+// Encore ticks of the voice-0 notes that the note loop routed to that MuseScore staff.
+static std::map<int, std::vector<int> > buildEncNoteTicksByStaff(
+    BuildCtx& ctx, const MeasEmitCtx& mc, const EncMeasure& encMeas)
 {
-    Measure* measure = mc.measure;
-    const EncMeasure& encMeas = *mc.encMeas;
-    const Fraction measTick = mc.measTick;
-
-    // Build a sorted list of Encore NOTE encTicks for each MuseScore staff, so the
-    // segEncTick lookup uses the actual Encore tick of each note rather than a
-    // conversion of the MuseScore cumTick.  The cumTick-to-encTick conversion is
-    // unreliable because the note loop accumulates durations (not Encore ticks),
-    // and the relationship is not proportional when durations don't align with
-    // the Encore tick grid (e.g. v0xC4 6/8 with beatTicks=240, lyric offset=51
-    // while the first note is at encTick=0).
-    //
-    // The note is routed to its MuseScore (staff, voice) with the SAME logic as the
-    // note loop (routeElementStaffVoice).  This matters for grand staves: a note can
-    // reach a lower staff either via staffWithin (raw-byte slot) or via the voice>=VOICES
-    // case, and a lyric can reach that staff by a different mechanism.  Keying the tick
-    // list by raw encStaff (instead of the routed staff) put the lyrics' notes on the
-    // wrong staff and reversed the syllables.  encNoteTicksByStaff[msStaff] holds the
-    // Encore ticks of the voice-0 notes that the note loop routed to that MuseScore staff.
     std::map<int, std::vector<int> > encNoteTicksByStaff;
     for (const auto& elem : encMeas.elements) {
         const EncMeasureElem* e = elem.get();
@@ -117,6 +110,94 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
             tickList.push_back(t);
         }
     }
+    return encNoteTicksByStaff;
+}
+
+// Build a list of all ChordRest elements (chords and rests) on chordTrack with their enc ticks.
+// segEncTick is taken directly from the Encore NOTE elements in order (positional assignment):
+// the kth MuseScore chord corresponds to the kth Encore note tick. This is more accurate than
+// converting MuseScore cumTick to Encore ticks because the note loop accumulates durations
+// (not encTicks), so the relationship is not proportional when note durations don't align with
+// the Encore tick grid.
+static std::vector<std::pair<int, ChordRest*> > buildCrTickPairs(
+    Measure* measure, const Fraction& measTick, const EncMeasure& encMeas,
+    track_idx_t chordTrack, const std::vector<int>* noteTickList)
+{
+    std::vector<std::pair<int, ChordRest*> > crTickPairs;
+    size_t noteTickIdx = 0;
+    for (Segment* s = measure->first(SegmentType::ChordRest);
+         s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(chordTrack);
+        if (!el || !el->isChordRest()) {
+            continue;
+        }
+        int segEncTick;
+        ChordRest* cr = toChordRest(el);
+        // Only advance noteTickIdx for chords, not for rests. Otherwise rests
+        // consume encTick entries intended for notes, causing all subsequent notes
+        // to have incorrect encTick values and lyrics to mismatch.
+        if (cr->isChord() && noteTickList && noteTickIdx < noteTickList->size()) {
+            segEncTick = (*noteTickList)[noteTickIdx++];
+        } else {
+            // Fallback for rests or when Encore note list is exhausted: estimate
+            // from the measure's beat grid.
+            const Fraction relTick = s->tick() - measTick;
+            const int durTicks = encMeas.durTicks ? static_cast<int>(encMeas.durTicks) : 960;
+            segEncTick = (relTick.numerator() * durTicks)
+                         / std::max(1, relTick.denominator());
+        }
+        crTickPairs.emplace_back(segEncTick, cr);
+    }
+    return crTickPairs;
+}
+
+// Find the index of the best unconsumed ChordRest for a lyric at encTick.
+// wantChord selects chords (true) or rests (false); maxDelta caps the distance.
+// When preferNotAfter is set, notes at/before encTick win over later notes regardless of
+// distance, and ties break to the closest (the threshold pass); otherwise the closest by
+// absolute distance wins (the rest/last-resort fallback passes).
+static int findBestCr(const std::vector<std::pair<int, ChordRest*> >& pairs,
+                      const std::vector<bool>& consumed, int encTick,
+                      bool wantChord, int maxDelta, bool preferNotAfter)
+{
+    int bestIdx = -1;
+    int bestDelta = INT_MAX;
+    bool bestIsAfter = false;  // true if best match has note_tick > encTick
+    for (size_t ni = 0; ni < pairs.size(); ++ni) {
+        if (consumed[ni]) {
+            continue;
+        }
+        const bool ok = wantChord ? pairs[ni].second->isChord() : pairs[ni].second->isRest();
+        if (!ok) {
+            continue;
+        }
+        const int delta = std::abs(pairs[ni].first - encTick);
+        if (delta > maxDelta) {
+            continue;
+        }
+        const bool isAfter = (pairs[ni].first > encTick);
+        if (bestIdx < 0
+            || (preferNotAfter && !isAfter && bestIsAfter)
+            || ((!preferNotAfter || isAfter == bestIsAfter) && delta < bestDelta)) {
+            bestDelta = delta;
+            bestIdx = static_cast<int>(ni);
+            bestIsAfter = isAfter;
+        }
+    }
+    return bestIdx;
+}
+
+// Attach queued lyrics from ctx.pendingLyrics to the nearest chord in the measure.
+// Uses a "lyrics-first" greedy assignment: for each syllable in tick order, claim
+// the nearest available note within the threshold, so later syllables cannot steal
+// the note from an earlier one.
+void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
+{
+    Measure* measure = mc.measure;
+    const EncMeasure& encMeas = *mc.encMeas;
+    const Fraction measTick = mc.measTick;
+
+    std::map<int, std::vector<int> > encNoteTicksByStaff = buildEncNoteTicksByStaff(ctx, mc, encMeas);
 
     // matchThreshold: half a beat in Encore ticks.
     const int beatTicksVal = encMeas.beatTicks ? static_cast<int>(encMeas.beatTicks) : 240;
@@ -132,12 +213,6 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
         const int lyVerseNo = static_cast<int>(lyTrack) % VOICES;
         const track_idx_t chordTrack = static_cast<track_idx_t>(lyStaffIdx) * VOICES;
 
-        // Build a list of all ChordRest elements (chords and rests) with their enc ticks.
-        // segEncTick is taken directly from the Encore NOTE elements in order (positional
-        // assignment): the kth MuseScore chord corresponds to the kth Encore note tick.
-        // This is more accurate than converting MuseScore cumTick to Encore ticks because
-        // the note loop accumulates durations (not encTicks), so the relationship is not
-        // proportional when note durations don't align with the Encore tick grid.
         const std::vector<int>* noteTickList = nullptr;
         {
             auto it = encNoteTicksByStaff.find(lyStaffIdx);
@@ -145,73 +220,21 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
                 noteTickList = &it->second;
             }
         }
-        std::vector<std::pair<int, ChordRest*> > crTickPairs;
-        size_t noteTickIdx = 0;
-        for (Segment* s = measure->first(SegmentType::ChordRest);
-             s; s = s->next(SegmentType::ChordRest)) {
-            EngravingItem* el = s->element(chordTrack);
-            if (!el || !el->isChordRest()) {
-                continue;
-            }
-            int segEncTick;
-            ChordRest* cr = toChordRest(el);
-            // Only advance noteTickIdx for chords, not for rests. Otherwise rests
-            // consume encTick entries intended for notes, causing all subsequent notes
-            // to have incorrect encTick values and lyrics to mismatch.
-            if (cr->isChord() && noteTickList && noteTickIdx < noteTickList->size()) {
-                segEncTick = (*noteTickList)[noteTickIdx++];
-            } else {
-                // Fallback for rests or when Encore note list is exhausted: estimate
-                // from the measure's beat grid.
-                const Fraction relTick = s->tick() - measTick;
-                const int durTicks = encMeas.durTicks ? static_cast<int>(encMeas.durTicks) : 960;
-                segEncTick = (relTick.numerator() * durTicks)
-                             / std::max(1, relTick.denominator());
-            }
-            crTickPairs.emplace_back(segEncTick, cr);
-        }
+        std::vector<std::pair<int, ChordRest*> > crTickPairs
+            = buildCrTickPairs(measure, measTick, encMeas, chordTrack, noteTickList);
 
         std::vector<bool> crConsumed(crTickPairs.size(), false);
         for (const auto& pl : entries) {
-            // First pass: find nearest chord within the threshold, with two-tier preference:
-            // Tier 1: prefer notes where note_tick <= lyric_tick (lyric comes after note start).
-            // Tier 2: within tier, prefer the closest note by absolute distance.
+            // First pass: nearest chord within the threshold, with two-tier preference:
+            // prefer notes at/before the lyric tick, then the closest by absolute distance.
             // This prevents lyrics from matching a later note simply because it is
             // absolutely closer (e.g., when lyric and note are not perfectly aligned).
-            int bestIdx = -1;
-            int bestDelta = matchThreshold + 1;
-            bool bestIsAfter = false;  // true if best match has note_tick > lyric_tick
-            for (size_t ni = 0; ni < crTickPairs.size(); ++ni) {
-                if (crConsumed[ni] || !crTickPairs[ni].second->isChord()) {
-                    continue;
-                }
-                const int delta = std::abs(crTickPairs[ni].first - pl.encTick);
-                if (delta > matchThreshold) {
-                    continue;
-                }
-                const bool isAfter = (crTickPairs[ni].first > pl.encTick);
-                // Prefer not-after over after; within same tier, prefer smaller delta.
-                if (bestIdx < 0
-                    || (!isAfter && bestIsAfter)
-                    || (isAfter == bestIsAfter && delta < bestDelta)) {
-                    bestDelta = delta;
-                    bestIdx = static_cast<int>(ni);
-                    bestIsAfter = isAfter;
-                }
-            }
+            int bestIdx = findBestCr(crTickPairs, crConsumed, pl.encTick,
+                                     /*wantChord*/ true, matchThreshold, /*preferNotAfter*/ true);
             // Fallback: attach to the nearest rest in the measure.
             if (bestIdx < 0) {
-                int bestRestDelta = INT_MAX;
-                for (size_t ni = 0; ni < crTickPairs.size(); ++ni) {
-                    if (crConsumed[ni] || !crTickPairs[ni].second->isRest()) {
-                        continue;
-                    }
-                    const int delta = std::abs(crTickPairs[ni].first - pl.encTick);
-                    if (delta < bestRestDelta) {
-                        bestRestDelta = delta;
-                        bestIdx = static_cast<int>(ni);
-                    }
-                }
+                bestIdx = findBestCr(crTickPairs, crConsumed, pl.encTick,
+                                     /*wantChord*/ false, INT_MAX, /*preferNotAfter*/ false);
             }
             // Last resort: a sung syllable always belongs to a note. If nothing matched
             // within the threshold and no rest was available, attach it to the nearest
@@ -219,17 +242,8 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
             // continuation syllables (e.g. "fin-ger", "soft-ly") whose stored tick sits
             // between notes, further than half a beat from the note they belong to.
             if (bestIdx < 0) {
-                int bestD = INT_MAX;
-                for (size_t ni = 0; ni < crTickPairs.size(); ++ni) {
-                    if (crConsumed[ni] || !crTickPairs[ni].second->isChord()) {
-                        continue;
-                    }
-                    const int delta = std::abs(crTickPairs[ni].first - pl.encTick);
-                    if (delta < bestD) {
-                        bestD = delta;
-                        bestIdx = static_cast<int>(ni);
-                    }
-                }
+                bestIdx = findBestCr(crTickPairs, crConsumed, pl.encTick,
+                                     /*wantChord*/ true, INT_MAX, /*preferNotAfter*/ false);
             }
             if (bestIdx < 0) {
                 continue;
