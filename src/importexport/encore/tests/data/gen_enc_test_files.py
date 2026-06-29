@@ -142,22 +142,39 @@ def _dots_from_gap(gap, fv):
         return 3
     return 0
 
-def _staff0_clef(data):
-    """Clef byte of the first staff entry of the first LINE block."""
+def _staff_clef_map(data):
+    """Map a note's rawStaff byte to its clef, read from the first LINE block.
+
+    Each 30-byte LINE staff entry carries its clef at byte +14 and its
+    instrStaffIdx at byte +21; a note's rawStaff (staffIdx | staffWithin)
+    equals the instrStaffIdx of the staff it belongs to (0x00 treble, 0x40
+    bass for a piano grand staff).  Returns (map, fallbackClef) where the
+    fallback is the first entry's clef for any unmatched rawStaff (the common
+    single-staff case)."""
     p = data.find(b'LINE')
     if p < 0:
-        return 0
-    content_off = p + 8 + 13          # 13-byte LINE header before staff entries
-    clef_off = content_off + 14       # byte 14 of the 30-byte staff entry
-    return data[clef_off] if clef_off < len(data) else 0
+        return {}, 0
+    count = data[0x33] if 0x33 < len(data) else 1
+    base = p + 8 + 13                 # 13-byte LINE header before staff entries
+    clef_by_raw = {}
+    fallback = 0
+    for s in range(max(count, 1)):
+        entry = base + s * 30
+        if entry + 21 >= len(data):
+            break
+        clef = data[entry + 14]
+        instr_staff = data[entry + 21]
+        clef_by_raw[instr_staff] = clef
+        if s == 0:
+            fallback = clef
+    return clef_by_raw, fallback
 
 def apply_encore_layout(data):
     """Fill Encore display-layout fields in every v0xC4 MEAS block in `data`."""
     if len(data) < 5 or data[4] != 0xC4:
         return data
     out = bytearray(data)
-    clef = _staff0_clef(out)
-    origin = _CLEF_ORIGIN.get(clef)   # None for PERC/TAB -> skip pitch mapping
+    clef_by_raw, fallback_clef = _staff_clef_map(out)
     pos = 0
     while True:
         m = out.find(b'MEAS', pos)
@@ -189,7 +206,11 @@ def apply_encore_layout(data):
                     struct.pack_into('<H', out, i + 10, _enc_xpos(tick))
                 if typ == 9 and esize >= 16:
                     midi = out[i + 15]
-                    # diatonic staff position + accidental (sharp spelling)
+                    # diatonic staff position + accidental (sharp spelling),
+                    # using the clef of the staff this note belongs to.
+                    raw_staff = out[i + 4]
+                    clef = clef_by_raw.get(raw_staff, fallback_clef)
+                    origin = _CLEF_ORIGIN.get(clef)   # None for PERC/TAB -> skip
                     if origin is not None and out[i + 12] == 0 and midi:
                         out[i + 12] = (_abs_diatonic(midi) - origin) & 0xFF
                         if _PC_SHARP[midi % 12] and out[i + 21] == 0:
@@ -418,6 +439,44 @@ def ornament_v0c4(tick, voice, staffIdx, tipo, xoffset=0, alMezuro=0, xoffset2=0
     d[18] = alMezuro
     d[20] = xoffset2
     d[26] = speguleco & 3
+    return bytes(d)
+
+def slur_v0c4(tick, staffIdx, startX, midX, endX, startY=9, midY=16, endY=9, voice=0):
+    """28-byte SLURSTART (tipo 0x21), the geometry-rich form Encore renders an
+    arc from. Three control points: (startX,startY), (midX,midY = apex),
+    (endX,endY). A larger midY makes the slur bulge; all-zero Y draws a flat
+    line. The 33-byte ornament_v0c4 SLURSTART used by importer fixtures draws
+    straight in Encore -- use this builder for files meant to open in Encore."""
+    d = bytearray(28)
+    struct.pack_into('<H', d, 0, tick)
+    d[2] = (5 << 4) | (voice & 0xF)
+    d[3] = 28
+    d[4] = staffIdx & 0xFF
+    d[5] = 0x21
+    struct.pack_into('<H', d, 10, startX); struct.pack_into('<h', d, 12, startY)
+    struct.pack_into('<H', d, 14, midX);   struct.pack_into('<h', d, 16, midY)
+    struct.pack_into('<H', d, 20, endX);   struct.pack_into('<h', d, 22, endY)
+    return bytes(d)
+
+def wedge_v0c4(tick, staffIdx, startX, endX, cresc=True, y=(-3, 2, 12), voice=0):
+    """28-byte WEDGESTART (tipo 0x1D) hairpin. startX is stored at both +10 and
+    +14, endX at +20. The Y triple (y12, y16, y22) sets vertical placement:
+    negative (~ -37) above the staff, small positive (the default -3/2/12)
+    just below it; large positive overshoots into the staff below. cresc=True
+    writes speguleco (+26)=0 for a crescendo (<), False writes 1 for a
+    diminuendo (>). The 33-byte ornament_v0c4 WEDGESTART draws as a closed
+    angle in Encore -- use this builder for files meant to open in Encore."""
+    d = bytearray(28)
+    struct.pack_into('<H', d, 0, tick)
+    d[2] = (5 << 4) | (voice & 0xF)
+    d[3] = 28
+    d[4] = staffIdx & 0xFF
+    d[5] = 0x1D
+    struct.pack_into('<H', d, 10, startX); struct.pack_into('<h', d, 12, y[0])
+    struct.pack_into('<H', d, 14, startX); struct.pack_into('<h', d, 16, y[1])
+    struct.pack_into('<H', d, 20, endX);   struct.pack_into('<h', d, 22, y[2])
+    d[24] = 1
+    d[26] = 0 if cresc else 1
     return bytes(d)
 
 def note_v0c2(tick, voice, staffIdx, fv, pitch):
