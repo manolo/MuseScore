@@ -44,6 +44,18 @@
 namespace mu::iex::enc {
 using namespace mu::engraving;
 
+// The tuplet ratio and resolved MuseScore duration for one note, produced once by
+// resolveNoteDuration and threaded through attachChordToTuplet/advanceCumulativeTick.
+// dt/dots are in/out: attach may shrink them for an isolated-explicit fill, advance reads
+// the final values. dtFace is the pre-cap duration used for the isolated-explicit fill check.
+struct TupletDecision {
+    int actualN { 0 };
+    int normalN { 0 };
+    DurationType dt { DurationType::V_INVALID };
+    int dots { 0 };
+    DurationType dtFace { DurationType::V_INVALID };
+};
+
 // Returns true if the note is a short MIDI artifact that should be skipped.
 static bool isMidiArtifact(const EncNote* en,
                            const NoteElemCtx& ec,
@@ -243,19 +255,19 @@ static void attachChordToTuplet(
     const NoteElemCtx& ec,
     const EncNote* en,
     Chord* chord,
-    DurationType& dt,
-    int& dots,
-    DurationType dtFace,
-    int preACheck,
-    int preNCheck,
-    bool isInnerMember,
-    bool isInnerFirst,
-    bool isInnerLast)
+    TupletDecision& dec)
 {
+    DurationType& dt = dec.dt;
+    int& dots = dec.dots;
+    const DurationType dtFace = dec.dtFace;
+    const int preACheck = dec.actualN;
+    const int preNCheck = dec.normalN;
+    const bool isInnerMember = mc.innerGroupMembers.count(ec.e) > 0;
+    const bool isInnerFirst  = mc.nestedByInnerFirst.count(ec.e) > 0;
+    const bool isInnerLast   = mc.nestedByInnerLast.count(ec.e) > 0;
     Measure* measure = mc.measure;
     const std::set<const EncMeasureElem*>& validTupletGroupMember = mc.validTupletGroupMember;
     const std::set<const EncMeasureElem*>& partialEndGroup = mc.partialEndGroup;
-    const std::set<const EncMeasureElem*>& impliedGroupMember = mc.validTupletGroupMember;
     const EncMeasureElem* e = ec.e;
     const auto& trackKey = ec.trackKey;
     track_idx_t track = ec.track;
@@ -269,7 +281,7 @@ static void attachChordToTuplet(
     int actualN = isStandardExplicit ? preACheck : 0;
     int normalN = isStandardExplicit ? preNCheck : 0;
     // Implied tuplet (pre-validated: isImpliedTupletMember set by parser for v0xC2 only).
-    if (actualN == 0 && (fvLow(en->faceValue)) >= 4 && impliedGroupMember.count(e)) {
+    if (actualN == 0 && (fvLow(en->faceValue)) >= 4 && validTupletGroupMember.count(e)) {
         actualN = detectImpliedTuplet(en->realDuration, en->faceValue, normalN);
     }
     // Sandwich orphan (tup=0 surrounded by tup=N:M notes): use active ratio to stay in bracket.
@@ -383,12 +395,13 @@ static bool advanceCumulativeTick(
     const NoteElemCtx& ec,
     const MeasEmitCtx& mc,
     Chord*& chord,
-    DurationType& dt,
-    int& dots,
-    bool isInnerMember,
-    int preACheck,
-    int preNCheck)
+    TupletDecision& dec)
 {
+    DurationType& dt = dec.dt;
+    int& dots = dec.dots;
+    const int preACheck = dec.actualN;
+    const int preNCheck = dec.normalN;
+    const bool isInnerMember = mc.innerGroupMembers.count(ec.e) > 0;
     Measure* measure = mc.measure;
     const auto& trackKey = ec.trackKey;
     int savedPrevMidiTick = ec.savedPrevMidiTick;
@@ -507,18 +520,18 @@ static bool resolveNoteDuration(
     const MeasEmitCtx& mc,
     const EncNote* en,
     bool isStandardExplicit,
-    int preACheck,
-    int preNCheck,
-    bool isChordExt,
-    int savedPrevMidiTick,
-    DurationType& dt,
-    int& dots,
-    DurationType& dtFace)
+    TupletDecision& dec)
 {
+    const int preACheck = dec.actualN;
+    const int preNCheck = dec.normalN;
+    const bool isChordExt = ec.isChordExt;
+    const int savedPrevMidiTick = ec.savedPrevMidiTick;
+    DurationType& dt = dec.dt;
+    int& dots = dec.dots;
+    DurationType& dtFace = dec.dtFace;
     Measure* measure = mc.measure;
     const std::set<const EncMeasureElem*>& validTupletGroupMember = mc.validTupletGroupMember;
     const std::set<const EncMeasureElem*>& partialEndGroup = mc.partialEndGroup;
-    const std::set<const EncMeasureElem*>& impliedGroupMember = mc.validTupletGroupMember;
     const EncMeasureElem* e = ec.e;
     const auto& trackKey = ec.trackKey;
 
@@ -583,7 +596,7 @@ static bool resolveNoteDuration(
         int preA = isStandardExplicit ? preACheck : 0;
         int preN = isStandardExplicit ? preNCheck : 0;
         if (!isStandardExplicit) {
-            if ((fvLow(en->faceValue)) >= 4 && impliedGroupMember.count(e)) {
+            if ((fvLow(en->faceValue)) >= 4 && validTupletGroupMember.count(e)) {
                 preA = detectImpliedTuplet(en->realDuration, en->faceValue, preN);
             }
         }
@@ -725,12 +738,8 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
 void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
 {
     Measure* measure = mc.measure;
-    const std::set<const EncMeasureElem*>& impliedGroupMember = mc.validTupletGroupMember;
     std::set<std::tuple<int, int, int> >& filteredTieSenderPitches = mc.filteredTieSenderPitches;
     const EncMeasureElem* e = ec.e;
-    const bool isInnerFirst  = mc.nestedByInnerFirst.count(e) > 0;
-    const bool isInnerLast   = mc.nestedByInnerLast.count(e) > 0;
-    const bool isInnerMember = mc.innerGroupMembers.count(e) > 0;
     int staffIdx = ec.staffIdx;
     track_idx_t track = ec.track;
     auto trackKey = ec.trackKey;
@@ -766,29 +775,26 @@ void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
             preA = 0;
             preN = 0;
         }
-        if (preA == 0 && (fvLow(en->faceValue)) >= 4 && impliedGroupMember.count(e)) {
+        if (preA == 0 && (fvLow(en->faceValue)) >= 4 && mc.validTupletGroupMember.count(e)) {
             preA = detectImpliedTuplet(en->realDuration, en->faceValue, preN);
         }
         (void)preA;
         (void)preN;
     }
-    int preACheck = en->actualNotes(), preNCheck = en->normalNotes();
+    TupletDecision dec;
+    dec.actualN = en->actualNotes();
+    dec.normalN = en->normalNotes();
     // Use uniform-fill override ratio when present.
     {
         auto orit = mc.overrideGroupRatios.find(e);
         if (orit != mc.overrideGroupRatios.end()) {
-            preACheck = orit->second.first;
-            preNCheck = orit->second.second;
+            dec.actualN = orit->second.first;
+            dec.normalN = orit->second.second;
         }
     }
-    bool isStandardExplicit = isStandardExplicitTuplet(preACheck, preNCheck);
+    bool isStandardExplicit = isStandardExplicitTuplet(dec.actualN, dec.normalN);
 
-    DurationType dt;
-    int dots;
-    DurationType dtFace;
-    if (!resolveNoteDuration(ctx, ec, mc, en, isStandardExplicit,
-                             preACheck, preNCheck, isChordExt, savedPrevMidiTick,
-                             dt, dots, dtFace)) {
+    if (!resolveNoteDuration(ctx, ec, mc, en, isStandardExplicit, dec)) {
         return;
     }
 
@@ -799,19 +805,16 @@ void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
     } else {
         chord = Factory::createChord(seg);
         chord->setTrack(track);
-        TDuration dur(dt);
-        dur.setDots(dots);
+        TDuration dur(dec.dt);
+        dur.setDots(dec.dots);
         chord->setDurationType(dur);
         chord->setTicks(dur.fraction());
-        chord->setDots(dots);
+        chord->setDots(dec.dots);
         seg->add(chord);
 
-        attachChordToTuplet(ctx, mc, ec, en, chord, dt, dots, dtFace,
-                            preACheck, preNCheck,
-                            isInnerMember, isInnerFirst, isInnerLast);
+        attachChordToTuplet(ctx, mc, ec, en, chord, dec);
 
-        if (!advanceCumulativeTick(ctx, ec, mc, chord, dt, dots,
-                                   isInnerMember, preACheck, preNCheck)) {
+        if (!advanceCumulativeTick(ctx, ec, mc, chord, dec)) {
             return;
         }
     }
