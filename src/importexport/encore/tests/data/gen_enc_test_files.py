@@ -572,6 +572,28 @@ def wedge_v0c4(tick, staffIdx, startX, endX, cresc=True, y=(-3, 2, 12), voice=0)
     d[26] = 0 if cresc else 1
     return bytes(d)
 
+# Dynamic-mark tipo bytes (size-16 ORN), see ENCORE_FORMAT.md ornament table.
+DYN = {'ppp': 0x80, 'pp': 0x81, 'p': 0x82, 'mp': 0x83, 'mf': 0x84, 'f': 0x85,
+       'ff': 0x86, 'fff': 0x87, 'sfz': 0x88, 'sffz': 0x89, 'fp': 0x8A,
+       'fz': 0xAA, 'sf': 0xAB}
+
+def dyn_v0c4(tick, staffIdx, mark, xoffset, yoffset=-3, voice=0):
+    """16-byte dynamic ORN (p, mf, f, ...). `mark` is a DYN key or a raw tipo
+    byte. The glyph is drawn at its own xoffset (+10, normally the note's
+    x-position at this tick) and yoffset (+12); a small value sits it next to
+    the staff. Like slur/wedge this is the geometry-bearing form Encore renders;
+    do not route it through the layout pass (it fills note/lyric x only)."""
+    tipo = DYN.get(mark, mark) if isinstance(mark, str) else mark
+    d = bytearray(16)
+    struct.pack_into('<H', d, 0, tick)
+    d[2] = (5 << 4) | (voice & 0xF)
+    d[3] = 16
+    d[4] = staffIdx & 0xFF
+    d[5] = tipo & 0xFF
+    struct.pack_into('<H', d, 10, xoffset)
+    struct.pack_into('<h', d, 12, yoffset)
+    return bytes(d)
+
 def note_v0c2(tick, voice, staffIdx, fv, pitch):
     """22-byte v0xC2 note. Pitch at d[10]=elemStart+13 (tuplet field)."""
     d = bytearray(19)
