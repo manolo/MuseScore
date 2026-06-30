@@ -354,6 +354,7 @@ def apply_encore_layout(data):
         # collect note/rest elements; track per (rawStaff, voice) for dots
         groups = {}
         max_xpos = 0
+        slurs = []                  # flat SLURSTART ORNs needing a curve
         # accidental in effect this measure, per (rawStaff, staff position):
         # an accidental carries to later same-line notes until the barline.
         meas_accid = {}
@@ -374,6 +375,11 @@ def apply_encore_layout(data):
                 if esize >= 12 and struct.unpack('<H', out[i + 10:i + 12])[0] == 0:
                     tk = struct.unpack('<H', out[i:i + 2])[0]
                     struct.pack_into('<H', out, i + 10, max(0, _enc_xpos(tk) - _GRACE_XPOS_OFFSET - 2))
+            # type 5 = ORN: a flat SLURSTART (tipo 0x21 with no curve control
+            # points, midY at +16 still zero) gets a subtle arc added below.
+            if typ == 5 and out[i + 5] == 0x21 and esize >= 24 \
+                    and out[i + 16] == 0 and out[i + 17] == 0:
+                slurs.append((i, out[i + 4]))
             # type 6 = lyric: it stores its x-position at +10 like a note, and
             # aligns under the note at the same tick.
             if typ == 6 and esize >= 12:
@@ -476,6 +482,28 @@ def apply_encore_layout(data):
                         out[off + 19] = 64              # editor velocity
                     if out[off + 3] >= 18 and struct.unpack('<H', out[off + 16:off + 18])[0] == 0:
                         struct.pack_into('<H', out, off + 16, pbdur)
+        # give flat slurs a subtle arc. A 33-byte SLURSTART has no curve control
+        # points, so Encore draws it as a straight line; fill startY (+12), the
+        # apex midX/midY (+14/+16) and endY (+22). The arc sits opposite the
+        # stems: below a low-note staff (notes mostly under the middle line),
+        # above otherwise. Kept subtle (apex ~9, ends ~4), not a semicircle.
+        if slurs:
+            pos_sum = {}
+            pos_cnt = {}
+            for (rs, vc), evts in groups.items():
+                for (tick, off, fv, etyp) in evts:
+                    if etyp == 9:
+                        pos_sum[rs] = pos_sum.get(rs, 0) + out[off + 12]
+                        pos_cnt[rs] = pos_cnt.get(rs, 0) + 1
+            for (off, rs) in slurs:
+                avg = pos_sum.get(rs, 0) / max(1, pos_cnt.get(rs, 1))
+                sign = 1 if avg >= 6 else -1     # high notes -> arc above (+), low -> below (-)
+                sx = struct.unpack('<H', out[off + 10:off + 12])[0]
+                ex = struct.unpack('<H', out[off + 20:off + 22])[0]
+                struct.pack_into('<h', out, off + 12, sign * 4)            # startY
+                struct.pack_into('<H', out, off + 14, (sx + ex) // 2)      # midX
+                struct.pack_into('<h', out, off + 16, sign * 9)            # midY (apex)
+                struct.pack_into('<h', out, off + 22, sign * 4)            # endY
         pos = elem_end
     return bytes(out)
 
