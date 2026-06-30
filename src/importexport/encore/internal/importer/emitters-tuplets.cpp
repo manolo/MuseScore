@@ -58,7 +58,15 @@ void TupletTracker::closeTuplet()
         const Fraction expected = TDuration(currentTuplet->baseLen()).fraction()
                                   * currentTuplet->ratio().denominator();
         if (currentTuplet->ticks() == Fraction(0, 1)) {
-            currentTuplet->setTicks(placedTicks);
+            // Beam layout builds TDuration(tuplet->ticks()) and asserts on a fraction that is
+            // not a real duration, so never store a placed length that does not fit a TDuration:
+            // snap a non-fitting partial length down to the nearest representable duration.
+            const Fraction t = fitsTDuration(placedTicks)
+                               ? placedTicks
+                               : TDuration(placedTicks, true /*truncate*/).fraction();
+            if (t > Fraction(0, 1)) {
+                currentTuplet->setTicks(t);
+            }
         } else {
             const bool mixedValueOvershoot = (placedTicks > expected)
                                              && (faceTicks > fullFaceSum);
