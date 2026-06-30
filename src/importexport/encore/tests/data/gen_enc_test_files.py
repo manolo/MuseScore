@@ -710,20 +710,40 @@ def tie_arc_v0c4(tick, staffIdx, position, arcX1, arcX2, voice=0, direction=0xfe
     d[16] = 0xF0
     return bytes(d)
 
-# Articulation tipo bytes. In v0xC4 Encore draws articulations as size-16 ORN
-# elements (the note's +24 byte is only what the importer reads); see the
-# ENCORE_FORMAT ornament table.
+# Size-16 ORN glyph tipo bytes. In v0xC4 Encore draws articulations and single
+# ornaments as size-16 ORN elements (the note's +24 byte is only what the
+# importer reads); see the ENCORE_FORMAT ornament table.
 ARTIC = {'staccato': 0xC9, 'accent': 0xBE, 'tenuto': 0xC8, 'marcato': 0xBF,
          'marcato_below': 0xC6, 'fermata': 0xCC, 'fermata_below': 0xCD,
-         'upbow': 0xC4, 'downbow': 0xBD}
+         'upbow': 0xC4, 'downbow': 0xBD,
+         'trill': 0xB0, 'short_trill': 0xB6, 'mordent': 0xB8, 'tremolo': 0xAF}
 
 def artic_v0c4(tick, staffIdx, mark, xoffset, yoffset=12, voice=0):
-    """Articulation as a size-16 ORN (staccato, accent, tenuto, marcato, ...).
-    Same wire form as dyn_v0c4. The glyph sits at xoffset (+10, the note x) and
-    yoffset (+12); a positive yoffset (~12) places it above the note, negative
-    below. Pair with a stem-down high note so the mark does not hit the stem."""
+    """Articulation or single ornament as a size-16 ORN (staccato, accent,
+    tenuto, marcato, trill, mordent, fermata, tremolo, ...). Same wire form as
+    dyn_v0c4. The glyph sits at xoffset (+10, the note x) and yoffset (+12); a
+    positive yoffset (~12) places it above the note, negative below. Pair with a
+    stem-down high note so the mark does not hit the stem."""
     tipo = ARTIC.get(mark, mark) if isinstance(mark, str) else mark
     return dyn_v0c4(tick, staffIdx, tipo, xoffset, yoffset, voice)
+
+def arpeggio_v0c4(tick, staffIdx, x, yTop, yBottom, voice=0):
+    """28-byte ARPEGGIO (tipo 0x22): a vertical wavy line just left of a chord.
+    All three x slots (+10/+14/+20) hold the same x so the line is vertical;
+    yTop (+16) and yBottom (+22) span the chord's noteheads (more negative is
+    higher). A size-16 form does not render."""
+    d = bytearray(28)
+    struct.pack_into('<H', d, 0, tick)
+    d[2] = (5 << 4) | (voice & 0xF)
+    d[3] = 28
+    d[4] = staffIdx & 0xFF
+    d[5] = 0x22
+    struct.pack_into('<H', d, 10, x); struct.pack_into('<h', d, 12, 8)
+    struct.pack_into('<H', d, 14, x); struct.pack_into('<h', d, 16, yTop)
+    struct.pack_into('<H', d, 20, x); struct.pack_into('<h', d, 22, yBottom)
+    d[24] = 1
+    d[26] = 2
+    return bytes(d)
 
 def note_v0c2(tick, voice, staffIdx, fv, pitch):
     """22-byte v0xC2 note. Pitch at d[10]=elemStart+13 (tuplet field)."""
