@@ -25,6 +25,7 @@
 
 #include "debug-dump.h"
 
+#include <map>
 #include <string>
 
 #include <QString>
@@ -83,9 +84,23 @@ void logEncRootInfo(const EncRoot& enc)
     }
 
     LOGD() << "---- Systems ----";
-    for (size_t i = 0; i < enc.lines.size(); ++i) {
-        const EncLine& ln = enc.lines[i];
-        LOGD() << "  [" << i << "] start=" << ln.start << "  count=" << (int)ln.measureCount;
+    {
+        // One line per system is useless noise on large scores (hundreds of near-identical
+        // entries). Summarize as a histogram of measures-per-system instead; the per-system
+        // start offsets are derivable from the counts and rarely needed.
+        std::map<int, int> measPerSys;   // measures in a system -> how many systems
+        for (const EncLine& ln : enc.lines) {
+            ++measPerSys[static_cast<int>(ln.measureCount)];
+        }
+        std::string hist;
+        for (auto it = measPerSys.rbegin(); it != measPerSys.rend(); ++it) {
+            if (!hist.empty()) {
+                hist += ", ";
+            }
+            hist += std::to_string(it->first) + "x" + std::to_string(it->second);
+        }
+        LOGD() << "  " << enc.lines.size() << " systems over " << h.pageCount
+               << " pages  (measures/system: " << hist << ")";
     }
 
     LOGD() << "---- Tempos ----";
@@ -106,6 +121,56 @@ void logEncRootInfo(const EncRoot& enc)
             }
         }
     }
+    // Diagnostics: non-notation elements the importer intentionally drops. MIDI Control Change
+    // events (sustain/volume/modulation) are playback-only and decoded here so the log says what
+    // they are instead of one "unknown" line per event.
+    {
+        int ccSustain = 0, ccVolume = 0, ccMod = 0, ccOther = 0, unknown1 = 0;
+        for (const EncMeasure& m : enc.measures) {
+            for (const auto& ep : m.elements) {
+                switch (static_cast<EncElemType>(ep->type)) {
+                case EncElemType::MIDI_CC:
+                    switch (static_cast<const EncMidiCc*>(ep.get())->controller) {
+                    case 64: ++ccSustain; break;
+                    case 7:  ++ccVolume;  break;
+                    case 1:  ++ccMod;     break;
+                    default: ++ccOther;   break;
+                    }
+                    break;
+                case EncElemType::UNKNOWN1:
+                    ++unknown1;
+                    break;
+                default:
+                    break;
+                }
+            }
+        }
+        const int ccTotal = ccSustain + ccVolume + ccMod + ccOther;
+        if (ccTotal || unknown1) {
+            LOGD() << "---- Diagnostics ----";
+            if (ccTotal) {
+                std::string by;
+                auto add = [&](const char* label, int n) {
+                    if (n > 0) {
+                        if (!by.empty()) {
+                            by += " ";
+                        }
+                        by += std::string(label) + "=" + std::to_string(n);
+                    }
+                };
+                add("sustain", ccSustain);
+                add("volume", ccVolume);
+                add("modulation", ccMod);
+                add("other", ccOther);
+                LOGD() << "  MIDI CC events (playback only, dropped): " << ccTotal
+                       << "  (" << by << ")";
+            }
+            if (unknown1) {
+                LOGD() << "  Unknown elements (type 0xA, dropped): " << unknown1;
+            }
+        }
+    }
+
     LOGD() << "---- Page setup ----";
     const EncPageSetup& ps = enc.pageSetup;
     if (ps.hasData) {

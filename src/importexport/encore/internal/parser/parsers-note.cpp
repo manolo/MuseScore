@@ -104,4 +104,17 @@ bool EncGenericElem::read(QDataStream& ds)
     EncMeasureElem::read(ds);
     return true;
 }
+
+bool EncMidiCc::read(QDataStream& ds)
+{
+    EncMeasureElem::read(ds);   // consumes size (d[3]) + rawStaff (d[4]); ds now at d[5]
+    // d[5] CC marker, d[6..9] zeros, d[10] controller, d[11] value. Only present when the
+    // element is the full 12 bytes; the measure loop reseeks to elemStart+elemSpacing(size)
+    // afterwards, so a short/garbage element stays aligned with controller/value left at 0.
+    if (size >= 12) {
+        ds.skipRawData(5);
+        ds >> controller >> value;
+    }
+    return true;
+}
 } // namespace mu::iex::enc

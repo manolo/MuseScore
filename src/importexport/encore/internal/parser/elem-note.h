@@ -165,6 +165,19 @@ struct EncGenericElem : EncMeasureElem {
     bool read(QDataStream& ds) override;
 };
 
+// An inline MIDI Control Change event (EncElemType::MIDI_CC). Encore stores these for
+// playback only (sustain pedal, volume, modulation); they carry no notation. The importer
+// records the controller and value for the diagnostic log and otherwise drops the element.
+// Byte layout (ENCORE_FORMAT.md "Type 0xB"): d[10] controller, d[11] value.
+struct EncMidiCc : EncMeasureElem {
+    using EncMeasureElem::EncMeasureElem;
+
+    quint8 controller { 0 };   // 64=sustain pedal, 7=volume, 1=modulation
+    quint8 value      { 0 };   // 127=max/on, 0=off
+
+    bool read(QDataStream& ds) override;
+};
+
 using MeasureElemVec    = std::vector<std::unique_ptr<EncMeasureElem> >;
 using MeasureElemRefVec = std::vector<const EncMeasureElem*>;
 } // namespace mu::iex::enc

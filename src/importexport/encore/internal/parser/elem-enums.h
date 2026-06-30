@@ -71,7 +71,7 @@ enum class EncElemType : quint8 {
     REST      = 8,
     NOTE      = 9,
     UNKNOWN1  = 10,
-    UNKNOWN2  = 11
+    MIDI_CC   = 11   // inline MIDI Control Change (sustain/volume/modulation); playback only, no notation
 };
 
 enum class EncBarlineType : quint8 {

@@ -26,6 +26,9 @@
 
 #include <gtest/gtest.h>
 
+#include <QByteArray>
+#include <QDataStream>
+
 #include "../internal/parser/elem.h"
 
 using namespace mu::iex::enc;
@@ -211,4 +214,44 @@ TEST(Tst_EncChordSym, empty_teksto_falls_through_to_numeric)
     cs.toniko = 1;
     cs.radiko = 0x05;    // A minor
     EXPECT_EQ(cs.chordName(), "Am");
+}
+
+// ---------------------------------------------------------------------------
+// EncMidiCc: inline MIDI Control Change events (EncElemType::MIDI_CC, type 0xB).
+// read() is entered at d[3] (the caller has already consumed tick + typeVoice),
+// so the buffer below starts at the size byte. See ENCORE_FORMAT.md "Type 0xB".
+// ---------------------------------------------------------------------------
+TEST(Tst_EncMidiCc, decodes_controller_and_value)
+{
+    QByteArray bytes;
+    bytes.append(char(12));      // d[3] size = 12
+    bytes.append(char(0));       // d[4] rawStaff
+    bytes.append(char(0xB0));    // d[5] CC marker (channel 0)
+    bytes.append(4, char(0));    // d[6..9] zeros
+    bytes.append(char(64));      // d[10] controller = sustain pedal
+    bytes.append(char(127));     // d[11] value = ON
+
+    QDataStream ds(bytes);
+    ds.setByteOrder(QDataStream::LittleEndian);
+    EncMidiCc cc(0, static_cast<quint8>(EncElemType::MIDI_CC), 0);
+    cc.read(ds);
+
+    EXPECT_EQ(cc.size, 12);
+    EXPECT_EQ(cc.controller, 64);   // sustain
+    EXPECT_EQ(cc.value, 127);       // on
+}
+
+TEST(Tst_EncMidiCc, short_element_leaves_controller_value_zero)
+{
+    // A malformed/short element (size < 12) must not read controller/value (stream stays aligned).
+    QByteArray bytes;
+    bytes.append(char(4));       // d[3] size = 4 (too short)
+    bytes.append(char(0));       // d[4] rawStaff
+    QDataStream ds(bytes);
+    ds.setByteOrder(QDataStream::LittleEndian);
+    EncMidiCc cc(0, static_cast<quint8>(EncElemType::MIDI_CC), 0);
+    cc.read(ds);
+
+    EXPECT_EQ(cc.controller, 0);
+    EXPECT_EQ(cc.value, 0);
 }

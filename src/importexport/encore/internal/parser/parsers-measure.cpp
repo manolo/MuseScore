@@ -55,14 +55,12 @@ static std::unique_ptr<EncMeasureElem> createMeasureElement(
     case EncElemType::TIE:
         return std::make_unique<EncTie>(tick, tp, vo);
     case EncElemType::UNKNOWN1:
-        LOGD() << QString("Encore: unknown element type UNKNOWN1 (0xA) at tick %1")
-                      .arg(static_cast<int>(tick));
+        // Genuinely unknown element type; counted and reported once by logEncRootInfo.
         return std::make_unique<EncGenericElem>(tick, tp, vo);
-    case EncElemType::UNKNOWN2:
-        // MIDI CC event (sustain, volume, modulation) - expected in live-recorded files.
-        LOGD() << QString("Encore: MIDI CC event (UNKNOWN2/MIDI-CC) at tick %1")
-                      .arg(static_cast<int>(tick));
-        return std::make_unique<EncGenericElem>(tick, tp, vo);
+    case EncElemType::MIDI_CC:
+        // Inline MIDI Control Change (sustain/volume/modulation), playback only; captured for
+        // the diagnostic summary in logEncRootInfo and otherwise dropped (no notation).
+        return std::make_unique<EncMidiCc>(tick, tp, vo);
     case EncElemType::CLEF:
         return std::make_unique<EncClefChange>(tick, tp, vo);
     case EncElemType::NONE:
