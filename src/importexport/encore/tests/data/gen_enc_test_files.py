@@ -367,6 +367,77 @@ def _measure_headers(out):
         p = mm + 8 + 0x36 + sz
     return hdrs
 
+def _apply_dots_and_stems(out, groups, dur_ticks):
+    """Per (rawStaff, voice): set dots, stem direction and playback fields.
+    Encore stores stem direction in options (+20 bit 0x80); it is not derived.
+    Notes sharing a tick form a chord and must share ONE stem direction (chosen
+    by the notehead furthest from the middle line), else each chord note draws
+    its own opposite stem. A secondary voice always stems down; a single voice
+    stems down when the deciding note is on the middle line (position 6) or
+    above, up below it. Notes are also made audible (see the +18 note)."""
+    staff_voices = {}
+    for (rs, vc) in groups:
+        staff_voices.setdefault(rs, set()).add(vc)
+    for (rs, vc), evts in groups.items():
+        multi = len(staff_voices.get(rs, ())) > 1
+        onsets = sorted(set(t for (t, _, _, _) in evts))
+        next_onset = {t: (onsets[k + 1] if k + 1 < len(onsets) else dur_ticks)
+                      for k, t in enumerate(onsets)}
+        chords = {}
+        for (tick, off, fv, etyp) in evts:
+            chords.setdefault(tick, []).append((off, fv, etyp))
+        for tick, chord in chords.items():
+            gap = next_onset[tick] - tick
+            note_pos = [out[off + 12] for (off, _, et) in chord if et == 9]
+            furthest = max(note_pos, key=lambda p: abs(p - 6)) if note_pos else 6
+            down = (vc >= 1) or (not multi and furthest >= 6)
+            # playback length ~ 80% of the note's sounding duration, the gate
+            # time Encore records (eighth 120 -> 96, half 480 -> 384).
+            pbdur = max(1, round(gap * 0.8))
+            for (off, fv, et) in chord:
+                # dots apply to notes and rests alike (parity by position)
+                if _dots_from_gap(gap, fv) > 0 and out[off + 14] == 0:
+                    out[off + 14] = 0x1d if out[off + 12] % 2 == 0 else 0x19
+                if et != 9:
+                    continue
+                if down and out[off + 3] >= 21 and not (out[off + 20] & 0x80):
+                    out[off + 20] |= 0x80
+                # Make the note sound in Encore. Playback uses the MIDI
+                # on-velocity at +18 (NOT the editor velocity at +19); left at 0
+                # the note is silent even though +19 is set. Also set duration.
+                if out[off + 3] >= 19 and out[off + 18] == 0:
+                    out[off + 18] = 0x50            # MIDI on-velocity (80)
+                if out[off + 3] >= 20 and out[off + 19] == 0:
+                    out[off + 19] = 64              # editor velocity
+                if out[off + 3] >= 18 and _rd16(out, off + 16) == 0:
+                    _wr16(out, off + 16, pbdur)
+
+def _curve_slurs(out, slurs, groups):
+    """Give each flat SLURSTART a subtle arc. A 33-byte slur has no curve
+    control points so Encore draws a straight line; fill startY (+12), the apex
+    midX/midY (+14/+16) and endY (+22). The arc sits opposite the stems: below a
+    low-note staff (notes mostly under the middle line), above otherwise. Kept
+    subtle (apex ~9, ends ~4), not a semicircle. The span (+10/+20) is kept."""
+    if not slurs:
+        return
+    pos_sum = {}
+    pos_cnt = {}
+    for evts in groups.values():
+        for (tick, off, fv, etyp) in evts:
+            if etyp == 9:
+                rs = out[off + 4]
+                pos_sum[rs] = pos_sum.get(rs, 0) + out[off + 12]
+                pos_cnt[rs] = pos_cnt.get(rs, 0) + 1
+    for (off, rs) in slurs:
+        avg = pos_sum.get(rs, 0) / max(1, pos_cnt.get(rs, 1))
+        sign = 1 if avg >= 6 else -1     # high notes -> arc above (+), low -> below (-)
+        sx = _rd16(out, off + 10)
+        ex = _rd16(out, off + 20)
+        _wr16(out, off + 12, sign * 4)            # startY
+        _wr16(out, off + 14, (sx + ex) // 2)      # midX
+        _wr16(out, off + 16, sign * 9)            # midY (apex)
+        _wr16(out, off + 22, sign * 4)            # endY
+
 def apply_encore_layout(data):
     """Fill Encore display-layout fields in every v0xC4 MEAS block in `data`."""
     if len(data) < 5 or data[4] != 0xC4:
@@ -478,72 +549,8 @@ def apply_encore_layout(data):
         else:
             width = _enc_xpos(dur_ticks)
         struct.pack_into('<I', out, hdr + 0x10, width)
-        # second pass per (rawStaff, voice): dots and stem direction. Encore
-        # stores stem direction in options (+20, bit 0x80); it is not derived.
-        # Notes sharing a tick form a chord and must share ONE stem direction
-        # (chosen by the notehead furthest from the middle line), otherwise each
-        # chord note would draw its own opposite stem. A secondary voice always
-        # stems down; a single voice stems down when the deciding note is on the
-        # middle line (position 6) or above, up below it.
-        staff_voices = {}
-        for (rs, vc) in groups:
-            staff_voices.setdefault(rs, set()).add(vc)
-        for (rs, vc), evts in groups.items():
-            multi = len(staff_voices.get(rs, ())) > 1
-            onsets = sorted(set(t for (t, _, _, _) in evts))
-            next_onset = {t: (onsets[k + 1] if k + 1 < len(onsets) else dur_ticks)
-                          for k, t in enumerate(onsets)}
-            chords = {}
-            for (tick, off, fv, etyp) in evts:
-                chords.setdefault(tick, []).append((off, fv, etyp))
-            for tick, chord in chords.items():
-                gap = next_onset[tick] - tick
-                note_pos = [out[off + 12] for (off, _, et) in chord if et == 9]
-                furthest = max(note_pos, key=lambda p: abs(p - 6)) if note_pos else 6
-                down = (vc >= 1) or (not multi and furthest >= 6)
-                # playback length ~ 80% of the note's sounding duration, the
-                # gate time Encore records (eighth 120 -> 96, half 480 -> 384).
-                pbdur = max(1, round(gap * 0.8))
-                for (off, fv, et) in chord:
-                    # dots apply to notes and rests alike (parity by position)
-                    if _dots_from_gap(gap, fv) > 0 and out[off + 14] == 0:
-                        out[off + 14] = 0x1d if out[off + 12] % 2 == 0 else 0x19
-                    if et != 9:
-                        continue
-                    if down and out[off + 3] >= 21 and not (out[off + 20] & 0x80):
-                        out[off + 20] |= 0x80
-                    # Make the note actually sound in Encore. Playback uses the
-                    # MIDI on-velocity at +18 (NOT the editor velocity at +19);
-                    # left at 0 the note is silent even though +19 is set. Also
-                    # give it a playback duration (+16).
-                    if out[off + 3] >= 19 and out[off + 18] == 0:
-                        out[off + 18] = 0x50            # MIDI on-velocity (80)
-                    if out[off + 3] >= 20 and out[off + 19] == 0:
-                        out[off + 19] = 64              # editor velocity
-                    if out[off + 3] >= 18 and _rd16(out, off + 16) == 0:
-                        _wr16(out, off + 16, pbdur)
-        # give flat slurs a subtle arc. A 33-byte SLURSTART has no curve control
-        # points, so Encore draws it as a straight line; fill startY (+12), the
-        # apex midX/midY (+14/+16) and endY (+22). The arc sits opposite the
-        # stems: below a low-note staff (notes mostly under the middle line),
-        # above otherwise. Kept subtle (apex ~9, ends ~4), not a semicircle.
-        if slurs:
-            pos_sum = {}
-            pos_cnt = {}
-            for (rs, vc), evts in groups.items():
-                for (tick, off, fv, etyp) in evts:
-                    if etyp == 9:
-                        pos_sum[rs] = pos_sum.get(rs, 0) + out[off + 12]
-                        pos_cnt[rs] = pos_cnt.get(rs, 0) + 1
-            for (off, rs) in slurs:
-                avg = pos_sum.get(rs, 0) / max(1, pos_cnt.get(rs, 1))
-                sign = 1 if avg >= 6 else -1     # high notes -> arc above (+), low -> below (-)
-                sx = _rd16(out, off + 10)
-                ex = _rd16(out, off + 20)
-                _wr16(out, off + 12, sign * 4)            # startY
-                _wr16(out, off + 14, (sx + ex) // 2)      # midX
-                _wr16(out, off + 16, sign * 9)            # midY (apex)
-                _wr16(out, off + 22, sign * 4)            # endY
+        _apply_dots_and_stems(out, groups, dur_ticks)
+        _curve_slurs(out, slurs, groups)
         pos = elem_end
     return bytes(out)
 
