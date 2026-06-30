@@ -322,27 +322,47 @@ def apply_encore_layout(data):
         else:
             width = _enc_xpos(dur_ticks)
         struct.pack_into('<I', out, hdr + 0x10, width)
-        # second pass over the notes per (rawStaff, voice): dots and stem
-        # direction. Encore stores stem direction in options (+20, bit 0x80);
-        # it is not derived. A secondary voice always stems down; in a single
-        # voice a note on the middle line (position 6) or above stems down,
-        # below it stems up.
+        # second pass per (rawStaff, voice): dots and stem direction. Encore
+        # stores stem direction in options (+20, bit 0x80); it is not derived.
+        # Notes sharing a tick form a chord and must share ONE stem direction
+        # (chosen by the notehead furthest from the middle line), otherwise each
+        # chord note would draw its own opposite stem. A secondary voice always
+        # stems down; a single voice stems down when the deciding note is on the
+        # middle line (position 6) or above, up below it.
         staff_voices = {}
         for (rs, vc) in groups:
             staff_voices.setdefault(rs, set()).add(vc)
         for (rs, vc), evts in groups.items():
             multi = len(staff_voices.get(rs, ())) > 1
-            evts.sort()
-            for k, (tick, off, fv) in enumerate(evts):
-                nxt = evts[k + 1][0] if k + 1 < len(evts) else dur_ticks
-                dots = _dots_from_gap(nxt - tick, fv)
-                if dots > 0 and out[off + 14] == 0:
-                    out[off + 14] = 0x1d if out[off + 12] % 2 == 0 else 0x19
-                if out[off + 3] >= 21 and not (out[off + 20] & 0x80):
-                    if vc >= 1:
-                        out[off + 20] |= 0x80                 # secondary voice down
-                    elif not multi and out[off + 12] >= 6:
-                        out[off + 20] |= 0x80                 # single voice, high note down
+            onsets = sorted(set(t for (t, _, _) in evts))
+            next_onset = {t: (onsets[k + 1] if k + 1 < len(onsets) else dur_ticks)
+                          for k, t in enumerate(onsets)}
+            chords = {}
+            for (tick, off, fv) in evts:
+                chords.setdefault(tick, []).append((off, fv))
+            for tick, chord in chords.items():
+                gap = next_onset[tick] - tick
+                positions = [out[off + 12] for (off, _) in chord]
+                furthest = max(positions, key=lambda p: abs(p - 6))
+                down = (vc >= 1) or (not multi and furthest >= 6)
+                # playback length ~ 80% of the note's sounding duration, the
+                # gate time Encore records (eighth 120 -> 96, half 480 -> 384).
+                pbdur = max(1, round(gap * 0.8))
+                for (off, fv) in chord:
+                    if _dots_from_gap(gap, fv) > 0 and out[off + 14] == 0:
+                        out[off + 14] = 0x1d if out[off + 12] % 2 == 0 else 0x19
+                    if down and out[off + 3] >= 21 and not (out[off + 20] & 0x80):
+                        out[off + 20] |= 0x80
+                    # Make the note actually sound in Encore. Playback uses the
+                    # MIDI on-velocity at +18 (NOT the editor velocity at +19);
+                    # left at 0 the note is silent even though +19 is set. Also
+                    # give it a playback duration (+16).
+                    if out[off + 3] >= 19 and out[off + 18] == 0:
+                        out[off + 18] = 0x50            # MIDI on-velocity (80)
+                    if out[off + 3] >= 20 and out[off + 19] == 0:
+                        out[off + 19] = 64              # editor velocity
+                    if out[off + 3] >= 18 and struct.unpack('<H', out[off + 16:off + 18])[0] == 0:
+                        struct.pack_into('<H', out, off + 16, pbdur)
         pos = elem_end
     return bytes(out)
 
