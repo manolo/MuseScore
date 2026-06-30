@@ -28,6 +28,8 @@
 #include "engraving/dom/layoutbreak.h"
 #include "engraving/dom/spanner.h"
 #include "engraving/dom/volta.h"
+#include "engraving/dom/chord.h"
+#include "engraving/dom/tremolosinglechord.h"
 #include "engraving/dom/rest.h"
 #include "engraving/dom/segment.h"
 #include "engraving/dom/instrument.h"
@@ -931,5 +933,37 @@ TEST_F(Tst_Options, mergeVoices_keeps_overlapping_voices)
     EXPECT_EQ(voicesWithChords(score, 0), 2)
         << "mergeVoices=true must leave genuinely overlapping voices untouched (all-or-nothing)";
     EXPECT_TRUE(score->sanityCheck()) << "untouched score must pass sanity check";
+    delete score;
+}
+
+// Regression: a single-chord tremolo sits on the voice-1 note that mergeVoices moves
+// into voice 0 (importer_merge_voices_tremolo: voice 0 quarter on beat 1, voice 1
+// quarter on beat 2 carrying a per-note R16 tremolo). The voice-change path rebuilds
+// the destination chord from scratch and carried over articulations, lyrics and slurs
+// but never the tremolo, so the source chord (and its tremolo) was removed and the
+// tremolo vanished. Enabling mergeVoices must not drop the tremolo.
+TEST_F(Tst_Options, mergeVoices_preserves_single_chord_tremolo)
+{
+    EncImportOptions opts;
+    opts.mergeVoices = true;
+    MasterScore* score = readEncoreScoreWithOpts("importer_merge_voices_tremolo.enc", opts);
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "merged score must pass sanity check";
+    EXPECT_EQ(voicesWithChords(score, 0), 1)
+        << "mergeVoices=true must collapse the non-overlapping voices into voice 1";
+
+    bool foundTremolo = false;
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (voice_idx_t v = 0; v < VOICES; ++v) {
+                EngravingItem* e = s->element(v);
+                if (e && e->isChord() && toChord(e)->tremoloSingleChord()) {
+                    foundTremolo = true;
+                }
+            }
+        }
+    }
+    EXPECT_TRUE(foundTremolo)
+        << "single-chord tremolo must survive when mergeVoices collapses its voice into voice 1";
     delete score;
 }

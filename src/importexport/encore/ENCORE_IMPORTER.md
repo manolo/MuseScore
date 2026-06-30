@@ -90,6 +90,7 @@ MasterScore  (complete)
 The "Default" column above is the shipped Preferences default (set in `enc-importconfiguration.cpp`).
 For the two measure-correction strategies the in-code struct fallback in `import-options.h` stays at `InvisibleRests` / `Truncate`, which is what direct callers and the unit tests use; only the GUI default is `IrregularMeasure`.
 `mergeVoices` follows the same split: the struct fallback is `false` (so unit-test fixtures keep their voices unless a test opts in) while the shipped GUI default is `true`.
+The collapse moves notes from the upper voices into voice 1 with the generic voice-change editing command, which rebuilds the destination chord and does not carry a single-chord tremolo across; `mergeNonOverlappingVoices` therefore snapshots each staff's tremolos by onset tick before the move and re-attaches any that were dropped, so tremolos survive the merge.
 
 ## Overfull measures
 

@@ -705,6 +705,19 @@ def gen_v0c4_merge_voices_overlapping():
     e += end_marker()
     return assemble(0xC4, [(meas_hdr(4, 4), e)])
 
+def gen_v0c4_merge_voices_tremolo():
+    """Single staff whose two voices never overlap, where the UPPER voice carries a
+    single-note tremolo. 4/4 measure: voice 0 has a quarter C4 on beat 1 (tick 0),
+    voice 1 has a quarter E4 on beat 2 (tick 240) with a per-note tremolo (artic
+    0x42 -> R16, two strokes). The intervals [0,240) and [240,480) do not overlap,
+    so with mergeVoices the voice-1 E4 is moved into voice 0; its tremolo must move
+    with it. Without the fix the voice change rebuilt the destination chord and the
+    tremolo was dropped."""
+    e  = note_v0c4(        0, 0, 0, fv=3, pitch=60)                # voice 0: quarter C4 on beat 1
+    e += note_v0c4_artic(240, 1, 0, fv=3, pitch=64, articUp=0x42)  # voice 1: quarter E4 + R16 tremolo
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)])
+
 def gen_v0c4_isolated_explicit_tuplet_capped():
     """Non-tuplet second cap must also update chord->ticks. An explicit-but-
     not-validated tuplet note ends up treated as a plain note (tupAdv !=
@@ -8618,6 +8631,7 @@ if __name__=='__main__':
     write("importer_full_voice_skipped.enc",        gen_v0c4_full_voice_skipped_via_loop())
     write("importer_merge_voices_non_overlapping.enc", gen_v0c4_merge_voices_non_overlapping())
     write("importer_merge_voices_overlapping.enc",     gen_v0c4_merge_voices_overlapping())
+    write("importer_merge_voices_tremolo.enc",         gen_v0c4_merge_voices_tremolo())
     write("importer_isolated_explicit_tuplet_capped.enc", gen_v0c4_isolated_explicit_tuplet_capped())
     write("importer_rest_not_chord_anchor.enc",     gen_v0c4_rest_not_chord_anchor())
     write("importer_rest_caps_in_open_tuplet.enc",  gen_v0c4_rest_caps_in_open_tuplet())

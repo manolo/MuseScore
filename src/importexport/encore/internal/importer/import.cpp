@@ -236,6 +236,26 @@ static void mergeNonOverlappingVoices(MasterScore* score)
     // editing commands below execute immediately and free themselves (see
     // UndoStack::pushAndPerform); the surrounding ScoreLoad keeps that path quiet.
     for (staff_idx_t si : candidates) {
+        const track_idx_t base = si * VOICES;
+
+        // The voice change below rebuilds the destination chord from scratch; it carries
+        // articulations, lyrics and slurs across but not a single-chord tremolo, so a
+        // tremolo on a moved upper-voice chord would be lost. Snapshot every tremolo on
+        // the staff (keyed by onset tick) and re-attach it after the collapse.
+        std::map<int, TremoloType> tremolosByTick;
+        for (Measure* m = first; m; m = m->nextMeasure()) {
+            for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+                for (voice_idx_t v = 0; v < VOICES; ++v) {
+                    EngravingItem* e = s->element(base + v);
+                    if (e && e->isChord()) {
+                        if (TremoloSingleChord* trem = toChord(e)->tremoloSingleChord()) {
+                            tremolosByTick[s->tick().ticks()] = trem->tremoloType();
+                        }
+                    }
+                }
+            }
+        }
+
         // Move every note on the staff into voice 1, filling its rests and merging
         // simultaneous same-duration notes into chords.
         score->deselectAll();
@@ -249,6 +269,29 @@ static void mergeNonOverlappingVoices(MasterScore* score)
         score->select(first, SelectType::RANGE, si);
         score->select(last, SelectType::RANGE, si);
         ImplodeExplode::implode(score);
+
+        // Re-attach any tremolo whose chord was moved into voice 1 (and so lost it).
+        for (const auto& [tick, type] : tremolosByTick) {
+            const Fraction f = Fraction::fromTicks(tick);
+            Measure* m = score->tick2measure(f);
+            if (!m) {
+                continue;
+            }
+            Segment* s = m->findSegment(SegmentType::ChordRest, f);
+            if (!s) {
+                continue;
+            }
+            for (voice_idx_t v = 0; v < VOICES; ++v) {
+                EngravingItem* e = s->element(base + v);
+                if (e && e->isChord() && !toChord(e)->tremoloSingleChord()) {
+                    Chord* c = toChord(e);
+                    TremoloSingleChord* trem = Factory::createTremoloSingleChord(c);
+                    trem->setTremoloType(type);
+                    c->add(trem);
+                    break;
+                }
+            }
+        }
     }
     score->deselectAll();
 }
