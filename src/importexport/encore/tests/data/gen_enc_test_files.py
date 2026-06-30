@@ -288,6 +288,11 @@ def apply_encore_layout(data):
                         xp = max(2, xp - _GRACE_XPOS_OFFSET)
                     struct.pack_into('<H', out, i + 10, xp)
                 max_xpos = max(max_xpos, struct.unpack('<H', out[i + 10:i + 12])[0])
+                # Rests carry a staff position at +12 too. Left at 0 they sit
+                # three spaces too low; Encore places them around position 6
+                # (eighth 7, sixteenth 5), staff-line relative for any clef.
+                if typ == 8 and esize >= 13 and out[i + 12] == 0:
+                    out[i + 12] = {4: 7, 5: 5}.get(out[i + 5] & 0x0F, 6)
                 if typ == 9 and esize >= 16:
                     midi = out[i + 15]
                     # diatonic staff position + accidental (sharp spelling),
