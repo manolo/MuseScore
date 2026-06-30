@@ -307,12 +307,6 @@ def apply_encore_layout(data):
                         out[i + 12] = posb
                         if disp and out[i + 21] == 0:
                             out[i + 21] = disp
-                    # Secondary voices point their stems down. Encore stores the
-                    # stem direction in the options byte (+20, bit 0x80) rather
-                    # than deriving it, so a voice>=1 note left at 0 would draw
-                    # stem-up and collide with the upper voice.
-                    if voice >= 1 and esize >= 21:
-                        out[i + 20] |= 0x80
                     groups.setdefault((out[i + 4], voice), []).append((tick, i, out[i + 5] & 0x0F))
             i += esize
         # measure width @0x10. Normally the x-position of the measure end, so
@@ -328,14 +322,27 @@ def apply_encore_layout(data):
         else:
             width = _enc_xpos(dur_ticks)
         struct.pack_into('<I', out, hdr + 0x10, width)
-        # dots: derive from the tick gap to the next event in the same voice
-        for evts in groups.values():
+        # second pass over the notes per (rawStaff, voice): dots and stem
+        # direction. Encore stores stem direction in options (+20, bit 0x80);
+        # it is not derived. A secondary voice always stems down; in a single
+        # voice a note on the middle line (position 6) or above stems down,
+        # below it stems up.
+        staff_voices = {}
+        for (rs, vc) in groups:
+            staff_voices.setdefault(rs, set()).add(vc)
+        for (rs, vc), evts in groups.items():
+            multi = len(staff_voices.get(rs, ())) > 1
             evts.sort()
             for k, (tick, off, fv) in enumerate(evts):
                 nxt = evts[k + 1][0] if k + 1 < len(evts) else dur_ticks
                 dots = _dots_from_gap(nxt - tick, fv)
                 if dots > 0 and out[off + 14] == 0:
                     out[off + 14] = 0x1d if out[off + 12] % 2 == 0 else 0x19
+                if out[off + 3] >= 21 and not (out[off + 20] & 0x80):
+                    if vc >= 1:
+                        out[off + 20] |= 0x80                 # secondary voice down
+                    elif not multi and out[off + 12] >= 6:
+                        out[off + 20] |= 0x80                 # single voice, high note down
         pos = elem_end
     return bytes(out)
 
@@ -702,6 +709,21 @@ def tie_arc_v0c4(tick, staffIdx, position, arcX1, arcX2, voice=0, direction=0xfe
     d[15] = position & 0xFF
     d[16] = 0xF0
     return bytes(d)
+
+# Articulation tipo bytes. In v0xC4 Encore draws articulations as size-16 ORN
+# elements (the note's +24 byte is only what the importer reads); see the
+# ENCORE_FORMAT ornament table.
+ARTIC = {'staccato': 0xC9, 'accent': 0xBE, 'tenuto': 0xC8, 'marcato': 0xBF,
+         'marcato_below': 0xC6, 'fermata': 0xCC, 'fermata_below': 0xCD,
+         'upbow': 0xC4, 'downbow': 0xBD}
+
+def artic_v0c4(tick, staffIdx, mark, xoffset, yoffset=12, voice=0):
+    """Articulation as a size-16 ORN (staccato, accent, tenuto, marcato, ...).
+    Same wire form as dyn_v0c4. The glyph sits at xoffset (+10, the note x) and
+    yoffset (+12); a positive yoffset (~12) places it above the note, negative
+    below. Pair with a stem-down high note so the mark does not hit the stem."""
+    tipo = ARTIC.get(mark, mark) if isinstance(mark, str) else mark
+    return dyn_v0c4(tick, staffIdx, tipo, xoffset, yoffset, voice)
 
 def note_v0c2(tick, voice, staffIdx, fv, pitch):
     """22-byte v0xC2 note. Pitch at d[10]=elemStart+13 (tuplet field)."""
