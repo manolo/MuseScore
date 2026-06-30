@@ -439,10 +439,17 @@ def _curve_slurs(out, slurs, groups):
         _wr16(out, off + 22, sign * 4)            # endY
 
 def apply_encore_layout(data):
-    """Fill Encore display-layout fields in every v0xC4 MEAS block in `data`."""
-    if len(data) < 5 or data[4] != 0xC4:
+    """Fill Encore display-layout fields in every v0xC4 MEAS block in `data`.
+
+    v0xC2 files (chuMagio 0xC2) are handled too: the synthetic ones keep the
+    v0xC4 skeleton (chuVersio 1056), so Encore renders them with the v0xC4 note
+    layout. Their notes carry the MIDI pitch in the tuplet slot (+13) instead of
+    +15, so we move it across first (same normalization the importer applies),
+    then the v0xC4 layout below positions and sounds them."""
+    if len(data) < 5 or data[4] not in (0xC2, 0xC4):
         return data
     out = bytearray(data)
+    is_c2 = out[4] == 0xC2
     clef_by_raw, fallback_clef, key_by_raw, fallback_key = _staff_clef_map(out)
     _fill_volta_hooks(out, _measure_headers(out))
 
@@ -514,6 +521,14 @@ def apply_encore_layout(data):
                 if typ == 8:
                     groups.setdefault((out[i + 4], voice), []).append((tick, i, out[i + 5] & 0x0F, 8))
                 if typ == 9 and esize >= 16:
+                    # v0xC2 sub-variant A keeps the MIDI pitch in the tuplet slot
+                    # (+13) with +15 empty or a stray flag; move it to +15 (the
+                    # v0xC4 pitch slot) so Encore reads it, clearing the tuplet
+                    # slot. Same rule the importer applies. Sub-variant B (+15
+                    # already a real pitch) is left alone.
+                    if is_c2 and out[i + 15] < 12 and out[i + 13] >= 12:
+                        out[i + 15] = out[i + 13]
+                        out[i + 13] = 0
                     midi = out[i + 15]
                     # diatonic staff position + accidental (sharp spelling),
                     # using the clef of the staff this note belongs to.
