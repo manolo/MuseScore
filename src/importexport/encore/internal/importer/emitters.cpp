@@ -371,6 +371,8 @@ std::optional<RoutedTrack> routeElementStaffVoice(
     }
 
     if (staffIdx >= ctx.totalStaves) {
+        LOGD() << "Encore import: dropping element at tick " << e->tick
+               << " - staff index " << staffIdx << " >= total staves " << ctx.totalStaves;
         return std::nullopt;
     }
     // Multi-staff routing:
@@ -409,6 +411,8 @@ std::optional<RoutedTrack> routeElementStaffVoice(
 
     const int msVoice = voice;
     if (msVoice >= static_cast<int>(VOICES)) {
+        LOGD() << "Encore import: dropping element at tick " << e->tick
+               << " - voice " << msVoice << " out of range on staff " << staffIdx;
         return std::nullopt;  // voice out of range
     }
     RoutedTrack r;

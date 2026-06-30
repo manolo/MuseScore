@@ -38,11 +38,8 @@ static int readMidiByteAt(QDataStream& ds, qint64 off)
     if (!ds.device()->seek(off)) {
         return 0;
     }
-    char b = 0;
-    if (ds.device()->read(&b, 1) != 1) {
-        return 0;
-    }
-    const quint8 prg = static_cast<quint8>(b);
+    quint8 prg = 0;
+    ds >> prg;
     return (prg >= 1 && prg <= 128) ? static_cast<int>(prg) : 0;
 }
 
@@ -297,11 +294,8 @@ static void readMidiProgramsNoTk(
                 if (!ds.device()->seek(off)) {
                     return false;
                 }
-                char b = 0;
-                if (ds.device()->read(&b, 1) != 1) {
-                    return false;
-                }
-                const quint8 u = static_cast<quint8>(b);
+                quint8 u = 0;
+                ds >> u;
                 return u >= 0x20 && u < 0x7F;
             };
 

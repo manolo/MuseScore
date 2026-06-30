@@ -99,89 +99,85 @@ enum class EncRepeatType : quint8 {
 };
 
 enum class EncOrnamentType : quint8 {
-    NONE       = 0,
-    // 0x10 / 0x12: ottava lines. Size=16. Endpoint resolved in post-pass to next ottava on same staff.
-    OTTAVA_ALTA  = 0x10,  // 8va above staff
-    OTTAVA_BASSA = 0x12,  // 8vb below staff
-    // 0x1C: user-placed graphic line (Encore Graphics palette); no musical meaning; skip silently.
-    GRAPHIC_LINE = 0x1C,
-    WEDGESTART = 0x1D,
-    STAFFTEXT  = 0x1E,
-    SLURSTART  = 0x21,
-    ARPEGGIO   = 0x22,
-    // Guitar bends (size=28 spanner format; alMezuro+xoffset2 encode bend arc).
-    // Confirmed in "Accidentals Marks and others2.enc" m37-m38.
-    // Not yet implemented in MuseScore importer, skip silently with LOGW.
-    GUITAR_BEND            = 0x28,  // regular bend (curved arrow up)
-    GUITAR_BEND_2          = 0x29,  // regular bend (curved arrow)
-    GUITAR_PREBEND         = 0x2A,  // prebend
-    GUITAR_PREBEND_RELEASE = 0x2B,  // prebend-release
-    GUITAR_BEND_V          = 0x30,  // V-shape bend
-    // See ENCORE_FORMAT.md §Ornament subtypes for tipo values, sizes, and quirks.
-    TRILL_END    = 0x35,
-    TRILL_START  = 0x36,
-    TRILL_ALT    = 0x37,
-    // 0xB0: standalone 16-byte "tr" ornament; places ornamentTrill glyph.
-    TRILL_TR     = 0xB0,
-    // 0xB6: standalone 16-byte short-trill ornament; places ornamentShortTrill glyph.
-    TRILL_SHORT  = 0xB6,
-    // 0xB8: double mordent (3-wave long mordent), confirmed in plectrum corpus.
-    DOUBLE_MORDENT = 0xB8,
-    // Fingering: FINGER_1 = 0xB9 = 0xB8 + 1 (1..5).
-    FINGER_1   = 0xB9,
-    FINGER_2   = 0xBA,
-    FINGER_3   = 0xBB,
-    FINGER_4   = 0xBC,
-    FINGER_5   = 0xBD,
-    ACCENT        = 0xBE,  // standalone accent (>) in v0xC4; maps to articAccentAbove
-    MARCATO       = 0xBF,  // standalone marcato (^, vertex up) → articMarcatoAbove
-    SEGNO       = 0xA2,
-    TO_CODA     = 0xA5,
-    CODA        = 0xA6,
-    // 0xC9 staccato: Encore's MusicXML exporter drops it; we import it.
-    STACCATO    = 0xC9,
-    TEMPO      = 0x32,
-    UPBOW         = 0xC4,
-    DOWNBOW       = 0xC5,
-    // 0xC0: heavy accent (∨) + staccato → articMarcatoStaccatoBelow (combined glyph).
+    // Lines, spanners, text
+    NONE                   = 0,
+    OTTAVA_ALTA            = 0x10,
+    OTTAVA_BASSA           = 0x12,
+    GRAPHIC_LINE           = 0x1C,
+    WEDGESTART             = 0x1D,
+    STAFFTEXT              = 0x1E,
+    SLURSTART              = 0x21,
+    ARPEGGIO               = 0x22,
+
+    // Guitar bends, tempo
+    GUITAR_BEND            = 0x28,
+    GUITAR_BEND_2          = 0x29,
+    GUITAR_PREBEND         = 0x2A,
+    GUITAR_PREBEND_RELEASE = 0x2B,
+    GUITAR_BEND_V          = 0x30,
+    TEMPO                  = 0x32,
+
+    // Trills, slur/wedge stops
+    TRILL_END              = 0x35,
+    TRILL_START            = 0x36,
+    TRILL_ALT              = 0x37,
+    SLURSTOP               = 0x41,
+    WEDGESTOP              = 0x4D,
+
+    // Dynamics
+    DYN_PPP                = 0x80,
+    DYN_PP                 = 0x81,
+    DYN_P                  = 0x82,
+    DYN_MP                 = 0x83,
+    DYN_MF                 = 0x84,
+    DYN_F                  = 0x85,
+    DYN_FF                 = 0x86,
+    DYN_FFF                = 0x87,
+    DYN_SFZ                = 0x88,
+    DYN_SFFZ               = 0x89,
+    DYN_FP                 = 0x8A,
+
+    // Navigation (segno/coda), breaths, more dynamics
+    SEGNO                  = 0xA2,
+    REPEAT_MEASURE         = 0xA3,
+    TO_CODA                = 0xA5,
+    CODA                   = 0xA6,
+    CAESURA                = 0xA7,
+    BREATH_COMMA           = 0xA8,
+    DYN_FZ                 = 0xAA,
+    DYN_SF                 = 0xAB,
+
+    // Tremolo, trills, mordent, fingering, accents
+    TREMOLO_32             = 0xAF,
+    TRILL_TR               = 0xB0,
+    TRILL_SHORT            = 0xB6,
+    DOUBLE_MORDENT         = 0xB8,
+    FINGER_1               = 0xB9,
+    FINGER_2               = 0xBA,
+    FINGER_3               = 0xBB,
+    FINGER_4               = 0xBC,
+    FINGER_5               = 0xBD,
+    ACCENT                 = 0xBE,
+    MARCATO                = 0xBF,
     MARCATO_STACCATO_BELOW = 0xC0,
-    // 0xC6: heavy accent (∨, inverted marcato, vertex down) → articMarcatoBelow.
-    MARCATO_BELOW = 0xC6,
-    // 0xC8: tenuto (, ) as standalone ORN → articTenutoAbove.
-    TENUTO = 0xC8,
-    // Standalone string-number ORNs (circled number above note).
-    // Per-note artic bytes cover strings 1 (0x39), 7 (0x3F), 8 (0x40).
-    // Standalone ORNs (size=16) cover strings 2-6:
-    STRING_NUMBER_2 = 0xE6,
-    STRING_NUMBER_3 = 0xE7,
-    STRING_NUMBER_4 = 0xE8,
-    STRING_NUMBER_5 = 0xE9,
-    STRING_NUMBER_6 = 0xEA,
-    // Tremolo ladder: 0xEE=R16 (2 slashes), 0xAF/0xEF=R32 (3 slashes).
-    TREMOLO_16  = 0xEE,
-    // 0xAF standard, 0xEF alternate (half notes at tick >= durTicks).
-    TREMOLO_32 = 0xAF,
-    TREMOLO_32B = 0xEF,
-    SLURSTOP   = 0x41,
-    WEDGESTOP  = 0x4D,
-    DYN_PPP    = 0x80,
-    DYN_PP     = 0x81,
-    DYN_P      = 0x82,
-    DYN_MP     = 0x83,
-    DYN_MF     = 0x84,
-    DYN_F      = 0x85,
-    DYN_FF     = 0x86,
-    DYN_FFF    = 0x87,
-    DYN_SFZ    = 0x88,
-    DYN_SFFZ   = 0x89,
-    DYN_FP     = 0x8A,
-    DYN_FZ     = 0xAA,
-    DYN_SF     = 0xAB,
-    FERMATA_ABOVE = 0xCC,  // standalone fermata above (size-16 ORN; yoffset > 0)
-    FERMATA_BELOW = 0xCD,  // standalone fermata below (size-16 ORN; yoffset < 0)
-    REPEAT_MEASURE = 0xA3, // "%" repeat-last-bar glyph (size-16 ORN)
-    CAESURA       = 0xA7,  // caesura // (size-16 ORN, placed before note at tick)
-    BREATH_COMMA  = 0xA8   // breath mark comma (size-16 ORN, placed before note at tick)
+
+    // Bows, marcato, tenuto, staccato, fermata
+    UPBOW                  = 0xC4,
+    DOWNBOW                = 0xC5,
+    MARCATO_BELOW          = 0xC6,
+    TENUTO                 = 0xC8,
+    STACCATO               = 0xC9,
+    FERMATA_ABOVE          = 0xCC,
+    FERMATA_BELOW          = 0xCD,
+
+    // String numbers, tremolo ladder
+    STRING_NUMBER_2        = 0xE6,
+    STRING_NUMBER_3        = 0xE7,
+    STRING_NUMBER_4        = 0xE8,
+    STRING_NUMBER_5        = 0xE9,
+    STRING_NUMBER_6        = 0xEA,
+    TREMOLO_16             = 0xEE,
+    TREMOLO_32B            = 0xEF
 };
 
 enum class EncAccidentalType : quint8 {

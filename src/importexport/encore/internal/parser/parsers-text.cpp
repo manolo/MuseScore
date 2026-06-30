@@ -48,7 +48,7 @@ bool EncHeader::readMagicAndVersion(QDataStream& ds)
 
 bool EncHeader::read(QDataStream& ds, const EncFormatReader& fmt)
 {
-    ds.skipRawData(0x28 - 5);
+    ds.skipRawData(0x28 - 5);   // from +5 (just past the 5-byte magic) to the header fields at 0x28
     ds >> chuVersio >> nekon1 >> fiksa1 >> lineCount >> pageCount;
     ds >> instrumentCount >> staffPerSystem >> measureCount;
     // Global staff-size selector (1=small … 4=default). v0xC2/C4/C5 store it at 0x52;

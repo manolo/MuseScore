@@ -111,6 +111,9 @@ void applyConcertPitch(Note* n, int semitone)
     n->setTpcFromPitch();
 }
 
+// TODO: format-agnostic candidate for promotion. This transform reads no Encore data; it is a
+// generic engraving fix-up (respell TPCs on transposing staves) that MusicXML/GuitarPro/MIDI
+// import could reuse. Consider moving it to engraving/editing or an importexport shared util.
 // score->spell() re-spells the whole score with a context-based heuristic that mishandles
 // transposing instruments: it can spell concert pitches with double-flats (e.g. a concert E in
 // A major rendered as a written double-flat) instead of the plain note the key wants. After
@@ -163,6 +166,9 @@ static void applyStaffScale(MasterScore* score, const EncRoot& enc)
     }
 }
 
+// TODO: format-agnostic candidate for promotion. This transform reads no Encore data; it is a
+// generic engraving operation (implode non-overlapping voices) that other importers could reuse.
+// Consider moving it to engraving/editing or an importexport shared util.
 // When a staff splits its content across several voices that never sound at the
 // same time, collapse them back into voice 1. This is the engraving equivalent of
 // the manual "move notes to voice 1" + Tools > Implode workflow. A staff is treated

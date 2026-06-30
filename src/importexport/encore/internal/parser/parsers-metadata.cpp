@@ -134,6 +134,10 @@ bool EncLine::read(QDataStream& ds, quint32 vs, int staffPerSystem)
 
 // Read 30-byte prefix + text payload of one TITL line.
 // Alignment at prefix+14: 0x02=right, 0x04=left, 0x06=center; 0x00=LEFT.
+// Fixed text-field width of one TITL line: 66 bytes in Latin-1, 1026 bytes in UTF-16 LE.
+static constexpr int kTitlTextBytesOneByte = 66;
+static constexpr int kTitlTextBytesTwoByte = 1026;
+
 static EncHeaderFooter readTitleLine(QDataStream& ds, EncCharSize cs)
 {
     QByteArray prefix(30, 0);
@@ -143,7 +147,7 @@ static EncHeaderFooter readTitleLine(QDataStream& ds, EncCharSize cs)
     QString item;
     bool done = false;
     if (cs == EncCharSize::ONE_BYTE) {
-        for (int j = 0; j < 66; ++j) {
+        for (int j = 0; j < kTitlTextBytesOneByte; ++j) {
             quint8 b;
             ds >> b;
             if (b == 0) {
@@ -154,7 +158,7 @@ static EncHeaderFooter readTitleLine(QDataStream& ds, EncCharSize cs)
             }
         }
     } else {
-        for (int j = 0; j < 1026;) {
+        for (int j = 0; j < kTitlTextBytesTwoByte;) {
             quint8 lo, hi;
             ds >> lo;
             ++j;
