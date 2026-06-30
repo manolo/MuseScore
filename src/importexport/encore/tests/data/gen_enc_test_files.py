@@ -642,7 +642,7 @@ def note_v0c4_xoff(tick, voice, staffIdx, fv, pitch, xoff):
     d[7..8] = element bytes +10..+11 (xoffset field)."""
     d = bytearray(25)
     d[0]=28; d[1]=staffIdx&0x3F; d[2]=fv; d[12]=pitch
-    struct.pack_into('<H', d, 7, xoff & 0xFFFF)
+    _wr16(d, 7, xoff & 0xFFFF)
     return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)
 
 def note_v0c4_perc(tick, voice, staffIdx, fv, pitch, position=0):
@@ -661,7 +661,7 @@ def set_score_size(data, sz):
 def set_version(data, ver):
     """Patch chuVersio uint16 LE at header offset 0x28."""
     d = bytearray(data)
-    struct.pack_into('<H', d, 0x28, ver)
+    _wr16(d, 0x28, ver)
     return bytes(d)
 
 def set_line_staff_size_hint(data, sz0indexed):
@@ -813,7 +813,7 @@ def ornament_v0c4_voice4_staffhi(tick, staffIdx, tipo):
     tipo(1) + 10 bytes of payload zeros.
     """
     d = bytearray(16)
-    struct.pack_into('<H', d, 0, tick)
+    _wr16(d, 0, tick)
     d[2] = (5 << 4) | 4               # typeVoice: ORN | voice=4
     d[3] = 16                          # size
     d[4] = (staffIdx & 0x3F) | 0x40    # staffByte with high bit set
@@ -833,13 +833,13 @@ def ornament_v0c4(tick, voice, staffIdx, tipo, xoffset=0, alMezuro=0, xoffset2=0
       d[26]=speguleco, d[27..32]=zeros.
     """
     d = bytearray(33)
-    struct.pack_into('<H', d, 0, tick)
+    _wr16(d, 0, tick)
     d[2] = (5<<4)|(voice&0xF)
     d[3] = 33
     d[4] = staffIdx&0x3F
     d[5] = tipo
     d[10] = xoffset
-    struct.pack_into('<h', d, 12, yoffset)
+    _wr16(d, 12, yoffset)
     d[16] = altMezuro
     d[18] = alMezuro
     d[20] = xoffset2
@@ -853,14 +853,14 @@ def slur_v0c4(tick, staffIdx, startX, midX, endX, startY=9, midY=16, endY=9, voi
     line. The 33-byte ornament_v0c4 SLURSTART used by importer fixtures draws
     straight in Encore -- use this builder for files meant to open in Encore."""
     d = bytearray(28)
-    struct.pack_into('<H', d, 0, tick)
+    _wr16(d, 0, tick)
     d[2] = (5 << 4) | (voice & 0xF)
     d[3] = 28
     d[4] = staffIdx & 0xFF
     d[5] = 0x21
-    struct.pack_into('<H', d, 10, startX); struct.pack_into('<h', d, 12, startY)
-    struct.pack_into('<H', d, 14, midX);   struct.pack_into('<h', d, 16, midY)
-    struct.pack_into('<H', d, 20, endX);   struct.pack_into('<h', d, 22, endY)
+    _wr16(d, 10, startX); _wr16(d, 12, startY)
+    _wr16(d, 14, midX);   _wr16(d, 16, midY)
+    _wr16(d, 20, endX);   _wr16(d, 22, endY)
     return bytes(d)
 
 def wedge_v0c4(tick, staffIdx, startX, endX, cresc=True, y=(-3, 2, 12), voice=0):
@@ -872,14 +872,14 @@ def wedge_v0c4(tick, staffIdx, startX, endX, cresc=True, y=(-3, 2, 12), voice=0)
     diminuendo (>). The 33-byte ornament_v0c4 WEDGESTART draws as a closed
     angle in Encore -- use this builder for files meant to open in Encore."""
     d = bytearray(28)
-    struct.pack_into('<H', d, 0, tick)
+    _wr16(d, 0, tick)
     d[2] = (5 << 4) | (voice & 0xF)
     d[3] = 28
     d[4] = staffIdx & 0xFF
     d[5] = 0x1D
-    struct.pack_into('<H', d, 10, startX); struct.pack_into('<h', d, 12, y[0])
-    struct.pack_into('<H', d, 14, startX); struct.pack_into('<h', d, 16, y[1])
-    struct.pack_into('<H', d, 20, endX);   struct.pack_into('<h', d, 22, y[2])
+    _wr16(d, 10, startX); _wr16(d, 12, y[0])
+    _wr16(d, 14, startX); _wr16(d, 16, y[1])
+    _wr16(d, 20, endX);   _wr16(d, 22, y[2])
     d[24] = 1
     d[26] = 0 if cresc else 1
     return bytes(d)
@@ -897,13 +897,13 @@ def dyn_v0c4(tick, staffIdx, mark, xoffset, yoffset=-3, voice=0):
     do not route it through the layout pass (it fills note/lyric x only)."""
     tipo = DYN.get(mark, mark) if isinstance(mark, str) else mark
     d = bytearray(16)
-    struct.pack_into('<H', d, 0, tick)
+    _wr16(d, 0, tick)
     d[2] = (5 << 4) | (voice & 0xF)
     d[3] = 16
     d[4] = staffIdx & 0xFF
     d[5] = tipo & 0xFF
-    struct.pack_into('<H', d, 10, xoffset)
-    struct.pack_into('<h', d, 12, yoffset)
+    _wr16(d, 10, xoffset)
+    _wr16(d, 12, yoffset)
     return bytes(d)
 
 def tie_arc_v0c4(tick, staffIdx, position, arcX1, arcX2, voice=0, direction=0xfe):
@@ -914,7 +914,7 @@ def tie_arc_v0c4(tick, staffIdx, position, arcX1, arcX2, voice=0, direction=0xfe
     measure width). `position` is the tied note's staff position (+14/+15). The
     16-byte tie_v0c4 has no arc and draws flat; use this for Encore files."""
     d = bytearray(18)
-    struct.pack_into('<H', d, 0, tick)
+    _wr16(d, 0, tick)
     d[2] = (3 << 4) | (voice & 0xF)
     d[3] = 18
     d[4] = staffIdx & 0x3F
@@ -951,14 +951,14 @@ def arpeggio_v0c4(tick, staffIdx, x, yTop, yBottom, voice=0):
     yTop (+16) and yBottom (+22) span the chord's noteheads (more negative is
     higher). A size-16 form does not render."""
     d = bytearray(28)
-    struct.pack_into('<H', d, 0, tick)
+    _wr16(d, 0, tick)
     d[2] = (5 << 4) | (voice & 0xF)
     d[3] = 28
     d[4] = staffIdx & 0xFF
     d[5] = 0x22
-    struct.pack_into('<H', d, 10, x); struct.pack_into('<h', d, 12, 8)
-    struct.pack_into('<H', d, 14, x); struct.pack_into('<h', d, 16, yTop)
-    struct.pack_into('<H', d, 20, x); struct.pack_into('<h', d, 22, yBottom)
+    _wr16(d, 10, x); _wr16(d, 12, 8)
+    _wr16(d, 14, x); _wr16(d, 16, yTop)
+    _wr16(d, 20, x); _wr16(d, 22, yBottom)
     d[24] = 1
     d[26] = 2
     return bytes(d)
@@ -978,7 +978,7 @@ def note_v0c2_size24(tick, voice, staffIdx, fv, pitch, artic):
     d[9]=0x80              # position flag (characteristic for size=24)
     d[10]=pitch            # MIDI pitch in tuplet slot (+13)
     d[11]=0xC0             # dotControl (characteristic for size=24)
-    struct.pack_into('<H', d, 13, 480)  # playback duration (+16)
+    _wr16(d, 13, 480)  # playback duration (+16)
     d[19]=artic            # articulation byte (+22): 0x1c=tenuto, 0x1d=staccato
     d[20]=0x08             # direction flag (+23)
     return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)
@@ -1047,7 +1047,7 @@ def note_v0c2_size24_semitone(tick, voice, staffIdx, fv, pitch):
     d[0]=24; d[1]=staffIdx&0x3F; d[2]=fv
     # d[10] (tuplet, rawElemStart+13) = 0: pitch is NOT here.
     d[12]=pitch          # semiTonePitch at rawElemStart+15: the real pitch.
-    struct.pack_into('<H', d, 13, 480)  # playback duration
+    _wr16(d, 13, 480)  # playback duration
     return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)
 
 def gen_v0c2_size24_semitonepitch():
@@ -3162,12 +3162,12 @@ def stafftext_v0c4(tick, voice, staffIdx, text_index, yoffset=0):
       d[32]    = tind (TEXT block index)
     """
     d = bytearray(33)
-    struct.pack_into('<H', d, 0, tick)
+    _wr16(d, 0, tick)
     d[2] = (5 << 4) | (voice & 0xF)
     d[3] = 33
     d[4] = staffIdx & 0x3F
     d[5] = 0x1e
-    struct.pack_into('<h', d, 12, yoffset)
+    _wr16(d, 12, yoffset)
     d[32] = text_index & 0xFF
     return bytes(d)
 
@@ -3303,7 +3303,7 @@ def tie_v0c4_18byte(tick, voice, staffIdx, direction=0x02, startFlag=0, arcX1=0,
     forward tie, isTieStart is determined by the direction/startFlag bits.
     """
     d = bytearray(18)
-    struct.pack_into('<H', d, 0, tick)
+    _wr16(d, 0, tick)
     d[2] = (3 << 4) | (voice & 0xF)
     d[3] = 18
     d[4] = staffIdx & 0x3F
@@ -3701,7 +3701,7 @@ def orn16_v0c4(tick, voice, staffIdx, tipo):
     Layout: tick(2) + typeVoice(1) + size(1) + staffByte(1) + tipo(1) + 10 zeros.
     """
     d = bytearray(16)
-    struct.pack_into('<H', d, 0, tick)
+    _wr16(d, 0, tick)
     d[2] = (5 << 4) | (voice & 0xF)
     d[3] = 16
     d[4] = staffIdx & 0x3F
@@ -4000,7 +4000,7 @@ def gen_v0c4_ornament_turn():
 def trill_simple_v0c4(tick, voice, staffIdx, xoffset=0):
     """16-byte TRILL_SHORT ornament (tipo=0xB6). Produces ornamentShortTrill glyph."""
     d = bytearray(16)
-    struct.pack_into('<H', d, 0, tick)
+    _wr16(d, 0, tick)
     d[2] = (5 << 4) | (voice & 0xF)
     d[3] = 16
     d[4] = staffIdx & 0x3F
@@ -4020,7 +4020,7 @@ def trill_simple_v0c4(tick, voice, staffIdx, xoffset=0):
 def trill_tr_v0c4(tick, voice, staffIdx):
     """16-byte TRILL_TR ornament (tipo=0xB0). Produces ornamentTrill glyph on the chord at tick."""
     d = bytearray(16)
-    struct.pack_into('<H', d, 0, tick)
+    _wr16(d, 0, tick)
     d[2] = (5 << 4) | (voice & 0xF)
     d[3] = 16
     d[4] = staffIdx & 0x3F
@@ -4756,7 +4756,7 @@ def ornament_v0c2_tempo(tick, voice, staffIdx, bpm):
     element +28 (d[28]); the +30 slot that carries the BPM in v0xC4 holds a constant
     unrelated byte here (observed 0x34 = 52), which must be ignored."""
     d = bytearray(36)
-    struct.pack_into('<H', d, 0, tick)
+    _wr16(d, 0, tick)
     d[2] = (5 << 4) | (voice & 0xF)
     d[3] = 36
     d[4] = staffIdx & 0x3F
@@ -4791,7 +4791,7 @@ def ornament_v0c2_tempo_v0c4_layout(tick, voice, staffIdx, bpm, noto=2):
     this way (the value at +28 is a small note-value code, e.g. 0x02 = quarter),
     unlike the older layout where the BPM itself sits at +28."""
     d = bytearray(38)
-    struct.pack_into('<H', d, 0, tick)
+    _wr16(d, 0, tick)
     d[2] = (5 << 4) | (voice & 0xF)
     d[3] = 38
     d[4] = staffIdx & 0x3F
@@ -6259,7 +6259,7 @@ def gen_v0xa6_grace_ongrid_snap_suppressed():
         return bytes(h)
     def note_a6(tick, fv, pitch, grace1=0):
         d = bytearray(20)
-        struct.pack_into('<H', d, 0, tick)
+        _wr16(d, 0, tick)
         d[2] = (9<<4)|0; d[3] = 10; d[4] = 0
         d[5] = fv; d[6] = grace1; d[11] = pitch
         return bytes(d)
@@ -6300,7 +6300,7 @@ def gen_v0xa6_inner_grace_group():
         return bytes(h)
     def note_a6(tick, fv, pitch, grace1=0):
         d = bytearray(20)
-        struct.pack_into('<H', d, 0, tick)
+        _wr16(d, 0, tick)
         d[2] = (9 << 4) | 0
         d[3] = 10
         d[4] = 0
@@ -6350,7 +6350,7 @@ def gen_v0xa6_grace_restores_face_value():
     def note_a6(tick, fv, pitch, grace1=0):
         """v0xA6 NOTE: 20-byte slot. Pitch at +11, tuplet at +7, grace1 at +6."""
         d = bytearray(20)
-        struct.pack_into('<H', d, 0, tick)
+        _wr16(d, 0, tick)
         d[2] = (9 << 4) | 0   # typeVoice
         d[3] = 10              # size
         d[4] = 0               # staff
@@ -7638,7 +7638,7 @@ def gen_sintetico_all_features():
     # ---- helpers for TEMPO ORN (tipo=0x32, tempo byte at element offset 30) ----
     def orn_tempo(tick, staffIdx, bpm):
         d = bytearray(33)
-        struct.pack_into('<H', d, 0, tick)
+        _wr16(d, 0, tick)
         d[2] = (5 << 4)          # typeVoice: ORN | voice=0
         d[3] = 33                # size
         d[4] = staffIdx & 0x3F
@@ -7656,7 +7656,7 @@ def gen_sintetico_all_features():
         if 0 < dc <= 255:
             d[11] = dc               # dotControl (1 byte)
         if dc > 0:
-            struct.pack_into('<H', d, 13, dc)  # playbackDurTicks (2 bytes)
+            _wr16(d, 13, dc)  # playbackDurTicks (2 bytes)
         d[12]=pitch
         d[21]=au; d[23]=ad
         return struct.pack('<H', tick) + bytes([0x90]) + bytes(d)
@@ -8148,7 +8148,7 @@ def gen_v0c4_multiinstr_slur_routing():
     def orn_raw(tick, voice, raw_staff, tipo, xoffset=0, alMezuro=0, xoffset2=0):
         """33-byte ORN with full raw_staff byte."""
         d = bytearray(33)
-        struct.pack_into('<H', d, 0, tick)
+        _wr16(d, 0, tick)
         d[2] = (5 << 4) | (voice & 0xF); d[3] = 33; d[4] = raw_staff & 0xFF
         d[5] = tipo; d[10] = xoffset; d[18] = alMezuro; d[20] = xoffset2
         return bytes(d)
@@ -9021,7 +9021,7 @@ def gen_v0c4_string_num_orn_no_dup():
 def gen_v0c4_graphic_line_skipped():
     # 28-byte 0x1C element: tick(2)+typeVoice(1)+size(1)+staff(1)+tipo(1)+22 zeros
     d = bytearray(28)
-    struct.pack_into('<H', d, 0, 0)        # tick=0
+    _wr16(d, 0, 0)        # tick=0
     d[2] = (5 << 4) | 0                   # type=5 (ORN), voice=0
     d[3] = 28                              # size=28
     d[4] = 0                               # staffIdx=0
