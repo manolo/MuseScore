@@ -151,6 +151,7 @@ struct EncHeader {
     qint8 instrumentCount{ 0 };
     qint8 staffPerSystem { 0 };
     qint16 measureCount   { 0 };
+    quint8 formatRev      { 0 };  // format-revision byte at 0x3E: 1 = Encore 4.5, 4 = Encore 5.0 (v0xC4)
     quint8 scoreSize      { 4 };  // staff-size selector 1-4 at header offset 0x52; 4 = default
 
     bool readMagicAndVersion(QDataStream& ds);

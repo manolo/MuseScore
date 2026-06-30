@@ -42,14 +42,25 @@ void logEncRootInfo(const EncRoot& enc)
     const EncHeader& h = enc.header;
     const char* fmtName = enc.fmt ? enc.fmt->formatName() : "unknown";
 
-    const char* encVer = (h.chuVersio >= 1000) ? "Encore 5.x"
-                         : (h.chuVersio >= 700) ? "Encore 4.x"
-                         : "Encore 2.x/3.x (legacy)";
+    // app version (0x28) -> Encore release. 592 = 2.x, 773 = 3.x, 775 = 4.0-4.2,
+    // 1056 = 4.5 and 5.x, split by the format-revision byte at 0x3E (1 = 4.5, 4 = 5.0).
+    const char* encVer;
+    if (h.chuVersio >= 1000) {
+        encVer = (h.formatRev >= 4) ? "Encore 5.x"
+                 : (h.formatRev >= 1) ? "Encore 4.5"
+                 : "Encore 4.5/5.x";
+    } else {
+        encVer = (h.chuVersio >= 775) ? "Encore 4.x"
+                 : (h.chuVersio >= 700) ? "Encore 3.x"
+                 : (h.chuVersio >= 500) ? "Encore 2.x"
+                 : "Encore (legacy)";
+    }
 
     LOGD() << "---- Encore file info ----";
     LOGD() << "  Magic:" << h.magic.toStdString()
            << "  Format:0x" << QString::number(h.chuMagio, 16).toUpper().toStdString()
-           << "(" << fmtName << ")  version=" << h.chuVersio << "(" << encVer << ")";
+           << "(" << fmtName << ")  version=" << h.chuVersio
+           << " rev=" << static_cast<int>(h.formatRev) << "(" << encVer << ")";
     LOGD() << "  Lines:" << h.lineCount
            << "  Pages:" << h.pageCount
            << "  Instruments:" << h.instrumentCount

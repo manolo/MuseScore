@@ -50,12 +50,16 @@ bool EncHeader::read(QDataStream& ds, const EncFormatReader& fmt)
 {
     ds.skipRawData(0x28 - 5);   // from +5 (just past the 5-byte magic) to the header fields at 0x28
     ds >> chuVersio >> nekon1 >> fiksa1 >> lineCount >> pageCount;
-    ds >> instrumentCount >> staffPerSystem >> measureCount;
+    ds >> instrumentCount >> staffPerSystem >> measureCount;   // cursor now at 0x36
+    // Format-revision byte at 0x3E distinguishes releases that share an app version:
+    // 1 = Encore 4.5, 4 = Encore 5.0 (both v0xC4 with chuVersio 1056). Meaningless for v0xA6.
+    ds.skipRawData(0x3E - 0x36);
+    ds >> formatRev;                                           // cursor now at 0x3F
     // Global staff-size selector (1=small … 4=default). v0xC2/C4/C5 store it at 0x52;
     // v0xA6 stores it at 0x8D (byte 0x52 is an unrelated field there). Offset from fmt.
     const qint64 szOff = fmt.scoreSizeOffset();
     if (fmt.headerEnd() > szOff) {
-        ds.skipRawData(static_cast<int>(szOff - 0x36));   // skip from 0x36 to the size byte
+        ds.skipRawData(static_cast<int>(szOff - 0x3F));   // skip from 0x3F to the size byte
         quint8 sz;
         ds >> sz;
         if (sz >= 1 && sz <= 4) {
@@ -63,7 +67,7 @@ bool EncHeader::read(QDataStream& ds, const EncFormatReader& fmt)
         }
         ds.skipRawData(static_cast<int>(fmt.headerEnd() - szOff - 1)); // skip to header end
     } else {
-        ds.skipRawData(static_cast<int>(fmt.headerEnd() - 0x36));
+        ds.skipRawData(static_cast<int>(fmt.headerEnd() - 0x3F));
     }
     return true;
 }
