@@ -257,6 +257,58 @@ def assemble(chuMagio, custom_list, fill_ts=(4,4), text_override=None):
         out += text_override
     return out
 
+def make_2staff_pre(clefs=(0, 1)):
+    """Turn the single-staff bazo skeleton PRE into a 2-staff system.
+
+    Sets the header staffPerSystem to 2 and rebuilds every LINE block to carry
+    two 30-byte staff entries instead of one. The second entry is a copy of the
+    first with its clef byte (+14) and instrStaffIdx (+21=1) changed, so notes
+    route to it by staffIdx 1 (rawStaff 0x01). Encore re-spaces the two staves
+    vertically on open.
+
+    instrumentCount is deliberately left at 1: the bazo TK00 defines a single
+    instrument, and raising the count to 2 makes Encore read past the TK00 data
+    and crash. With one instrument and two staves there is no separate brace
+    (bazo's TK00 carries no grouping), which is the intended 2-staff-no-brace
+    layout. `clefs` is the (top, bottom) clef byte pair (default G over F)."""
+    pre = bytearray(set_chumagio(0xC4))
+    pre[0x33] = 2
+    out = bytearray()
+    pos = 0
+    while pos < len(pre):
+        if pre[pos:pos + 4] == b'LINE':
+            sz = struct.unpack('<I', pre[pos + 4:pos + 8])[0]
+            content = pre[pos + 8:pos + 8 + sz]
+            hdr13 = content[:13]
+            s0 = bytearray(content[13:13 + 30])
+            tail = content[13 + 30:]
+            s0[14] = clefs[0]
+            s1 = bytearray(s0)
+            s1[14] = clefs[1]
+            s1[21] = 1                     # instrStaffIdx 1 -> bass staff slot
+            newc = bytes(hdr13) + bytes(s0) + bytes(s1) + bytes(tail)
+            out += b'LINE' + struct.pack('<I', len(newc)) + newc
+            pos += 8 + sz
+        else:
+            out += pre[pos:pos + 1]
+            pos += 1
+    return bytes(out)
+
+def assemble_2staff(custom_list, fill_ts=(4, 4), clefs=(0, 1)):
+    """assemble() for a 2-staff system (top clef over bottom clef, no brace).
+
+    Notes route to the top staff with staffIdx 0 (rawStaff 0x00) and to the
+    bottom staff with staffIdx 1 (rawStaff 0x01); note_v0c4 already preserves
+    those low values. The layout pass reads each note's clef from the LINE
+    entries, so bottom-staff positions come out in the bottom clef."""
+    pre = bytearray(make_2staff_pre(clefs))
+    total_meas = max(len(custom_list), 6)
+    struct.pack_into('<h', pre, 0x34, total_meas)
+    body = b''.join(meas_block(h, e) for h, e in custom_list)
+    if len(custom_list) < 6:
+        body += b''.join(empty_meas(*fill_ts) for _ in range(6 - len(custom_list)))
+    return bytes(pre) + body + SKELETON_POST
+
 # ---------------------------------------------------------------------------
 # Note / rest / ornament element builders
 # ---------------------------------------------------------------------------
