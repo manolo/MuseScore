@@ -153,39 +153,90 @@ def _dots_from_gap(gap, fv):
         return 3
     return 0
 
+_NAT_SEMI    = [0, 2, 4, 5, 7, 9, 11]   # semitone of natural letters C D E F G A B
+_SHARP_ORDER = [3, 0, 4, 1, 5, 2, 6]     # letters that gain a sharp as fifths rise
+_FLAT_ORDER  = [6, 2, 5, 1, 4, 0, 3]     # letters that gain a flat as fifths fall
+# Encore key byte -> fifths (mirrors the importer's encKeyToFifths table).
+_KEY_FIFTHS  = [0, -1, -2, -3, -4, -5, -6, -7, 1, 2, 3, 4, 5, 6, 7]
+
+def _key_alt(fifths):
+    alt = [0] * 7
+    if fifths > 0:
+        for j in range(min(fifths, 7)):
+            alt[_SHARP_ORDER[j]] = 1
+    elif fifths < 0:
+        for j in range(min(-fifths, 7)):
+            alt[_FLAT_ORDER[j]] = -1
+    return alt
+
+def _spell(midi, fifths, origin):
+    """Spell a MIDI pitch in the given key. Returns (staff position byte,
+    displayed accidental) where the accidental is 0=none (in key), 1=sharp,
+    2=flat, 3=natural. A note that matches the key's accidental for its letter
+    shows no accidental; one that differs shows the explicit glyph."""
+    pc = midi % 12
+    alt = _key_alt(fifths)
+    letter = None
+    actual = 0
+    disp = 0
+    for L in range(7):                       # in-key spelling
+        if (_NAT_SEMI[L] + alt[L]) % 12 == pc:
+            letter, actual, disp = L, alt[L], 0
+            break
+    if letter is None:                       # natural against a key accidental
+        for L in range(7):
+            if _NAT_SEMI[L] % 12 == pc:
+                letter, actual, disp = L, 0, (3 if alt[L] else 0)
+                break
+    if letter is None:                       # raised (sharp)
+        for L in range(7):
+            if (_NAT_SEMI[L] + 1) % 12 == pc:
+                letter, actual, disp = L, 1, 1
+                break
+    if letter is None:                       # lowered (flat)
+        for L in range(7):
+            if (_NAT_SEMI[L] - 1) % 12 == pc:
+                letter, actual, disp = L, -1, 2
+                break
+    octave = (midi - actual) // 12 - 1
+    return (octave * 7 + letter - origin) & 0xFF, disp
+
 def _staff_clef_map(data):
     """Map a note's rawStaff byte to its clef, read from the first LINE block.
 
-    Each 30-byte LINE staff entry carries its clef at byte +14 and its
-    instrStaffIdx at byte +21; a note's rawStaff (staffIdx | staffWithin)
-    equals the instrStaffIdx of the staff it belongs to (0x00 treble, 0x40
-    bass for a piano grand staff).  Returns (map, fallbackClef) where the
-    fallback is the first entry's clef for any unmatched rawStaff (the common
-    single-staff case)."""
+    Each 30-byte LINE staff entry carries its clef at byte +14, its key
+    signature at +15 and its instrStaffIdx at +21; a note's rawStaff (staffIdx
+    | staffWithin) equals the instrStaffIdx of the staff it belongs to (0x00
+    treble, 0x40 bass for a piano grand staff).  Returns
+    (clef_by_raw, fallback_clef, key_by_raw, fallback_key); the fallbacks are
+    the first entry's values for any unmatched rawStaff (the single-staff case)."""
     p = data.find(b'LINE')
     if p < 0:
-        return {}, 0
+        return {}, 0, {}, 0
     count = data[0x33] if 0x33 < len(data) else 1
     base = p + 8 + 13                 # 13-byte LINE header before staff entries
     clef_by_raw = {}
-    fallback = 0
+    key_by_raw = {}
+    fallback_clef = 0
+    fallback_key = 0
     for s in range(max(count, 1)):
         entry = base + s * 30
         if entry + 21 >= len(data):
             break
-        clef = data[entry + 14]
         instr_staff = data[entry + 21]
-        clef_by_raw[instr_staff] = clef
+        clef_by_raw[instr_staff] = data[entry + 14]
+        key_by_raw[instr_staff] = data[entry + 15]
         if s == 0:
-            fallback = clef
-    return clef_by_raw, fallback
+            fallback_clef = data[entry + 14]
+            fallback_key = data[entry + 15]
+    return clef_by_raw, fallback_clef, key_by_raw, fallback_key
 
 def apply_encore_layout(data):
     """Fill Encore display-layout fields in every v0xC4 MEAS block in `data`."""
     if len(data) < 5 or data[4] != 0xC4:
         return data
     out = bytearray(data)
-    clef_by_raw, fallback_clef = _staff_clef_map(out)
+    clef_by_raw, fallback_clef, key_by_raw, fallback_key = _staff_clef_map(out)
     # Mid-piece CLEF changes (element type 1) override the LINE clef for every
     # later note on that staff. Tracked across measures in stream order, since
     # Encore writes a staff's elements in tick order with the clef change first.
@@ -246,9 +297,11 @@ def apply_encore_layout(data):
                                         clef_by_raw.get(raw_staff, fallback_clef))
                     origin = _CLEF_ORIGIN.get(clef)   # None for PERC/TAB -> skip
                     if origin is not None and out[i + 12] == 0 and midi:
-                        out[i + 12] = (_abs_diatonic(midi) - origin) & 0xFF
-                        if _PC_SHARP[midi % 12] and out[i + 21] == 0:
-                            out[i + 21] = 1
+                        fifths = _KEY_FIFTHS[key_by_raw.get(raw_staff, fallback_key) % 15]
+                        posb, disp = _spell(midi, fifths, origin)
+                        out[i + 12] = posb
+                        if disp and out[i + 21] == 0:
+                            out[i + 21] = disp
                     # Secondary voices point their stems down. Encore stores the
                     # stem direction in the options byte (+20, bit 0x80) rather
                     # than deriving it, so a voice>=1 note left at 0 would draw
@@ -427,6 +480,25 @@ def set_staff_clef(data, staff_idx=0, clef=7):
             entry_offset = pos + 8 + 13 + staff_idx * 30 + 14  # +14 = clef byte
             if entry_offset < len(d):
                 d[entry_offset] = clef & 0xFF
+            size = int.from_bytes(d[pos+4:pos+8], 'little')
+            pos += 8 + size
+        else:
+            pos += 1
+    return bytes(d)
+
+def set_staff_key(data, key, staff_idx=0):
+    """Patch the key-signature byte for staff_idx in ALL LINE blocks. The key
+    byte sits at staff-entry +15 (right after the clef at +14). Encore's key
+    encoding: 0=C, 1..7 = 1..7 flats, 8..14 = 1..7 sharps (see encKeyToFifths).
+    Apply before write()/apply_encore_layout so the layout pass spells notes in
+    this key (in-key notes get no accidental, out-of-key notes get one)."""
+    d = bytearray(data)
+    pos = 0
+    while pos + 8 < len(d):
+        if d[pos:pos+4] == b'LINE':
+            entry_offset = pos + 8 + 13 + staff_idx * 30 + 15  # +15 = key byte
+            if entry_offset < len(d):
+                d[entry_offset] = key & 0xFF
             size = int.from_bytes(d[pos+4:pos+8], 'little')
             pos += 8 + size
         else:
