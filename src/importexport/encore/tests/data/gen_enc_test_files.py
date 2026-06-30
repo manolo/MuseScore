@@ -224,6 +224,15 @@ _CLEF_ORIGIN = {0: 28, 1: 16, 4: 35, 5: 21}
 def _enc_xpos(tick):
     return round(ENC_XPOS_BASE + tick * ENC_XPOS_SLOPE)
 
+def _rd16(b, off):
+    """Read a little-endian uint16 at b[off]."""
+    return b[off] | (b[off + 1] << 8)
+
+def _wr16(b, off, val):
+    """Write a little-endian uint16 to b[off]."""
+    b[off] = val & 0xFF
+    b[off + 1] = (val >> 8) & 0xFF
+
 def _face_ticks(fv):
     return {1: 960, 2: 480, 3: 240, 4: 120, 5: 60, 6: 30, 7: 15}.get(fv & 0x0F, 0)
 
@@ -379,8 +388,8 @@ def apply_encore_layout(data):
         hdr = m + 8
         elem_start = hdr + 0x36
         elem_end = elem_start + size
-        beat_ticks = struct.unpack('<H', out[hdr + 4:hdr + 6])[0]
-        dur_ticks = struct.unpack('<H', out[hdr + 6:hdr + 8])[0]
+        beat_ticks = _rd16(out, hdr + 4)
+        dur_ticks = _rd16(out, hdr + 6)
         ts_den = out[hdr + 9]
         # collect note/rest elements; track per (rawStaff, voice) for dots
         groups = {}
@@ -403,9 +412,9 @@ def apply_encore_layout(data):
             # and (16-byte form) draw it just left of the note at its tick.
             if typ == 1 and esize >= 6:
                 clef_now[out[i + 4]] = out[i + 5]
-                if esize >= 12 and struct.unpack('<H', out[i + 10:i + 12])[0] == 0:
-                    tk = struct.unpack('<H', out[i:i + 2])[0]
-                    struct.pack_into('<H', out, i + 10, max(0, _enc_xpos(tk) - _GRACE_XPOS_OFFSET - 2))
+                if esize >= 12 and _rd16(out, i + 10) == 0:
+                    tk = _rd16(out, i)
+                    _wr16(out, i + 10, max(0, _enc_xpos(tk) - _GRACE_XPOS_OFFSET - 2))
             # type 5 = ORN: a flat SLURSTART (tipo 0x21 with no curve control
             # points, midY at +16 still zero) gets a subtle arc added below.
             if typ == 5 and out[i + 5] == 0x21 and esize >= 24 \
@@ -414,18 +423,18 @@ def apply_encore_layout(data):
             # type 6 = lyric: it stores its x-position at +10 like a note, and
             # aligns under the note at the same tick.
             if typ == 6 and esize >= 12:
-                tick = struct.unpack('<H', out[i:i + 2])[0]
-                if struct.unpack('<H', out[i + 10:i + 12])[0] == 0:
-                    struct.pack_into('<H', out, i + 10, _enc_xpos(tick))
+                tick = _rd16(out, i)
+                if _rd16(out, i + 10) == 0:
+                    _wr16(out, i + 10, _enc_xpos(tick))
             if typ in (8, 9) and esize >= 12:
-                tick = struct.unpack('<H', out[i:i + 2])[0]
+                tick = _rd16(out, i)
                 # x-position
-                if struct.unpack('<H', out[i + 10:i + 12])[0] == 0:
+                if _rd16(out, i + 10) == 0:
                     xp = _enc_xpos(tick)
                     if typ == 9 and (out[i + 6] & 0x20):   # grace -> left of its main note
                         xp = max(2, xp - _GRACE_XPOS_OFFSET)
-                    struct.pack_into('<H', out, i + 10, xp)
-                max_xpos = max(max_xpos, struct.unpack('<H', out[i + 10:i + 12])[0])
+                    _wr16(out, i + 10, xp)
+                max_xpos = max(max_xpos, _rd16(out, i + 10))
                 # Rests carry a staff position at +12 too. Left at 0 they sit
                 # three spaces too low; Encore places them around position 6
                 # (eighth 7, sixteenth 5), staff-line relative for any clef.
@@ -511,8 +520,8 @@ def apply_encore_layout(data):
                         out[off + 18] = 0x50            # MIDI on-velocity (80)
                     if out[off + 3] >= 20 and out[off + 19] == 0:
                         out[off + 19] = 64              # editor velocity
-                    if out[off + 3] >= 18 and struct.unpack('<H', out[off + 16:off + 18])[0] == 0:
-                        struct.pack_into('<H', out, off + 16, pbdur)
+                    if out[off + 3] >= 18 and _rd16(out, off + 16) == 0:
+                        _wr16(out, off + 16, pbdur)
         # give flat slurs a subtle arc. A 33-byte SLURSTART has no curve control
         # points, so Encore draws it as a straight line; fill startY (+12), the
         # apex midX/midY (+14/+16) and endY (+22). The arc sits opposite the
@@ -529,12 +538,12 @@ def apply_encore_layout(data):
             for (off, rs) in slurs:
                 avg = pos_sum.get(rs, 0) / max(1, pos_cnt.get(rs, 1))
                 sign = 1 if avg >= 6 else -1     # high notes -> arc above (+), low -> below (-)
-                sx = struct.unpack('<H', out[off + 10:off + 12])[0]
-                ex = struct.unpack('<H', out[off + 20:off + 22])[0]
-                struct.pack_into('<h', out, off + 12, sign * 4)            # startY
-                struct.pack_into('<H', out, off + 14, (sx + ex) // 2)      # midX
-                struct.pack_into('<h', out, off + 16, sign * 9)            # midY (apex)
-                struct.pack_into('<h', out, off + 22, sign * 4)            # endY
+                sx = _rd16(out, off + 10)
+                ex = _rd16(out, off + 20)
+                _wr16(out, off + 12, sign * 4)            # startY
+                _wr16(out, off + 14, (sx + ex) // 2)      # midX
+                _wr16(out, off + 16, sign * 9)            # midY (apex)
+                _wr16(out, off + 22, sign * 4)            # endY
         pos = elem_end
     return bytes(out)
 
