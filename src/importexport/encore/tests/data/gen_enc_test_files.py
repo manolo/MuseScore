@@ -231,6 +231,12 @@ def apply_encore_layout(data):
                         out[i + 12] = (_abs_diatonic(midi) - origin) & 0xFF
                         if _PC_SHARP[midi % 12] and out[i + 21] == 0:
                             out[i + 21] = 1
+                    # Secondary voices point their stems down. Encore stores the
+                    # stem direction in the options byte (+20, bit 0x80) rather
+                    # than deriving it, so a voice>=1 note left at 0 would draw
+                    # stem-up and collide with the upper voice.
+                    if voice >= 1 and esize >= 21:
+                        out[i + 20] |= 0x80
                     groups.setdefault((out[i + 4], voice), []).append((tick, i, out[i + 5] & 0x0F))
             i += esize
         # measure width @0x10. Normally the x-position of the measure end, so
