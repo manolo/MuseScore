@@ -3430,6 +3430,12 @@ def meas_hdr_coda(timeSigNum, timeSigDen, bpm=100, barTypeEnd=0, codaByte=0):
     here: 0x80=DCALCODA, 0x81=DSALCODA, 0x82=DCALFINE, 0x86=FINE, 0x87=DC."""
     h = bytearray(meas_hdr(timeSigNum, timeSigDen, bpm=bpm, barTypeEnd=barTypeEnd))
     h[0x1A] = codaByte & 0xFF
+    if codaByte:
+        # The coda field is a u32: low byte = mark type, upper bytes = style and
+        # x-position. Encore draws the mark below the staff without the style
+        # byte; 0x0B at +0x1B places "Fine"/"D.C."/etc. above it.
+        h[0x1B] = 0x0B
+        h[0x1C] = 12
     return bytes(h)
 
 
