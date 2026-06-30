@@ -683,6 +683,26 @@ def dyn_v0c4(tick, staffIdx, mark, xoffset, yoffset=-3, voice=0):
     struct.pack_into('<h', d, 12, yoffset)
     return bytes(d)
 
+def tie_arc_v0c4(tick, staffIdx, position, arcX1, arcX2, voice=0, direction=0xfe):
+    """18-byte TIE (type 3) carrying the arc x-positions Encore draws from.
+    arcX1 is the start note's x, arcX2 the end note's x. For a tie that crosses
+    a barline, arcX2 is measure-relative to the START measure, so pass the start
+    measure width plus the end note's x in the next measure (it exceeds the
+    measure width). `position` is the tied note's staff position (+14/+15). The
+    16-byte tie_v0c4 has no arc and draws flat; use this for Encore files."""
+    d = bytearray(18)
+    struct.pack_into('<H', d, 0, tick)
+    d[2] = (3 << 4) | (voice & 0xF)
+    d[3] = 18
+    d[4] = staffIdx & 0x3F
+    d[5] = direction
+    d[10] = arcX1 & 0xFF
+    d[12] = arcX2 & 0xFF
+    d[14] = position & 0xFF
+    d[15] = position & 0xFF
+    d[16] = 0xF0
+    return bytes(d)
+
 def note_v0c2(tick, voice, staffIdx, fv, pitch):
     """22-byte v0xC2 note. Pitch at d[10]=elemStart+13 (tuplet field)."""
     d = bytearray(19)
