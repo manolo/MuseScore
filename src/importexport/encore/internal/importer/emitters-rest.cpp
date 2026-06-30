@@ -66,9 +66,9 @@ void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
     int dots = computeDotCount(er->dotControl, er->realDuration, er->faceValue);
     // Cap rest duration to remaining space. Also cap when the current tuplet group is full (it's closed before this rest, making it plain).
     {
-        const auto& ttPre = ctx.tuplets[trackKey];
+        const auto& ttPre = ctx.scratch.tuplets[trackKey];
         if (!ttPre.inTuplet() || ttPre.groupFull()) {
-            Fraction remaining = measure->ticks() - ctx.cumTick[trackKey];
+            Fraction remaining = measure->ticks() - ctx.scratch.cumTick[trackKey];
             TDuration fullDur(dt);
             fullDur.setDots(dots);
             if (remaining > Fraction(0, 1) && fullDur.fraction() > remaining) {
@@ -89,7 +89,7 @@ void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         rest->setDots(dots);
         seg->add(rest);
 
-        auto& tt = ctx.tuplets[trackKey];
+        auto& tt = ctx.scratch.tuplets[trackKey];
         int actualNr = er->actualNotes();
         int normalNr = er->normalNotes();
         const bool isStdExplicitR = isStandardExplicitTuplet(actualNr, normalNr);
@@ -108,7 +108,7 @@ void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
                 if (isStdExplicitR && !validTupletGroupMember.count(e)) {
                     Fraction tupAdv = TDuration(dt).fraction()
                                       * Fraction(normalNr, actualNr);
-                    Fraction remaining = measure->ticks() - ctx.cumTick[trackKey];
+                    Fraction remaining = measure->ticks() - ctx.scratch.cumTick[trackKey];
                     if (tupAdv == remaining) {
                         tt.startTuplet(measure, elemTick, actualNr, normalNr, dt, track);
                     } else {
@@ -134,11 +134,11 @@ void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
             }
         }
 
-        // Advance cumulative position; when capped, also update rest's ticks so actualTicks() matches ctx.cumTick advance (avoids sanityCheck overshoot).
+        // Advance cumulative position; when capped, also update rest's ticks so actualTicks() matches ctx.scratch.cumTick advance (avoids sanityCheck overshoot).
         Fraction advance = tt.inTuplet()
                            ? TDuration(dt).fraction() * Fraction(tt.normalN, tt.actualN)
                            : dottedAdvance(dt, dots);
-        Fraction remaining = measure->ticks() - ctx.cumTick[trackKey];
+        Fraction remaining = measure->ticks() - ctx.scratch.cumTick[trackKey];
         if (advance > remaining && remaining > Fraction(0, 1)) {
             advance = TDuration(remaining, true).fraction();
             if (advance.numerator() == 0) {
@@ -152,9 +152,9 @@ void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
                 seg->remove(rest);
                 delete rest;
                 if (savedPrevMidiTick >= 0) {
-                    ctx.prevMidiTick[trackKey] = savedPrevMidiTick;
+                    ctx.scratch.prevMidiTick[trackKey] = savedPrevMidiTick;
                 } else {
-                    ctx.prevMidiTick.erase(trackKey);
+                    ctx.scratch.prevMidiTick.erase(trackKey);
                 }
                 return;
             }
@@ -168,7 +168,7 @@ void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
             rest->setTicks(cappedDur.fraction());
             rest->setDots(0);
         }
-        ctx.cumTick[trackKey] += advance;
+        ctx.scratch.cumTick[trackKey] += advance;
         if (tt.inTuplet()) {
             tt.placedTicks += advance;
         }

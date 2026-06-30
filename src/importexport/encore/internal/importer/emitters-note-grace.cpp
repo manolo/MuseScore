@@ -62,14 +62,14 @@ bool tryHandleGraceNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec,
     // Roll back per-track tick state so the next note is not detected as a
     // chord extension of this grace.
     if (ec.savedPrevMidiTick >= 0) {
-        ctx.prevMidiTick[trackKey] = ec.savedPrevMidiTick;
+        ctx.scratch.prevMidiTick[trackKey] = ec.savedPrevMidiTick;
     } else {
-        ctx.prevMidiTick.erase(trackKey);
+        ctx.scratch.prevMidiTick.erase(trackKey);
     }
     if (ec.hadLastChordPos) {
-        ctx.lastChordPos[trackKey] = ec.savedLastChordPos;
+        ctx.scratch.lastChordPos[trackKey] = ec.savedLastChordPos;
     } else {
-        ctx.lastChordPos.erase(trackKey);
+        ctx.scratch.lastChordPos.erase(trackKey);
     }
 
     DurationType graceDt = realDuration2DurationType(en->realDuration, en->faceValue);
@@ -98,14 +98,14 @@ bool tryHandleGraceNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec,
                 gc->setGraceIndex(0);
                 toChord(existingEl)->add(gc);
                 applyNoteArticulations(ctx, gnote, gc, en, ec.track, mc);
-                ctx.graceStolenTicks[trackKey] += faceValue2ticks(en->faceValue & 0x0F);
+                ctx.scratch.graceStolenTicks[trackKey] += faceValue2ticks(en->faceValue & 0x0F);
                 return true;
             }
         }
     }
 
-    ctx.pendingGraces[trackKey].push_back({ gc, en });
-    ctx.graceStolenTicks[trackKey] += faceValue2ticks(en->faceValue & 0x0F);
+    ctx.scratch.pendingGraces[trackKey].push_back({ gc, en });
+    ctx.scratch.graceStolenTicks[trackKey] += faceValue2ticks(en->faceValue & 0x0F);
     return true;
 }
 } // namespace mu::iex::enc

@@ -252,7 +252,6 @@ struct BuildCtx
     std::vector<PendingOrnFingering> pendingOrnFingerings {};
     std::vector<PendingOttava> pendingOttavas {};
     std::vector<PendingMarker> pendingMarkers {};
-    std::map<track_idx_t, std::vector<PendingLyric> > pendingLyrics {};
 
     // Volta being coalesced: equal-bitmask runs collapse into one Volta.
     Volta* activeVolta { nullptr };
@@ -262,36 +261,44 @@ struct BuildCtx
     // followed by a bitmask of {2,4} → only show "4." for the second bracket, not "2, 4.").
     quint8 usedVoltaBits { 0 };
 
-    std::map<std::pair<int, int>, TupletTracker> tuplets {};
+    // Per-measure / per-run emitter scratch, grouped so builders and resolvers don't touch it:
+    // only the emitters (emitMeasures and its helpers) use ctx.emit.*. Lives for the emit phase.
+    struct EmitState {
+        // Tuplet trackers under construction, keyed by (staffIdx, msVoice); cleared each measure.
+        std::map<std::pair<int, int>, TupletTracker> tuplets {};
+        // Inner (nested) TupletTrackers; cleared each measure alongside tuplets.
+        std::map<std::pair<int, int>, TupletTracker> innerTuplets {};
 
-    // Pending tie-start notes, persists across measures. key=(staffIdx, voice, pitch).
-    std::map<std::tuple<int, int, int>, Note*> pendingTieNote {};
+        // Pending tie-start notes, persists across measures. key=(staffIdx, voice, pitch).
+        std::map<std::tuple<int, int, int>, Note*> pendingTieNote {};
 
-    // Accumulated written position per (staffIdx, msVoice).
-    std::map<std::pair<int, int>, Fraction> cumTick {};
-    // Last MIDI tick placed; same tick = same chord.
-    std::map<std::pair<int, int>, int> prevMidiTick {};
-    // Encore voice of last note placed; guards against chord-extension misdetection.
-    std::map<std::pair<int, int>, int> prevEncVoice {};
-    std::map<std::pair<int, int>, Fraction> lastChordPos {};
-    // Last enc tick at which a REST was placed; absorbs duplicate rests when multiple
-    // Encore voices route to the same MuseScore voice.
-    std::map<std::pair<int, int>, int> prevRestTick {};
+        // Accumulated written position per (staffIdx, msVoice).
+        std::map<std::pair<int, int>, Fraction> cumTick {};
+        // Last MIDI tick placed; same tick = same chord.
+        std::map<std::pair<int, int>, int> prevMidiTick {};
+        // Encore voice of last note placed; guards against chord-extension misdetection.
+        std::map<std::pair<int, int>, int> prevEncVoice {};
+        std::map<std::pair<int, int>, Fraction> lastChordPos {};
+        // Last enc tick at which a REST was placed; absorbs duplicate rests when multiple
+        // Encore voices route to the same MuseScore voice.
+        std::map<std::pair<int, int>, int> prevRestTick {};
 
-    // Grace chords held detached; attached to the next normal chord. The source EncNote is
-    // kept so articulations/ornaments/fermatas are applied once the grace has a real segment
-    // (a detached grace only sees the dummy segment, where fermatas cannot anchor).
-    std::map<std::pair<int, int>, std::vector<PendingGrace> > pendingGraces {};
-    // Ticks borrowed by grace notes; suppresses spurious gap-snap rests after a grace group.
-    std::map<std::pair<int, int>, int> graceStolenTicks {};
-    // Inner (nested) TupletTrackers; cleared each measure alongside tuplets.
-    std::map<std::pair<int, int>, TupletTracker> innerTuplets {};
-    // True when the next syllable follows a hyphen; reset at measure boundary.
-    std::map<track_idx_t, bool> nextLyricHyphenBefore {};
-    // Last lyric attached on each track. Lets a hyphen that opens the next measure
-    // promote the previous measure's final syllable so the word stays hyphenated
-    // across the barline.
-    std::map<track_idx_t, mu::engraving::Lyrics*> lastAttachedLyric {};
+        // Grace chords held detached; attached to the next normal chord. The source EncNote is
+        // kept so articulations/ornaments/fermatas are applied once the grace has a real segment
+        // (a detached grace only sees the dummy segment, where fermatas cannot anchor).
+        std::map<std::pair<int, int>, std::vector<PendingGrace> > pendingGraces {};
+        // Ticks borrowed by grace notes; suppresses spurious gap-snap rests after a grace group.
+        std::map<std::pair<int, int>, int> graceStolenTicks {};
+
+        // Lyric syllables queued for attachment; drained each measure by attachPendingLyrics.
+        std::map<track_idx_t, std::vector<PendingLyric> > pendingLyrics {};
+        // True when the next syllable follows a hyphen; reset at measure boundary.
+        std::map<track_idx_t, bool> nextLyricHyphenBefore {};
+        // Last lyric attached on each track. Lets a hyphen that opens the next measure
+        // promote the previous measure's final syllable so the word stays hyphenated
+        // across the barline.
+        std::map<track_idx_t, mu::engraving::Lyrics*> lastAttachedLyric {};
+    } scratch;
 };
 } // namespace mu::iex::enc
 

@@ -127,7 +127,7 @@ void adjustPickupMeasure(BuildCtx& ctx, Measure* measure, int measIdx)
         return;
     }
     Fraction maxCumTick { 0, 1 };
-    for (auto& [key, ct] : ctx.cumTick) {
+    for (auto& [key, ct] : ctx.scratch.cumTick) {
         if (ct > maxCumTick) {
             maxCumTick = ct;
         }
@@ -152,10 +152,10 @@ void fillTrailingGaps(BuildCtx& ctx, Measure* measure, Fraction measTick)
     for (int si = 0; si < ctx.totalStaves; ++si) {
         for (voice_idx_t v = 0; v < VOICES; ++v) {
             const auto key = std::make_pair(si, static_cast<int>(v));
-            if (!ctx.cumTick.count(key)) {
+            if (!ctx.scratch.cumTick.count(key)) {
                 continue;
             }
-            const Fraction voicePos = ctx.cumTick.at(key);
+            const Fraction voicePos = ctx.scratch.cumTick.at(key);
             if (voicePos <= Fraction(0, 1)) {
                 continue;
             }
@@ -192,8 +192,8 @@ void fillTrailingGaps(BuildCtx& ctx, Measure* measure, Fraction measTick)
             Fraction staffLen { 0, 1 };
             for (voice_idx_t v = 0; v < VOICES; ++v) {
                 const auto k = std::make_pair(si, static_cast<int>(v));
-                if (ctx.cumTick.count(k) && ctx.cumTick.at(k) > staffLen) {
-                    staffLen = ctx.cumTick.at(k);
+                if (ctx.scratch.cumTick.count(k) && ctx.scratch.cumTick.at(k) > staffLen) {
+                    staffLen = ctx.scratch.cumTick.at(k);
                 }
             }
             if (staffLen <= Fraction(0, 1)) {

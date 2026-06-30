@@ -37,7 +37,7 @@ namespace mu::iex::enc {
 void enqueueLyric(BuildCtx& ctx, const EncLyric* el, track_idx_t track)
 {
     const String text(el->text);
-    auto& queue = ctx.pendingLyrics[track];
+    auto& queue = ctx.scratch.pendingLyrics[track];
     if (text == u"-") {
         if (!queue.empty()) {
             queue.back().hyphenAfter = true;
@@ -46,8 +46,8 @@ void enqueueLyric(BuildCtx& ctx, const EncLyric* el, track_idx_t track)
             // cleared at the barline). Promote it so the hyphen renders across the bar:
             // a standalone word becomes the start of a hyphenated one (SINGLE -> BEGIN),
             // and an ending syllable becomes a middle one (END -> MIDDLE).
-            auto it = ctx.lastAttachedLyric.find(track);
-            if (it != ctx.lastAttachedLyric.end() && it->second) {
+            auto it = ctx.scratch.lastAttachedLyric.find(track);
+            if (it != ctx.scratch.lastAttachedLyric.end() && it->second) {
                 mu::engraving::Lyrics* prev = it->second;
                 if (prev->syllabic() == mu::engraving::LyricsSyllabic::SINGLE) {
                     prev->setSyllabic(mu::engraving::LyricsSyllabic::BEGIN);
@@ -56,17 +56,17 @@ void enqueueLyric(BuildCtx& ctx, const EncLyric* el, track_idx_t track)
                 }
             }
         }
-        ctx.nextLyricHyphenBefore[track] = true;
+        ctx.scratch.nextLyricHyphenBefore[track] = true;
     } else if (text.isEmpty()) {
-        ctx.nextLyricHyphenBefore[track] = false;
+        ctx.scratch.nextLyricHyphenBefore[track] = false;
     } else {
         PendingLyric pl;
         pl.encTick = static_cast<int>(el->tick);
         pl.text = text;
-        auto it = ctx.nextLyricHyphenBefore.find(track);
-        pl.hyphenBefore = (it != ctx.nextLyricHyphenBefore.end()) && it->second;
+        auto it = ctx.scratch.nextLyricHyphenBefore.find(track);
+        pl.hyphenBefore = (it != ctx.scratch.nextLyricHyphenBefore.end()) && it->second;
         pl.hyphenAfter = false;
-        ctx.nextLyricHyphenBefore[track] = false;
+        ctx.scratch.nextLyricHyphenBefore[track] = false;
         queue.push_back(std::move(pl));
     }
 }
@@ -186,7 +186,7 @@ static int findBestCr(const std::vector<std::pair<int, ChordRest*> >& pairs,
     return bestIdx;
 }
 
-// Attach queued lyrics from ctx.pendingLyrics to the nearest chord in the measure.
+// Attach queued lyrics from ctx.scratch.pendingLyrics to the nearest chord in the measure.
 // Uses a "lyrics-first" greedy assignment: for each syllable in tick order, claim
 // the nearest available note within the threshold, so later syllables cannot steal
 // the note from an earlier one.
@@ -202,7 +202,7 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
     const int beatTicksVal = encMeas.beatTicks ? static_cast<int>(encMeas.beatTicks) : 240;
     const int matchThreshold = beatTicksVal / 2;
 
-    for (auto& [lyTrack, entries] : ctx.pendingLyrics) {
+    for (auto& [lyTrack, entries] : ctx.scratch.pendingLyrics) {
         if (entries.empty()) {
             continue;
         }
@@ -263,13 +263,13 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
             }
             ly->setSyllabic(syll);
             c->add(ly);
-            ctx.lastAttachedLyric[lyTrack] = ly;
+            ctx.scratch.lastAttachedLyric[lyTrack] = ly;
         }
         // Lyric ticks are measure-relative; unmatched leftovers cannot anchor in a
         // later measure, so discard them.
         entries.clear();
     }
-    // ctx.nextLyricHyphenBefore survives barlines so a trailing hyphen (e.g. "RO -")
+    // ctx.scratch.nextLyricHyphenBefore survives barlines so a trailing hyphen (e.g. "RO -")
     // carries into the next measure's first syllable.
 }
 } // namespace mu::iex::enc
