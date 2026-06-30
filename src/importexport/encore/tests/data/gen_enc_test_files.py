@@ -299,6 +299,8 @@ def apply_encore_layout(data):
                 # (eighth 7, sixteenth 5), staff-line relative for any clef.
                 if typ == 8 and esize >= 13 and out[i + 12] == 0:
                     out[i + 12] = {4: 7, 5: 5}.get(out[i + 5] & 0x0F, 6)
+                if typ == 8:
+                    groups.setdefault((out[i + 4], voice), []).append((tick, i, out[i + 5] & 0x0F, 8))
                 if typ == 9 and esize >= 16:
                     midi = out[i + 15]
                     # diatonic staff position + accidental (sharp spelling),
@@ -320,7 +322,7 @@ def apply_encore_layout(data):
                             if out[i + 21] == 0:
                                 out[i + 21] = _ALT_GLYPH.get(actual, 0)
                             meas_accid[akey] = actual
-                    groups.setdefault((out[i + 4], voice), []).append((tick, i, out[i + 5] & 0x0F))
+                    groups.setdefault((out[i + 4], voice), []).append((tick, i, out[i + 5] & 0x0F, 9))
             i += esize
         # measure width @0x10. Normally the x-position of the measure end, so
         # the last note keeps its own duration as trailing space. But when the
@@ -347,23 +349,26 @@ def apply_encore_layout(data):
             staff_voices.setdefault(rs, set()).add(vc)
         for (rs, vc), evts in groups.items():
             multi = len(staff_voices.get(rs, ())) > 1
-            onsets = sorted(set(t for (t, _, _) in evts))
+            onsets = sorted(set(t for (t, _, _, _) in evts))
             next_onset = {t: (onsets[k + 1] if k + 1 < len(onsets) else dur_ticks)
                           for k, t in enumerate(onsets)}
             chords = {}
-            for (tick, off, fv) in evts:
-                chords.setdefault(tick, []).append((off, fv))
+            for (tick, off, fv, etyp) in evts:
+                chords.setdefault(tick, []).append((off, fv, etyp))
             for tick, chord in chords.items():
                 gap = next_onset[tick] - tick
-                positions = [out[off + 12] for (off, _) in chord]
-                furthest = max(positions, key=lambda p: abs(p - 6))
+                note_pos = [out[off + 12] for (off, _, et) in chord if et == 9]
+                furthest = max(note_pos, key=lambda p: abs(p - 6)) if note_pos else 6
                 down = (vc >= 1) or (not multi and furthest >= 6)
                 # playback length ~ 80% of the note's sounding duration, the
                 # gate time Encore records (eighth 120 -> 96, half 480 -> 384).
                 pbdur = max(1, round(gap * 0.8))
-                for (off, fv) in chord:
+                for (off, fv, et) in chord:
+                    # dots apply to notes and rests alike (parity by position)
                     if _dots_from_gap(gap, fv) > 0 and out[off + 14] == 0:
                         out[off + 14] = 0x1d if out[off + 12] % 2 == 0 else 0x19
+                    if et != 9:
+                        continue
                     if down and out[off + 3] >= 21 and not (out[off + 20] & 0x80):
                         out[off + 20] |= 0x80
                     # Make the note actually sound in Encore. Playback uses the
