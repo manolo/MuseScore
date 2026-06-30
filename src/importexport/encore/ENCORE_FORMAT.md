@@ -579,7 +579,7 @@ Offsets from element start:
 **Tempo beat unit (+28, `noto`).** Low 7 bits = note value (0 = whole, 1 = half, 2 = quarter, 3 = eighth, ...) and high bit 0x80 = dotted, so 0x02 is a quarter, 0x82 a dotted quarter, 0x81 a dotted half.
 A value of 0 (or an out-of-range byte from an older format) means no explicit unit.
 
-**Tempo BPM.** In v0xC4 the BPM is at +30, expressed in the beat unit from +28. In v0xC2 (Encore 3.x/4.x) the BPM is instead at +28 and the +30 slot holds a constant unrelated byte (observed 0x34 = 52), so read +28 for v0xC2 tempo marks.
+**Tempo BPM.** In v0xC4 the BPM is at +30, expressed in the beat unit from +28. v0xC2 (Encore 3.x/4.x) has two layouts. Newer files match v0xC4: the BPM is at +30 and +28 holds a beat-unit code (low 7 bits in 0..6). Older files store the BPM directly at +28 and leave a constant unrelated byte (observed 0x34 = 52) in the +30 slot. Distinguish by +28: when it is a valid beat-unit code the BPM is at +30; otherwise the +28 byte itself is the BPM.
 
 The TEXT block entry index at +32 is present only when the element is at least 33 bytes long.
 In shorter ornaments (notably v0xC2 size-32 STAFFTEXT elements) the +32 slot does not exist, and the entry index is read from the +30 slot instead, sharing it with the tempo byte.

@@ -4100,6 +4100,43 @@ def gen_v0c2_tempo_orn_bpm_offset():
     return pre + body + SKELETON_POST
 
 
+def ornament_v0c2_tempo_v0c4_layout(tick, voice, staffIdx, bpm, noto=2):
+    """38-byte v0xC2 TEMPO ornament that uses the v0xC4-style layout: a beat-unit
+    code (noto) at +28 and the BPM at +30. Newer Encore 4.x files store the tempo
+    this way (the value at +28 is a small note-value code, e.g. 0x02 = quarter),
+    unlike the older layout where the BPM itself sits at +28."""
+    d = bytearray(38)
+    struct.pack_into('<H', d, 0, tick)
+    d[2] = (5 << 4) | (voice & 0xF)
+    d[3] = 38
+    d[4] = staffIdx & 0x3F
+    d[5] = 0x32           # TEMPO subtype
+    d[28] = noto & 0xFF   # beat-unit code (0x02 = quarter)
+    d[30] = bpm & 0xFF    # v0xC4-style BPM at +30
+    return bytes(d)
+
+
+# ===========================================================================
+# text_tempo_orn_v0c2_v0c4_layout.enc
+# FIX: some v0xC2 (Encore 4.x) files store the tempo mark the v0xC4 way: a small
+# beat-unit code at ORN +28 (noto, e.g. 0x02 = quarter) and the real BPM at +30.
+# The earlier v0xC2 rule moved +28 into the tempo unconditionally, so a quarter=158
+# mark imported as quarter=2 (the beat-unit code). The reader must keep the +30 BPM
+# when +28 is a valid beat-unit code, and only move +28 across when it is not.
+# Fixture: 4/4 v0xC2, header bpm=0, ORN TEMPO with noto=0x02 at +28 and BPM=158 at +30.
+# Expected: TempoText quarter=158, BPS=158/60; not quarter=2.
+# ===========================================================================
+def gen_v0c2_tempo_orn_v0c4_layout():
+    orn = ornament_v0c2_tempo_v0c4_layout(0, 0, 0, bpm=158, noto=2)
+    e  = bytes(orn)
+    e += note_v0c2(0, 0, 0, fv=3, pitch=60)
+    e += end_marker()
+    pre  = set_chumagio(0xC2)
+    body = meas_block(meas_hdr(4, 4, bpm=0), e)
+    body += b''.join(meas_block(meas_hdr(4, 4, bpm=0), end_marker()) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
 def gen_v0c4_tempo_orn_explicit_quarter_unit():
     orn = bytearray(ornament_v0c4(0, 0, 0, tipo=0x32))
     orn[28] = 2          # noto = explicit quarter-note beat unit (0-indexed note value)
@@ -8675,6 +8712,7 @@ if __name__=='__main__':
     write("text_tempo_orn_xoffset_downbeat.enc",                gen_v0c4_tempo_orn_xoffset_downbeat())
     write("text_tempo_orn_explicit_quarter_unit.enc",           gen_v0c4_tempo_orn_explicit_quarter_unit())
     write("text_tempo_orn_v0c2_bpm_offset.enc",                 gen_v0c2_tempo_orn_bpm_offset())
+    write("text_tempo_orn_v0c2_v0c4_layout.enc",                gen_v0c2_tempo_orn_v0c4_layout())
     write("text_orn_tempo_misplaced_multi_measure.enc",         gen_v0c4_orn_tempo_misplaced_multi_measure())
     write("text_orn_tempo_equals_header.enc",                   gen_v0c4_orn_tempo_equals_header_at_start())
     write("notes_rdur_80_stays_16th.enc",         gen_v0c4_rdur_80_stays_16th())
