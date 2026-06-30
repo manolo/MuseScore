@@ -574,6 +574,21 @@ def rest_v0c4_mrest(tick, voice, staffIdx, fv, mrestCount):
     d[12] = mrestCount & 0xFF
     return struct.pack('<H', tick) + bytes([(8<<4)|(voice&0xF)]) + bytes(d)
 
+def mrest_v0c4(tick, count, staffIdx=0, voice=0):
+    """Multi-measure rest that Encore actually draws as a thick bar with the
+    count above it. The face value byte must be 0x20 (a plain rest fv draws a
+    single whole rest instead), the count sits at +15, and +16/+17 carry the
+    constant 0x80 0x07 marker seen in real files. The layout pass fills x (+10)
+    and position (+12)."""
+    d = bytearray(15)
+    d[0] = 18
+    d[1] = staffIdx & 0x3F
+    d[2] = 0x20
+    d[12] = count & 0xFF        # +15 mrestCount
+    d[13] = 0x80                # +16
+    d[14] = 0x07                # +17
+    return struct.pack('<H', tick) + bytes([(8 << 4) | (voice & 0xF)]) + bytes(d)
+
 def tie_v0c4(tick, voice, staffIdx, direction=0xfe, startFlag=0):
     """16-byte TIE element (type=3). Marks note(s) at (staffIdx, voice, tick)
     as tie-start when EITHER the arc-direction byte at +5 (`direction`) OR
