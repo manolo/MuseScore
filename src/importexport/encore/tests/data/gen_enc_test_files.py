@@ -115,6 +115,11 @@ ENC_XPOS_BASE  = 12
 # width or it collapses every note onto the first position. Validated against a
 # 2/2 beatTicks=240 bar: last xpos 141 + 63 = 204 renders correctly.
 _LEGACY_BEATTICKS_TRAIL = 63
+# A grace note shares its main note's tick, so the tick-based xpos would stack
+# it on top of the main note. Encore draws a grace just to the left, so offset
+# it. Grace notes carry bit 0x20 in grace1 (+6); the common normal-note flags
+# 0x10/0x40/0x50 do not, so the test isolates real graces.
+_GRACE_XPOS_OFFSET = 10
 
 # semitone -> diatonic letter index (C=0 .. B=6), sharp spelling, and the
 # accidental glyph for that semitone (1 = sharp on a black key, else 0).
@@ -210,7 +215,10 @@ def apply_encore_layout(data):
                 tick = struct.unpack('<H', out[i:i + 2])[0]
                 # x-position
                 if struct.unpack('<H', out[i + 10:i + 12])[0] == 0:
-                    struct.pack_into('<H', out, i + 10, _enc_xpos(tick))
+                    xp = _enc_xpos(tick)
+                    if typ == 9 and (out[i + 6] & 0x20):   # grace -> left of its main note
+                        xp = max(2, xp - _GRACE_XPOS_OFFSET)
+                    struct.pack_into('<H', out, i + 10, xp)
                 max_xpos = max(max_xpos, struct.unpack('<H', out[i + 10:i + 12])[0])
                 if typ == 9 and esize >= 16:
                     midi = out[i + 15]
