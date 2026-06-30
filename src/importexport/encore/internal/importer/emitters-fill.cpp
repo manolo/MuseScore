@@ -27,10 +27,12 @@
 #include <algorithm>
 
 #include "engraving/dom/chord.h"
+#include "engraving/dom/durationtype.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/rest.h"
 #include "engraving/dom/segment.h"
+#include "engraving/dom/sig.h"
 #include "engraving/dom/tuplet.h"
 
 namespace mu::iex::enc {
@@ -115,6 +117,35 @@ static void resizeMeasureAndShift(BuildCtx& ctx, Measure* measure, Fraction newL
     }
 }
 
+// Fill a gap of length `len` at absolute tick `fillTick` in `track` with rests of exact rhythmic
+// value, split per the measure's time signature (as Measure::fillGap does), instead of one
+// whole-measure rest. A V_MEASURE-typed rest renders as a centered whole rest whatever its actual
+// duration, which is wrong for a partial gap; a rhythmic split shows the correct values (and is
+// what a visible filler should look like). `makeGap` marks the rests as invisible gap rests.
+// No-op if the first segment is already occupied.
+static void addGapRests(Measure* measure, const Fraction& fillTick, const Fraction& len,
+                        track_idx_t track, bool makeGap)
+{
+    if (len <= Fraction(0, 1)) {
+        return;
+    }
+    const Fraction rtick = fillTick - measure->tick();
+    Fraction pos = fillTick;
+    for (const TDuration& d : toRhythmicDurationList(len, true /*isRest*/, rtick,
+                                                     measure->timesig(), measure, 0 /*maxDots*/)) {
+        Segment* seg = measure->getSegment(SegmentType::ChordRest, pos);
+        if (seg->element(track)) {
+            break;
+        }
+        Rest* r = Factory::createRest(seg, d);
+        r->setTicks(d.isMeasure() ? measure->ticks() : d.fraction());
+        r->setTrack(track);
+        r->setGap(makeGap);
+        seg->add(r);
+        pos += r->actualTicks();
+    }
+}
+
 // Case B pickup adjustment: if measure 0 has the same timesig as measure 1 but
 // the note loop placed less content than the full measure, shorten it to the
 // actual cumTick. Update all subsequent measures' tick positions accordingly.
@@ -168,14 +199,7 @@ void fillTrailingGaps(BuildCtx& ctx, Measure* measure, Fraction measTick)
             }
             const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
             const Fraction fillTick = measTick + voicePos;
-            Segment* seg = measure->getSegment(SegmentType::ChordRest, fillTick);
-            if (!seg->element(tr)) {
-                Rest* r = Factory::createRest(seg, TDuration(DurationType::V_MEASURE));
-                r->setTicks(remaining);
-                r->setTrack(tr);
-                r->setGap(makeGap);
-                seg->add(r);
-            }
+            addGapRests(measure, fillTick, remaining, tr, makeGap);
         }
     }
 
@@ -252,18 +276,10 @@ void correctMeasureLength(BuildCtx& ctx, Measure* measure)
                     delete gr;
                 }
             }
-            // Undershoot: add exact V_MEASURE rest for residual
+            // Undershoot: fill the residual with exact-valued rests.
             const Fraction deficit = mLen - voiceSum;
             if (deficit > Fraction(0, 1) && deficit <= maxDelta) {
-                const Fraction fillTick = measure->tick() + voiceSum;
-                Segment* fillSeg = measure->getSegment(SegmentType::ChordRest, fillTick);
-                if (!fillSeg->element(tr)) {
-                    Rest* r = Factory::createRest(fillSeg, TDuration(DurationType::V_MEASURE));
-                    r->setTicks(deficit);
-                    r->setTrack(tr);
-                    r->setGap(makeGap);
-                    fillSeg->add(r);
-                }
+                addGapRests(measure, measure->tick() + voiceSum, deficit, tr, makeGap);
             }
         }
     }
@@ -300,15 +316,7 @@ void extendMeasureIrregular(BuildCtx& ctx, Measure* measure)
                 if (voiceSum <= Fraction(0, 1) || voiceSum >= maxVoiceSum) {
                     continue;
                 }
-                const Fraction fillTick = measTick + voiceSum;
-                Segment* fillSeg = measure->getSegment(SegmentType::ChordRest, fillTick);
-                if (!fillSeg->element(tr)) {
-                    Rest* r = Factory::createRest(fillSeg, TDuration(DurationType::V_MEASURE));
-                    r->setTicks(maxVoiceSum - voiceSum);
-                    r->setTrack(tr);
-                    r->setGap(false);
-                    fillSeg->add(r);
-                }
+                addGapRests(measure, measTick + voiceSum, maxVoiceSum - voiceSum, tr, false);
             }
         }
     }
@@ -356,15 +364,7 @@ void capMeasureLength(BuildCtx& ctx, Measure* measure)
             }
             const Fraction deficit = mLen - voiceSum;
             if (deficit > Fraction(0, 1)) {
-                const Fraction fillTick = measure->tick() + voiceSum;
-                Segment* fillSeg = measure->getSegment(SegmentType::ChordRest, fillTick);
-                if (!fillSeg->element(tr)) {
-                    Rest* r = Factory::createRest(fillSeg, TDuration(DurationType::V_MEASURE));
-                    r->setTicks(deficit);
-                    r->setTrack(tr);
-                    r->setGap(makeGap);
-                    fillSeg->add(r);
-                }
+                addGapRests(measure, measure->tick() + voiceSum, deficit, tr, makeGap);
             }
         }
     }

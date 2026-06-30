@@ -248,6 +248,43 @@ TEST_F(Tst_Options, underfill_visible_rests_produces_no_gap_rests)
     delete score;
 }
 
+// A partial gap must be filled with exact-valued rests, not a whole-measure (V_MEASURE) rest:
+// a V_MEASURE rest renders as a centered whole rest whatever its real duration, which is wrong
+// next to notes. A fully empty measure may still hold a whole-measure rest, so only measures
+// that contain a note are checked.
+TEST_F(Tst_Options, visible_rests_use_exact_durations_not_whole_measure)
+{
+    EncImportOptions opts;
+    opts.underfillMeasureStrategy = UnderfillStrategy::VisibleRests;
+    MasterScore* score = readEncoreScoreWithOpts("structure_pickup_casea_sparse.enc", opts);
+    ASSERT_NE(score, nullptr);
+
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        bool hasNote = false;
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (track_idx_t t = 0; t < score->ntracks(); ++t) {
+                const EngravingItem* e = s->element(t);
+                if (e && e->isChord()) {
+                    hasNote = true;
+                }
+            }
+        }
+        if (!hasNote) {
+            continue;
+        }
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (track_idx_t t = 0; t < score->ntracks(); ++t) {
+                const EngravingItem* e = s->element(t);
+                if (e && e->isRest()) {
+                    EXPECT_NE(toRest(e)->durationType().type(), DurationType::V_MEASURE)
+                        << "partial-gap fill must use exact rest durations, not a whole-measure rest";
+                }
+            }
+        }
+    }
+    delete score;
+}
+
 // ===========================================================================
 // firstMeasureIsPickup
 // ===========================================================================
