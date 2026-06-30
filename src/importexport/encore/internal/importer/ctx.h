@@ -267,6 +267,13 @@ struct BuildCtx
     // Per-measure / per-run emitter scratch, grouped so builders and resolvers don't touch it:
     // only the emitters (emitMeasures and its helpers) use ctx.emit.*. Lives for the emit phase.
     struct EmitState {
+        // Elements dropped by routeElementStaffVoice because they reference a staff index the
+        // score does not have (mostly orphan data from staves deleted in Encore, not shown there)
+        // or an out-of-range voice. Counted here and reported once, instead of one log line each.
+        // mutable: routeElementStaffVoice takes a const BuildCtx& and otherwise only reads.
+        mutable std::map<int, int> droppedByMissingStaff {};   // staff index -> count
+        mutable int droppedByBadVoice { 0 };
+
         // Tuplet trackers under construction, keyed by (staffIdx, msVoice); cleared each measure.
         std::map<std::pair<int, int>, TupletTracker> tuplets {};
         // Inner (nested) TupletTrackers; cleared each measure alongside tuplets.

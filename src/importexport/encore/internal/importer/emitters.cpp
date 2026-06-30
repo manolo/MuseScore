@@ -371,8 +371,10 @@ std::optional<RoutedTrack> routeElementStaffVoice(
     }
 
     if (staffIdx >= ctx.totalStaves) {
-        LOGD() << "Encore import: dropping element at tick " << e->tick
-               << " - staff index " << staffIdx << " >= total staves " << ctx.totalStaves;
+        // The element references a staff the score does not have. This is almost always orphan
+        // data from a staff deleted in Encore (its index is not reused, and Encore does not show
+        // it). Count it; emitMeasures reports the total once instead of one line per element.
+        ++ctx.scratch.droppedByMissingStaff[staffIdx];
         return std::nullopt;
     }
     // Multi-staff routing:
@@ -411,8 +413,7 @@ std::optional<RoutedTrack> routeElementStaffVoice(
 
     const int msVoice = voice;
     if (msVoice >= static_cast<int>(VOICES)) {
-        LOGD() << "Encore import: dropping element at tick " << e->tick
-               << " - voice " << msVoice << " out of range on staff " << staffIdx;
+        ++ctx.scratch.droppedByBadVoice;
         return std::nullopt;  // voice out of range
     }
     RoutedTrack r;
@@ -1019,5 +1020,25 @@ void emitMeasures(BuildCtx& ctx)
 
     applyMeasureBpmMarks(ctx);
     discardDanglingGraces(ctx);
+
+    // One-line summary of elements that could not be placed (they reference a staff/voice the
+    // score does not have), instead of a debug line per dropped element.
+    if (!ctx.scratch.droppedByMissingStaff.empty() || ctx.scratch.droppedByBadVoice > 0) {
+        int total = ctx.scratch.droppedByBadVoice;
+        std::string byStaff;
+        for (const auto& [staffIdx, count] : ctx.scratch.droppedByMissingStaff) {
+            total += count;
+            if (!byStaff.empty()) {
+                byStaff += ", ";
+            }
+            byStaff += "staff " + std::to_string(staffIdx) + ": " + std::to_string(count);
+        }
+        LOGD() << "Encore import: dropped " << total << " element(s) the score has no place for"
+               << " (" << ctx.totalStaves << " staves built"
+               << (byStaff.empty() ? std::string() : "; missing-staff refs: " + byStaff)
+               << (ctx.scratch.droppedByBadVoice ? "; out-of-range voice: "
+                   + std::to_string(ctx.scratch.droppedByBadVoice) : std::string())
+               << "). These usually come from staves deleted in Encore (not shown there).";
+    }
 }
 } // namespace mu::iex::enc
