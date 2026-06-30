@@ -768,8 +768,10 @@ def tie_arc_v0c4(tick, staffIdx, position, arcX1, arcX2, voice=0, direction=0xfe
 # importer reads); see the ENCORE_FORMAT ornament table.
 ARTIC = {'staccato': 0xC9, 'accent': 0xBE, 'tenuto': 0xC8, 'marcato': 0xBF,
          'marcato_below': 0xC6, 'fermata': 0xCC, 'fermata_below': 0xCD,
-         'upbow': 0xC4, 'downbow': 0xBD,
-         'trill': 0xB0, 'short_trill': 0xB6, 'mordent': 0xB8, 'tremolo': 0xAF}
+         'upbow': 0xC4,
+         'trill': 0xB0, 'short_trill': 0xB6, 'mordent': 0xB8, 'tremolo': 0xAF,
+         'finger1': 0xB9, 'finger2': 0xBA, 'finger3': 0xBB, 'finger4': 0xBC,
+         'finger5': 0xBD}
 
 def artic_v0c4(tick, staffIdx, mark, xoffset, yoffset=12, voice=0):
     """Articulation or single ornament as a size-16 ORN (staccato, accent,
