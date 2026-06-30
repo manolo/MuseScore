@@ -212,6 +212,9 @@ struct PendingGrace {
     const EncNote* en { nullptr };
 };
 
+// Shared importer context threaded through builders, emitters and resolvers: the target score,
+// the parsed Encore model, import options, derived staff/measure tables, the resolver "pending"
+// queues drained in the post-pass, and (grouped in EmitState scratch) the emitter-only state.
 struct BuildCtx
 {
     mu::engraving::MasterScore* score;

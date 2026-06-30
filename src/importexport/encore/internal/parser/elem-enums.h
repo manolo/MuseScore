@@ -25,7 +25,6 @@
 #include <QtGlobal>
 
 namespace mu::iex::enc {
-
 // Encore file format versions (byte at file offset 4).
 enum class EncFormatVersion : quint8 {
     V2_X   = 0xA6,  // Encore 2.x (legacy)
@@ -33,11 +32,13 @@ enum class EncFormatVersion : quint8 {
     V5_X   = 0xC4,  // Encore 5.x (current)
 };
 
+// Text encoding width of an instrument's strings: 1-byte (ANSI) or 2-byte (UTF-16 LE).
 enum class EncCharSize : char {
     ONE_BYTE,
     TWO_BYTES
 };
 
+// Clef shape stored per staff/clef-change. ALIA (-1) = inherit/unchanged.
 enum class EncClefType : qint8 {
     ALIA = -1,
     G    = 0,
@@ -51,6 +52,7 @@ enum class EncClefType : qint8 {
     TAB  = 8
 };
 
+// Staff notation kind: standard melody, guitar tablature, or rhythm-slash staff.
 enum class EncStaffType : quint8 {
     MELODY  = 0,
     TAB     = 1,
@@ -201,5 +203,4 @@ enum class EncTextAlign : quint8 {
     CENTER = 0x06,
     RIGHT  = 0x02
 };
-
 } // namespace mu::iex::enc

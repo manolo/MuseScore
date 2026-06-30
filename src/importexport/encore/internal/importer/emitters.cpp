@@ -930,6 +930,9 @@ static void discardDanglingGraces(BuildCtx& ctx)
     ctx.scratch.pendingGraces.clear();
 }
 
+// Main emit phase: walk every parsed measure, route and dispatch each element to its type
+// handler (notes/rests/ornaments/lyrics/...), and run the per-measure fill/overfull passes.
+// The resolver post-pass (spanners, etc.) runs afterwards from buildScore.
 void emitMeasures(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;

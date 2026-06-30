@@ -73,6 +73,8 @@ struct EncMeasureElem {
     virtual bool read(QDataStream& ds);
 };
 
+// A pitched note: face value (duration + notehead), MIDI pitch, articulations, tuplet ratio,
+// and grace/tie flags derived during parsing.
 struct EncNote : EncMeasureElem {
     quint8 faceValue       { 0 };
     quint8 grace1          { 0 };
@@ -114,6 +116,7 @@ struct EncNote : EncMeasureElem {
     bool read(QDataStream& ds) override;
 };
 
+// A rest; mrestCount > 1 marks an Encore multi-measure rest (v0xC4) shown as one symbol.
 struct EncRest : EncMeasureElem {
     quint8 faceValue  { 0 };
     quint8 tuplet     { 0 };
@@ -137,6 +140,7 @@ struct EncRest : EncMeasureElem {
     bool read(QDataStream& ds) override;
 };
 
+// Mid-measure key-signature change (tipo = Encore key index).
 struct EncKeyChange : EncMeasureElem {
     quint8 tipo { 0 };
 
@@ -145,6 +149,7 @@ struct EncKeyChange : EncMeasureElem {
     bool read(QDataStream& ds) override;
 };
 
+// Mid-measure clef change.
 struct EncClefChange : EncMeasureElem {
     EncClefType clefType { EncClefType::G };
 
@@ -153,6 +158,7 @@ struct EncClefChange : EncMeasureElem {
     bool read(QDataStream& ds) override;
 };
 
+// Placeholder for element types the importer does not model; carried through but not emitted.
 struct EncGenericElem : EncMeasureElem {
     using EncMeasureElem::EncMeasureElem;
 

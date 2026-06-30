@@ -51,6 +51,7 @@ bool fitsTDuration(const Fraction& f)
     return snap.isValid() && snap.fraction() == f;
 }
 
+// Finish the current tuplet group and reset the per-group accumulators for the next one.
 void TupletTracker::closeTuplet()
 {
     if (currentTuplet && placedTicks > Fraction(0, 1)) {
@@ -76,6 +77,7 @@ void TupletTracker::closeTuplet()
     fullFaceSum = Fraction(0, 1);
 }
 
+// Create a MuseScore Tuplet for an [aN:normalN_] group at tick and begin tracking it.
 Tuplet* TupletTracker::startTuplet(Measure* measure, Fraction tick,
                                    int aN, int normalN_, DurationType baseType, track_idx_t track_)
 {
@@ -98,6 +100,7 @@ Tuplet* TupletTracker::startTuplet(Measure* measure, Fraction tick,
     return currentTuplet;
 }
 
+// Tick advance contributed by one tuplet member of the given base duration (scaled by the ratio).
 Fraction TupletTracker::noteAdvance(DurationType baseType) const
 {
     if (!inTuplet()) {
