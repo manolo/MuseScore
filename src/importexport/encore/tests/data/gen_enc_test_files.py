@@ -216,10 +216,6 @@ _LEGACY_BEATTICKS_TRAIL = 63
 # 0x10/0x40/0x50 do not, so the test isolates real graces.
 _GRACE_XPOS_OFFSET = 10
 
-# semitone -> diatonic letter index (C=0 .. B=6), sharp spelling, and the
-# accidental glyph for that semitone (1 = sharp on a black key, else 0).
-_PC_LETTER = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6]
-_PC_SHARP  = [0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0]
 # clef byte -> absolute-diatonic-index of staff position 0.  G=C4, F=E2,
 # G8M=C3 (octave down), G8P=C5 (octave up).  PERC(7)/TAB(8)/other: no pitch
 # mapping, skip.
@@ -227,9 +223,6 @@ _CLEF_ORIGIN = {0: 28, 1: 16, 4: 35, 5: 21}
 
 def _enc_xpos(tick):
     return round(ENC_XPOS_BASE + tick * ENC_XPOS_SLOPE)
-
-def _abs_diatonic(midi):
-    return (midi // 12 - 1) * 7 + _PC_LETTER[midi % 12]
 
 def _face_ticks(fv):
     return {1: 960, 2: 480, 3: 240, 4: 120, 5: 60, 6: 30, 7: 15}.get(fv & 0x0F, 0)
