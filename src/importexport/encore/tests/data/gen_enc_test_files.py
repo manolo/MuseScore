@@ -171,35 +171,38 @@ def _key_alt(fifths):
 
 def _spell(midi, fifths, origin):
     """Spell a MIDI pitch in the given key. Returns (staff position byte,
-    displayed accidental) where the accidental is 0=none (in key), 1=sharp,
-    2=flat, 3=natural. A note that matches the key's accidental for its letter
-    shows no accidental; one that differs shows the explicit glyph."""
+    letter 0-6, actualAlteration) where actualAlteration is the note's true
+    semitone offset from its natural letter (-1 flat, 0 natural, +1 sharp).
+    The displayed accidental is decided by the caller, which also tracks
+    accidentals already in effect in the measure."""
     pc = midi % 12
     alt = _key_alt(fifths)
     letter = None
     actual = 0
-    disp = 0
     for L in range(7):                       # in-key spelling
         if (_NAT_SEMI[L] + alt[L]) % 12 == pc:
-            letter, actual, disp = L, alt[L], 0
+            letter, actual = L, alt[L]
             break
-    if letter is None:                       # natural against a key accidental
+    if letter is None:                       # natural letter
         for L in range(7):
             if _NAT_SEMI[L] % 12 == pc:
-                letter, actual, disp = L, 0, (3 if alt[L] else 0)
+                letter, actual = L, 0
                 break
     if letter is None:                       # raised (sharp)
         for L in range(7):
             if (_NAT_SEMI[L] + 1) % 12 == pc:
-                letter, actual, disp = L, 1, 1
+                letter, actual = L, 1
                 break
     if letter is None:                       # lowered (flat)
         for L in range(7):
             if (_NAT_SEMI[L] - 1) % 12 == pc:
-                letter, actual, disp = L, -1, 2
+                letter, actual = L, -1
                 break
     octave = (midi - actual) // 12 - 1
-    return (octave * 7 + letter - origin) & 0xFF, disp
+    return (octave * 7 + letter - origin) & 0xFF, letter, actual
+
+# actual alteration (-2..+2) -> accidental glyph byte (1 sharp, 2 flat, 3 natural)
+_ALT_GLYPH = {1: 1, -1: 2, 0: 3, 2: 4, -2: 5}
 
 def _staff_clef_map(data):
     """Map a note's rawStaff byte to its clef, read from the first LINE block.
@@ -256,6 +259,9 @@ def apply_encore_layout(data):
         # collect note/rest elements; track per (rawStaff, voice) for dots
         groups = {}
         max_xpos = 0
+        # accidental in effect this measure, per (rawStaff, staff position):
+        # an accidental carries to later same-line notes until the barline.
+        meas_accid = {}
         i = elem_start
         while i + 4 <= elem_end:
             if out[i:i + 2] == b'\xff\xff':
@@ -303,10 +309,17 @@ def apply_encore_layout(data):
                     origin = _CLEF_ORIGIN.get(clef)   # None for PERC/TAB -> skip
                     if origin is not None and out[i + 12] == 0 and midi:
                         fifths = _KEY_FIFTHS[key_by_raw.get(raw_staff, fallback_key) % 15]
-                        posb, disp = _spell(midi, fifths, origin)
+                        posb, letter, actual = _spell(midi, fifths, origin)
                         out[i + 12] = posb
-                        if disp and out[i + 21] == 0:
-                            out[i + 21] = disp
+                        # show an accidental only when the note's alteration
+                        # differs from what is already in effect on that line
+                        # (the key default until an accidental overrides it).
+                        akey = (raw_staff, posb)
+                        in_effect = meas_accid.get(akey, _key_alt(fifths)[letter])
+                        if actual != in_effect:
+                            if out[i + 21] == 0:
+                                out[i + 21] = _ALT_GLYPH.get(actual, 0)
+                            meas_accid[akey] = actual
                     groups.setdefault((out[i + 4], voice), []).append((tick, i, out[i + 5] & 0x0F))
             i += esize
         # measure width @0x10. Normally the x-position of the measure end, so
