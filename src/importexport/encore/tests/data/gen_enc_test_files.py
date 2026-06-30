@@ -186,6 +186,10 @@ def apply_encore_layout(data):
         return data
     out = bytearray(data)
     clef_by_raw, fallback_clef = _staff_clef_map(out)
+    # Mid-piece CLEF changes (element type 1) override the LINE clef for every
+    # later note on that staff. Tracked across measures in stream order, since
+    # Encore writes a staff's elements in tick order with the clef change first.
+    clef_now = {}
     pos = 0
     while True:
         m = out.find(b'MEAS', pos)
@@ -211,6 +215,13 @@ def apply_encore_layout(data):
             esize = out[i + 3]
             if esize == 0:
                 break
+            # type 1 = clef change: update the clef in effect for this staff,
+            # and (16-byte form) draw it just left of the note at its tick.
+            if typ == 1 and esize >= 6:
+                clef_now[out[i + 4]] = out[i + 5]
+                if esize >= 12 and struct.unpack('<H', out[i + 10:i + 12])[0] == 0:
+                    tk = struct.unpack('<H', out[i:i + 2])[0]
+                    struct.pack_into('<H', out, i + 10, max(0, _enc_xpos(tk) - _GRACE_XPOS_OFFSET - 2))
             # type 6 = lyric: it stores its x-position at +10 like a note, and
             # aligns under the note at the same tick.
             if typ == 6 and esize >= 12:
@@ -231,7 +242,8 @@ def apply_encore_layout(data):
                     # diatonic staff position + accidental (sharp spelling),
                     # using the clef of the staff this note belongs to.
                     raw_staff = out[i + 4]
-                    clef = clef_by_raw.get(raw_staff, fallback_clef)
+                    clef = clef_now.get(raw_staff,
+                                        clef_by_raw.get(raw_staff, fallback_clef))
                     origin = _CLEF_ORIGIN.get(clef)   # None for PERC/TAB -> skip
                     if origin is not None and out[i + 12] == 0 and midi:
                         out[i + 12] = (_abs_diatonic(midi) - origin) & 0xFF
@@ -8679,9 +8691,15 @@ def gen_v0c4_cross_measure_slur_precision():
 
 
 def _clef_elem(tick, voice, staffIdx, clef_type):
-    # CLEF element, size=6: tick(2)+typeVoice(1)+size(1)+rawStaff(1)+clefType(1)
-    d = bytearray(3)
-    d[0] = 6; d[1] = staffIdx & 0x3F; d[2] = clef_type & 0xFF
+    # CLEF change element, size=16. Encore renders the clef from this 16-byte
+    # form (a 6-byte one is read by the importer but never drawn). Layout:
+    # tick(2) + typeVoice(1) + size(1) + rawStaff(1) + clefType(1) + 4 zero +
+    # xoffset(2 @+10, filled by the layout pass) + 0x02 @+12 + trailer.
+    d = bytearray(13)
+    d[0] = 16
+    d[1] = staffIdx & 0x3F
+    d[2] = clef_type & 0xFF
+    d[9] = 0x02                  # +12: constant marker seen in real clef changes
     return struct.pack('<H', tick) + bytes([(1 << 4) | (voice & 0xF)]) + bytes(d)
 
 
