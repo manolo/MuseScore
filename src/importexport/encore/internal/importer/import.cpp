@@ -362,6 +362,41 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     score->masterScore()->invalidateRepeatList();
 }
 
+muse::String encoreLoadErrorMessage(const QString& path)
+{
+    QByteArray head;
+    QFile file(path);
+    if (file.open(QIODevice::ReadOnly)) {
+        head = file.read(5);
+    }
+    const QByteArray magic = head.left(4);
+    const muse::String name = muse::String::fromQString(QFileInfo(path).fileName());
+
+    // Older encrypted Encore container (ZBOT/ZBOP/ZBO6).
+    if (magic == "ZBOT" || magic == "ZBOP" || magic == "ZBO6") {
+        return muse::mtrc("engraving",
+                          "“%1” is in an older, encrypted Encore format (%2) that this importer cannot read. "
+                          "Open it in Encore and save it again, then import the saved file.")
+               .arg(name).arg(muse::String::fromQString(QString::fromLatin1(magic)));
+    }
+    // Recognizable Encore header, but the file could not be parsed: unsupported variant, damaged,
+    // or empty.
+    if (magic == "SCOW" || magic == "SCO5") {
+        const QString ver = QStringLiteral("%1").arg(
+            head.size() >= 5 ? static_cast<unsigned char>(head[4]) : 0, 2, 16, QChar('0'));
+        return muse::mtrc("engraving",
+                          "“%1” could not be read as an Encore file (format version 0x%2). It may be damaged "
+                          "or use an unsupported variant. Try opening it in Encore and saving it again, then "
+                          "import the saved file.")
+               .arg(name).arg(muse::String::fromQString(ver));
+    }
+    // No recognizable Encore header at all.
+    return muse::mtrc("engraving",
+                      "“%1” is not a recognized Encore file. Its header does not match any known Encore "
+                      "format, so it may be corrupted or a different type of file.")
+           .arg(name);
+}
+
 Err importEncore(MasterScore* score, const QString& path, const EncImportOptions& opts)
 {
     if (!QFileInfo::exists(path)) {
@@ -373,13 +408,14 @@ Err importEncore(MasterScore* score, const QString& path, const EncImportOptions
         return Err::FileOpenError;
     }
 
-    // ZBOT = Encore 4 format, not supported here. See MuseScore#24341.
+    // ZBOT/ZBOP/ZBO6 are older encrypted Encore containers (only the first 42 bytes decrypt with
+    // a known XOR key; see ENCORE_FORMAT.md). Not supported here. See MuseScore#24341.
     {
         QByteArray magic4 = file.read(4);
         file.seek(0);
-        if (magic4 == "ZBOT") {
-            LOGW("Encore: ZBOT format (Encore 4) is not supported. "
-                 "Please re-save the file using Encore 5 to convert it first.");
+        if (magic4 == "ZBOT" || magic4 == "ZBOP" || magic4 == "ZBO6") {
+            LOGW() << "Encore: encrypted format (" << magic4.toStdString()
+                   << ") is not supported; re-save the file in Encore as an unencrypted file first.";
             return Err::FileBadFormat;
         }
     }

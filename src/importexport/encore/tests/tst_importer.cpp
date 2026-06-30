@@ -52,6 +52,11 @@
 
 #include "testbase.h"
 
+#include <QDir>
+#include <QFile>
+
+#include "../internal/importer/import.h"
+
 static const QString ENC_DIR(QString(iex_encore_tests_DATA_ROOT) + "/data/");
 
 using namespace mu::engraving;
@@ -2428,4 +2433,51 @@ TEST_F(Tst_Importer, v0c4_volta_repeat_skips_first_ending_on_replay)
         << "1st ending must play once and be skipped on the repeat; a stale cached "
         "repeat list replays it on every pass (got " << firstEndingPlays << " plays)";
     delete score;
+}
+
+// Write a small file with the given leading bytes and return its path.
+static QString encWriteTempFile(const QString& name, const QByteArray& bytes)
+{
+    const QString path = QDir::temp().filePath(name);
+    QFile f(path);
+    f.open(QIODevice::WriteOnly | QIODevice::Truncate);
+    f.write(bytes);
+    f.close();
+    return path;
+}
+
+// The bad-format message must identify why a file was rejected and how to recover.
+TEST(EncImporterErrors, EncryptedContainerMessage)
+{
+    for (const char* magic : { "ZBOT", "ZBOP", "ZBO6" }) {
+        const QString path = encWriteTempFile(QStringLiteral("enc_err_%1.enc").arg(magic),
+                                              QByteArray(magic) + QByteArray(40, '\0'));
+        const QString msg = mu::iex::enc::encoreLoadErrorMessage(path).toQString();
+        EXPECT_TRUE(msg.contains("encrypted", Qt::CaseInsensitive))
+            << magic << " -> " << msg.toStdString();
+        EXPECT_TRUE(msg.contains(QString::fromLatin1(magic)))
+            << "message should name the detected container: " << msg.toStdString();
+        QFile::remove(path);
+    }
+}
+
+TEST(EncImporterErrors, UnreadableEncoreFileMessage)
+{
+    // A SCOW header with no valid body: recognizable Encore file, but not parseable.
+    const QString path = encWriteTempFile(QStringLiteral("enc_err_scow.enc"),
+                                          QByteArray("SCOW") + QByteArray(1, '\xC4') + QByteArray(8, '\0'));
+    const QString msg = mu::iex::enc::encoreLoadErrorMessage(path).toQString();
+    EXPECT_TRUE(msg.contains("could not be read", Qt::CaseInsensitive)) << msg.toStdString();
+    EXPECT_TRUE(msg.contains("0xc4", Qt::CaseInsensitive))
+        << "message should report the detected format version byte: " << msg.toStdString();
+    QFile::remove(path);
+}
+
+TEST(EncImporterErrors, NotAnEncoreFileMessage)
+{
+    const QString path = encWriteTempFile(QStringLiteral("enc_err_noise.enc"),
+                                          QByteArray("\x7F\x45\x4C\x46 random noise not encore", 28));
+    const QString msg = mu::iex::enc::encoreLoadErrorMessage(path).toQString();
+    EXPECT_TRUE(msg.contains("not a recognized Encore file", Qt::CaseInsensitive)) << msg.toStdString();
+    QFile::remove(path);
 }

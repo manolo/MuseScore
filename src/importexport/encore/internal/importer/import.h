@@ -37,6 +37,12 @@ class MasterScore;
 
 namespace mu::iex::enc {
 mu::engraving::Err importEncore(mu::engraving::MasterScore* score, const QString& path, const EncImportOptions& opts = EncImportOptions {});
+
+// Build a user-facing message for a file importEncore rejected with FileBadFormat, by
+// re-reading its header: an older encrypted Encore container (ZBOT/ZBOP/ZBO6), a SCOW/SCO5
+// file that could not be parsed (unsupported variant, damaged, or empty), or a file with no
+// recognizable Encore header at all.
+muse::String encoreLoadErrorMessage(const QString& path);
 } // namespace mu::iex::enc
 
 #endif // MU_IMPORTEXPORT_ENC_IMPORT_IMPORT_H
