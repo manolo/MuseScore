@@ -3395,6 +3395,20 @@ def meas_hdr_coda(timeSigNum, timeSigDen, bpm=100, barTypeEnd=0, codaByte=0):
     return bytes(h)
 
 
+def meas_hdr_volta(timeSigNum, timeSigDen, ending, hooks=0xC0, bpm=100, barTypeEnd=0):
+    """meas_hdr variant that draws a volta (ending) bracket. `ending` is the
+    ending-number bitmask at +0x0F (bit 0 = 1st ending, bit 1 = 2nd, ...);
+    consecutive measures with the same bitmask form one bracket. `hooks` at
+    +0x0E draws the bracket ends: 0xC0 both (single-measure ending), 0x80 left
+    only (bracket start), 0x40 right only (bracket end). Without the hooks byte
+    Encore draws no bracket. (Vertical placement is Encore's default, close to
+    the staff; the exact height lives in the measure layout region.)"""
+    h = bytearray(meas_hdr(timeSigNum, timeSigDen, bpm=bpm, barTypeEnd=barTypeEnd))
+    h[0x0E] = hooks & 0xFF
+    h[0x0F] = ending & 0xFF
+    return bytes(h)
+
+
 def gen_v0c4_section_markers():
     # m1: regular measure with a SEGNO ORN (tipo=0xA2) attached.
     # m2: regular measure with a CODA ORN (tipo=0xA6).
