@@ -331,29 +331,13 @@ def _staff_clef_map(data):
             fallback_key = data[entry + 15]
     return clef_by_raw, fallback_clef, key_by_raw, fallback_key
 
-def apply_encore_layout(data):
-    """Fill Encore display-layout fields in every v0xC4 MEAS block in `data`."""
-    if len(data) < 5 or data[4] != 0xC4:
-        return data
-    out = bytearray(data)
-    clef_by_raw, fallback_clef, key_by_raw, fallback_key = _staff_clef_map(out)
-
-    # Volta brackets: a measure's ending-number bitmask is at header +0x0F, but
-    # Encore only draws the bracket when the hook byte at +0x0E is set. Many
-    # fixtures set just +0x0F (what the importer reads). Walk the measures and
-    # fill the hooks, coalescing consecutive measures that share the same
-    # bitmask into one bracket: a lone ending gets both hooks (0xC0); a run gets
-    # a left hook (0x80) on the first measure, a right hook (0x40) on the last,
-    # none in between. Only fills a hook left at 0 (explicit hooks are kept).
-    meas_hdrs = []
-    p = 0
-    while True:
-        mm = out.find(b'MEAS', p)
-        if mm < 0:
-            break
-        sz = struct.unpack('<I', out[mm + 4:mm + 8])[0]
-        meas_hdrs.append(mm + 8)
-        p = mm + 8 + 0x36 + sz
+def _fill_volta_hooks(out, meas_hdrs):
+    """Draw volta brackets from the ending-number bitmask at header +0x0F.
+    Encore only draws the bracket when the hook byte at +0x0E is set; many
+    fixtures set just +0x0F (what the importer reads). Coalesce consecutive
+    measures that share a bitmask into one bracket: a lone ending gets both
+    hooks (0xC0); a run gets a left hook (0x80) on the first measure and a
+    right hook (0x40) on the last, none in between. Hooks already set are kept."""
     k = 0
     while k < len(meas_hdrs):
         ending = out[meas_hdrs[k] + 0x0F]
@@ -365,15 +349,31 @@ def apply_encore_layout(data):
             j += 1
         for idx in range(k, j + 1):
             h = meas_hdrs[idx]
-            if out[h + 0x0E] != 0:
-                continue
-            if k == j:
-                out[h + 0x0E] = 0xC0
-            elif idx == k:
-                out[h + 0x0E] = 0x80
-            elif idx == j:
-                out[h + 0x0E] = 0x40
+            if out[h + 0x0E] == 0:
+                out[h + 0x0E] = 0xC0 if k == j else (0x80 if idx == k else
+                                                     (0x40 if idx == j else 0))
         k = j + 1
+
+def _measure_headers(out):
+    """Header offsets (start of the 0x36-byte header) of every MEAS block."""
+    hdrs = []
+    p = 0
+    while True:
+        mm = out.find(b'MEAS', p)
+        if mm < 0:
+            break
+        sz = struct.unpack('<I', out[mm + 4:mm + 8])[0]
+        hdrs.append(mm + 8)
+        p = mm + 8 + 0x36 + sz
+    return hdrs
+
+def apply_encore_layout(data):
+    """Fill Encore display-layout fields in every v0xC4 MEAS block in `data`."""
+    if len(data) < 5 or data[4] != 0xC4:
+        return data
+    out = bytearray(data)
+    clef_by_raw, fallback_clef, key_by_raw, fallback_key = _staff_clef_map(out)
+    _fill_volta_hooks(out, _measure_headers(out))
 
     # Mid-piece CLEF changes (element type 1) override the LINE clef for every
     # later note on that staff. Tracked across measures in stream order, since
