@@ -1072,6 +1072,30 @@ def arpeggio_v0c4(tick, staffIdx, x, yTop, yBottom, voice=0):
     d[26] = 2
     return bytes(d)
 
+# Tempo mark template captured from an Encore-5-saved file (quarter = 100 at a
+# beat). The element is a 38-byte ORN (tipo 0x32 = TEMPO): beat-unit code at
+# +28 (0x02 = quarter), BPM at +30, and a fixed text/glyph layout box at
+# +10..+27. An earlier 33-byte guess made Encore misparse the following bytes
+# and paint a giant black box; the correct size is 38.
+_TEMPO_TMPL = bytes.fromhex(
+    'f000502600320000000031000e003100cfff00004d00daff0000000002026400570009000000')
+
+def tempo_v0c4(tick, bpm, beat_unit=0x02, voice=0, staffIdx=0):
+    """38-byte TEMPO ORN (tipo 0x32). Draws "<note> = bpm" above the staff at
+    `tick`. beat_unit is the metronome note code (0x02 = quarter); bpm is the
+    beats-per-minute number. The x-position (+10/+14) is set from the tick like
+    a note; the rest of the layout box comes from the captured template."""
+    d = bytearray(_TEMPO_TMPL)
+    _wr16(d, 0, tick)
+    d[2] = (5 << 4) | (voice & 0x0F)
+    d[4] = staffIdx & 0x3F
+    xp = _enc_xpos(tick)
+    _wr16(d, 10, xp)
+    _wr16(d, 14, xp)
+    d[28] = beat_unit & 0xFF
+    d[30] = bpm & 0xFF
+    return bytes(d)
+
 def note_v0c2(tick, voice, staffIdx, fv, pitch):
     """22-byte v0xC2 note. Pitch at d[10]=elemStart+13 (tuplet field)."""
     d = bytearray(19)
