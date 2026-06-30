@@ -27,11 +27,13 @@ Byte at file offset 4 identifies the version:
 
 | Byte | Version | Encore release                                     |
 |------|---------|----------------------------------------------------|
-| 0xA6 | v0xA6   | Encore 2.x / 3.x and MusicTime (legacy)            |
-| 0xC2 | v0xC2   | Encore 4.x (incl. 4.5; app version 0x28 = 773/775) |
-| 0xC4 | v0xC4   | Encore 5.x                                         |
+| 0xA6 | v0xA6   | Encore 2.x and MusicTime, ~1991-1999 (app 592)            |
+| 0xC2 | v0xC2   | Encore 3.x (app 773, 1993+) and 4.x before 4.5 (app 775)  |
+| 0xC4 | v0xC4   | Encore 4.5 (2001) through 5.x (app 0x28 = 1056)        |
 
-v0xA6 carries app version 0x28 = 592. Encore 4.5 opens a v0xA6 file with a font / file-conversion prompt and re-saves it as v0xC2/v0xC4, so a v0xA6 file cannot be produced again from 4.5 or 5.x.
+v0xA6 carries app version 0x28 = 592. Encore 4.5 opens a v0xA6 file with a font / file-conversion prompt and re-saves it as v0xC4, so a v0xA6 file cannot be produced again from 4.5 or 5.x. Encore 3.0 already uses SCOW with format byte 0xC2 and app version 773 (verified on a genuine Windows Encore 3.0 save), so 0xA6 is Encore 2.x only; the later 0xC2 app version 775 is Encore 4.0-4.2 (pre-4.5).
+
+The v0xC4 format spans Encore 4.5 through 5.x: both write file byte 0x04 = 0xC4 and app version 0x28 = 1056, so neither field identifies the release. The byte at offset 0x3E is a format-revision counter that does, and it is constant for a given Encore build regardless of score content. Observed values: 0 on early 0xC4 files (pre-4.5), 1 on Encore 4.5, 4 on Encore 5.0 (verified against files saved by each installed version). Encore 4.5 refuses a file whose 0x3E revision is newer than it supports, which is why a 5.0-saved file fails to open in 4.5; a 5.0 file also adds a WINI block and embeds the printer DEVMODE. The MuseScore importer keys only on byte 0x04 and ignores 0x3E, so it reads every v0xC4 revision. A corpus of dated saves confirms the era split: 0x3E=1 files run 1999-2008 (Encore 4.5, released November 2001) and 0x3E=4 files never appear before 2009 (Encore 5.0; 5.0.2 was October 2009), so app version 1056 is not unique to 5.x.
 
 File magic at offset 0 (byte order of multi-byte integers follows the magic):
 
@@ -58,7 +60,7 @@ The plaintext `SCOW` equivalent is structurally different, so re-saving from Enc
 |--------|------|----------------------------------------------------------------------------|
 | 0x00   | 4    | magic (`SCOW` or `SCO5`)                                                   |
 | 0x04   | 1    | format version (see above)                                                 |
-| 0x28   | 2    | Encore app version (uint16 LE): 592=v0xA6, 773/775=v0xC2, 1056=v0xC4       |
+| 0x28   | 2    | Encore app version (uint16 LE): 592 = 2.x (0xA6); 773 = 3.x, 775 = 4.x<4.5 (0xC2); 1056 = 4.5/5.x (0xC4) |
 | 0x2A   | 2    | purpose unconfirmed (possibly total LINE-staff entries)                    |
 | 0x2C   | 2    | default beatTicks (uint16 LE): 240 = quarter-note grid; matches MEAS +0x04 |
 | 0x2E   | 2    | number of system blocks                                                    |
@@ -66,10 +68,11 @@ The plaintext `SCOW` equivalent is structurally different, so re-saving from Enc
 | 0x32   | 1    | number of instrument blocks                                                |
 | 0x33   | 1    | staves per system                                                          |
 | 0x34   | 2    | **rendered measure count** (see below)                                     |
+| 0x3E   | 1    | **v0xC4 format revision** (see Format versions): 0 = pre-4.5, 1 = 4.5, 4 = 5.0 |
 | 0x52   | 1    | **global staff-size selector** for v0xC2/C4 (see below)                    |
 | 0x8D   | 1    | **global staff-size selector** for v0xA6 (see below)                       |
 
-Bytes 0x36..0xC1 are padding except 0x52 / 0x8D.
+Bytes 0x36..0xC1 are padding except 0x3D (constant 0x01 in v0xC4), 0x3E (format revision) and 0x52 / 0x8D.
 
 The selector at 0x52 holds 1-4 (4 = default) for v0xC2/C4 and is only a fallback for when LINE block data is absent.
 In Encore 4.x this field is unrelated (values 1-8, no monotone mapping to a size); there per-instrument size always comes from LINE staff entry byte +13.
