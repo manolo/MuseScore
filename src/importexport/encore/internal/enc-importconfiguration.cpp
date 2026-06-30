@@ -79,6 +79,11 @@ void EncImportConfiguration::init()
         m_instrumentSearchModeChanged.send(static_cast<InstrumentSearchMode>(val.toInt()));
     });
 
+    // These are the shipped (GUI) defaults and are the authoritative defaults for real imports.
+    // They INTENTIONALLY differ from the EncImportOptions struct initializers (used only as in-code
+    // fallbacks by tests): underfill/overfill default to IrregularMeasure and mergeVoices to true
+    // here, vs InvisibleRests/Truncate/false in the struct. Keep both in sync deliberately, not by
+    // assuming one should match the other.
     settings()->setDefaultValue(ENC_UNDERFILL_STRATEGY_KEY, Val(static_cast<int>(UnderfillStrategy::IrregularMeasure)));
     settings()->valueChanged(ENC_UNDERFILL_STRATEGY_KEY).onReceive(this, [this](const Val& val) {
         m_underfillMeasureStrategyChanged.send(static_cast<UnderfillStrategy>(val.toInt()));
