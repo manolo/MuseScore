@@ -94,6 +94,13 @@ const mu::engraving::InstrumentTemplate* findDrumsetTemplate(const QString& encN
 // MIDI-only lookup among non-drumset templates; prefers "common" genre when multiple share the same program.
 const mu::engraving::InstrumentTemplate* findTemplateByMidi(int encMidiProgram0indexed);
 
+// Fallback when findTemplateByMidi finds no exact program match: returns the nearest template
+// within the same General MIDI family (16 families of 8 programs), preferring the "common"
+// genre on ties. Keeps the instrument's category (Strings, Brass, Bass, …) instead of falling
+// back to Grand Piano for programs no template carries as its primary sound (Pizzicato/Tremolo
+// Strings, Muted Trumpet, Synth Bass, Voice Oohs, …).
+const mu::engraving::InstrumentTemplate* findTemplateByMidiFamily(int encMidiProgram0indexed);
+
 // Given a matched template, return its standard-notation or tablature sibling (e.g.
 // "Classical Guitar" <-> "Classical Guitar (tablature)"). Returns the input if it already
 // matches wantTab, or nullptr when no sibling exists. Siblings are matched by shared

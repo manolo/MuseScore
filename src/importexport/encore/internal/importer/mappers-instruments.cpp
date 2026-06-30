@@ -41,12 +41,17 @@ namespace mu::iex::enc {
 QString normalizeEncoreInstrName(const QString& name)
 {
     QString s = name.trimmed();
-    // Remove:  separator (space, - _ .) + digits + optional ordinal (ª º °).
-    // Covers "Voz 1", "Voz-1", "Voz_1", "Voz.1", "Bandurria 2ª" -> base name.
-    static const QRegularExpression trailingNum(QStringLiteral("[\\s\\-_.]+\\d+[\xaa\xb0\xba]*$"));
+    // Remove:  optional separator (space, - _ .) + digits + optional ordinal (ª º °).
+    // The separator is optional so an attached part number is also stripped:
+    // "Voz 1", "Voz-1", "Voz.1", "Bandurria 2ª", "Bandurria1", "Violin2" -> base name.
+    static const QRegularExpression trailingNum(QStringLiteral("[\\s\\-_.]*\\d+[\xaa\xb0\xba]*$"));
     // Remove:  trailing ordinals with no preceding digit
     static const QRegularExpression trailingOrd(QStringLiteral("[\xaa\xb0\xba]+$"));
-    s.remove(trailingNum);
+    // Only strip when a non-empty stem remains (so "1234" or "2ª" are left untouched).
+    const QRegularExpressionMatch numMatch = trailingNum.match(s);
+    if (numMatch.hasMatch() && numMatch.capturedStart() > 0) {
+        s = s.left(numMatch.capturedStart()).trimmed();
+    }
     s.remove(trailingOrd);
     return s.trimmed();
 }
@@ -123,14 +128,28 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
             needles << n;
         }
     };
+    // Add a needle plus its singular stem(s). Romance plurals add "s" (vowel + s:
+    // "bandurrias" -> "bandurria") or "es" (consonant + es: "laudes" -> "laud"); we add both
+    // candidate stems and let template matching pick the one that exists. Language-agnostic,
+    // no per-instrument data: a stem that matches no template is simply never scored.
+    auto addNeedleWithStems = [&](const QString& s) {
+        addNeedle(s);
+        const QString n = normalizeForCompare(s);
+        if (n.endsWith(u's') && n.length() >= 5) {
+            addNeedle(n.left(n.length() - 1));
+        }
+        if (n.endsWith(QStringLiteral("es")) && n.length() >= 6) {
+            addNeedle(n.left(n.length() - 2));
+        }
+    };
     addNeedle(encName);
-    addNeedle(norm);
+    addNeedleWithStems(norm);
     // Split words on any non-alphanumeric separator (space, - _ . and punctuation), keeping
     // accented letters within words. So "Voz-1"/"Vln.2"/"Sax_tenor" tokenize correctly.
     static const QRegularExpression wordSplit(QStringLiteral("[^\\p{L}\\p{N}]+"));
     for (const QString& word : norm.split(wordSplit, Qt::SkipEmptyParts)) {
         if (word.length() >= 4) {
-            addNeedle(word);
+            addNeedleWithStems(word);
         }
     }
     if (needles.isEmpty()) {
@@ -222,13 +241,18 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
     // "Guitarra" -> "Guitar"). Only sufficiently long words count (>= 75% similar, <= 2 edits,
     // both words >= 5 chars). This catches typos and near roots but NOT distant cross-language
     // roots (e.g. "Gitarre"/"Chitarra" are too far from "Guitar"), which would need a synonym table.
-    // A fuzzy hit is weak (not exact, not unique), so the MIDI program can still override it.
+    // A fuzzy hit to a single close template (e.g. "acordeon" -> only "accordion") is as
+    // distinctive as a unique substring match, so it is reported as unique below and the MIDI
+    // program will not override it. A fuzzy hit shared by several near templates (e.g. "corneta"
+    // near cornet/cornett/eb-cornet) stays non-unique and still defers to MIDI.
+    bool fuzzyUnique = false;
     if (!best) {
         static const QRegularExpression fuzzyWordSplit(QStringLiteral("[^\\p{L}\\p{N}]+"));
         constexpr double kFuzzyMinSim = 0.75;
         constexpr int kFuzzyMaxDist = 2;
         constexpr int kFuzzyMinLen = 5;
         double bestSim = 0.0;
+        int fuzzyHits = 0;   // distinct templates reaching kFuzzyMinSim
         for (const InstrumentGroup* g : instrumentGroups) {
             for (const InstrumentTemplate* it : g->instrumentTemplates) {
                 if (it->useDrumset) {
@@ -257,6 +281,9 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
                         }
                     }
                 }
+                if (sim >= kFuzzyMinSim) {
+                    ++fuzzyHits;
+                }
                 if (sim > bestSim) {
                     bestSim = sim;
                     best = it;
@@ -266,6 +293,8 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
         }
         if (bestSim < kFuzzyMinSim) {
             best = nullptr;
+        } else {
+            fuzzyUnique = (fuzzyHits == 1);
         }
     }
 
@@ -275,6 +304,13 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
     }
 
     const InstrumentTemplate* result = useCompatible ? bestCompatible : best;
+
+    // A fuzzy match that was the only template above the similarity threshold is as
+    // distinctive as a unique substring match (the fuzzy path only runs when no exact/contains
+    // match exists, so result == best here).
+    if (outUniqueName && fuzzyUnique && result == best) {
+        *outUniqueName = true;
+    }
 
     // A contains-only name match is "weak" in general, but a needle that no other template's
     // name contains (e.g. "dulzaina" -> only "Castilian Dulzaina") identifies the instrument as
@@ -457,6 +493,52 @@ const InstrumentTemplate* findTemplateByMidi(int encMidiProgram0indexed)
             }
             if (!best || (isCommon && !bestIsCommon)) {
                 best = it;
+                bestIsCommon = isCommon;
+            }
+        }
+    }
+    return best;
+}
+
+const InstrumentTemplate* findTemplateByMidiFamily(int encMidiProgram0indexed)
+{
+    if (encMidiProgram0indexed < 0) {
+        return nullptr;
+    }
+    // General MIDI groups its 128 programs into 16 families of 8 (Piano, Chromatic
+    // Percussion, Organ, Guitar, Bass, Strings, Ensemble, Brass, Reed, Pipe, two Synth
+    // Lead/Pad ranges, Effects, Ethnic, Percussive, Sound Effects). When no template has the
+    // exact program as its primary sound (e.g. Pizzicato/Tremolo Strings, Muted Trumpet,
+    // Synth Bass, Voice Oohs), fall back to the closest template within the same family so the
+    // part keeps its instrument category instead of collapsing to Grand Piano.
+    const int family = encMidiProgram0indexed / 8;
+    const int familyFirst = family * 8;
+    const int familyLast = familyFirst + 7;
+    const InstrumentTemplate* best = nullptr;
+    int bestDist = 1000;
+    bool bestIsCommon = false;
+    for (const InstrumentGroup* g : instrumentGroups) {
+        for (const InstrumentTemplate* it : g->instrumentTemplates) {
+            if (it->useDrumset || it->channel.empty()) {
+                continue;
+            }
+            const int prog = it->channel.front().program();
+            if (prog < familyFirst || prog > familyLast) {
+                continue;
+            }
+            bool isCommon = false;
+            for (const InstrumentGenre* gen : it->genres) {
+                if (gen && gen->id == "common") {
+                    isCommon = true;
+                    break;
+                }
+            }
+            const int dist = prog > encMidiProgram0indexed
+                             ? prog - encMidiProgram0indexed : encMidiProgram0indexed - prog;
+            // Prefer the nearest program; break ties toward the "common" genre.
+            if (!best || dist < bestDist || (dist == bestDist && isCommon && !bestIsCommon)) {
+                best = it;
+                bestDist = dist;
                 bestIsCommon = isCommon;
             }
         }

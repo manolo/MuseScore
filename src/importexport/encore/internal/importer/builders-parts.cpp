@@ -82,6 +82,7 @@ enum class MatchStep {
     PercKeyword,    // generic percussion keyword in the name -> drumset
     RhythmStaff,    // RHYTHM staff -> snare-drum
     MidiProgram,    // MIDI program lookup
+    MidiFamily,     // nearest template in the same GM family (fallback before Grand Piano)
 };
 
 static const char* matchStepLabel(MatchStep step)
@@ -94,6 +95,7 @@ static const char* matchStepLabel(MatchStep step)
     case MatchStep::PercKeyword:   return "perc keyword";
     case MatchStep::RhythmStaff:   return "RHYTHM staff";
     case MatchStep::MidiProgram:   return "MIDI program";
+    case MatchStep::MidiFamily:    return "MIDI family";
     }
     return "";
 }
@@ -267,6 +269,13 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
     // Step 6: MIDI program lookup (skipped for RHYTHM staves).
     if (!tmpl && !isRhythm) {
         tryStep(MatchStep::MidiProgram, tryMidiProgram(instr, encKey));
+    }
+
+    // Step 7: nearest template in the same GM family. Catches configured programs that no
+    // template carries as its primary sound (Pizzicato/Tremolo Strings, Muted Trumpet, Synth
+    // Bass, Voice Oohs, …) so the part keeps its category instead of falling back to Grand Piano.
+    if (!tmpl && !isRhythm && encMidi >= 0) {
+        tryStep(MatchStep::MidiFamily, findTemplateByMidiFamily(encMidi));
     }
 
     // Encore stores the staff's notation/tablature choice in the clef; a name/MIDI match may

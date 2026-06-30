@@ -930,3 +930,78 @@ TEST_F(Tst_Instruments, midi_mapping_is_built_for_every_part)
     }
     delete score;
 }
+
+// ===========================================================================
+// Algorithmic name-confidence improvements (corpus study). These exercise the matcher
+// functions directly; the templates are loaded once by the test environment.
+//
+// Class A: a confident name match (exact, unique, or now also a normalized/plural/fuzzy
+// match that is unambiguous) must be reported confident so the weak-name -> MIDI override in
+// tryNameMidiScore does not discard it for a placeholder MIDI program.
+// ===========================================================================
+TEST_F(Tst_Instruments, plural_name_depluralized_and_unique)
+{
+    using namespace mu::iex::enc;
+    bool exact = false, unique = false;
+    // "Bandurrias" (plural) must collapse to the singular stem and match the unique Bandurria
+    // template confidently, so MIDI 1 (Grand Piano) can no longer override it.
+    const InstrumentTemplate* t = findEncoreInstrumentTemplate(
+        QStringLiteral("Bandurrias"), -1, ENC_KEY_NO_FILTER, &exact, &unique);
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(t->id, String(u"bandurria"));
+    EXPECT_TRUE(exact || unique)
+        << "a depluralized stem must match the Bandurria template confidently, not weakly";
+}
+
+TEST_F(Tst_Instruments, attached_digit_name_normalized)
+{
+    using namespace mu::iex::enc;
+    bool exact = false, unique = false;
+    // "Bandurria1" (digit attached, no separator) must normalize to "Bandurria".
+    const InstrumentTemplate* t = findEncoreInstrumentTemplate(
+        QStringLiteral("Bandurria1"), -1, ENC_KEY_NO_FILTER, &exact, &unique);
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(t->id, String(u"bandurria"));
+    EXPECT_TRUE(exact || unique) << "attached part number must be stripped to a confident match";
+}
+
+TEST_F(Tst_Instruments, fuzzy_unique_name_reported_unique)
+{
+    using namespace mu::iex::enc;
+    bool exact = false, unique = false;
+    // "Acordeon" fuzzy-matches only "accordion"; a single close template is confident.
+    const InstrumentTemplate* t = findEncoreInstrumentTemplate(
+        QStringLiteral("Acordeon"), -1, ENC_KEY_NO_FILTER, &exact, &unique);
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(t->id, String(u"accordion"));
+    EXPECT_TRUE(unique) << "a fuzzy match that is the only template above threshold must be unique";
+}
+
+TEST_F(Tst_Instruments, ambiguous_name_still_not_unique)
+{
+    using namespace mu::iex::enc;
+    bool exact = false, unique = false;
+    // Regression guard: "Guitarra" contains-matches many guitar templates, so it must stay
+    // non-unique and keep deferring to the MIDI program (Classical Guitar via MIDI 25).
+    const InstrumentTemplate* t = findEncoreInstrumentTemplate(
+        QStringLiteral("Guitarra"), -1, ENC_KEY_NO_FILTER, &exact, &unique);
+    ASSERT_NE(t, nullptr);
+    EXPECT_FALSE(exact);
+    EXPECT_FALSE(unique) << "an ambiguous substring name must remain weak so MIDI can correct it";
+}
+
+// Class B: a configured MIDI program that no template carries as its primary sound must fall
+// back to the nearest template in the same General MIDI family, not to Grand Piano.
+TEST_F(Tst_Instruments, gm_family_fallback_for_unmapped_program)
+{
+    using namespace mu::iex::enc;
+    constexpr int kPizzicatoStrings0 = 45;   // GM 46, 0-indexed; Strings family (40..47)
+    EXPECT_EQ(findTemplateByMidi(kPizzicatoStrings0), nullptr)
+        << "precondition: no template has Pizzicato Strings as its primary program";
+    const InstrumentTemplate* t = findTemplateByMidiFamily(kPizzicatoStrings0);
+    ASSERT_NE(t, nullptr);
+    ASSERT_FALSE(t->channel.empty());
+    const int prog = t->channel.front().program();
+    EXPECT_GE(prog, 40);
+    EXPECT_LE(prog, 47) << "family fallback must stay within the Strings family, not Grand Piano";
+}
