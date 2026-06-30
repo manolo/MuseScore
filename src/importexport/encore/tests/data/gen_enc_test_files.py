@@ -109,6 +109,12 @@ def meas_block(hdr54, elems):
 # ---------------------------------------------------------------------------
 ENC_XPOS_SLOPE = 0.153
 ENC_XPOS_BASE  = 12
+# Trailing pixels after the last element when a measure carries a legacy
+# beatTicks (one that does not satisfy beatTicks*timeSigDen == 960, e.g. 240 in
+# a 2/2 bar). Encore lays such a bar on a short beat grid, so it needs extra
+# width or it collapses every note onto the first position. Validated against a
+# 2/2 beatTicks=240 bar: last xpos 141 + 63 = 204 renders correctly.
+_LEGACY_BEATTICKS_TRAIL = 63
 
 # semitone -> diatonic letter index (C=0 .. B=6), sharp spelling, and the
 # accidental glyph for that semitone (1 = sharp on a black key, else 0).
@@ -184,11 +190,12 @@ def apply_encore_layout(data):
         hdr = m + 8
         elem_start = hdr + 0x36
         elem_end = elem_start + size
+        beat_ticks = struct.unpack('<H', out[hdr + 4:hdr + 6])[0]
         dur_ticks = struct.unpack('<H', out[hdr + 6:hdr + 8])[0]
-        # measure width = x-position of the measure end
-        struct.pack_into('<I', out, hdr + 0x10, _enc_xpos(dur_ticks))
+        ts_den = out[hdr + 9]
         # collect note/rest elements; track per (rawStaff, voice) for dots
         groups = {}
+        max_xpos = 0
         i = elem_start
         while i + 4 <= elem_end:
             if out[i:i + 2] == b'\xff\xff':
@@ -204,6 +211,7 @@ def apply_encore_layout(data):
                 # x-position
                 if struct.unpack('<H', out[i + 10:i + 12])[0] == 0:
                     struct.pack_into('<H', out, i + 10, _enc_xpos(tick))
+                max_xpos = max(max_xpos, struct.unpack('<H', out[i + 10:i + 12])[0])
                 if typ == 9 and esize >= 16:
                     midi = out[i + 15]
                     # diatonic staff position + accidental (sharp spelling),
@@ -217,6 +225,19 @@ def apply_encore_layout(data):
                             out[i + 21] = 1
                     groups.setdefault((out[i + 4], voice), []).append((tick, i, out[i + 5] & 0x0F))
             i += esize
+        # measure width @0x10. Normally the x-position of the measure end, so
+        # the last note keeps its own duration as trailing space. But when the
+        # beatTicks is the legacy value (not 960/timeSigDen, e.g. 240 in a 2/2
+        # measure where it should be 480), Encore lays the measure out on a
+        # shorter beat grid and the content runs past it; the measure then needs
+        # a wider stored width or every note collapses to the first position.
+        # In that case size it from the actual content plus a full-beat trailing.
+        correct_beat = (960 // ts_den) if ts_den else 0
+        if correct_beat and beat_ticks and beat_ticks != correct_beat:
+            width = max_xpos + _LEGACY_BEATTICKS_TRAIL
+        else:
+            width = _enc_xpos(dur_ticks)
+        struct.pack_into('<I', out, hdr + 0x10, width)
         # dots: derive from the tick gap to the next event in the same voice
         for evts in groups.values():
             evts.sort()
