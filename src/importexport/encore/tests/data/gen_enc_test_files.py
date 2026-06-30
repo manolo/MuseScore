@@ -1096,6 +1096,35 @@ def tempo_v0c4(tick, bpm, beat_unit=0x02, voice=0, staffIdx=0):
     d[30] = bpm & 0xFF
     return bytes(d)
 
+def stafftext_orn(tick, tind=0, x=28, y=-61, box=True, voice=0, staffIdx=0):
+    """86-byte STAFFTEXT ORN (tipo 0x1e). Anchors an expression/staff text at
+    `tick`; the actual string lives in the TEXT block (build it with the
+    existing text_block_v0c4), referenced by `tind` (entry index). `box`=True
+    sets the "enclose with box" flag (+34/+35 = 1), which makes Encore display
+    the FULL text -- without it Encore clips the text to a small box and shows
+    only the first few characters.
+
+    NOTE on rendering: a measure carrying staff text also needs Encore's
+    computed 16-byte layout blob in its MEAS header at +0x26..+0x35 (the slot
+    that otherwise holds the " Writer" tag); with the default tag the text
+    stacks vertically one character per line. That blob is opaque per-text
+    geometry and is not synthesized here, so use a captured header for faithful
+    horizontal rendering. The element itself (and the TEXT block) import
+    correctly regardless."""
+    d = bytearray(86)
+    _wr16(d, 0, tick)
+    d[2] = (5 << 4) | (voice & 0x0F)
+    d[3] = 86
+    d[4] = staffIdx & 0x3F
+    d[5] = 0x1e
+    _wr16(d, 10, x); d[12] = 18; _wr16(d, 14, x)
+    _wr16(d, 16, y & 0xFFFF); _wr16(d, 20, 88); _wr16(d, 22, (y + 17) & 0xFFFF)
+    d[24] = 0x51; d[26] = 0x0c; d[28] = 0x03
+    d[32] = tind & 0xFF
+    if box:
+        d[34] = 1; d[35] = 1
+    return bytes(d)
+
 def note_v0c2(tick, voice, staffIdx, fv, pitch):
     """22-byte v0xC2 note. Pitch at d[10]=elemStart+13 (tuplet field)."""
     d = bytearray(19)
