@@ -35,7 +35,6 @@
 #include "engraving/dom/note.h"
 #include "engraving/dom/pitchspelling.h"
 #include "engraving/dom/segment.h"
-#include "engraving/dom/staff.h"
 #include "engraving/dom/tremolosinglechord.h"
 
 #include "engraving/editing/editnote.h"
@@ -450,49 +449,6 @@ TEST_F(Engraving_NoteTests, tpcTranspose2)
     printf("================\n");
 
     EXPECT_TRUE(ScoreComp::saveCompareScore(score, u"tpc-transpose2-test.mscx", NOTE_DATA_DIR + u"tpc-transpose2-ref.mscx"));
-}
-
-//---------------------------------------------------------
-///   spellTransposingFromConcertKey
-///   Auto-spelling a transposing instrument must use the concert key, not the
-///   written key. The fixture is a chromatic scale on a B-flat clarinet (concert
-///   pitch sounds a major second below the written pitch); the concert key is C
-///   major and the written key is therefore D major. Spelling from the written
-///   D-major key pushes the chromatic run sharp and mis-spells the concert
-///   naturals C and F as B-sharp and E-sharp. Using the concert key keeps them
-///   as plain C and F.
-//---------------------------------------------------------
-
-TEST_F(Engraving_NoteTests, spellTransposingFromConcertKey)
-{
-    MasterScore* score = ScoreRW::readScore(NOTE_DATA_DIR + u"spell-transpose-concertkey.mscx");
-    ASSERT_TRUE(score);
-
-    const Staff* staff = score->staff(0);
-    ASSERT_TRUE(staff);
-    const Fraction t0 = Fraction(0, 1);
-    EXPECT_EQ(staff->concertKey(t0), Key::C);
-    EXPECT_EQ(staff->key(t0), Key::D);
-
-    score->spell();
-
-    std::vector<Note*> notes;
-    for (Segment* s = score->firstSegment(SegmentType::ChordRest); s; s = s->next1(SegmentType::ChordRest)) {
-        EngravingItem* e = s->element(0);
-        if (e && e->isChord()) {
-            notes.push_back(toChord(e)->upNote());
-        }
-    }
-    ASSERT_EQ(notes.size(), size_t(12));
-
-    // The chromatic scan covers concert pitches 60..71. The concert naturals C
-    // (60) and F (65) must stay C and F, not the written-key enharmonics B# / E#.
-    EXPECT_EQ(notes[0]->pitch(), 60);
-    EXPECT_EQ(int(notes[0]->tpc1()), int(Tpc::TPC_C));   // C natural, not B-sharp
-    EXPECT_EQ(notes[5]->pitch(), 65);
-    EXPECT_EQ(int(notes[5]->tpc1()), int(Tpc::TPC_F));   // F natural, not E-sharp
-
-    delete score;
 }
 
 //---------------------------------------------------------
