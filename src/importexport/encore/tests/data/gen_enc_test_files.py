@@ -412,6 +412,93 @@ def _apply_dots_and_stems(out, groups, dur_ticks):
                 if out[off + 3] >= 18 and _rd16(out, off + 16) == 0:
                     _wr16(out, off + 16, pbdur)
 
+def _beam_elem(start_tick, end_tick, leftX, rightX, count, voice=0, staff=0):
+    """Build a 30-byte BEAM element (type 4). Encore draws one beam joining the
+    `count` member notes; the members carry grace1 bit 0x10 (set by _beam_pass).
+    Only the structural fields are filled (tick, span x, end tick, member count);
+    Encore recomputes the beam's vertical geometry on open, so the zeroed slope
+    bytes render correctly. Validated against Encore-saved beam groups."""
+    d = bytearray(30)
+    _wr16(d, 0, start_tick)
+    d[2] = (4 << 4) | (voice & 0x0F)
+    d[3] = 30
+    d[4] = staff & 0x3F
+    d[5] = 0x01
+    _wr16(d, 14, leftX)
+    _wr16(d, 16, rightX)
+    _wr16(d, 20, end_tick)
+    d[22] = 0x01
+    d[25] = (count - 1) & 0xFF
+    d[27] = 0x0c
+    return bytes(d)
+
+def _beam_pass(out):
+    """Insert BEAM elements so consecutive beamable notes render joined in Encore.
+
+    Beamable = eighth or shorter (faceValue low nibble >= 4), not a grace note.
+    Notes are grouped per (rawStaff, voice) and beamed in runs that stay within
+    one beat (the measure's beatTicks); a run of >= 2 such notes gets one BEAM
+    element at the run's start tick, and every member note gets grace1 bit 0x10
+    (the on-disk beam-membership flag). The importer ignores BEAM (it maps to a
+    generic, dropped element) and re-beams on its own, so this is a pure render
+    addition that does not change import results. Runs through the buffer after
+    the main layout loop so each note's x-position (+10) is already set."""
+    result = bytearray()
+    pos = 0
+    while pos < len(out):
+        if out[pos:pos + 4] != b'MEAS':
+            result += out[pos:pos + 1]
+            pos += 1
+            continue
+        size = struct.unpack('<I', out[pos + 4:pos + 8])[0]
+        hdr = out[pos + 8:pos + 8 + 0x36]
+        beat_ticks = _rd16(hdr, 4) or 240
+        elem_start = pos + 8 + 0x36
+        eb = bytearray(out[elem_start:elem_start + size])
+        # parse the element stream (stops at the 0xffff end marker)
+        elems = []
+        i = 0
+        while i + 4 <= len(eb):
+            if eb[i:i + 2] == b'\xff\xff' or eb[i + 3] == 0:
+                break
+            elems.append((i, eb[i + 3], _rd16(eb, i), eb[i + 2] >> 4, eb[i + 2] & 0x0F))
+            i += eb[i + 3]
+        # collect beamable notes per (staff, voice)
+        groups = {}
+        for (off, esize, tick, typ, voice) in elems:
+            if typ != 9 or esize < 16:
+                continue
+            if (eb[off + 5] & 0x0F) < 4 or (eb[off + 6] & 0x20):
+                continue
+            groups.setdefault((eb[off + 4], voice), []).append((tick, off))
+        beams = {}     # rel-off of run's first note -> beam bytes to insert before it
+        for (staff, voice), notes in groups.items():
+            notes.sort()
+            run = []
+            for (tick, off) in notes + [(None, None)]:
+                if run and (tick is None or tick // beat_ticks != run[0][0] // beat_ticks):
+                    if len(run) >= 2:
+                        fo, lo = run[0][1], run[-1][1]
+                        beams[fo] = _beam_elem(run[0][0], run[-1][0],
+                                               _rd16(eb, fo + 10), _rd16(eb, lo + 10),
+                                               len(run), voice, staff)
+                        for (_, o) in run:
+                            eb[o + 6] |= 0x10
+                    run = []
+                if tick is not None:
+                    run.append((tick, off))
+        if beams:
+            newe = bytearray()
+            for (off, esize, tick, typ, voice) in elems:
+                if off in beams:
+                    newe += beams[off]
+                newe += eb[off:off + esize]
+            newe += b'\xff\xff'
+            eb = newe
+        result += b'MEAS' + struct.pack('<I', len(eb)) + hdr + eb
+        pos = elem_start + size
+    return bytes(result)
+
 def _curve_slurs(out, slurs, groups):
     """Give each flat SLURSTART a subtle arc. A 33-byte slur has no curve
     control points so Encore draws a straight line; fill startY (+12), the apex
@@ -567,7 +654,7 @@ def apply_encore_layout(data):
         _apply_dots_and_stems(out, groups, dur_ticks)
         _curve_slurs(out, slurs, groups)
         pos = elem_end
-    return bytes(out)
+    return _beam_pass(out)
 
 def empty_meas(tsNum=4, tsDen=4):
     return meas_block(meas_hdr(tsNum, tsDen), b'\xff\xff')
