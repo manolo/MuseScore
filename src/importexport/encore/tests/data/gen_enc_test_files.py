@@ -211,6 +211,12 @@ def apply_encore_layout(data):
             esize = out[i + 3]
             if esize == 0:
                 break
+            # type 6 = lyric: it stores its x-position at +10 like a note, and
+            # aligns under the note at the same tick.
+            if typ == 6 and esize >= 12:
+                tick = struct.unpack('<H', out[i:i + 2])[0]
+                if struct.unpack('<H', out[i + 10:i + 12])[0] == 0:
+                    struct.pack_into('<H', out, i + 10, _enc_xpos(tick))
             if typ in (8, 9) and esize >= 12:
                 tick = struct.unpack('<H', out[i:i + 2])[0]
                 # x-position
