@@ -38,7 +38,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Download macOS artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: 'MU4_*_Mac_*'
           merge-multiple: true
@@ -67,7 +67,7 @@ jobs:
           zip -r --symlinks MuseScore-Studio-enc-importer-preview-mac-arm64.zip MuseScore-enc-preview.app
 
       - name: Upload arm64 zip
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: enc-preview-mac-arm64-zip
           path: MuseScore-Studio-enc-importer-preview-mac-arm64.zip
@@ -77,33 +77,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout (for README files)
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           sparse-checkout: Binarios/EncoreImporter
           sparse-checkout-cone-mode: false
 
       - name: Download macOS universal artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: 'MU4_*_Mac_*'
           merge-multiple: true
           path: ./raw/mac
 
       - name: Download macOS arm64 zip
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: enc-preview-mac-arm64-zip
           path: ./raw/mac-arm64
 
       - name: Download Windows artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: 'MU4_*_Win_x64*'
           merge-multiple: true
           path: ./raw/win
 
       - name: Download Linux artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: 'MU4_*_Lin_x64*'
           merge-multiple: true
@@ -151,18 +151,20 @@ jobs:
             echo "WARNING: no .AppImage found"; ls ./raw/linux/
           fi
 
-          # README files
-          cp Binarios/EncoreImporter/README-mac.txt          preview/
-          cp Binarios/EncoreImporter/README-mac-arm64.txt    preview/
-          cp Binarios/EncoreImporter/README-win-x86_64.txt   preview/
-          cp Binarios/EncoreImporter/README-linux-x86_64.txt preview/
+          # README files (sparse-checked-out from Binarios/). Tolerate their absence on branches
+          # that do not carry that directory so the preview package still assembles under set -e.
+          if [ -d Binarios/EncoreImporter ]; then
+            cp Binarios/EncoreImporter/README-*.txt preview/ 2>/dev/null || true
+          else
+            echo "WARNING: Binarios/EncoreImporter not present; skipping README files"
+          fi
 
           echo ""
           echo "Preview package contents:"
           ls -lh preview/
 
       - name: Upload preview package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: MuseScore-enc-importer-preview
           path: preview/
