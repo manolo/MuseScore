@@ -2943,6 +2943,12 @@ def meas_hdr_coda(timeSigNum, timeSigDen, bpm=100, barTypeEnd=0, codaByte=0):
     here: 0x80=DCALCODA, 0x81=DSALCODA, 0x82=DCALFINE, 0x86=FINE, 0x87=DC."""
     h = bytearray(meas_hdr(timeSigNum, timeSigDen, bpm=bpm, barTypeEnd=barTypeEnd))
     h[0x1A] = codaByte & 0xFF
+    if codaByte:
+        # The coda field is a u32: low byte = mark type, upper bytes = style and
+        # x-position. Encore draws the mark below the staff without the style
+        # byte; 0x0B at +0x1B places "Fine"/"D.C."/etc. above it.
+        h[0x1B] = 0x0B
+        h[0x1C] = 12
     return bytes(h)
 
 
@@ -8396,9 +8402,15 @@ def gen_v0c4_cross_measure_slur_precision():
 
 
 def _clef_elem(tick, voice, staffIdx, clef_type):
-    # CLEF element, size=6: tick(2)+typeVoice(1)+size(1)+rawStaff(1)+clefType(1)
-    d = bytearray(3)
-    d[0] = 6; d[1] = staffIdx & 0x3F; d[2] = clef_type & 0xFF
+    # CLEF change element, size=16. Encore renders the clef from this 16-byte
+    # form (a 6-byte one is read by the importer but never drawn). Layout:
+    # tick(2) + typeVoice(1) + size(1) + rawStaff(1) + clefType(1) + 4 zero +
+    # xoffset(2 @+10, filled by the layout pass) + 0x02 @+12 + trailer.
+    d = bytearray(13)
+    d[0] = 16
+    d[1] = staffIdx & 0x3F
+    d[2] = clef_type & 0xFF
+    d[9] = 0x02                  # +12: constant marker seen in real clef changes
     return struct.pack('<H', tick) + bytes([(1 << 4) | (voice & 0xF)]) + bytes(d)
 
 
@@ -8437,7 +8449,13 @@ def gen_v0c4_structure_clef_trailing_cautionary():
     return assemble(0xC4, [(meas_hdr(2, 4), e0), (meas_hdr(2, 4), e1)], fill_ts=(2, 4))
 
 
-def write(name,data):
+def write(name,data,layout=True):
+    # `layout=False` skips the Encore display-layout pass for fixtures whose
+    # importer regression depends on notes carrying a zero xoffset (the pass
+    # would change spanner-anchor snapping). Those fixtures test importer logic,
+    # not Encore rendering, so leaving them un-laid-out is intentional.
+    if layout:
+        data = apply_encore_layout(data)
     path=os.path.join(OUT_DIR,name)
     with open(path,'wb') as f: f.write(data)
     print(f"  {name}  ({len(data):,} bytes)")
@@ -8605,6 +8623,765 @@ def gen_v0c2_tilde_primary_block_midi():
     return bytes(hdr) + line_block + meas_block(meas_hdr(4, 4), elems) + SKELETON_POST
 
 
+
+
+# ===========================================================================
+# Encore-renderability layer (ported): display-layout pass + geometry-bearing
+# element builders. The MuseScore importer ignores these fields, so generated
+# fixtures import identically while opening correctly in Encore 5.
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Encore on-disk layout pass (v0xC4)
+#
+# The MuseScore importer recomputes note positions from tick + face value, so
+# it ignores the on-disk layout fields.  Real Encore 5 instead renders straight
+# from them, so synthetic files that leave them zero collapse every note onto
+# the first tick.  This pass fills the layout fields the way Encore writes them
+# (validated by cutting + pasting notes in Encore and re-reading its output):
+#
+#   * note/rest x-position (+10): linear in tick, xpos = round(12 + tick*0.153)
+#   * measure width (@0x10):      xpos(durTicks); the last note then keeps its
+#                                 own duration as trailing space before the bar
+#   * note diatonic staff position (+12): clef-relative diatonic step from MIDI
+#   * accidental glyph (+21):     1 sharp / 2 flat (black keys, sharp spelling)
+#   * dot control (+14):          0x1d (even position) / 0x19 (odd) for 1 dot
+#
+# Every field is filled only when it is still zero, so fixtures that set an
+# explicit xoffset / position / dotControl for an importer regression keep their
+# value.  The importer ignores all of these (xoffset feeds only spanner-anchor
+# heuristics, dotControl falls back to tick-gap snapping), so the pass is a
+# pure display addition.
+# ---------------------------------------------------------------------------
+ENC_XPOS_SLOPE = 0.153
+ENC_XPOS_BASE  = 12
+# Trailing pixels after the last element when a measure carries a legacy
+# beatTicks (one that does not satisfy beatTicks*timeSigDen == 960, e.g. 240 in
+# a 2/2 bar). Encore lays such a bar on a short beat grid, so it needs extra
+# width or it collapses every note onto the first position. Validated against a
+# 2/2 beatTicks=240 bar: last xpos 141 + 63 = 204 renders correctly.
+_LEGACY_BEATTICKS_TRAIL = 63
+# A grace note shares its main note's tick, so the tick-based xpos would stack
+# it on top of the main note. Encore draws a grace just to the left, so offset
+# it. Grace notes carry bit 0x20 in grace1 (+6); the common normal-note flags
+# 0x10/0x40/0x50 do not, so the test isolates real graces.
+_GRACE_XPOS_OFFSET = 10
+
+# clef byte -> absolute-diatonic-index of staff position 0.  G=C4, F=E2,
+# G8M=C3 (octave down), G8P=C5 (octave up).  PERC(7)/TAB(8)/other: no pitch
+# mapping, skip.
+_CLEF_ORIGIN = {0: 28, 1: 16, 4: 35, 5: 21}
+
+def _enc_xpos(tick):
+    return round(ENC_XPOS_BASE + tick * ENC_XPOS_SLOPE)
+
+def _rd16(b, off):
+    """Read a little-endian uint16 at b[off]."""
+    return b[off] | (b[off + 1] << 8)
+
+def _wr16(b, off, val):
+    """Write a little-endian uint16 to b[off]."""
+    b[off] = val & 0xFF
+    b[off + 1] = (val >> 8) & 0xFF
+
+def _face_ticks(fv):
+    return {1: 960, 2: 480, 3: 240, 4: 120, 5: 60, 6: 30, 7: 15}.get(fv & 0x0F, 0)
+
+def _dots_from_gap(gap, fv):
+    base = _face_ticks(fv)
+    if base <= 0 or gap <= 0:
+        return 0
+    if abs(gap - base) <= 1:
+        return 0
+    if abs(gap - base * 3 // 2) <= 1:
+        return 1
+    if (base * 7) % 4 == 0 and abs(gap - base * 7 // 4) <= 1:
+        return 2
+    if (base * 15) % 8 == 0 and abs(gap - base * 15 // 8) <= 1:
+        return 3
+    return 0
+
+_NAT_SEMI    = [0, 2, 4, 5, 7, 9, 11]   # semitone of natural letters C D E F G A B
+_SHARP_ORDER = [3, 0, 4, 1, 5, 2, 6]     # letters that gain a sharp as fifths rise
+_FLAT_ORDER  = [6, 2, 5, 1, 4, 0, 3]     # letters that gain a flat as fifths fall
+# Encore key byte -> fifths (mirrors the importer's encKeyToFifths table).
+_KEY_FIFTHS  = [0, -1, -2, -3, -4, -5, -6, -7, 1, 2, 3, 4, 5, 6, 7]
+
+def _key_alt(fifths):
+    alt = [0] * 7
+    if fifths > 0:
+        for j in range(min(fifths, 7)):
+            alt[_SHARP_ORDER[j]] = 1
+    elif fifths < 0:
+        for j in range(min(-fifths, 7)):
+            alt[_FLAT_ORDER[j]] = -1
+    return alt
+
+def _spell(midi, fifths, origin):
+    """Spell a MIDI pitch in the given key. Returns (staff position byte,
+    letter 0-6, actualAlteration) where actualAlteration is the note's true
+    semitone offset from its natural letter (-1 flat, 0 natural, +1 sharp).
+    The displayed accidental is decided by the caller, which also tracks
+    accidentals already in effect in the measure."""
+    pc = midi % 12
+    alt = _key_alt(fifths)
+    letter = None
+    actual = 0
+    for L in range(7):                       # in-key spelling
+        if (_NAT_SEMI[L] + alt[L]) % 12 == pc:
+            letter, actual = L, alt[L]
+            break
+    if letter is None:                       # natural letter
+        for L in range(7):
+            if _NAT_SEMI[L] % 12 == pc:
+                letter, actual = L, 0
+                break
+    if letter is None:                       # raised (sharp)
+        for L in range(7):
+            if (_NAT_SEMI[L] + 1) % 12 == pc:
+                letter, actual = L, 1
+                break
+    if letter is None:                       # lowered (flat)
+        for L in range(7):
+            if (_NAT_SEMI[L] - 1) % 12 == pc:
+                letter, actual = L, -1
+                break
+    octave = (midi - actual) // 12 - 1
+    return (octave * 7 + letter - origin) & 0xFF, letter, actual
+
+# actual alteration (-2..+2) -> accidental glyph byte (1 sharp, 2 flat, 3 natural)
+_ALT_GLYPH = {1: 1, -1: 2, 0: 3, 2: 4, -2: 5}
+
+def _staff_clef_map(data):
+    """Map a note's rawStaff byte to its clef, read from the first LINE block.
+
+    Each 30-byte LINE staff entry carries its clef at byte +14, its key
+    signature at +15 and its instrStaffIdx at +21; a note's rawStaff (staffIdx
+    | staffWithin) equals the instrStaffIdx of the staff it belongs to (0x00
+    treble, 0x40 bass for a piano grand staff).  Returns
+    (clef_by_raw, fallback_clef, key_by_raw, fallback_key); the fallbacks are
+    the first entry's values for any unmatched rawStaff (the single-staff case)."""
+    p = data.find(b'LINE')
+    if p < 0:
+        return {}, 0, {}, 0
+    count = data[0x33] if 0x33 < len(data) else 1
+    base = p + 8 + 13                 # 13-byte LINE header before staff entries
+    clef_by_raw = {}
+    key_by_raw = {}
+    fallback_clef = 0
+    fallback_key = 0
+    for s in range(max(count, 1)):
+        entry = base + s * 30
+        if entry + 21 >= len(data):
+            break
+        instr_staff = data[entry + 21]
+        clef_by_raw[instr_staff] = data[entry + 14]
+        key_by_raw[instr_staff] = data[entry + 15]
+        if s == 0:
+            fallback_clef = data[entry + 14]
+            fallback_key = data[entry + 15]
+    return clef_by_raw, fallback_clef, key_by_raw, fallback_key
+
+def _fill_volta_hooks(out, meas_hdrs):
+    """Draw volta brackets from the ending-number bitmask at header +0x0F.
+    Encore only draws the bracket when the hook byte at +0x0E is set; many
+    fixtures set just +0x0F (what the importer reads). Coalesce consecutive
+    measures that share a bitmask into one bracket: a lone ending gets both
+    hooks (0xC0); a run gets a left hook (0x80) on the first measure and a
+    right hook (0x40) on the last, none in between. Hooks already set are kept."""
+    k = 0
+    while k < len(meas_hdrs):
+        ending = out[meas_hdrs[k] + 0x0F]
+        if ending == 0:
+            k += 1
+            continue
+        j = k
+        while j + 1 < len(meas_hdrs) and out[meas_hdrs[j + 1] + 0x0F] == ending:
+            j += 1
+        for idx in range(k, j + 1):
+            h = meas_hdrs[idx]
+            if out[h + 0x0E] == 0:
+                out[h + 0x0E] = 0xC0 if k == j else (0x80 if idx == k else
+                                                     (0x40 if idx == j else 0))
+        k = j + 1
+
+def _measure_headers(out):
+    """Header offsets (start of the 0x36-byte header) of every MEAS block."""
+    hdrs = []
+    p = 0
+    while True:
+        mm = out.find(b'MEAS', p)
+        if mm < 0:
+            break
+        sz = struct.unpack('<I', out[mm + 4:mm + 8])[0]
+        hdrs.append(mm + 8)
+        p = mm + 8 + 0x36 + sz
+    return hdrs
+
+def _apply_dots_and_stems(out, groups, dur_ticks):
+    """Per (rawStaff, voice): set dots, stem direction and playback fields.
+    Encore stores stem direction in options (+20 bit 0x80); it is not derived.
+    Notes sharing a tick form a chord and must share ONE stem direction (chosen
+    by the notehead furthest from the middle line), else each chord note draws
+    its own opposite stem. A secondary voice always stems down; a single voice
+    stems down when the deciding note is on the middle line (position 6) or
+    above, up below it. Notes are also made audible (see the +18 note)."""
+    staff_voices = {}
+    for (rs, vc) in groups:
+        staff_voices.setdefault(rs, set()).add(vc)
+    for (rs, vc), evts in groups.items():
+        multi = len(staff_voices.get(rs, ())) > 1
+        onsets = sorted(set(t for (t, _, _, _) in evts))
+        next_onset = {t: (onsets[k + 1] if k + 1 < len(onsets) else dur_ticks)
+                      for k, t in enumerate(onsets)}
+        chords = {}
+        for (tick, off, fv, etyp) in evts:
+            chords.setdefault(tick, []).append((off, fv, etyp))
+        for tick, chord in chords.items():
+            gap = next_onset[tick] - tick
+            note_pos = [out[off + 12] for (off, _, et) in chord if et == 9]
+            furthest = max(note_pos, key=lambda p: abs(p - 6)) if note_pos else 6
+            down = (vc >= 1) or (not multi and furthest >= 6)
+            # playback length ~ 80% of the note's sounding duration, the gate
+            # time Encore records (eighth 120 -> 96, half 480 -> 384).
+            pbdur = max(1, round(gap * 0.8))
+            for (off, fv, et) in chord:
+                # dots apply to notes and rests alike (parity by position)
+                if _dots_from_gap(gap, fv) > 0 and out[off + 14] == 0:
+                    out[off + 14] = 0x1d if out[off + 12] % 2 == 0 else 0x19
+                if et != 9:
+                    continue
+                if down and out[off + 3] >= 21 and not (out[off + 20] & 0x80):
+                    out[off + 20] |= 0x80
+                # Make the note sound in Encore. Playback uses the MIDI
+                # on-velocity at +18 (NOT the editor velocity at +19); left at 0
+                # the note is silent even though +19 is set. Also set duration.
+                if out[off + 3] >= 19 and out[off + 18] == 0:
+                    out[off + 18] = 0x50            # MIDI on-velocity (80)
+                if out[off + 3] >= 20 and out[off + 19] == 0:
+                    out[off + 19] = 64              # editor velocity
+                if out[off + 3] >= 18 and _rd16(out, off + 16) == 0:
+                    _wr16(out, off + 16, pbdur)
+
+def _beam_elem(start_tick, end_tick, leftX, rightX, count, voice=0, staff=0):
+    """Build a 30-byte BEAM element (type 4). Encore draws one beam joining the
+    `count` member notes; the members carry grace1 bit 0x10 (set by _beam_pass).
+    Only the structural fields are filled (tick, span x, end tick, member count);
+    Encore recomputes the beam's vertical geometry on open, so the zeroed slope
+    bytes render correctly. Validated against Encore-saved beam groups."""
+    d = bytearray(30)
+    _wr16(d, 0, start_tick)
+    d[2] = (4 << 4) | (voice & 0x0F)
+    d[3] = 30
+    d[4] = staff & 0x3F
+    d[5] = 0x01
+    _wr16(d, 14, leftX)
+    _wr16(d, 16, rightX)
+    _wr16(d, 20, end_tick)
+    d[22] = 0x01
+    d[25] = (count - 1) & 0xFF
+    d[27] = 0x0c
+    return bytes(d)
+
+def _beam_pass(out):
+    """Insert BEAM elements so consecutive beamable notes render joined in Encore.
+
+    Beamable = eighth or shorter (faceValue low nibble >= 4), not a grace note.
+    Notes are grouped per (rawStaff, voice) and beamed in runs that stay within
+    one beat (the measure's beatTicks); a run of >= 2 such notes gets one BEAM
+    element at the run's start tick, and every member note gets grace1 bit 0x10
+    (the on-disk beam-membership flag). The importer ignores BEAM (it maps to a
+    generic, dropped element) and re-beams on its own, so this is a pure render
+    addition that does not change import results. Runs through the buffer after
+    the main layout loop so each note's x-position (+10) is already set."""
+    result = bytearray()
+    pos = 0
+    while pos < len(out):
+        if out[pos:pos + 4] != b'MEAS':
+            result += out[pos:pos + 1]
+            pos += 1
+            continue
+        size = struct.unpack('<I', out[pos + 4:pos + 8])[0]
+        hdr = out[pos + 8:pos + 8 + 0x36]
+        beat_ticks = _rd16(hdr, 4) or 240
+        elem_start = pos + 8 + 0x36
+        eb = bytearray(out[elem_start:elem_start + size])
+        # parse the element stream (stops at the 0xffff end marker)
+        elems = []
+        i = 0
+        while i + 4 <= len(eb):
+            if eb[i:i + 2] == b'\xff\xff' or eb[i + 3] == 0:
+                break
+            elems.append((i, eb[i + 3], _rd16(eb, i), eb[i + 2] >> 4, eb[i + 2] & 0x0F))
+            i += eb[i + 3]
+        # collect beamable notes per (staff, voice)
+        groups = {}
+        for (off, esize, tick, typ, voice) in elems:
+            if typ != 9 or esize < 16:
+                continue
+            if (eb[off + 5] & 0x0F) < 4 or (eb[off + 6] & 0x20):
+                continue
+            groups.setdefault((eb[off + 4], voice), []).append((tick, off))
+        beams = {}     # rel-off of run's first note -> beam bytes to insert before it
+        for (staff, voice), notes in groups.items():
+            notes.sort()
+            run = []
+            for (tick, off) in notes + [(None, None)]:
+                if run and (tick is None or tick // beat_ticks != run[0][0] // beat_ticks):
+                    if len(run) >= 2:
+                        fo, lo = run[0][1], run[-1][1]
+                        beams[fo] = _beam_elem(run[0][0], run[-1][0],
+                                               _rd16(eb, fo + 10), _rd16(eb, lo + 10),
+                                               len(run), voice, staff)
+                        for (_, o) in run:
+                            eb[o + 6] |= 0x10
+                    run = []
+                if tick is not None:
+                    run.append((tick, off))
+        if beams:
+            newe = bytearray()
+            for (off, esize, tick, typ, voice) in elems:
+                if off in beams:
+                    newe += beams[off]
+                newe += eb[off:off + esize]
+            newe += b'\xff\xff'
+            eb = newe
+        result += b'MEAS' + struct.pack('<I', len(eb)) + hdr + eb
+        pos = elem_start + size
+    return bytes(result)
+
+def _curve_slurs(out, slurs, groups):
+    """Give each flat SLURSTART a subtle arc. A 33-byte slur has no curve
+    control points so Encore draws a straight line; fill startY (+12), the apex
+    midX/midY (+14/+16) and endY (+22). The arc sits opposite the stems: below a
+    low-note staff (notes mostly under the middle line), above otherwise. Kept
+    subtle (apex ~9, ends ~4), not a semicircle. The span (+10/+20) is kept."""
+    if not slurs:
+        return
+    pos_sum = {}
+    pos_cnt = {}
+    for evts in groups.values():
+        for (tick, off, fv, etyp) in evts:
+            if etyp == 9:
+                rs = out[off + 4]
+                pos_sum[rs] = pos_sum.get(rs, 0) + out[off + 12]
+                pos_cnt[rs] = pos_cnt.get(rs, 0) + 1
+    for (off, rs) in slurs:
+        avg = pos_sum.get(rs, 0) / max(1, pos_cnt.get(rs, 1))
+        sign = 1 if avg >= 6 else -1     # high notes -> arc above (+), low -> below (-)
+        sx = _rd16(out, off + 10)
+        ex = _rd16(out, off + 20)
+        _wr16(out, off + 12, sign * 4)            # startY
+        _wr16(out, off + 14, (sx + ex) // 2)      # midX
+        _wr16(out, off + 16, sign * 9)            # midY (apex)
+        _wr16(out, off + 22, sign * 4)            # endY
+
+def apply_encore_layout(data):
+    """Fill Encore display-layout fields in every v0xC4 MEAS block in `data`.
+
+    v0xC2 files (chuMagio 0xC2) are handled too: the synthetic ones keep the
+    v0xC4 skeleton (chuVersio 1056), so Encore renders them with the v0xC4 note
+    layout. Their notes carry the MIDI pitch in the tuplet slot (+13) instead of
+    +15, so we move it across first (same normalization the importer applies),
+    then the v0xC4 layout below positions and sounds them."""
+    if len(data) < 5 or data[4] not in (0xC2, 0xC4):
+        return data
+    out = bytearray(data)
+    is_c2 = out[4] == 0xC2
+    clef_by_raw, fallback_clef, key_by_raw, fallback_key = _staff_clef_map(out)
+    _fill_volta_hooks(out, _measure_headers(out))
+
+    # Mid-piece CLEF changes (element type 1) override the LINE clef for every
+    # later note on that staff. Tracked across measures in stream order, since
+    # Encore writes a staff's elements in tick order with the clef change first.
+    clef_now = {}
+    pos = 0
+    while True:
+        m = out.find(b'MEAS', pos)
+        if m < 0:
+            break
+        size = struct.unpack('<I', out[m + 4:m + 8])[0]
+        hdr = m + 8
+        elem_start = hdr + 0x36
+        elem_end = elem_start + size
+        beat_ticks = _rd16(out, hdr + 4)
+        dur_ticks = _rd16(out, hdr + 6)
+        ts_den = out[hdr + 9]
+        # collect note/rest elements; track per (rawStaff, voice) for dots
+        groups = {}
+        max_xpos = 0
+        slurs = []                  # flat SLURSTART ORNs needing a curve
+        # accidental in effect this measure, per (rawStaff, staff position):
+        # an accidental carries to later same-line notes until the barline.
+        meas_accid = {}
+        i = elem_start
+        while i + 4 <= elem_end:
+            if out[i:i + 2] == b'\xff\xff':
+                break
+            tv = out[i + 2]
+            typ = tv >> 4
+            voice = tv & 0x0F
+            esize = out[i + 3]
+            if esize == 0:
+                break
+            # type 1 = clef change: update the clef in effect for this staff,
+            # and (16-byte form) draw it just left of the note at its tick.
+            if typ == 1 and esize >= 6:
+                clef_now[out[i + 4]] = out[i + 5]
+                if esize >= 12 and _rd16(out, i + 10) == 0:
+                    tk = _rd16(out, i)
+                    _wr16(out, i + 10, max(0, _enc_xpos(tk) - _GRACE_XPOS_OFFSET - 2))
+            # type 5 = ORN: a flat SLURSTART (tipo 0x21 with no curve control
+            # points, midY at +16 still zero) gets a subtle arc added below.
+            if typ == 5 and out[i + 5] == 0x21 and esize >= 24 \
+                    and out[i + 16] == 0 and out[i + 17] == 0:
+                slurs.append((i, out[i + 4]))
+            # type 6 = lyric: it stores its x-position at +10 like a note, and
+            # aligns under the note at the same tick.
+            if typ == 6 and esize >= 12:
+                tick = _rd16(out, i)
+                if _rd16(out, i + 10) == 0:
+                    _wr16(out, i + 10, _enc_xpos(tick))
+            if typ in (8, 9) and esize >= 12:
+                tick = _rd16(out, i)
+                # x-position
+                if _rd16(out, i + 10) == 0:
+                    xp = _enc_xpos(tick)
+                    if typ == 9 and (out[i + 6] & 0x20):   # grace -> left of its main note
+                        xp = max(2, xp - _GRACE_XPOS_OFFSET)
+                    _wr16(out, i + 10, xp)
+                max_xpos = max(max_xpos, _rd16(out, i + 10))
+                # Rests carry a staff position at +12 too. Left at 0 they sit
+                # three spaces too low; Encore places them around position 6
+                # (eighth 7, sixteenth 5), staff-line relative for any clef.
+                if typ == 8 and esize >= 13 and out[i + 12] == 0:
+                    out[i + 12] = {4: 7, 5: 5}.get(out[i + 5] & 0x0F, 6)
+                if typ == 8:
+                    groups.setdefault((out[i + 4], voice), []).append((tick, i, out[i + 5] & 0x0F, 8))
+                if typ == 9 and esize >= 16:
+                    # v0xC2 sub-variant A keeps the MIDI pitch in the tuplet slot
+                    # (+13) with +15 empty or a stray flag; move it to +15 (the
+                    # v0xC4 pitch slot) so Encore reads it, clearing the tuplet
+                    # slot. Same rule the importer applies. Sub-variant B (+15
+                    # already a real pitch) is left alone.
+                    if is_c2 and out[i + 15] < 12 and out[i + 13] >= 12:
+                        out[i + 15] = out[i + 13]
+                        out[i + 13] = 0
+                    midi = out[i + 15]
+                    # diatonic staff position + accidental (sharp spelling),
+                    # using the clef of the staff this note belongs to.
+                    raw_staff = out[i + 4]
+                    clef = clef_now.get(raw_staff,
+                                        clef_by_raw.get(raw_staff, fallback_clef))
+                    origin = _CLEF_ORIGIN.get(clef)   # None for PERC/TAB -> skip
+                    if origin is not None and out[i + 12] == 0 and midi:
+                        fifths = _KEY_FIFTHS[key_by_raw.get(raw_staff, fallback_key) % 15]
+                        posb, letter, actual = _spell(midi, fifths, origin)
+                        out[i + 12] = posb
+                        # show an accidental only when the note's alteration
+                        # differs from what is already in effect on that line
+                        # (the key default until an accidental overrides it).
+                        akey = (raw_staff, posb)
+                        in_effect = meas_accid.get(akey, _key_alt(fifths)[letter])
+                        if actual != in_effect:
+                            if out[i + 21] == 0:
+                                out[i + 21] = _ALT_GLYPH.get(actual, 0)
+                            meas_accid[akey] = actual
+                    groups.setdefault((out[i + 4], voice), []).append((tick, i, out[i + 5] & 0x0F, 9))
+            i += esize
+        # measure width @0x10. Normally the x-position of the measure end, so
+        # the last note keeps its own duration as trailing space. But when the
+        # beatTicks is the legacy value (not 960/timeSigDen, e.g. 240 in a 2/2
+        # measure where it should be 480), Encore lays the measure out on a
+        # shorter beat grid and the content runs past it; the measure then needs
+        # a wider stored width or every note collapses to the first position.
+        # In that case size it from the actual content plus a full-beat trailing.
+        correct_beat = (960 // ts_den) if ts_den else 0
+        if correct_beat and beat_ticks and beat_ticks != correct_beat:
+            width = max_xpos + _LEGACY_BEATTICKS_TRAIL
+        else:
+            width = _enc_xpos(dur_ticks)
+        struct.pack_into('<I', out, hdr + 0x10, width)
+        _apply_dots_and_stems(out, groups, dur_ticks)
+        _curve_slurs(out, slurs, groups)
+        pos = elem_end
+    return _beam_pass(out)
+
+def make_2staff_pre(clefs=(0, 1)):
+    """Turn the single-staff bazo skeleton PRE into a 2-staff system.
+
+    Sets the header staffPerSystem to 2 and rebuilds every LINE block to carry
+    two 30-byte staff entries instead of one. The second entry is a copy of the
+    first with its clef byte (+14) and instrStaffIdx (+21=1) changed, so notes
+    route to it by staffIdx 1 (rawStaff 0x01). Encore re-spaces the two staves
+    vertically on open.
+
+    instrumentCount is deliberately left at 1: the bazo TK00 defines a single
+    instrument, and raising the count to 2 makes Encore read past the TK00 data
+    and crash. With one instrument and two staves there is no separate brace
+    (bazo's TK00 carries no grouping), which is the intended 2-staff-no-brace
+    layout. `clefs` is the (top, bottom) clef byte pair (default G over F)."""
+    pre = bytearray(set_chumagio(0xC4))
+    pre[0x33] = 2
+    out = bytearray()
+    pos = 0
+    while pos < len(pre):
+        if pre[pos:pos + 4] == b'LINE':
+            sz = struct.unpack('<I', pre[pos + 4:pos + 8])[0]
+            content = pre[pos + 8:pos + 8 + sz]
+            hdr13 = content[:13]
+            s0 = bytearray(content[13:13 + 30])
+            tail = content[13 + 30:]
+            s0[14] = clefs[0]
+            s1 = bytearray(s0)
+            s1[14] = clefs[1]
+            s1[21] = 1                     # instrStaffIdx 1 -> bass staff slot
+            newc = bytes(hdr13) + bytes(s0) + bytes(s1) + bytes(tail)
+            out += b'LINE' + struct.pack('<I', len(newc)) + newc
+            pos += 8 + sz
+        else:
+            out += pre[pos:pos + 1]
+            pos += 1
+    return bytes(out)
+
+def assemble_2staff(custom_list, fill_ts=(4, 4), clefs=(0, 1)):
+    """assemble() for a 2-staff system (top clef over bottom clef, no brace).
+
+    Notes route to the top staff with staffIdx 0 (rawStaff 0x00) and to the
+    bottom staff with staffIdx 1 (rawStaff 0x01); note_v0c4 already preserves
+    those low values. The layout pass reads each note's clef from the LINE
+    entries, so bottom-staff positions come out in the bottom clef."""
+    pre = bytearray(make_2staff_pre(clefs))
+    total_meas = max(len(custom_list), 6)
+    struct.pack_into('<h', pre, 0x34, total_meas)
+    body = b''.join(meas_block(h, e) for h, e in custom_list)
+    if len(custom_list) < 6:
+        body += b''.join(empty_meas(*fill_ts) for _ in range(6 - len(custom_list)))
+    return bytes(pre) + body + SKELETON_POST
+
+def set_staff_key(data, key, staff_idx=0):
+    """Patch the key-signature byte for staff_idx in ALL LINE blocks. The key
+    byte sits at staff-entry +15 (right after the clef at +14). Encore's key
+    encoding: 0=C, 1..7 = 1..7 flats, 8..14 = 1..7 sharps (see encKeyToFifths).
+    Apply before write()/apply_encore_layout so the layout pass spells notes in
+    this key (in-key notes get no accidental, out-of-key notes get one)."""
+    d = bytearray(data)
+    pos = 0
+    while pos + 8 < len(d):
+        if d[pos:pos+4] == b'LINE':
+            entry_offset = pos + 8 + 13 + staff_idx * 30 + 15  # +15 = key byte
+            if entry_offset < len(d):
+                d[entry_offset] = key & 0xFF
+            size = int.from_bytes(d[pos+4:pos+8], 'little')
+            pos += 8 + size
+        else:
+            pos += 1
+    return bytes(d)
+
+
+def mrest_v0c4(tick, count, staffIdx=0, voice=0):
+    """Multi-measure rest that Encore actually draws as a thick bar with the
+    count above it. The face value byte must be 0x20 (a plain rest fv draws a
+    single whole rest instead), the count sits at +15, and +16/+17 carry the
+    constant 0x80 0x07 marker seen in real files. The layout pass fills x (+10)
+    and position (+12)."""
+    d = bytearray(15)
+    d[0] = 18
+    d[1] = staffIdx & 0x3F
+    d[2] = 0x20
+    d[12] = count & 0xFF        # +15 mrestCount
+    d[13] = 0x80                # +16
+    d[14] = 0x07                # +17
+    return struct.pack('<H', tick) + bytes([(8 << 4) | (voice & 0xF)]) + bytes(d)
+
+
+def slur_v0c4(tick, staffIdx, startX, midX, endX, startY=9, midY=16, endY=9, voice=0):
+    """28-byte SLURSTART (tipo 0x21), the geometry-rich form Encore renders an
+    arc from. Three control points: (startX,startY), (midX,midY = apex),
+    (endX,endY). A larger midY makes the slur bulge; all-zero Y draws a flat
+    line. The 33-byte ornament_v0c4 SLURSTART used by importer fixtures draws
+    straight in Encore -- use this builder for files meant to open in Encore."""
+    d = bytearray(28)
+    _wr16(d, 0, tick)
+    d[2] = (5 << 4) | (voice & 0xF)
+    d[3] = 28
+    d[4] = staffIdx & 0xFF
+    d[5] = 0x21
+    _wr16(d, 10, startX); _wr16(d, 12, startY)
+    _wr16(d, 14, midX);   _wr16(d, 16, midY)
+    _wr16(d, 20, endX);   _wr16(d, 22, endY)
+    return bytes(d)
+
+def wedge_v0c4(tick, staffIdx, startX, endX, cresc=True, y=(-3, 2, 12), voice=0):
+    """28-byte WEDGESTART (tipo 0x1D) hairpin. startX is stored at both +10 and
+    +14, endX at +20. The Y triple (y12, y16, y22) sets vertical placement:
+    negative (~ -37) above the staff, small positive (the default -3/2/12)
+    just below it; large positive overshoots into the staff below. cresc=True
+    writes speguleco (+26)=0 for a crescendo (<), False writes 1 for a
+    diminuendo (>). The 33-byte ornament_v0c4 WEDGESTART draws as a closed
+    angle in Encore -- use this builder for files meant to open in Encore."""
+    d = bytearray(28)
+    _wr16(d, 0, tick)
+    d[2] = (5 << 4) | (voice & 0xF)
+    d[3] = 28
+    d[4] = staffIdx & 0xFF
+    d[5] = 0x1D
+    _wr16(d, 10, startX); _wr16(d, 12, y[0])
+    _wr16(d, 14, startX); _wr16(d, 16, y[1])
+    _wr16(d, 20, endX);   _wr16(d, 22, y[2])
+    d[24] = 1
+    d[26] = 0 if cresc else 1
+    return bytes(d)
+
+# Dynamic-mark tipo bytes (size-16 ORN), see ENCORE_FORMAT.md ornament table.
+DYN = {'ppp': 0x80, 'pp': 0x81, 'p': 0x82, 'mp': 0x83, 'mf': 0x84, 'f': 0x85,
+       'ff': 0x86, 'fff': 0x87, 'sfz': 0x88, 'sffz': 0x89, 'fp': 0x8A,
+       'fz': 0xAA, 'sf': 0xAB}
+
+def dyn_v0c4(tick, staffIdx, mark, xoffset, yoffset=-3, voice=0):
+    """16-byte dynamic ORN (p, mf, f, ...). `mark` is a DYN key or a raw tipo
+    byte. The glyph is drawn at its own xoffset (+10, normally the note's
+    x-position at this tick) and yoffset (+12); a small value sits it next to
+    the staff. Like slur/wedge this is the geometry-bearing form Encore renders;
+    do not route it through the layout pass (it fills note/lyric x only)."""
+    tipo = DYN.get(mark, mark) if isinstance(mark, str) else mark
+    d = bytearray(16)
+    _wr16(d, 0, tick)
+    d[2] = (5 << 4) | (voice & 0xF)
+    d[3] = 16
+    d[4] = staffIdx & 0xFF
+    d[5] = tipo & 0xFF
+    _wr16(d, 10, xoffset)
+    _wr16(d, 12, yoffset)
+    return bytes(d)
+
+def tie_arc_v0c4(tick, staffIdx, position, arcX1, arcX2, voice=0, direction=0xfe):
+    """18-byte TIE (type 3) carrying the arc x-positions Encore draws from.
+    arcX1 is the start note's x, arcX2 the end note's x. For a tie that crosses
+    a barline, arcX2 is measure-relative to the START measure, so pass the start
+    measure width plus the end note's x in the next measure (it exceeds the
+    measure width). `position` is the tied note's staff position (+14/+15). The
+    16-byte tie_v0c4 has no arc and draws flat; use this for Encore files."""
+    d = bytearray(18)
+    _wr16(d, 0, tick)
+    d[2] = (3 << 4) | (voice & 0xF)
+    d[3] = 18
+    d[4] = staffIdx & 0x3F
+    d[5] = direction
+    d[10] = arcX1 & 0xFF
+    d[12] = arcX2 & 0xFF
+    d[14] = position & 0xFF
+    d[15] = position & 0xFF
+    d[16] = 0xF0
+    return bytes(d)
+
+# Size-16 ORN glyph tipo bytes. In v0xC4 Encore draws articulations and single
+# ornaments as size-16 ORN elements (the note's +24 byte is only what the
+# importer reads); see the ENCORE_FORMAT ornament table.
+ARTIC = {'staccato': 0xC9, 'accent': 0xBE, 'tenuto': 0xC8, 'marcato': 0xBF,
+         'marcato_below': 0xC6, 'fermata': 0xCC, 'fermata_below': 0xCD,
+         'upbow': 0xC4,
+         'trill': 0xB0, 'short_trill': 0xB6, 'mordent': 0xB8, 'tremolo': 0xAF,
+         'finger1': 0xB9, 'finger2': 0xBA, 'finger3': 0xBB, 'finger4': 0xBC,
+         'finger5': 0xBD}
+
+def artic_v0c4(tick, staffIdx, mark, xoffset, yoffset=12, voice=0):
+    """Articulation or single ornament as a size-16 ORN (staccato, accent,
+    tenuto, marcato, trill, mordent, fermata, tremolo, ...). Same wire form as
+    dyn_v0c4. The glyph sits at xoffset (+10, the note x) and yoffset (+12); a
+    positive yoffset (~12) places it above the note, negative below. Pair with a
+    stem-down high note so the mark does not hit the stem."""
+    tipo = ARTIC.get(mark, mark) if isinstance(mark, str) else mark
+    return dyn_v0c4(tick, staffIdx, tipo, xoffset, yoffset, voice)
+
+def arpeggio_v0c4(tick, staffIdx, x, yTop, yBottom, voice=0):
+    """28-byte ARPEGGIO (tipo 0x22): a vertical wavy line just left of a chord.
+    All three x slots (+10/+14/+20) hold the same x so the line is vertical;
+    yTop (+16) and yBottom (+22) span the chord's noteheads (more negative is
+    higher). A size-16 form does not render."""
+    d = bytearray(28)
+    _wr16(d, 0, tick)
+    d[2] = (5 << 4) | (voice & 0xF)
+    d[3] = 28
+    d[4] = staffIdx & 0xFF
+    d[5] = 0x22
+    _wr16(d, 10, x); _wr16(d, 12, 8)
+    _wr16(d, 14, x); _wr16(d, 16, yTop)
+    _wr16(d, 20, x); _wr16(d, 22, yBottom)
+    d[24] = 1
+    d[26] = 2
+    return bytes(d)
+
+# Tempo mark template captured from an Encore-5-saved file (quarter = 100 at a
+# beat). The element is a 38-byte ORN (tipo 0x32 = TEMPO): beat-unit code at
+# +28 (0x02 = quarter), BPM at +30, and a fixed text/glyph layout box at
+# +10..+27. An earlier 33-byte guess made Encore misparse the following bytes
+# and paint a giant black box; the correct size is 38.
+_TEMPO_TMPL = bytes.fromhex(
+    'f000502600320000000031000e003100cfff00004d00daff0000000002026400570009000000')
+
+def tempo_v0c4(tick, bpm, beat_unit=0x02, voice=0, staffIdx=0):
+    """38-byte TEMPO ORN (tipo 0x32). Draws "<note> = bpm" above the staff at
+    `tick`. beat_unit is the metronome note code (0x02 = quarter); bpm is the
+    beats-per-minute number. The x-position (+10/+14) is set from the tick like
+    a note; the rest of the layout box comes from the captured template."""
+    d = bytearray(_TEMPO_TMPL)
+    _wr16(d, 0, tick)
+    d[2] = (5 << 4) | (voice & 0x0F)
+    d[4] = staffIdx & 0x3F
+    xp = _enc_xpos(tick)
+    _wr16(d, 10, xp)
+    _wr16(d, 14, xp)
+    d[28] = beat_unit & 0xFF
+    d[30] = bpm & 0xFF
+    return bytes(d)
+
+def stafftext_orn(tick, tind=0, x=28, y=-61, box=True, voice=0, staffIdx=0):
+    """86-byte STAFFTEXT ORN (tipo 0x1e). Anchors an expression/staff text at
+    `tick`; the actual string lives in the TEXT block (build it with the
+    existing text_block_v0c4), referenced by `tind` (entry index). `box`=True
+    sets the "enclose with box" flag (+34/+35 = 1), which makes Encore display
+    the FULL text -- without it Encore clips the text to a small box and shows
+    only the first few characters.
+
+    NOTE on rendering: a measure carrying staff text also needs Encore's
+    computed 16-byte layout blob in its MEAS header at +0x26..+0x35 (the slot
+    that otherwise holds the " Writer" tag); with the default tag the text
+    stacks vertically one character per line. That blob is opaque per-text
+    geometry and is not synthesized here, so use a captured header for faithful
+    horizontal rendering. The element itself (and the TEXT block) import
+    correctly regardless."""
+    d = bytearray(86)
+    _wr16(d, 0, tick)
+    d[2] = (5 << 4) | (voice & 0x0F)
+    d[3] = 86
+    d[4] = staffIdx & 0x3F
+    d[5] = 0x1e
+    _wr16(d, 10, x); d[12] = 18; _wr16(d, 14, x)
+    _wr16(d, 16, y & 0xFFFF); _wr16(d, 20, 88); _wr16(d, 22, (y + 17) & 0xFFFF)
+    d[24] = 0x51; d[26] = 0x0c; d[28] = 0x03
+    d[32] = tind & 0xFF
+    if box:
+        d[34] = 1; d[35] = 1
+    return bytes(d)
+
+def meas_hdr_volta(timeSigNum, timeSigDen, ending, hooks=0xC0, bpm=100, barTypeEnd=0):
+    """meas_hdr variant that draws a volta (ending) bracket. `ending` is the
+    ending-number bitmask at +0x0F (bit 0 = 1st ending, bit 1 = 2nd, ...);
+    consecutive measures with the same bitmask form one bracket. `hooks` at
+    +0x0E draws the bracket ends: 0xC0 both (single-measure ending), 0x80 left
+    only (bracket start), 0x40 right only (bracket end). Without the hooks byte
+    Encore draws no bracket. (Vertical placement is Encore's default, close to
+    the staff; the exact height lives in the measure layout region.)"""
+    h = bytearray(meas_hdr(timeSigNum, timeSigDen, bpm=bpm, barTypeEnd=barTypeEnd))
+    h[0x0E] = hooks & 0xFF
+    h[0x0F] = ending & 0xFF
+    return bytes(h)
+
+
+
+
 if __name__=='__main__':
     print("Generating synthetic Encore test files (using bazo.enc skeleton):")
     write("structure_v0c2_pitches.enc",       gen_v0c2_pitches())
@@ -8686,7 +9463,7 @@ if __name__=='__main__':
     write("instruments_tk_onebyte_name.enc",  gen_v0c4_tk_onebyte_name())
     write("ornaments_beamed_triplet_capped.enc", gen_v0c4_beamed_triplet_capped())
     write("ornaments_zero_hairpin.enc",           gen_v0c4_zero_hairpin())
-    write("ornaments_multi_measure_hairpin.enc",  gen_v0c4_multi_measure_hairpin())
+    write("ornaments_multi_measure_hairpin.enc",  gen_v0c4_multi_measure_hairpin(), layout=False)
     write("ornaments_grace_slur_to_main.enc",      gen_v0c4_grace_slur_to_main())
     write("ornaments_grace_slur_to_later.enc",     gen_v0c4_grace_slur_to_later())
     write("ornaments_multi_measure_slur.enc",     gen_v0c4_multi_measure_slur())
