@@ -100,6 +100,22 @@ static const char* matchStepLabel(MatchStep step)
     return "";
 }
 
+// Describe an Encore MIDI program for the debug log using MuseScore's own instrument names
+// (localized like everything else: the template trackName is translated at load). Encore stores
+// a 1-indexed GM program; map it to the template whose primary sound is that program and show its
+// track name. No hardcoded GM table; an unmapped program shows just the number.
+static std::string midiProgramInfo(const EncInstrument& instr)
+{
+    if (instr.midiProgram <= 0) {
+        return "MIDI program none";
+    }
+    std::string label = "MIDI program " + std::to_string(instr.midiProgram);
+    if (const InstrumentTemplate* gm = findTemplateByMidi(instr.midiProgram - 1)) {
+        label += " (" + gm->trackName.toStdString() + ")";
+    }
+    return label;
+}
+
 // Apply a found template (or fallback to Grand Piano) and set the instrument's long name.
 static void applyInstrumentOrFallback(Part* part, const InstrumentTemplate* tmpl,
                                       const EncInstrument& instr, MatchStep matchStep)
@@ -122,22 +138,22 @@ static void applyInstrumentOrFallback(Part* part, const InstrumentTemplate* tmpl
         if (ins.trackName().isEmpty()) {
             ins.setTrackName(humanizeTemplateId(tmpl->id));
         }
-        LOGD() << "  instrument \"" << instr.name.toStdString()
-               << "\": step(" << matchStepLabel(matchStep)
-               << (matchStep == MatchStep::MidiProgram ? QString(" %1").arg(instr.midiProgram).toStdString() : std::string())
-               << ")" << " -> " << ins.trackName().toStdString();
+        LOGD() << "  instrument \"" << instr.name.toStdString() << "\" (" << midiProgramInfo(instr)
+               << "): step(" << matchStepLabel(matchStep) << ") -> " << ins.trackName().toStdString();
         part->setInstrument(ins);
         return;
     }
     // Grand Piano fallback.
     const InstrumentTemplate* pianoTmpl = searchTemplateForMidiProgram(0, 0, false);
     if (pianoTmpl) {
-        LOGD() << "  instrument \"" << instr.name.toStdString() << "\": no match -> fallback: Grand Piano";
+        LOGD() << "  instrument \"" << instr.name.toStdString() << "\" (" << midiProgramInfo(instr)
+               << "): no match -> fallback: Grand Piano";
         Instrument ins = Instrument::fromTemplate(pianoTmpl);
         setInstrName(ins);
         part->setInstrument(ins);
     } else {
-        LOGD() << "  instrument \"" << instr.name.toStdString() << "\": no match, no piano template -> bare MIDI";
+        LOGD() << "  instrument \"" << instr.name.toStdString() << "\" (" << midiProgramInfo(instr)
+               << "): no match, no piano template -> bare MIDI";
         part->setMidiProgram(0, 0);
         if (!instr.name.isEmpty()) {
             part->setPlainLongName(String(instr.name));
@@ -297,6 +313,11 @@ void buildParts(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
     const EncRoot& enc = ctx.enc;
+    const char* searchModeLabel =
+        ctx.opts.instrumentSearchMode == InstrumentSearchMode::MidiOnly ? "MIDI only"
+        : ctx.opts.instrumentSearchMode == InstrumentSearchMode::Piano  ? "Grand Piano for all"
+        :                                                                 "name then MIDI";
+    LOGD() << "---- Instrument assignment (using " << searchModeLabel << ") ----";
     int cumStaffIdx = 0;  // running index into enc.lines[0].staffData
     for (const auto& instr : enc.instruments) {
         int ns = instr.nstaves > 0 ? instr.nstaves : 1;

@@ -28,6 +28,7 @@
 #include <map>
 #include <string>
 
+#include <QLocale>
 #include <QString>
 
 #include "../parser/elem.h"
@@ -54,6 +55,9 @@ void logEncRootInfo(const EncRoot& enc)
            << "  Instruments:" << h.instrumentCount
            << "  Staves/sys:" << h.staffPerSystem
            << "  Measures:" << h.measureCount;
+    // The UI language MuseScore runs in; the instrument names logged below are localized to it
+    // (QLocale default is set to the configured language at startup).
+    LOGD() << "  UI locale:" << QLocale().name().toStdString();
 
     LOGD() << "---- Titles ----";
     if (!enc.titleBlock.title.isEmpty()) {
@@ -103,23 +107,36 @@ void logEncRootInfo(const EncRoot& enc)
                << " pages  (measures/system: " << hist << ")";
     }
 
-    LOGD() << "---- Tempos ----";
-    LOGD() << "  Total: " << enc.measures.size();
-    quint8 lastNum = 0, lastDen = 0;
-    quint16 lastBpm = 0;
-    for (size_t i = 0; i < enc.measures.size(); ++i) {
-        const EncMeasure& m = enc.measures[i];
-        const bool timeSigChanged = (m.timeSigNum != lastNum || m.timeSigDen != lastDen);
-        const bool bpmChanged = (m.bpm != 0 && m.bpm != lastBpm);
-        if (i == 0 || timeSigChanged || bpmChanged) {
-            LOGD() << "  [" << i << "] " << (int)m.timeSigNum << "/" << (int)m.timeSigDen
-                   << (m.bpm ? (QString("  bpm=") + QString::number(m.bpm)).toStdString() : "");
-            lastNum = m.timeSigNum;
-            lastDen = m.timeSigDen;
-            if (m.bpm) {
-                lastBpm = m.bpm;
+    LOGD() << "---- Tempo & meter ----";
+    {
+        // One compact line of the tempo/time-signature changes (the measure count is already in
+        // the header), e.g. "20 changes: m0=3/4 180bpm, m48=2/4 120bpm, ...".
+        std::string changes;
+        int nChanges = 0;
+        quint8 lastNum = 0, lastDen = 0;
+        quint16 lastBpm = 0;
+        for (size_t i = 0; i < enc.measures.size(); ++i) {
+            const EncMeasure& m = enc.measures[i];
+            const bool timeSigChanged = (m.timeSigNum != lastNum || m.timeSigDen != lastDen);
+            const bool bpmChanged = (m.bpm != 0 && m.bpm != lastBpm);
+            if (i == 0 || timeSigChanged || bpmChanged) {
+                if (!changes.empty()) {
+                    changes += ", ";
+                }
+                changes += "m" + std::to_string(i) + "=" + std::to_string((int)m.timeSigNum)
+                           + "/" + std::to_string((int)m.timeSigDen);
+                if (m.bpm) {
+                    changes += " " + std::to_string(m.bpm) + "bpm";
+                }
+                ++nChanges;
+                lastNum = m.timeSigNum;
+                lastDen = m.timeSigDen;
+                if (m.bpm) {
+                    lastBpm = m.bpm;
+                }
             }
         }
+        LOGD() << "  " << nChanges << " changes: " << changes;
     }
     // Diagnostics: non-notation elements the importer intentionally drops. MIDI Control Change
     // events (sustain/volume/modulation) are playback-only and decoded here so the log says what
