@@ -301,6 +301,17 @@ Byte 0x0F is a bitmask, bit `n` set means the measure belongs to ending `n+1`.
 Encore sets the same bitmask on **every** measure inside the ending (not just the first).
 Consecutive measures with the same non-zero bitmask form one multi-ending bracket; the bitmask bit-positions give the ending numbers (bit 0 = ending 1, bit 1 = ending 2, etc.).
 
+#### Repeat play count
+
+Encore stores no explicit "times played" value for a repeat-end barline. The number of
+times a repeated section plays is implied by the volta endings: it is the highest ending
+number among the brackets that belong to the repeat. A repeat with a first ending of
+"1.-3." (bits 0+1+2 = 0x07) followed by a "4." ending (bit 3) plays four times, so the
+final ending is reached only on the fourth pass. The end-repeat measure carries the first
+ending's bitmask, and the additional endings appear on the measures that follow it up to
+the next repeat start. When a repeat has no alternate endings the play count is the
+default of two.
+
 #### Repeat-mark ladder (LOW byte of 0x1A)
 
 | Byte | Meaning                                                      |

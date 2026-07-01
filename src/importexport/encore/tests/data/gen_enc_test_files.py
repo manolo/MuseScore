@@ -6419,6 +6419,44 @@ def gen_v0c4_volta_repeat_playback():
 
 
 # ===========================================================================
+# structure_volta_repeat_playcount.enc
+# A repeat whose endings span more than two passes: ||: m0  1.-3.[m1] :||  4.[m2]
+#   m0: repeat-start barline (start byte 0x0C = 2), the repeated body
+#   m1: first ending, repeatAlternative 0x07 (endings 1+2+3) + repeat-end barline
+#       (barTypeEnd = 4)
+#   m2: second ending, repeatAlternative 0x08 (ending 4) + final barline
+#       (barTypeEnd = 5)
+# Encore stores no explicit "times played" count; the pass count is implied by the
+# highest ending number (4 here). Without deriving it, the end-repeat barline keeps
+# MuseScore's default repeatCount of 2 and the section plays only twice, so the "4."
+# ending is never reached.
+# ===========================================================================
+def gen_v0c4_volta_repeat_playcount():
+    def body():
+        return (note_v0c4(0,   0, 0, fv=3, pitch=60)
+                + note_v0c4(240, 0, 0, fv=3, pitch=62)
+                + note_v0c4(480, 0, 0, fv=3, pitch=64)
+                + note_v0c4(720, 0, 0, fv=3, pitch=65)
+                + end_marker())
+
+    h0 = bytearray(meas_hdr(4, 4))
+    h0[0x0C] = 2                       # m0: REPEATSTART at measure start
+
+    h1 = bytearray(meas_hdr(4, 4, barTypeEnd=4))  # m1: REPEATEND at measure end
+    h1[0x0F] = 0x07                    # first ending, endings 1+2+3
+
+    h2 = bytearray(meas_hdr(4, 4, barTypeEnd=5))  # m2: FINAL barline
+    h2[0x0F] = 0x08                    # second ending, ending 4
+
+    custom = [
+        (bytes(h0), body()),
+        (bytes(h1), body()),
+        (bytes(h2), body()),
+    ]
+    return assemble(0xC4, custom, fill_ts=(4, 4))
+
+
+# ===========================================================================
 # importer_to_coda_vs_coda_marker.enc
 # Encore distinguishes the source measure of "To Coda" from the destination
 # measure carrying the Coda glyph by two distinct coda-byte values in the
@@ -9771,6 +9809,7 @@ if __name__=='__main__':
           gen_v0c4_header_measure_count_truncates_ghost_measures())
     write("importer_volta_coalesce_and_text.enc",         gen_v0c4_volta_coalesce_and_text())
     write("structure_volta_repeat_playback.enc",          gen_v0c4_volta_repeat_playback())
+    write("structure_volta_repeat_playcount.enc",         gen_v0c4_volta_repeat_playcount())
     write("importer_to_coda_vs_coda_marker.enc",          gen_v0c4_to_coda_vs_coda_marker())
     write("text_text_block_latin1_decoding.enc",      gen_v0c4_text_block_latin1_decoding())
     write("importer_two_dynamics_in_one_measure.enc",     gen_v0c4_two_dynamics_in_one_measure())

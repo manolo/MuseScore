@@ -2435,6 +2435,65 @@ TEST_F(Tst_Importer, v0c4_volta_repeat_skips_first_ending_on_replay)
     delete score;
 }
 
+// Regression: Encore stores no explicit "times played" count for a repeat; the pass
+// count is implied by the volta endings. A repeat with endings "1.-3." then "4." must
+// play four times so the "4." ending is reached. The importer left MuseScore's default
+// repeatCount of 2 on the end-repeat barline, so the section only played twice and the
+// "4." ending was never entered. The fix derives the count from the highest ending
+// number of the repeat's voltas.
+TEST_F(Tst_Importer, v0c4_volta_repeat_playcount_from_endings)
+{
+    MasterScore* score = readEncoreScore("structure_volta_repeat_playcount.enc");
+    ASSERT_NE(score, nullptr);
+    score->setExpandRepeats(true);
+
+    // Locate the end-repeat measure and the final ("4.") ending measure.
+    const Measure* endRepeat = nullptr;
+    const Volta* fourthEnding = nullptr;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (mb->isMeasure() && toMeasure(mb)->repeatEnd()) {
+            endRepeat = toMeasure(mb);
+            break;
+        }
+    }
+    for (const auto& p : score->spanner()) {
+        const Spanner* sp = p.second;
+        if (sp && sp->isVolta()) {
+            const Volta* v = toVolta(sp);
+            if (v->endings().size() == 1 && v->endings()[0] == 4) {
+                fourthEnding = v;
+            }
+        }
+    }
+    ASSERT_NE(endRepeat, nullptr) << "expected a measure with a repeat-end barline";
+    ASSERT_NE(fourthEnding, nullptr) << "expected a 4th-ending volta (endings == {4})";
+
+    EXPECT_EQ(endRepeat->repeatCount(), 4)
+        << "end-repeat barline must play 4 times (highest ending is '4.'); the default "
+           "of 2 stops before the 4th ending (got " << endRepeat->repeatCount() << ")";
+
+    // The repeated body (the measure carrying the repeat-start) must be played on all
+    // four passes; the 4th ending is entered exactly once, on the last pass.
+    const int repeatStartTick = endRepeat->tick().ticks() - endRepeat->ticks().ticks();
+    const int fourthEndingTick = fourthEnding->tick().ticks();
+    int bodyPlays = 0;
+    int fourthEndingPlays = 0;
+    for (const RepeatSegment* rs : score->repeatList()) {
+        if (rs->tick <= repeatStartTick && repeatStartTick < rs->endTick()) {
+            ++bodyPlays;
+        }
+        if (rs->tick <= fourthEndingTick && fourthEndingTick < rs->endTick()) {
+            ++fourthEndingPlays;
+        }
+    }
+    EXPECT_EQ(bodyPlays, 4)
+        << "repeated body must play 4 times (got " << bodyPlays << ")";
+    EXPECT_EQ(fourthEndingPlays, 1)
+        << "4th ending must play exactly once, on the final pass (got "
+        << fourthEndingPlays << ")";
+    delete score;
+}
+
 // Write a small file with the given leading bytes and return its path.
 static QString encWriteTempFile(const QString& name, const QByteArray& bytes)
 {
