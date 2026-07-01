@@ -60,66 +60,76 @@ static void resolveArpeggios(MasterScore* score,
     }
 }
 
-static void resolveSingleChordTremolos(MasterScore* score,
-                                       const std::vector<PendingOrnTremolo>& pendingOrnTremolos)
+// Locate the Chord a single-chord tremolo ORN belongs to. The ORN's stored tick/voice are
+// unreliable (Encore may place it at durTicks or in voice 0 regardless of the note's real voice),
+// so the tick->measure->voice fallbacks try, in order: the exact (tick, track) segment; the last
+// chord on that track in the source measure; then any voice on that staff. Returns nullptr when no
+// chord is found. See ENCORE_FORMAT.md §Ornament element.
+static Chord* findChordForTremolo(MasterScore* score, const PendingOrnTremolo& pt)
 {
-    // See ENCORE_FORMAT.md §Ornament element.
-    // ORN may land at durTicks or in voice 0 even when the note is in another voice.
-    for (const PendingOrnTremolo& pt : pendingOrnTremolos) {
-        // staffIdx/msVoice come from the file; skip any pending whose staff is out of range
-        // before deriving tracks for the element() scans below.
-        if (!validTrack(score, static_cast<track_idx_t>(pt.staffIdx) * VOICES)) {
-            continue;
+    // staffIdx/msVoice come from the file; reject an out-of-range staff before deriving tracks.
+    if (!validTrack(score, static_cast<track_idx_t>(pt.staffIdx) * VOICES)) {
+        return nullptr;
+    }
+    const track_idx_t trTrack = static_cast<track_idx_t>(pt.staffIdx * VOICES + pt.msVoice);
+    Measure* m = score->tick2measure(pt.tick);
+    if (!m) {
+        m = score->tick2measure(pt.measTick);
+    }
+    if (!m) {
+        return nullptr;
+    }
+    Segment* seg = m->findSegment(SegmentType::ChordRest, pt.tick);
+    if (!seg || !seg->element(trTrack) || !seg->element(trTrack)->isChord()) {
+        Measure* srcMeas = score->tick2measure(pt.measTick);
+        if (!srcMeas) {
+            srcMeas = m;
         }
-        const track_idx_t trTrack = static_cast<track_idx_t>(pt.staffIdx * VOICES + pt.msVoice);
-        Measure* m = score->tick2measure(pt.tick);
-        if (!m) {
-            m = score->tick2measure(pt.measTick);
-        }
-        if (!m) {
-            continue;
-        }
-        Segment* seg = m->findSegment(SegmentType::ChordRest, pt.tick);
-        if (!seg || !seg->element(trTrack) || !seg->element(trTrack)->isChord()) {
-            Measure* srcMeas = score->tick2measure(pt.measTick);
-            if (!srcMeas) {
-                srcMeas = m;
-            }
-            seg = nullptr;
-            for (Segment* s = srcMeas->first(SegmentType::ChordRest); s;
-                 s = s->next(SegmentType::ChordRest)) {
-                if (s->element(trTrack) && s->element(trTrack)->isChord()) {
-                    seg = s;
-                }
+        seg = nullptr;
+        for (Segment* s = srcMeas->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            if (s->element(trTrack) && s->element(trTrack)->isChord()) {
+                seg = s;
             }
         }
-        track_idx_t resolvedTrack = trTrack;
-        if (!seg || !seg->element(resolvedTrack) || !seg->element(resolvedTrack)->isChord()) {
-            Measure* srcMeas = score->tick2measure(pt.measTick);
-            if (!srcMeas) {
-                srcMeas = m;
-            }
-            if (srcMeas) {
-                for (int v = 0; v < static_cast<int>(VOICES) && !seg; ++v) {
-                    const track_idx_t altTrack = static_cast<track_idx_t>(pt.staffIdx * VOICES + v);
-                    for (Segment* s = srcMeas->first(SegmentType::ChordRest); s;
-                         s = s->next(SegmentType::ChordRest)) {
-                        if (s->element(altTrack) && s->element(altTrack)->isChord()) {
-                            seg = s;
-                            resolvedTrack = altTrack;
-                        }
+    }
+    track_idx_t resolvedTrack = trTrack;
+    if (!seg || !seg->element(resolvedTrack) || !seg->element(resolvedTrack)->isChord()) {
+        Measure* srcMeas = score->tick2measure(pt.measTick);
+        if (!srcMeas) {
+            srcMeas = m;
+        }
+        if (srcMeas) {
+            for (int v = 0; v < static_cast<int>(VOICES) && !seg; ++v) {
+                const track_idx_t altTrack = static_cast<track_idx_t>(pt.staffIdx * VOICES + v);
+                for (Segment* s = srcMeas->first(SegmentType::ChordRest); s;
+                     s = s->next(SegmentType::ChordRest)) {
+                    if (s->element(altTrack) && s->element(altTrack)->isChord()) {
+                        seg = s;
+                        resolvedTrack = altTrack;
                     }
                 }
             }
         }
-        if (!seg || !seg->element(resolvedTrack)) {
+    }
+    if (!seg || !seg->element(resolvedTrack)) {
+        return nullptr;
+    }
+    EngravingItem* el = seg->element(resolvedTrack);
+    if (!el || !el->isChord()) {
+        return nullptr;
+    }
+    return toChord(el);
+}
+
+static void resolveSingleChordTremolos(MasterScore* score,
+                                       const std::vector<PendingOrnTremolo>& pendingOrnTremolos)
+{
+    for (const PendingOrnTremolo& pt : pendingOrnTremolos) {
+        Chord* c = findChordForTremolo(score, pt);
+        if (!c) {
             continue;
         }
-        EngravingItem* el = seg->element(resolvedTrack);
-        if (!el || !el->isChord()) {
-            continue;
-        }
-        Chord* c = toChord(el);
         // Encore places the tremolo ORN after the tied-from note; walk back to tie start.
         if (!c->notes().empty() && c->notes().front()->tieBack()) {
             Chord* prev = c->notes().front()->tieBack()->startNote()->chord();

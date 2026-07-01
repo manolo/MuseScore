@@ -37,6 +37,34 @@ struct EncInstrument;
 struct EncRoot;
 struct EncLine;
 
+// Skip a file-supplied block size, clamped to the bytes actually remaining on the device.
+// The size comes from an untrusted file: a value larger than INT_MAX would wrap negative when
+// passed to QDataStream::skipRawData(int) (silently skipping nothing and desyncing the stream),
+// and any value past EOF must not seek beyond the device. Returns false when the requested size
+// is negative or exceeds what remains, so the caller can stop reading further blocks.
+bool skipBlock(QDataStream& ds, qint64 size);
+
+// Skip from the current cursor to the end of a block whose start position and declared length
+// are both known. blockStartPos is the device position of the block's first payload byte and
+// declaredLen its untrusted varSize; this advances to (blockStartPos + declaredLen), clamped to
+// the device. Returns false when the cursor is already at/past the computed end (nothing to skip)
+// or the end lies past EOF, mirroring skipBlock so callers can stop reading further blocks.
+bool skipToBlockEnd(QDataStream& ds, qint64 blockStartPos, qint64 declaredLen);
+
+// The device position just past a MEAS block's element stream: measStart + varsize + elemBlockOffset,
+// clamped to the device size so an untrusted/oversized varsize can never push the element loop past
+// EOF. Pure so it can be unit-tested with synthetic sizes.
+qint64 clampMeasureEnd(qint64 measStart, quint32 varsize, qint64 elemBlockOffset, qint64 deviceSize);
+
+// Phase 1 of duration resolution: set each element's realDuration from the gap to the next event
+// (skipping same-tick chord members and near-simultaneous cluster notes), capping the gap at any
+// boundaryTicks (mid-measure CLEF/KEYCHANGE) and applying v0xA6 grace time-borrowing when enabled.
+// Declared here so the decision core can be unit-tested with synthetic element lists.
+void computeElementDurations(std::vector<EncMeasureElem*>& elems,
+                             qint16 durTicks,
+                             bool hasGraceTimeBorrowing,
+                             const std::vector<qint16>& boundaryTicks = {});
+
 // EncFormatReader: per-format binary parsing strategy. Register a new version in EncFormatReader::create().
 struct EncFormatReader
 {

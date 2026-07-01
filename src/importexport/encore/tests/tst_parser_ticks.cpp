@@ -24,8 +24,12 @@
 
 #include "../internal/parser/ticks.h"
 #include "../internal/parser/elem.h"
+#include "../internal/parser/readers.h"
 #include "../internal/importer/coords.h"
 #include "../internal/importer/durations.h"
+#include "../internal/importer/page-layout.h"
+
+#include <vector>
 
 using namespace mu::engraving;
 using namespace mu::iex::enc;
@@ -314,4 +318,44 @@ TEST(Tst_EncorePrecPlist, rejects_non_plist)
     EncPrintSetup ps;
     EXPECT_FALSE(parsePrecPlist(QByteArray("not a plist at all"), ps));
     EXPECT_FALSE(ps.hasData);
+}
+
+TEST(Tst_EncoreParserBounds, clampMeasureEnd_clamps_oversized_varsize)
+{
+    // Normal case: end = measStart + varsize + elemBlockOffset.
+    EXPECT_EQ(clampMeasureEnd(100, 50, 0x36, 10000), 100 + 50 + 0x36);
+    // An oversized (attacker-controlled) varsize must clamp to the device size, never past EOF.
+    EXPECT_EQ(clampMeasureEnd(100, 0xFFFFFFFFu, 0x36, 1000), 1000);
+    // A varsize that fits stays unclamped even for a large device.
+    EXPECT_EQ(clampMeasureEnd(0, 200, 0x36, 100000), 200 + 0x36);
+}
+
+TEST(Tst_EncoreParserDurations, computeElementDurations_gap_and_boundary)
+{
+    // Two notes 480 ticks apart in a 960-tick (4/4) measure: each spans the gap to the next event,
+    // and the last spans the gap to the measure end.
+    EncNote a(0, 9, 0);
+    EncNote b(480, 9, 0);
+    std::vector<EncMeasureElem*> elems { &a, &b };
+    computeElementDurations(elems, 960, /*hasGraceTimeBorrowing*/ false);
+    EXPECT_EQ(a.realDuration, 480);
+    EXPECT_EQ(b.realDuration, 480);
+
+    // A boundary tick (e.g. a mid-measure clef change) caps the preceding note's gap.
+    EncNote c(0, 9, 0);
+    EncNote d(480, 9, 0);
+    std::vector<EncMeasureElem*> elems2 { &c, &d };
+    computeElementDurations(elems2, 960, false, { 240 });
+    EXPECT_EQ(c.realDuration, 240);
+    EXPECT_EQ(d.realDuration, 480);
+}
+
+TEST(Tst_EncorePageLayout, winiUnitsPerInch_detects_points_vs_pixels)
+{
+    // Degenerate page width falls back to typographic points.
+    EXPECT_DOUBLE_EQ(winiUnitsPerInch(500, 50, 0.0), 72.0);
+    // A near-72 ratio (typographic-point WINI) snaps to exactly 72: (560+35)/8.27 = 71.9.
+    EXPECT_DOUBLE_EQ(winiUnitsPerInch(560, 35, 8.27), 72.0);
+    // A clearly larger ratio (~84) is a screen-pixel WINI and is returned as the estimate.
+    EXPECT_GT(winiUnitsPerInch(665, 35, 8.27), 80.0);   // (665+35)/8.27 = 84.6
 }

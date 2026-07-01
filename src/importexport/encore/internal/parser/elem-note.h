@@ -84,6 +84,9 @@ struct EncNote : EncMeasureElem {
     quint8 dotControl      { 0 };
     quint8 semiTonePitch   { 0 };
     quint16 playbackDurTicks{ 0 };
+    // Parsed for format completeness; not consumed by any emitter. velocity is Encore's per-note
+    // MIDI velocity and alterationGlyph its explicit-accidental glyph selector; MuseScore derives
+    // both from the score model (dynamics / key + pitch) instead.
     quint8 velocity        { 0 };
     quint8 options         { 0 };
     quint8 alterationGlyph { 0 };

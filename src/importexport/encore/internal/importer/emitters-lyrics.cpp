@@ -24,6 +24,8 @@
 
 #include "emitters-internal.h"
 
+#include "../parser/ticks.h"
+
 #include "engraving/dom/chord.h"
 #include "engraving/dom/chordrest.h"
 #include "engraving/dom/factory.h"
@@ -141,7 +143,7 @@ static std::vector<std::pair<int, ChordRest*> > buildCrTickPairs(
             // Fallback for rests or when Encore note list is exhausted: estimate
             // from the measure's beat grid.
             const Fraction relTick = s->tick() - measTick;
-            const int durTicks = encMeas.durTicks ? static_cast<int>(encMeas.durTicks) : 960;
+            const int durTicks = encMeas.durTicks ? static_cast<int>(encMeas.durTicks) : kEncWholeTicks;
             segEncTick = (relTick.numerator() * durTicks)
                          / std::max(1, relTick.denominator());
         }

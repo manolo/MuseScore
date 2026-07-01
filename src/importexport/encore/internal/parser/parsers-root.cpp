@@ -23,7 +23,6 @@
 #include "elem.h"
 
 #include <algorithm>
-#include <limits>
 
 #include <QRegularExpression>
 
@@ -33,30 +32,6 @@ namespace mu::iex::enc {
 // ---------------------------------------------------------------------------
 // EncRoot - top-level container
 // ---------------------------------------------------------------------------
-
-// Skip a file-supplied block size, clamped to the bytes actually remaining on the device.
-// The size comes from an untrusted file: a value larger than INT_MAX would wrap negative when
-// passed to QDataStream::skipRawData(int) (silently skipping nothing and desyncing the stream),
-// and any value past EOF must not seek beyond the device. Returns false when the requested size
-// exceeds what remains, so the caller can stop reading further blocks.
-static bool skipBlock(QDataStream& ds, qint64 size)
-{
-    QIODevice* dev = ds.device();
-    const qint64 remaining = dev->size() - dev->pos();
-    if (size < 0 || size > remaining) {
-        return false;
-    }
-    qint64 left = size;
-    while (left > 0) {
-        const int chunk = static_cast<int>(std::min<qint64>(left, std::numeric_limits<int>::max()));
-        const int n = ds.skipRawData(chunk);
-        if (n <= 0) {
-            return false;
-        }
-        left -= n;
-    }
-    return true;
-}
 
 // WINI page-setup block. Layout: 21 uint16 LE values (42 bytes). The margins are int32 LE (two
 // adjacent uint16s, high word always 0): [12,13]=top, [14,15]=left, [16,17]=pageHeight_pts -
@@ -208,8 +183,22 @@ bool parsePrecPlist(const QByteArray& buf, EncPrintSetup& out)
 // DEVMODE; SCO5 (macOS Encore 5) stores it as an NSPrintInfo XML plist. Detect by content.
 static void readPrintSetup(QDataStream& ds, quint32 varSize, EncPrintSetup& out)
 {
-    QByteArray buf(static_cast<int>(varSize), '\0');
-    const int n = ds.readRawData(buf.data(), static_cast<int>(varSize));
+    // varSize is untrusted: a huge value (e.g. 0x40000000) would request ~1 GB and a value above
+    // INT_MAX casts to a negative int (UB/abort in QByteArray). A PREC block is a Windows DEVMODE
+    // (~220 bytes) or a small NSPrintInfo plist; clamp to a few KB and to the bytes actually left.
+    constexpr qint64 kMaxPrecBytes = 64 * 1024;
+    const qint64 startPos = ds.device()->pos();
+    const qint64 remaining = ds.device()->size() - startPos;
+    qint64 want = static_cast<qint64>(varSize);
+    if (want < 0) {
+        want = 0;
+    }
+    want = std::min({ want, remaining, kMaxPrecBytes });
+    QByteArray buf(static_cast<int>(want), '\0');
+    const int n = (want > 0) ? ds.readRawData(buf.data(), static_cast<int>(want)) : 0;
+    // Always advance to the declared block end so the next magic scan stays aligned even when we
+    // only read (or trusted) a clamped prefix.
+    skipToBlockEnd(ds, startPos, static_cast<qint64>(varSize));
     if (n <= 0) {
         return;
     }

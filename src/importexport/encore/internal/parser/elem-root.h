@@ -92,7 +92,7 @@ struct EncLine {
 // Title block
 // ---------------------------------------------------------------------------
 
-QString readTextItem(QDataStream& ds, EncCharSize cs);
+QString readTextItem(QDataStream& ds, EncCharSize cs, qint64 blockEnd);
 
 struct EncHeaderFooter {
     QString text;

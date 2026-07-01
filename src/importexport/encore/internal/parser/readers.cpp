@@ -25,9 +25,49 @@
 #include "readers-v0xc2.h"
 #include "readers-v0xc4.h"
 
+#include <algorithm>
+#include <limits>
+
+#include <QDataStream>
+#include <QIODevice>
+
 #include "log.h"
 
 namespace mu::iex::enc {
+
+bool skipBlock(QDataStream& ds, qint64 size)
+{
+    QIODevice* dev = ds.device();
+    const qint64 remaining = dev->size() - dev->pos();
+    if (size < 0 || size > remaining) {
+        return false;
+    }
+    qint64 left = size;
+    while (left > 0) {
+        const int chunk = static_cast<int>(std::min<qint64>(left, std::numeric_limits<int>::max()));
+        const int n = ds.skipRawData(chunk);
+        if (n <= 0) {
+            return false;
+        }
+        left -= n;
+    }
+    return true;
+}
+
+bool skipToBlockEnd(QDataStream& ds, qint64 blockStartPos, qint64 declaredLen)
+{
+    const qint64 toSkip = (blockStartPos + declaredLen) - ds.device()->pos();
+    if (toSkip <= 0) {
+        return false;
+    }
+    return skipBlock(ds, toSkip);
+}
+
+qint64 clampMeasureEnd(qint64 measStart, quint32 varsize, qint64 elemBlockOffset, qint64 deviceSize)
+{
+    const qint64 end = measStart + static_cast<qint64>(varsize) + elemBlockOffset;
+    return std::min(end, deviceSize);
+}
 
 // Selects a format reader. SCO5 (macOS Encore 5) is identified by its magic string rather than
 // chuMagio (which is not 0xC4 in those files); it shares the v0xC4 binary format and differs

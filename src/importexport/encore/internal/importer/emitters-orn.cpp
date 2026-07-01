@@ -24,6 +24,7 @@
 
 #include "emitters-internal.h"
 #include "coords.h"
+#include "durations.h"
 #include "../parser/ticks.h"
 #include "mappers.h"
 #include "engraving/dom/dynamic.h"
@@ -176,15 +177,8 @@ static void handleTempoOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
             return;
         }
         // Detect beat unit from beatTicks so we can compare units correctly and set BPS/display.
-        const quint16 rawBeatTicks = encMeas.beatTicks;
         // Use nominal timesig so a pickup measure inherits the main sig's classification.
-        const Fraction mts = measure->timesig();
-        // Dotted-quarter beat: beatTicks=360 (explicit) or compound time sig (6/8, 9/8, 12/8)
-        // with legacy beatTicks=240.
-        const bool cmpd = (rawBeatTicks == 360)
-                          || (mts.denominator() == 8
-                              && mts.numerator() % 3 == 0
-                              && mts.numerator() > 3);
+        const bool cmpd = isCompoundBeat(encMeas.beatTicks, measure->timesig());
         // The MEAS header BPM is the authoritative tempo position: applyMeasureBpmMarks places a
         // TempoText at the measure START (a real ChordRest segment that registers in the tempo map).
         // The ORN TEMPO is only a visual mark whose stored tick is often off (Encore puts it at the

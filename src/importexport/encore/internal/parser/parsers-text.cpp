@@ -79,18 +79,31 @@ bool EncHeader::read(QDataStream& ds, const EncFormatReader& fmt)
 bool EncTextBlock::read(QDataStream& ds, quint32 varSize)
 {
     // See ENCORE_FORMAT.md §TEXT block for layout. Entry N referenced by ORN tind byte (+32).
+    // varSize is untrusted; route every skip through skipBlock/skipToBlockEnd so a value above
+    // INT_MAX cannot wrap negative in skipRawData(quint32) and desync the following magic scan.
+    const qint64 startPos = ds.device()->pos();
     if (varSize < 8) {
-        ds.skipRawData(varSize);
+        skipBlock(ds, varSize);
         return true;
     }
     quint16 sync = 0;
     quint16 count = 0;
     quint32 contentSize = 0;
     ds >> sync >> count >> contentSize;
+    (void)sync;
+    // contentSize is the declared payload length; varSize (the block's own size field) is the
+    // authoritative bound, so the per-entry checks below clamp to varSize and contentSize is
+    // not relied upon.
+    (void)contentSize;
     quint32 consumed = 8;
     entries.clear();
     entries.reserve(count);
     for (quint16 i = 0; i < count && consumed + 2 <= varSize; ++i) {
+        // A read past EOF on a truncated block leaves the stream non-Ok; stop instead of
+        // fabricating zero-filled entries from the past-EOF zero fill.
+        if (ds.status() != QDataStream::Ok) {
+            break;
+        }
         quint16 entrySize = 0;
         ds >> entrySize;
         consumed += 2;
@@ -138,10 +151,8 @@ bool EncTextBlock::read(QDataStream& ds, quint32 varSize)
         }
         entries.push_back(text);
     }
-    // Skip any remaining bytes inside the block (padding or unparsed tail).
-    if (consumed < varSize) {
-        ds.skipRawData(varSize - consumed);
-    }
+    // Skip any remaining bytes inside the block (padding or unparsed tail), clamped to the device.
+    skipToBlockEnd(ds, startPos, varSize);
     return true;
 }
 } // namespace mu::iex::enc

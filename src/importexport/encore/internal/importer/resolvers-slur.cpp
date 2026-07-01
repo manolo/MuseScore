@@ -230,6 +230,79 @@ static Chord* firstChordOnStaffFrom(Measure* m, int staffIdx, const Fraction& fr
 // past the start when the arc clearly does. Used when alMezuro is not a reliable measure count
 // (xoffsets reset at barlines). Returns the resolved end tick, or nullopt when it cannot place
 // the endpoint (the caller then tries the cross-measure-xoffset and last-chord fallbacks).
+// The xoffset of the slur's start note: scan the start measure for the NOTE at startEncTick on
+// this staff (any voice, since the slur ORN's encVoice is the arc position, not the note voice)
+// and return its xoffset. A grace note at that tick wins over a regular one (v0xC4 serializes the
+// regular note first, but the grace xoffset is the true arc-start reference). Returns -1 when no
+// start note is found. See ENCORE_FORMAT.md §Slur.
+static int findSlurStartNoteXoffset(const EncMeasure& startEncMeas, int staffIdx, int startEncTick,
+                                    const std::array<int, 256>& lineSlotByRawByte)
+{
+    int firstNoteXoff = -1;
+    for (const auto& elem : startEncMeas.elements) {
+        const EncMeasureElem* em = elem.get();
+        if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
+            continue;
+        }
+        if (getLineSlot(em, lineSlotByRawByte) != staffIdx) {
+            continue;
+        }
+        if (static_cast<int>(em->tick) != startEncTick) {
+            continue;
+        }
+        const EncNote* en = static_cast<const EncNote*>(em);
+        const int xoff = static_cast<int>(en->xoffset);
+        if (en->graceType() != EncGraceType::NORMAL) {
+            return xoff;   // grace wins; stop searching
+        }
+        if (firstNoteXoff < 0) {
+            firstNoteXoff = xoff;   // regular: tentative, keep searching
+        }
+    }
+    return firstNoteXoff;
+}
+
+// Cross-measure endpoint search: when alMezuro is unreliable and the arc clearly runs past the
+// start measure, scan the next one or two measures for the note whose xoffset best matches
+// targetEndXoff. bestDist is in/out: only a strictly closer note updates it and yields a result.
+// Returns the endpoint tick when a closer note is found, else nullopt (caller keeps its endpoint).
+static std::optional<Fraction> extendSlurToLaterMeasures(
+    BuildCtx& ctx, const PendingSlur& ps, const std::array<int, 256>& lineSlotByRawByte,
+    int targetEndXoff, int& bestDist)
+{
+    const EncRoot& enc = ctx.enc;
+    std::optional<Fraction> result;
+    for (int nextMIdx = ps.startMeasIdx + 1;
+         nextMIdx <= ps.startMeasIdx + 2
+         && nextMIdx < static_cast<int>(enc.measures.size())
+         && nextMIdx < static_cast<int>(ctx.measuresByIdx.size());
+         ++nextMIdx) {
+        const EncMeasure& nextEncMeas = enc.measures[nextMIdx];
+        const int nextWt = encWholeNoteTicks(nextEncMeas);
+        Measure* nextMs = ctx.measuresByIdx[nextMIdx];
+        for (const auto& elem : nextEncMeas.elements) {
+            const EncMeasureElem* em = elem.get();
+            if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
+                continue;
+            }
+            if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
+                continue;
+            }
+            const int xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
+            const int dist = std::abs(xoff - targetEndXoff);
+            if (dist < bestDist) {
+                bestDist = dist;
+                const Fraction endRel(static_cast<int>(em->tick), nextWt);
+                result = nextMs->tick() + endRel.reduced();
+            }
+        }
+        if (bestDist == 0) {
+            break;
+        }
+    }
+    return result;
+}
+
 static std::optional<Fraction> resolveSameMeasureHeuristic(
     BuildCtx& ctx, const PendingSlur& ps, const std::array<int, 256>& lineSlotByRawByte)
 {
@@ -245,35 +318,12 @@ static std::optional<Fraction> resolveSameMeasureHeuristic(
     bool resolved = false;
 
     const EncMeasure& startEncMeas = enc.measures[ps.startMeasIdx];
-    int firstNoteXoff = -1;
     const Fraction relStartTick = ps.startTick - ctx.measuresByIdx[ps.startMeasIdx]->tick();
     const int wt = encWholeNoteTicks(startEncMeas);
     const int startEncTick = (relStartTick.numerator() * wt)
                              / std::max(1, relStartTick.denominator());
-    for (const auto& elem : startEncMeas.elements) {
-        const EncMeasureElem* em = elem.get();
-        if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
-            continue;
-        }
-        // Search all voices: slur ORN encVoice is the arc position, not necessarily the note voice.
-        if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
-            continue;
-        }
-        if (static_cast<int>(em->tick) != startEncTick) {
-            continue;
-        }
-        const EncNote* en = static_cast<const EncNote*>(em);
-        const int xoff = static_cast<int>(en->xoffset);
-        if (en->graceType() != EncGraceType::NORMAL) {
-            // v0xC4: regular note appears before grace in binary; prefer grace xoffset
-            // as arc-start reference to avoid inflating targetEndXoff.
-            firstNoteXoff = xoff;
-            break;
-        }
-        if (firstNoteXoff < 0) {
-            firstNoteXoff = xoff;   // regular: tentative, keep searching
-        }
-    }
+    const int firstNoteXoff = findSlurStartNoteXoffset(startEncMeas, ps.staffIdx, startEncTick,
+                                                       lineSlotByRawByte);
     if (firstNoteXoff >= 0) {
         const int pixelSpan = ps.slurXoffset2 - ps.slurXoffset;
         // Tiny pixelSpan (0-2) with note before arc start: firstNoteXoff+pixelSpan ≈ 0 matches a decoy.
@@ -385,35 +435,10 @@ static std::optional<Fraction> resolveSameMeasureHeuristic(
             if (!ps.alMezuroValid && !usedTinyPixelSpan && bestDist > 0
                 && (targetEndXoff > maxXoffInMeas || bestEncTick < 0)
                 && !(resolved && endTick == ps.startTick)) {
-                for (int nextMIdx = ps.startMeasIdx + 1;
-                     nextMIdx <= ps.startMeasIdx + 2
-                     && nextMIdx < static_cast<int>(enc.measures.size())
-                     && nextMIdx < static_cast<int>(ctx.measuresByIdx.size());
-                     ++nextMIdx) {
-                    const EncMeasure& nextEncMeas = enc.measures[nextMIdx];
-                    const int nextWt = encWholeNoteTicks(nextEncMeas);
-                    Measure* nextMs = ctx.measuresByIdx[nextMIdx];
-                    for (const auto& elem : nextEncMeas.elements) {
-                        const EncMeasureElem* em = elem.get();
-                        if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
-                            continue;
-                        }
-                        if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
-                            continue;
-                        }
-                        const int xoff = static_cast<int>(
-                            static_cast<const EncNote*>(em)->xoffset);
-                        const int dist = std::abs(xoff - targetEndXoff);
-                        if (dist < bestDist) {
-                            bestDist = dist;
-                            const Fraction endRel(static_cast<int>(em->tick), nextWt);
-                            endTick = nextMs->tick() + endRel.reduced();
-                            resolved = true;
-                        }
-                    }
-                    if (bestDist == 0) {
-                        break;
-                    }
+                if (auto ext = extendSlurToLaterMeasures(ctx, ps, lineSlotByRawByte,
+                                                         targetEndXoff, bestDist)) {
+                    endTick = *ext;
+                    resolved = true;
                 }
             }
         } // integrated endpoint-search block

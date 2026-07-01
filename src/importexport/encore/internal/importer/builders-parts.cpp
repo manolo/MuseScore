@@ -27,17 +27,11 @@
 #include "import.h"
 #include "../parser/elem.h"
 #include "mappers.h"
-#include "../parser/ticks.h"
-#include "emitters-tuplets.h"
 #include <algorithm>
-#include <memory>
 #include <map>
 #include <set>
 #include <vector>
 #include <QDataStream>
-#include <QFile>
-#include <QFileInfo>
-#include <QRegularExpression>
 #include "engraving/dom/clef.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/masterscore.h"

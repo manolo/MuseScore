@@ -138,8 +138,14 @@ void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         Fraction advance = tt.inTuplet()
                            ? TDuration(dt).fraction() * Fraction(tt.normalN, tt.actualN)
                            : dottedAdvance(dt, dots);
+        // Mirror the note path (advanceCumulativeTick): never cut a tuplet member here (a tuplet is
+        // atomic; let it overshoot and resolve the whole tuplet in fitOverfullMeasure), and skip
+        // the cap entirely for IrregularMeasure so cumTick can exceed the measure length and
+        // capMeasureLength extends it.
         Fraction remaining = measure->ticks() - ctx.scratch.cumTick[trackKey];
-        if (advance > remaining && remaining > Fraction(0, 1)) {
+        if (advance > remaining && remaining > Fraction(0, 1)
+            && ctx.opts.overfillMeasureStrategy != OverfillStrategy::IrregularMeasure
+            && !rest->tuplet()) {
             advance = TDuration(remaining, true).fraction();
             if (advance.numerator() == 0) {
                 // Remaining too small to fit any standard duration: drop the

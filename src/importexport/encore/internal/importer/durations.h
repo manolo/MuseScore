@@ -45,4 +45,9 @@ int computeDotCount(quint8 dotControl, qint16 realDuration, quint8 faceValue, bo
 // Standard Encore tuplet ratios (3:2, 4:3, 5:4, 6:4).
 // Other actualN:normalN pairs are MIDI timing noise; caller should zero them.
 bool isStandardExplicitTuplet(int actualN, int normalN);
+
+// True when a measure's beat is a dotted quarter (compound feel): either the raw beatTicks is the
+// explicit 360, or the time signature is a compound x/8 (6/8, 9/8, 12/8, ...) whose legacy files
+// still store beatTicks=240. Used for tempo-mark beat-unit display. See ENCORE_IMPORTER.md.
+bool isCompoundBeat(quint16 rawBeatTicks, mu::engraving::Fraction timesig);
 } // namespace mu::iex::enc

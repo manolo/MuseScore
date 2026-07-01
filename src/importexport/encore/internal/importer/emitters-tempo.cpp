@@ -26,6 +26,7 @@
 
 #include <cmath>
 
+#include "durations.h"
 #include "../parser/ticks.h"
 
 #include "engraving/dom/factory.h"
@@ -158,12 +159,7 @@ void applyMeasureBpmMarks(BuildCtx& ctx)
                 // Re-express the quarter-note BPM in the chosen beat unit.
                 displayBpm = static_cast<int>(std::lround(bpm * 240.0 / displayBeatTicks));
             } else {
-                const quint16 rawBeatTicks = enc.measures[mi].beatTicks;
-                const Fraction mts = m->timesig();
-                const bool cmpd = (rawBeatTicks == 360)
-                                  || (mts.denominator() == 8
-                                      && mts.numerator() % 3 == 0
-                                      && mts.numerator() > 3);
+                const bool cmpd = isCompoundBeat(enc.measures[mi].beatTicks, m->timesig());
                 displayBeatTicks = cmpd ? 360 : 240;
                 displayBpm = cmpd ? (bpm * 2 + 1) / 3 : static_cast<int>(bpm);
             }

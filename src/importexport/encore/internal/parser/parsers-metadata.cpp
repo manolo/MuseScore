@@ -22,7 +22,10 @@
 
 #include "elem.h"
 
+#include <algorithm>
+
 #include "parsers-encoding.h"
+#include "readers.h"
 
 namespace mu::iex::enc {
 // ---------------------------------------------------------------------------
@@ -70,10 +73,9 @@ bool EncInstrument::read(QDataStream& ds, quint32 vs, bool probeEncoding)
             name.append(ch);
         }
     }
-    int toSkip = static_cast<int>(offset) - nread;
-    if (toSkip > 0) {
-        ds.skipRawData(toSkip);
-    }
+    // Skip whatever remains of the block after the name, clamped to the device (offset is
+    // an untrusted file value). nread counts bytes consumed from the block's 8-byte header.
+    skipBlock(ds, static_cast<qint64>(offset) - nread);
     return true;
 }
 
@@ -106,13 +108,21 @@ bool EncLineStaffData::read(QDataStream& ds)
 
 bool EncLine::read(QDataStream& ds, quint32 vs, int staffPerSystem)
 {
+    // LINE block layout constants. kStaffEntryBytes is one EncLineStaffData staff entry;
+    // kBlockHeaderBytes is the magic + size already consumed on entry; kLinePrefixBytes is the
+    // fixed prefix before the staff entries (the header plus the 13 bytes of skip + start +
+    // measureCount read below).
+    static constexpr int kBlockHeaderBytes = 8;
+    static constexpr int kLinePrefixBytes  = 21;
+    static constexpr int kStaffEntryBytes  = 30;
+
     offset = vs;
     ds.skipRawData(10);
     ds >> start >> measureCount;
     // staffPerSystem comes from the header; clamp it to the staff entries the block can
-    // actually hold (30 bytes each) so a corrupt count cannot spin the loop fabricating
-    // zeroed staves, and stop early if the stream runs out.
-    const int maxStaves = static_cast<int>(offset) / 30;
+    // actually hold so a corrupt count cannot spin the loop fabricating zeroed staves, and
+    // stop early if the stream runs out.
+    const int maxStaves = static_cast<int>(offset) / kStaffEntryBytes;
     if (staffPerSystem > maxStaves) {
         staffPerSystem = maxStaves;
     }
@@ -121,10 +131,10 @@ bool EncLine::read(QDataStream& ds, quint32 vs, int staffPerSystem)
         lsd.read(ds);
         staffData.push_back(lsd);
     }
-    const int toSkip = static_cast<int>(offset) + 8 - 21 - 30 * staffPerSystem;
-    if (toSkip > 0) {
-        ds.skipRawData(toSkip);
-    }
+    // Skip the block's tail after the parsed staff entries, clamped to the device.
+    const qint64 toSkip = static_cast<qint64>(offset) + kBlockHeaderBytes
+                          - kLinePrefixBytes - static_cast<qint64>(kStaffEntryBytes) * staffPerSystem;
+    skipBlock(ds, toSkip);
     return true;
 }
 
@@ -138,16 +148,25 @@ bool EncLine::read(QDataStream& ds, quint32 vs, int staffPerSystem)
 static constexpr int kTitlTextBytesOneByte = 66;
 static constexpr int kTitlTextBytesTwoByte = 1026;
 
-static EncHeaderFooter readTitleLine(QDataStream& ds, EncCharSize cs)
+// blockEnd bounds every read to the TITL block's declared end (startPos + varSize). A truncated
+// block would otherwise pull zero-fill past EOF and, worse, a block shorter than the fixed line
+// structure would read into the following block and desync the top-level magic scan. No read here
+// crosses blockEnd, so EncTitle::read can realign exactly with skipToBlockEnd afterwards.
+static EncHeaderFooter readTitleLine(QDataStream& ds, EncCharSize cs, qint64 blockEnd)
 {
+    const qint64 prefixAvail = std::max<qint64>(0, blockEnd - ds.device()->pos());
+    const int prefixWant = static_cast<int>(std::min<qint64>(30, prefixAvail));
     QByteArray prefix(30, 0);
-    int got = ds.readRawData(prefix.data(), 30);
+    int got = (prefixWant > 0) ? ds.readRawData(prefix.data(), prefixWant) : 0;
     quint8 alignByte = (got >= 15) ? static_cast<quint8>(prefix[14]) : 0;
 
     QString item;
     bool done = false;
     if (cs == EncCharSize::ONE_BYTE) {
         for (int j = 0; j < kTitlTextBytesOneByte; ++j) {
+            if (ds.device()->pos() >= blockEnd || ds.status() != QDataStream::Ok) {
+                break;
+            }
             quint8 b;
             ds >> b;
             if (b == 0) {
@@ -159,6 +178,9 @@ static EncHeaderFooter readTitleLine(QDataStream& ds, EncCharSize cs)
         }
     } else {
         for (int j = 0; j < kTitlTextBytesTwoByte;) {
+            if (ds.device()->pos() >= blockEnd - 1 || ds.status() != QDataStream::Ok) {
+                break;
+            }
             quint8 lo, hi;
             ds >> lo;
             ++j;
@@ -187,9 +209,9 @@ static EncHeaderFooter readTitleLine(QDataStream& ds, EncCharSize cs)
     return out;
 }
 
-QString readTextItem(QDataStream& ds, EncCharSize cs)
+QString readTextItem(QDataStream& ds, EncCharSize cs, qint64 blockEnd)
 {
-    return readTitleLine(ds, cs).text;
+    return readTitleLine(ds, cs, blockEnd).text;
 }
 
 bool EncTitle::read(QDataStream& ds, quint32 vs, EncCharSize cs)
@@ -213,27 +235,34 @@ bool EncTitle::read(QDataStream& ds, quint32 vs, EncCharSize cs)
     footer.clear();
     copyright.clear();
 
+    // Bound every line read to the block's declared end so a truncated or short TITL block cannot
+    // read past EOF or into the following block. varSize excludes the 8-byte block header, so the
+    // end lies at startPos + varSize.
+    const qint64 startPos = ds.device()->pos();
+    const qint64 blockEnd = startPos + static_cast<qint64>(vs);
+
     ds.skipRawData(2);
-    title = readTextItem(ds, cs);
+    title = readTextItem(ds, cs, blockEnd);
     for (int i = 0; i < 2; ++i) {
-        subtitle.push_back(readTextItem(ds, cs));
+        subtitle.push_back(readTextItem(ds, cs, blockEnd));
     }
     for (int i = 0; i < 3; ++i) {
-        instruction.push_back(readTextItem(ds, cs));
+        instruction.push_back(readTextItem(ds, cs, blockEnd));
     }
     for (int i = 0; i < 4; ++i) {
-        author.push_back(readTextItem(ds, cs));
+        author.push_back(readTextItem(ds, cs, blockEnd));
     }
     for (int i = 0; i < 2; ++i) {
-        header.push_back(readTitleLine(ds, cs));
+        header.push_back(readTitleLine(ds, cs, blockEnd));
     }
     for (int i = 0; i < 2; ++i) {
-        footer.push_back(readTitleLine(ds, cs));
+        footer.push_back(readTitleLine(ds, cs, blockEnd));
     }
     for (int i = 0; i < 6; ++i) {
-        copyright.push_back(readTextItem(ds, cs));
+        copyright.push_back(readTextItem(ds, cs, blockEnd));
     }
-    ds.skipRawData(cs == EncCharSize::ONE_BYTE ? 504 : 120);
+    // Realign to the block end; the fixed trailing pad (504 / 120 bytes) is whatever is left.
+    skipToBlockEnd(ds, startPos, static_cast<qint64>(vs));
     return true;
 }
 } // namespace mu::iex::enc

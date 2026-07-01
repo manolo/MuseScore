@@ -210,4 +210,14 @@ bool isStandardExplicitTuplet(int actualN, int normalN)
     }
     return false;
 }
+
+bool isCompoundBeat(quint16 rawBeatTicks, Fraction timesig)
+{
+    // Explicit dotted-quarter beat, or a compound x/8 meter (6/8, 9/8, 12/8, ...) whose legacy
+    // files still store beatTicks=240.
+    return rawBeatTicks == 360
+           || (timesig.denominator() == 8
+               && timesig.numerator() % 3 == 0
+               && timesig.numerator() > 3);
+}
 } // namespace mu::iex::enc

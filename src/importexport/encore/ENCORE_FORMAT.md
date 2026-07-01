@@ -375,6 +375,8 @@ For multi-instrument scores where earlier instruments have more than one staff, 
 | 8    | REST      |
 | 9    | NOTE      |
 
+Type 4 (BEAM) is parsed but intentionally not modeled by the importer: MuseScore auto-beams from note durations and the time signature, so Encore's explicit beam groups are dropped. See BEAM element below.
+
 **Type 0xB (MIDI CC events).** Elements with high nibble 0xB are MIDI Control Change events stored inline for playback-only use; they have no visual representation.
 Observed always with size=12 (total 12 bytes from element start).
 Byte layout: ``` d[0..1] tick (uint16 LE) d[2] typeVoice = 0xBn (type=11, voice=n) d[3] size = 12 d[4] MIDI channel / track index d[5] MIDI CC event marker (0xB0 = CC channel-0) d[6..9] zeros d[10] MIDI CC controller number (64=sustain pedal, 7=volume, 1=modulation) d[11] MIDI CC value (127=max/on, 0=off) ``` Examples observed: `40 7F` (sustain pedal ON), `40 00` (sustain off), `07 6A` (volume 106).
@@ -569,7 +571,8 @@ Offsets from element start:
 | Offset | Size | Description                                                             |
 |--------|------|-------------------------------------------------------------------------|
 | +5     | 1    | ornament subtype (see table)                                            |
-| +10    | 2    | start x-position within the measure (layout units)                      |
+| +10    | 1    | `xoffset`, start x-position within the measure (layout units)           |
+| +11    | 1    | skipped (high byte of the layout x, ignored)                            |
 | +12    | 2    | signed s16 Cartesian y (negative = below staff)                         |
 | +16    | 1    | altMezuro (v0xC2 only): measures forward to slur end (see caveat below) |
 | +18    | 1    | alMezuro, measures forward to the end measure                           |
@@ -759,7 +762,7 @@ Restore it before computing measure position.
 **Inner grace detection.** After a leading grace (grace1 & 0x30 == 0x20), inner graces (grace1 & 0x30 == 0x10) have a strictly larger faceValue (shorter note).
 Only applies when `fv > maxFvInQueue`.
 
-**Face-grid snap suppression.** The implicit-silence snap must be suppressed while graces are pending (prevents spurious rests before the grace group) and also for subsequent notes whose apparent gap equals the stolen grace ticks (`stolenTicks` accumulated per trackKey).
+**Face-grid snap suppression.** The implicit-silence snap must be suppressed while graces are pending (prevents spurious rests before the grace group) and also for subsequent notes whose apparent gap equals the cumulative grace ticks already borrowed for that staff/voice.
 
 ### Grace-note slurs (SLURSTART co-located with appoggiatura)
 
@@ -881,7 +884,8 @@ Resolve each note's staff with the same routing as the note stream before gather
 | +5     | 1    | face value: high nibble = notehead type, low nibble = duration (see below)    |
 | +6     | 1    | grace1 (high-nibble flags, see grace section)                                 |
 | +7     | 1    | grace2                                                                        |
-| +10    | 2    | layout x-position                                                             |
+| +10    | 1    | `xoffset`, layout x-position                                                  |
+| +11    | 1    | skipped (high byte of the layout x, ignored)                                  |
 | +12    | 1    | staff-relative pitch, diatonic steps from C4 (see below)                      |
 | +13    | 1    | tuplet byte, high nibble = actualN, low nibble = normalN                      |
 | +14    | 1    | dot count (0/1/2/3)                                                           |
@@ -929,7 +933,8 @@ Because a value below C0 (MIDI 12) cannot be a real note, +15 counts as the pitc
 | +5     | 1    | face value (same encoding as v0xC4)                                             |
 | +6     | 1    | grace1                                                                          |
 | +7     | 1    | grace2                                                                          |
-| +10    | 2    | layout x-position                                                               |
+| +10    | 1    | `xoffset`, layout x-position                                                    |
+| +11    | 1    | skipped (high byte of the layout x, ignored)                                    |
 | +13    | 1    | **MIDI pitch** (sub-variant A) or tuplet ratio (sub-variant B has pitch at +15) |
 | +14    | 1    | dotControl, layout/display byte; bit 0 is an unreliable dotted hint (see below) |
 | +15    | 1    | **MIDI pitch** (sub-variant B only); in A a stray flag, never a pitch           |
@@ -971,7 +976,8 @@ Byte +11 is the playable MIDI value.
 | Offset | Size | Description                                                                  |
 |--------|------|------------------------------------------------------------------------------|
 | +5     | 1    | face value, same encoding as Note element                                    |
-| +10    | 2    | layout x-position                                                            |
+| +10    | 1    | `xoffset`, layout x-position                                                 |
+| +11    | 1    | skipped (high byte of the layout x, ignored)                                 |
 | +13    | 1    | tuplet byte, high nibble = actualN, low nibble = normalN (same as note)      |
 | +14    | 1    | dotControl, **bitmask flag, NOT a tick count**. Bit 0 = dotted display hint. |
 | +15    | 1    | **mrestCount**, multi-measure rest count (see below)                         |
@@ -1148,6 +1154,8 @@ Type 4. Explicit beaming per level:
 | 30   | 0x01    | 1st (8th flag)       |
 | 46   | 0x02    | 2nd (16th extension) |
 | 62   | 0x03    | 3rd (32nd extension) |
+
+The importer intentionally does not model BEAM elements: MuseScore auto-beams from note durations and the time signature, so Encore's explicit beam groups are dropped.
 
 ---
 

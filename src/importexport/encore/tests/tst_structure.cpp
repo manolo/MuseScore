@@ -1340,3 +1340,29 @@ TEST_F(Tst_Structure, malformed_oversized_block_size_does_not_crash)
     delete readEncoreScore("oversized.enc");
     setRootDir(ENC_DIR);
 }
+
+TEST_F(Tst_Structure, malformed_truncated_at_byte_boundaries_does_not_crash)
+{
+    // Finer-grained companion to malformed_truncated_input_does_not_crash: truncate a known-good
+    // file at every 64-byte boundary so a cut landing in the middle of any block header, size
+    // field, or element stream exercises the parser's bounds guards. Every prefix must import
+    // (as a null or a bounded score) without crashing, aborting, or hanging.
+    const QByteArray good = readFixtureBytes("bazo.enc");
+    ASSERT_GT(good.size(), 0);
+
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    setRootDir(tmp.path());
+
+    for (int len = 0; len <= good.size(); len += 64) {
+        const QByteArray cut = good.left(len);
+        const QString name = QString("trunc_at_%1.enc").arg(len);
+        QFile f(tmp.path() + "/" + name);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+        f.write(cut);
+        f.close();
+        delete readEncoreScore(name);
+    }
+
+    setRootDir(ENC_DIR);
+}

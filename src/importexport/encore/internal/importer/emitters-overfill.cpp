@@ -389,7 +389,9 @@ void fitOverfullMeasure(BuildCtx& ctx, Measure* measure)
                 break;
             case OverfillStrategy::StretchLastNote:
                 // Tier 2 (compress bracket) / lone-note reduce; decline -> tier 3 (irregular).
-                // Tier 1 (rob value from earlier notes) is not implemented yet.
+                // Documented limitation: tier 1 (rob value from earlier notes in the bar) is not
+                // implemented, so a voice stretch cannot resolve degrades to IrregularMeasure
+                // output rather than a standard-length bar. See ENCORE_IMPORTER.md §Overfull measures.
                 if (!stretchOverfullVoice(ctx, measure, tr)) {
                     needIrregularFallback = true;
                 }

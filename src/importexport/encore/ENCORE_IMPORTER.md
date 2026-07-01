@@ -108,6 +108,10 @@ A tuplet is always preserved whole, compressed whole, or dissolved whole; a part
   notation survives layout) and filling the remainder with an exact rest; a lone trailing
   note is reduced with up to 3 dots instead. If the compressed bracket would be smaller
   than half the tuplet's natural span, it falls back to `IrregularMeasure` for that measure.
+  Known limitation: the "rob value from earlier notes in the bar" refinement is not
+  implemented, so a measure that cannot be resolved by compressing or reducing the trailing
+  content silently degrades to `IrregularMeasure` output rather than a standard-length bar.
+  Prefer `Truncate` when a standard bar length is required.
 
 - **Mark as irregular measure** (`IrregularMeasure`): the measure's actual duration is
   extended to hold all the content, preserving the exact rhythm at the cost of a
@@ -294,9 +298,9 @@ A common pattern is a 3/4 bar carrying two NOTEs at Encore ticks 240 and 480 wit
 At the start of `elemTick` computation, the importer compares the element's absolute Encore tick (converted to a Fraction via `Fraction(e->tick, wholeTicks)`) against the current `cumTick[trackKey]`.
 When the difference is strictly greater than `CHORD_MIDI_THRESHOLD` (= 8 Encore ticks), `cumTick` is snapped forward to the Encore tick; `checkMeasure` later inserts the necessary fill rests during the per-staff gap pass.
 
-`wholeTicks` is the number of Encore ticks in a whole note.
-The file header stores `beatTicks` (the duration of one beat in the current time signature: 240 for x/4 meters, 120 for x/8 meters, 480 for x/2 meters, etc.), so `wholeTicks = beatTicks * timeSigDen` (= 960 in every observed file).
-An earlier version of this code used `4 * beatTicks` on the implicit assumption that `beatTicks` always equals 240. That held for x/4 meters but produced a denominator half the correct value in x/8 meters: every gap-snap fire then pushed `cumTick` twice as far as intended and the measure overflowed. v0xA6 scores in 3/8 / 6/8 (where `beatTicks = 120` always) tripped this on every measure.
+`wholeTicks` is the number of Encore ticks in a whole note, obtained from `encWholeNoteTicks()`.
+It is derived from the measure's own fields as `durTicks * timeSigDen / timeSigNum`, which yields the true whole-note grid regardless of how the file encodes `beatTicks`; when those fields are missing or zero it falls back to the `kEncWholeTicks` grid constant (960).
+An earlier version of this code computed the grid from `beatTicks` (`4 * beatTicks`, or equivalently `beatTicks * timeSigDen`) on the implicit assumption that `beatTicks` always equals 240. That held for x/4 meters but produced a denominator half the correct value in x/8 meters: every gap-snap fire then pushed `cumTick` twice as far as intended and the measure overflowed. Deriving the grid from `durTicks`/`timeSig` instead of `beatTicks` avoids this.
 
 The 8-tick threshold matches the same constant used for chord- extension detection, so the snap behaves consistently with the "same-cluster" timing tolerance: drift inside a chord cluster remains absorbed by `cumTick`, while anything beyond it is treated as an intentional silence the user notated.
 The smallest face value with non-degenerate ticks is the 64th (15 Encore ticks); any real silence is strictly above the threshold.
@@ -794,7 +798,7 @@ When both are added to MuseScore's Chord, the result is two noteheads at the sam
 The importer suppresses it when the concert pitch is already present in the chord (`chord->findNote(concertPitch)`).
 This guard is scoped to `grace1 & 0x40` to avoid false positives on v0xC2 chord clusters, where the `semiTonePitch` field holds an unreliable value before the v0xA6 pitch fix and multiple cluster notes can share the same raw byte value.
 
-**Source:** `handleNote` in `emitters-note.cpp` (~line 490).
+**Source:** `handleNote` in `emitters-note.cpp`.
 
 ### Tests
 
@@ -940,15 +944,15 @@ When `repeatAlternative` drops to 0 the counter resets.
 
 Exercised by `Tst_Importer.v0c4_volta_overlapping_bits_filtered`.
 
-## Gap-snap wholeTicks must always be 960
+## Gap-snap wholeTicks derives from the measure, not from beatTicks
 
 The gap-snap logic converts an Encore MIDI tick to a fraction of the measure using `encTickFrac = Fraction(e->tick, wholeTicks)`.
-The formula `wholeTicks = beatTicks * timeSigDen` gives 960 only when `beatTicks` is the raw note unit (240 for x/4, 120 for x/8).
-Files that store a non-standard value, e.g. 2/2 with `beatTicks=240` instead of the correct 480, produce `wholeTicks=480`.
+Deriving the whole-note grid from `beatTicks` (`wholeTicks = beatTicks * timeSigDen`) gives 960 only when `beatTicks` is the raw note unit (240 for x/4, 120 for x/8).
+Files that store a non-standard value, e.g. 2/2 with `beatTicks=240` instead of the correct 480, would then produce `wholeTicks=480`.
 A note at Encore tick=360 would then have `encTickFrac = 360/480 = 3/4`, exceeding `cumTick = 3/8` after a rest+quarter, causing gap-snap to fire and jump cumTick from 3/8 to 3/4. All notes in the second half of the measure (ticks 480-840) are dropped (measure overflows).
 
-Encore always uses 960 ticks per whole note regardless of time signature or beatTicks encoding.
-`wholeTicks` is now a compile-time constant 960. The same fix applies to the chord-symbol placement formula.
+`encWholeNoteTicks()` sidesteps this by deriving the grid from the measure's own duration and time signature as `durTicks * timeSigDen / timeSigNum`, falling back to the `kEncWholeTicks` grid constant (960) only when those fields are unusable.
+This yields the correct whole-note grid regardless of how the file encodes `beatTicks`. The same helper is used for the chord-symbol placement formula.
 Exercised by `Tst_Importer.v0c4_2_2_beatticks240_gap_snap_no_false_fire`.
 
 ## Percussion clef for drumset staves
@@ -958,7 +962,7 @@ After instrument assignment, `buildInitialSignatures` now checks whether the sta
 
 ## MIDI artifact filter bypass for chord roots and chord extensions
 
-The MIDI artifact filter (lines 152 to 174 in `emitters-note.cpp`) drops notes whose `realDuration` falls in the range 5 to 14 ticks when the face value is an eighth note or longer.
+The MIDI artifact filter (`isMidiArtifact` in `emitters-note.cpp`) drops notes whose `realDuration` falls in the range 5 to 14 ticks when the face value is an eighth note or longer.
 Two valid cases were incorrectly caught:
 
 1. **First note on staff in a measure** (`savedPrevMidiTick < 0`): can never
@@ -1077,7 +1081,7 @@ The original code guarded expansion with two conditions:
 Condition 2 was the bug source: it collapsed a legitimate mrest when followed by a rest measure (e.g. a dotted-quarter rest in the measure after a 3-measure multi-measure rest).
 The successor content is irrelevant, Encore's `mrestCount` byte is authoritative.
 
-The fix removes condition 2 from `encMeasDisplayCount` (builders.cpp) and from the identical `measDisplayCount` lambda in emitters.cpp.
+The fix removes condition 2 from `encMeasDisplayCount` (builders-measures.cpp) and from the identical `measDisplayCount` lambda in emitters.cpp.
 Both must agree or `buildMeasures` creates the right number of MuseScore measures but the emitters places notes in the wrong ones.
 
 Exercised by `Tst_Importer.mrest_single_block_expands_when_successor_is_rest`.
@@ -1393,56 +1397,9 @@ Global spatium is not changed.
 
 ## Page margins
 
-Page margins are stored in an optional WINI block near the end of the file.
-The block is written only when the user explicitly opens and saves Page Setup in Encore; files that were never touched through that dialog have no WINI block.
+Page margins come from the optional WINI block. Its byte layout, the 40/42-byte `varsize` forms, the points-vs-screen-pixel unit variants, the page-size recovery heuristic and the rounding/display quirks are all described in ENCORE_FORMAT.md §WINI; this section records only the DOM-side behavior.
 
-### WINI block layout
-
-Magic: `WINI`.
-Size field: 42 bytes (21 × uint16 LE).
-
-The four margin-related values are stored as int32 LE (pairs of adjacent uint16, high word always zero) at byte offsets 24-39 within the block content:
-
-| Offset | Field      | Meaning                                           |
-|--------|------------|---------------------------------------------------|
-| +24    | top        | top margin                                        |
-| +28    | left       | left margin                                       |
-| +32    | bottomEdge | bottom boundary of printable area (from page top) |
-| +36    | rightEdge  | right boundary of printable area (from page left) |
-
-### WINI unit variants
-
-Encore 5.x stores these values in **typographic points (1/72")**.
-Earlier versions (~4.x, some 3.x) store them in **screen pixels at the monitor DPI** (~84-85 PPI).
-Detection in `applyPageMargins` (`import.cpp`):
-
-```
-if rightEdge > pageWidth × 72:   # coordinate exceeds A4 in pts → screen-pixel format
-    scale = (rightEdge + left) / pageWidthIn   # ≈ 84.67 for A4
-else:
-    scale = 72                                 # typographic points
-```
-
-### Page-size detection (`detectWiniPageSize`)
-
-In screen-pixel format, the paper size is not stored explicitly.
-It is recovered by matching `pageWidth_units = rightEdge + left` against all standard `QPageSize` sizes in two passes:
-
-**Pass 1, ISO A-series (A0..A10) only.** All AN sizes share the 1:√2 aspect ratio, so within any AN file exactly one AN size falls in the plausible DPI range [60, 135] (consecutive sizes differ by √2 ≈ 1.414× in DPI).
-The in-range AN candidate with smallest `|dpiW − dpiH|` is selected.
-Checking A-series first prevents non-document sizes (envelopes, 12"×18" sheet, …) from winning over the correct AN via accidentally smaller delta.
-
-**Pass 2, all other sizes (Letter, Legal, B-series, …).** Reached only when no A-series candidate qualifies.
-Picks smallest `|dpiW − dpiH|` among in-range candidates.
-If neither pass finds a match, returns false and the caller keeps the current MuseScore page dimensions (custom page).
-
-When the page is detected, `Sid::pageWidth` and `Sid::pageHeight` are updated to the detected dimensions before computing margins, so right/bottom margins are always derived from the correct paper size.
-
-### Encoding quirks
-
-Encore rounds when storing: `round(inches × 72)`.
-The display in Page Setup shows `floor(pts / 72 × 1000) / 1000` so values may differ slightly from what the user typed (e.g. 0.100 in stores as 7 pts and displays as 0.097 in).
-In screen-pixel files Encore also uses 1/72" for its own margin display, so the top/left values it shows (e.g. 0.39") differ slightly from the physical margin computed at the correct DPI (e.g. 0.33").
+`applyPageMargins` (`page-layout.cpp`) reads the parsed `EncPageSetup`. In the screen-pixel variant the paper size is not stored, so `detectWiniPageSize` matches the recovered page width against the standard `QPageSize` list (ISO A-series first, then Letter/Legal/B-series). On a match it updates `Sid::pageWidth` and `Sid::pageHeight` before the margins are computed, so the right/bottom margins derive from the correct paper size; when no size matches the current MuseScore page dimensions are kept.
 
 ### Files with no WINI block
 

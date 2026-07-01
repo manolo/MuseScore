@@ -65,6 +65,8 @@ static std::unique_ptr<EncMeasureElem> createMeasureElement(
         return std::make_unique<EncClefChange>(tick, tp, vo);
     case EncElemType::NONE:
     case EncElemType::BEAM:
+        // BEAM is intentionally not modeled: MuseScore auto-beams from note durations and time
+        // signature, so Encore's explicit beam groups are dropped. See ENCORE_FORMAT.md.
     default:
         return std::make_unique<EncGenericElem>(tick, tp, vo);
     }
@@ -74,11 +76,11 @@ static std::unique_ptr<EncMeasureElem> createMeasureElement(
 // boundaryTicks: sorted non-note ticks (CLEF, KEYCHANGE) that cap the gap even when no
 // note follows. Prevents a lonely quarter rest from being stretched to fill the whole measure
 // when a mid-measure clef change is the next event at that voice/staff.
-static void computeElementDurations(
+void computeElementDurations(
     std::vector<EncMeasureElem*>& elems,
     qint16 durTicks,
     bool hasGraceTimeBorrowing,
-    const std::vector<qint16>& boundaryTicks = {})
+    const std::vector<qint16>& boundaryTicks)
 {
     for (size_t i = 0; i < elems.size(); ++i) {
         size_t j = i + 1;
@@ -150,10 +152,17 @@ bool EncMeasure::read(QDataStream& ds, const quint32 vs, const EncFormatReader& 
 
     const qint64 elemOffset = static_cast<qint64>(fmt.elemBlockOffset());
     ds.device()->seek(measStart + elemOffset);
-    // varsize is an untrusted file value; compute the end in qint64 and never let it run past
-    // the device so the element loop below is bounded even for a corrupt/oversized size.
-    qint64 measEnd = measStart + static_cast<qint64>(varsize) + elemOffset;
-    measEnd = std::min(measEnd, ds.device()->size());
+    // varsize is an untrusted file value; clampMeasureEnd computes the end in qint64 and never lets
+    // it run past the device so the element loop below is bounded even for a corrupt/oversized size.
+    const qint64 measEnd = clampMeasureEnd(measStart, varsize, elemOffset, ds.device()->size());
+
+    // Guard the first read the same way the loop body does. After the seek, a truncated file has
+    // no element bytes left: reading would return a zero-filled tick (0, not 0xFFFF) and the loop
+    // would mis-classify the truncated measure as a real one starting at tick 0 instead of bailing.
+    if (ds.device()->pos() >= measEnd - 2 || ds.status() != QDataStream::Ok) {
+        ds.device()->seek(measEnd);
+        return true;
+    }
 
     quint16 tick;
     ds >> tick;

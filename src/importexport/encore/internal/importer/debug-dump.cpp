@@ -84,7 +84,8 @@ void logEncRootInfo(const EncRoot& enc)
         LOGD() << "  Copyrt:   " << enc.titleBlock.copyright[0].toStdString();
     }
 
-    static const char* kSizeLabel[4] = { "60%", "70%", "75%", "100%" };
+    // Must match applyStaffScale's kScaleBySize in import.cpp: { 0.60, 0.75, 1.00, 1.30 }.
+    static const char* kSizeLabel[4] = { "60%", "75%", "100%", "130%" };
 
     LOGD() << "---- Instruments ----";
     for (size_t i = 0; i < enc.instruments.size(); ++i) {
