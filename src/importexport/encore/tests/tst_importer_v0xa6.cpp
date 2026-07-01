@@ -707,3 +707,43 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_second_verse_aligns_by_xoffset)
     EXPECT_EQ(perChord[2].second, String(u"Z"));
     delete score;
 }
+
+// A final melisma word: two notes, one held syllable per verse, both sung on the first note. Encore
+// stores verse 1 at the melisma's END note (tick 360) and collapses verse 2 to tick 0; neither verse
+// spans the bar. Tick-based matching sends verse 1 "peace" to note 2, but its x-offset (59) nearly
+// equals verse 2 "born" (64), so both belong on note 1. Before the fix verse 1 landed on note 2.
+TEST_F(Tst_ImporterV0xa6, v0xa6_melisma_word_aligns_both_verses_on_first_note)
+{
+    MasterScore* score = readEncoreScore("importer_v0xa6_melisma_verse_alignment.enc");
+    ASSERT_NE(score, nullptr);
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    std::vector<std::pair<String, String> > perChord;   // (verse 0 text, verse 1 text)
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        String v0, v1;
+        for (Lyrics* ly : toChord(el)->lyrics()) {
+            if (!ly) {
+                continue;
+            }
+            if (ly->verse() == 0) {
+                v0 = ly->plainText();
+            } else if (ly->verse() == 1) {
+                v1 = ly->plainText();
+            }
+        }
+        perChord.emplace_back(v0, v1);
+    }
+
+    ASSERT_GE(perChord.size(), size_t(2));
+    // Both verses on the first chord; the second chord (melisma tail) carries no syllable.
+    EXPECT_EQ(perChord[0].first,  String(u"peace"));
+    EXPECT_EQ(perChord[0].second, String(u"born"));
+    EXPECT_TRUE(perChord[1].first.isEmpty());
+    EXPECT_TRUE(perChord[1].second.isEmpty());
+    delete score;
+}

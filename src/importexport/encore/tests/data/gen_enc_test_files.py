@@ -640,6 +640,20 @@ def gen_v0xa6_two_verse_alignment():
     meas = b'MEAS' + struct.pack('<I', len(e)) + _mhdr_a6(3, 4) + e
     return build_v0xa6([('Voz', 1, 0)], [meas], staff_size=1)
 
+def gen_v0xa6_melisma_verse_alignment():
+    """A final melisma word: two notes and a single held syllable per verse. Encore stores verse 1's
+    syllable at the melisma's END note (tick 360) and collapses verse 2 to tick 0, but both are sung
+    on the first note (near-equal x-offsets). No verse spans the bar, so tick-based matching sends
+    verse 1 to note 2; only x-offset alignment keeps both on note 1."""
+    notes = note_v0xa6(0, 0, 0, 3, 0) + note_v0xa6(360, 0, 0, 3, 7)
+    # verse 1 (voice 0): single syllable stored at the end note (tick 360), x-offset 59
+    v1 = lyric_v0xa6(360, 0, 0, "peace", kie=59)
+    # verse 2 (voice 1): single syllable collapsed to tick 0, near-equal x-offset 64
+    v2 = lyric_v0xa6(0, 1, 0, "born", kie=64)
+    e = notes + v1 + v2 + end_marker()
+    meas = b'MEAS' + struct.pack('<I', len(e)) + _mhdr_a6(2, 4) + e
+    return build_v0xa6([('Voz', 1, 0)], [meas], staff_size=1)
+
 # ---------------------------------------------------------------------------
 # File generators, new set (replacing Encore 5 example files)
 # ---------------------------------------------------------------------------
@@ -9490,6 +9504,7 @@ if __name__=='__main__':
     write("importer_v0xa6_two_verse_alignment.enc", gen_v0xa6_two_verse_alignment())
     write("options_underfill_irregular_empty_staff.enc",   gen_v0c4_underfill_irregular_sparse_with_empty_staff())
     write("importer_v0xa6_stafftext_placement.enc", gen_v0xa6_stafftext_placement())
+    write("importer_v0xa6_melisma_verse_alignment.enc", gen_v0xa6_melisma_verse_alignment())
     write("notes_corrupted.enc",     gen_v0c4_corrupted())
     write("notes_swing.enc",         gen_v0c4_swing())
     write("notes_grace.enc",             gen_v0c4_grace())

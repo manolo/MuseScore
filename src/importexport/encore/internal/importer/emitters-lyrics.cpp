@@ -231,6 +231,42 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
         }
     }
 
+    // Fallback for measures where NO verse has reliable (spanning) ticks. A final melisma word that
+    // is the only syllable in the bar is stored at the melisma's end note in one verse and collapsed
+    // to tick 0 in another, so tick-based matching splits the verses across different notes. Position
+    // purely by xoffset instead: syllables (across verses) whose xoffset nearly coincides are the same
+    // held word and must resolve to the same (earliest) note. Only staves absent from the spanning
+    // reference are touched, so measures with a normal multi-syllable verse are left unchanged.
+    {
+        std::map<int, std::vector<std::pair<int, int> > > noSpanByStaff;   // staff -> [(xoffset, encTick)]
+        for (const auto& [t, es] : ctx.scratch.pendingLyrics) {
+            const int staff = static_cast<int>(t) / VOICES;
+            if (xoffTickRefByStaff.count(staff)) {
+                continue;   // has a reliable spanning reference; handled below
+            }
+            auto& v = noSpanByStaff[staff];
+            for (const auto& e : es) {
+                v.emplace_back(e.xoffset, e.encTick);
+            }
+        }
+        // xoffset units; adjacent notes differ by far more than this, matching cross-verse syllables
+        // differ by much less (see attachPendingLyrics reference building above).
+        const int kieThreshold = 25;
+        for (auto& [t, es] : ctx.scratch.pendingLyrics) {
+            auto sit = noSpanByStaff.find(static_cast<int>(t) / VOICES);
+            if (sit == noSpanByStaff.end()) {
+                continue;
+            }
+            for (auto& e : es) {
+                for (const auto& [kx, kt] : sit->second) {
+                    if (std::abs(kx - e.xoffset) <= kieThreshold && kt < e.encTick) {
+                        e.encTick = kt;
+                    }
+                }
+            }
+        }
+    }
+
     for (auto& [lyTrack, entries] : ctx.scratch.pendingLyrics) {
         if (entries.empty()) {
             continue;
