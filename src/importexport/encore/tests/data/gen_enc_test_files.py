@@ -355,6 +355,44 @@ def note_v0xa6(tick, voice, staffIdx, fv, pitch_offset):
     pad[11 - 3 - 7] = midi & 0xFF   # = pad[1] = file offset +11
     return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)+bytes(pad)
 
+def lyric_v0xa6(tick, voice, staffIdx, text):
+    """v0xA6 compact lyric: tick(2)+tv(1)+size(1)+rawStaff(1)+one control byte, then
+    null-terminated Latin-1 text, all within the size*2 slot (text at elemStart+6)."""
+    tb = text.encode('latin1') + b'\x00'
+    need = 6 + len(tb)
+    size = (need + 1) // 2
+    if size * 2 < need:
+        size += 1
+    b = bytearray(size * 2)
+    struct.pack_into('<H', b, 0, tick)
+    b[2] = (6 << 4) | (voice & 0xF)   # type 6 = LYRIC
+    b[3] = size
+    b[4] = staffIdx & 0x3F
+    b[5] = 0x00                       # control/anchor byte
+    b[6:6 + len(tb)] = tb
+    return bytes(b)
+
+def stafftext_orn_v0xa6(tick, voice, staffIdx, tind):
+    """v0xA6 compact STAFFTEXT ornament: size=15 (30-byte slot), tipo 0x1E at +5, and the
+    TEXT-block entry index at elemStart+28 (= +26 from the type/voice byte)."""
+    size = 15
+    b = bytearray(size * 2)
+    struct.pack_into('<H', b, 0, tick)
+    b[2] = (5 << 4) | (voice & 0xF)   # type 5 = ORNAMENT
+    b[3] = size
+    b[4] = staffIdx & 0x3F
+    b[5] = 0x1E                       # tipo = STAFFTEXT
+    b[28] = tind & 0xFF               # tind
+    return bytes(b)
+
+def text_block_v0xa6(entries):
+    """v0xA6 TEXT block: entries have no 14-byte header; text starts at payload offset 0."""
+    body = struct.pack('<HHI', 0, len(entries), 0)   # sync, count, contentSize
+    for t in entries:
+        tb = t.encode('latin1') + b'\x00'
+        body += struct.pack('<H', len(tb)) + tb
+    return b'TEXT' + struct.pack('<I', len(body)) + bytes(body)
+
 # ---------------------------------------------------------------------------
 # File generators, original set
 # ---------------------------------------------------------------------------
@@ -552,6 +590,18 @@ def gen_v0xa6_score_size():
 def gen_v0xa6_key_signature():
     m = _meas_a6([(0, 0, 0, 4, 0), (0, 0, 1, 4, 7)])
     return build_v0xa6([('Vz1', 0, 0), ('Vz2', 0, 0)], [m], staff_size=1, keyIndex=10)
+
+def gen_v0xa6_lyrics_and_stafftext():
+    """Encore 2.x note carrying a compact lyric syllable plus a STAFFTEXT ornament that
+    references a TEXT-block entry. Both the compact lyric and the compact-ornament TEXT
+    index were dropped before the v0xA6 compact-layout fix; this exercises both end to end."""
+    e  = note_v0xa6(0, 0, 0, 3, 0)          # quarter C4
+    e += lyric_v0xa6(0, 0, 0, "loco")       # lyric syllable under it
+    e += stafftext_orn_v0xa6(0, 0, 0, 0)    # STAFFTEXT -> TEXT entry 0
+    e += end_marker()
+    meas = b'MEAS' + struct.pack('<I', len(e)) + _mhdr_a6(2, 4) + e
+    f = build_v0xa6([('Voz', 1, 0)], [meas], staff_size=1)
+    return f + text_block_v0xa6(["dolce"])   # entry 0 = "dolce" (non-tempo -> stays StaffText)
 
 # ---------------------------------------------------------------------------
 # File generators, new set (replacing Encore 5 example files)
@@ -9399,6 +9449,7 @@ if __name__=='__main__':
     write("instruments_v0xa6_midi_program.enc",   gen_v0xa6_midi_program())
     write("structure_v0xa6_score_size.enc",       gen_v0xa6_score_size())
     write("structure_v0xa6_key_signature.enc",    gen_v0xa6_key_signature())
+    write("importer_v0xa6_lyrics_and_stafftext.enc", gen_v0xa6_lyrics_and_stafftext())
     write("options_underfill_irregular_empty_staff.enc",   gen_v0c4_underfill_irregular_sparse_with_empty_staff())
     write("notes_corrupted.enc",     gen_v0c4_corrupted())
     write("notes_swing.enc",         gen_v0c4_swing())

@@ -33,6 +33,7 @@
 #include "engraving/dom/instrument.h"
 #include "engraving/dom/marker.h"
 #include "engraving/dom/part.h"
+#include "engraving/dom/lyrics.h"
 #include "engraving/dom/stafftext.h"
 #include "engraving/dom/tremolosinglechord.h"
 #include "engraving/dom/tuplet.h"
@@ -509,5 +510,44 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_grace_restores_face_value)
     EXPECT_EQ(elements[4].second, false);
     EXPECT_EQ(elements[4].first, DurationType::V_EIGHTH)
         << "last note must be an eighth (face value), not a 16th from rawGap=90";
+    delete score;
+}
+
+// End-to-end: a real v0xA6 file whose measure carries a compact lyric syllable ("loco") and a
+// STAFFTEXT ornament pointing at TEXT entry 0 ("dolce") must import both. Before the compact-layout
+// fix the 2.x lyric and staff text were silently dropped.
+TEST_F(Tst_ImporterV0xa6, v0xa6_imports_lyrics_and_staff_text)
+{
+    MasterScore* score = readEncoreScore("importer_v0xa6_lyrics_and_stafftext.enc");
+    ASSERT_NE(score, nullptr);
+
+    bool foundLyric = false;
+    bool foundStaffText = false;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        Measure* m = toMeasure(mb);
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* a : s->annotations()) {
+                if (a && a->isStaffText() && toStaffText(a)->plainText() == String(u"dolce")) {
+                    foundStaffText = true;
+                }
+            }
+            for (int ti = 0; ti < static_cast<int>(score->nstaves() * VOICES); ++ti) {
+                EngravingItem* el = s->element(static_cast<track_idx_t>(ti));
+                if (!el || !el->isChord()) {
+                    continue;
+                }
+                for (Lyrics* ly : toChord(el)->lyrics()) {
+                    if (ly && ly->plainText() == String(u"loco")) {
+                        foundLyric = true;
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_TRUE(foundLyric) << "v0xA6 compact lyric 'loco' must be imported";
+    EXPECT_TRUE(foundStaffText) << "v0xA6 staff text 'dolce' must be imported";
     delete score;
 }
