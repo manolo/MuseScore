@@ -200,6 +200,7 @@ struct PendingMarker {
 // when queue index shifts due to ORN elements.
 struct PendingLyric {
     int encTick;
+    int xoffset;        // horizontal anchor (EncLyric::kie); the reliable per-syllable position
     String text;
     bool hyphenBefore;
     bool hyphenAfter;

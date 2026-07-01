@@ -628,3 +628,44 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_stafftext_tind_at_offset_26)
 
     EXPECT_EQ(orn.tind, 4);
 }
+
+// Encore stores verse 2 (voice 1) with tick=0 on every syllable; its real position is the xoffset,
+// identical to verse 1. The importer must align verse 2 to the same notes as verse 1 rather than
+// collapsing every verse-2 syllable onto the first notes. Three notes carry verse 1 "A/B/C" and
+// verse 2 "X/Y/Z" at matching x-offsets; each note must end up with the aligned pair.
+TEST_F(Tst_ImporterV0xa6, v0xa6_second_verse_aligns_by_xoffset)
+{
+    MasterScore* score = readEncoreScore("importer_v0xa6_two_verse_alignment.enc");
+    ASSERT_NE(score, nullptr);
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    std::vector<std::pair<String, String> > perChord;   // (verse 0 text, verse 1 text)
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        String v0, v1;
+        for (Lyrics* ly : toChord(el)->lyrics()) {
+            if (!ly) {
+                continue;
+            }
+            if (ly->verse() == 0) {
+                v0 = ly->plainText();
+            } else if (ly->verse() == 1) {
+                v1 = ly->plainText();
+            }
+        }
+        perChord.emplace_back(v0, v1);
+    }
+
+    ASSERT_GE(perChord.size(), size_t(3));
+    EXPECT_EQ(perChord[0].first,  String(u"A"));
+    EXPECT_EQ(perChord[0].second, String(u"X"));
+    EXPECT_EQ(perChord[1].first,  String(u"B"));
+    EXPECT_EQ(perChord[1].second, String(u"Y"));
+    EXPECT_EQ(perChord[2].first,  String(u"C"));
+    EXPECT_EQ(perChord[2].second, String(u"Z"));
+    delete score;
+}

@@ -355,9 +355,9 @@ def note_v0xa6(tick, voice, staffIdx, fv, pitch_offset):
     pad[11 - 3 - 7] = midi & 0xFF   # = pad[1] = file offset +11
     return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)+bytes(pad)
 
-def lyric_v0xa6(tick, voice, staffIdx, text):
-    """v0xA6 compact lyric: tick(2)+tv(1)+size(1)+rawStaff(1)+one control byte, then
-    null-terminated Latin-1 text, all within the size*2 slot (text at elemStart+6)."""
+def lyric_v0xa6(tick, voice, staffIdx, text, kie=0):
+    """v0xA6 compact lyric: tick(2)+tv(1)+size(1)+rawStaff(1)+control/anchor byte (kie = the
+    horizontal x-offset), then null-terminated Latin-1 text within the size*2 slot (text at +6)."""
     tb = text.encode('latin1') + b'\x00'
     need = 6 + len(tb)
     size = (need + 1) // 2
@@ -368,7 +368,7 @@ def lyric_v0xa6(tick, voice, staffIdx, text):
     b[2] = (6 << 4) | (voice & 0xF)   # type 6 = LYRIC
     b[3] = size
     b[4] = staffIdx & 0x3F
-    b[5] = 0x00                       # control/anchor byte
+    b[5] = kie & 0xFF                 # control/anchor byte = x-offset
     b[6:6 + len(tb)] = tb
     return bytes(b)
 
@@ -602,6 +602,28 @@ def gen_v0xa6_lyrics_and_stafftext():
     meas = b'MEAS' + struct.pack('<I', len(e)) + _mhdr_a6(2, 4) + e
     f = build_v0xa6([('Voz', 1, 0)], [meas], staff_size=1)
     return f + text_block_v0xa6(["dolce"])   # entry 0 = "dolce" (non-tempo -> stays StaffText)
+
+def gen_v0xa6_two_verse_alignment():
+    """Two lyric verses over three notes. Encore stores verse 2 (voice 1) with tick=0 on EVERY
+    syllable; the real horizontal position is the xoffset (kie), identical to verse 1's syllable at
+    the same spot. The importer must align verse 2 to the same notes as verse 1 (via xoffset), not
+    collapse every verse-2 syllable onto the first notes."""
+    notes = (note_v0xa6(0, 0, 0, 3, 0)
+             + note_v0xa6(240, 0, 0, 3, 4)
+             + note_v0xa6(480, 0, 0, 3, 7))
+    # verse 1 (voice 0): correct ticks, x-offsets 10/50/90
+    v1 = (lyric_v0xa6(0,   0, 0, "A", kie=10)
+          + lyric_v0xa6(240, 0, 0, "B", kie=50)
+          + lyric_v0xa6(480, 0, 0, "C", kie=90))
+    # verse 2 (voice 1): all tick 0, same x-offsets as verse 1, but emitted in REVERSE x-offset
+    # order (as Encore does, e.g. storing the "2." first syllable last) so a tick-only greedy match
+    # would scramble them; only xoffset alignment recovers X/Y/Z on notes 1/2/3.
+    v2 = (lyric_v0xa6(0, 1, 0, "Z", kie=90)
+          + lyric_v0xa6(0, 1, 0, "Y", kie=50)
+          + lyric_v0xa6(0, 1, 0, "X", kie=10))
+    e = notes + v1 + v2 + end_marker()
+    meas = b'MEAS' + struct.pack('<I', len(e)) + _mhdr_a6(3, 4) + e
+    return build_v0xa6([('Voz', 1, 0)], [meas], staff_size=1)
 
 # ---------------------------------------------------------------------------
 # File generators, new set (replacing Encore 5 example files)
@@ -9450,6 +9472,7 @@ if __name__=='__main__':
     write("structure_v0xa6_score_size.enc",       gen_v0xa6_score_size())
     write("structure_v0xa6_key_signature.enc",    gen_v0xa6_key_signature())
     write("importer_v0xa6_lyrics_and_stafftext.enc", gen_v0xa6_lyrics_and_stafftext())
+    write("importer_v0xa6_two_verse_alignment.enc", gen_v0xa6_two_verse_alignment())
     write("options_underfill_irregular_empty_staff.enc",   gen_v0c4_underfill_irregular_sparse_with_empty_staff())
     write("notes_corrupted.enc",     gen_v0c4_corrupted())
     write("notes_swing.enc",         gen_v0c4_swing())

@@ -870,6 +870,12 @@ By then the previous measure's syllable is already placed, so the hyphen must pr
 
 **Multi-verse.** Verse N uses voice (N−1) on the same staff.
 All verses anchor on the voice-0 chord.
+Encore writes the first verse (voice 0) with a correct per-syllable tick, but every later verse
+stores tick=0 on ALL its syllables; only the x-offset (`textAnchor`, +0x0A) distinguishes their
+positions, and it matches the first verse's x-offsets syllable for syllable. A tick-only match
+therefore collapses the later verses onto the first notes; the x-offset is the reliable anchor, so
+a collapsed verse must be positioned by mapping each syllable's x-offset to the first verse's
+x-offset→tick pairs. (The syllables are also not necessarily stored in x-offset order.)
 
 **Lyric-to-note matching.** Each lyric's `textAnchor` (+0x0A) is a visual x-offset, not a tick.
 Match each lyric to the nearest note by tick within a half-beat window:

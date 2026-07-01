@@ -64,6 +64,7 @@ void enqueueLyric(BuildCtx& ctx, const EncLyric* el, track_idx_t track)
     } else {
         PendingLyric pl;
         pl.encTick = static_cast<int>(el->tick);
+        pl.xoffset = static_cast<int>(el->kie);   // horizontal anchor; see attach pass
         pl.text = text;
         auto it = ctx.scratch.nextLyricHyphenBefore.find(track);
         pl.hyphenBefore = (it != ctx.scratch.nextLyricHyphenBefore.end()) && it->second;
@@ -204,6 +205,32 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
     const int beatTicksVal = encMeas.beatTicks ? static_cast<int>(encMeas.beatTicks) : 240;
     const int matchThreshold = beatTicksVal / 2;
 
+    // Encore stores the second and later verses with tick=0 on every syllable; the real horizontal
+    // position lives only in the xoffset (kie), identical to the matching first-verse syllable.
+    // Build a per-staff xoffset->tick reference from the verses whose ticks are reliable (they span
+    // more than one value); a collapsed verse is then remapped by nearest xoffset below so all verses
+    // align on the same notes. Note xoffsets are not usable for this (absent/zero in v0xA6).
+    std::map<int, std::vector<std::pair<int, int> > > xoffTickRefByStaff;   // staff -> [(xoffset, encTick)]
+    for (const auto& [refTrack, refEntries] : ctx.scratch.pendingLyrics) {
+        if (refEntries.size() < 2) {
+            continue;
+        }
+        bool spans = false;
+        for (const auto& e : refEntries) {
+            if (e.encTick != refEntries.front().encTick) {
+                spans = true;
+                break;
+            }
+        }
+        if (!spans) {
+            continue;
+        }
+        auto& ref = xoffTickRefByStaff[static_cast<int>(refTrack) / VOICES];
+        for (const auto& e : refEntries) {
+            ref.emplace_back(e.xoffset, e.encTick);
+        }
+    }
+
     for (auto& [lyTrack, entries] : ctx.scratch.pendingLyrics) {
         if (entries.empty()) {
             continue;
@@ -213,6 +240,38 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
         const int lyStaffIdx = static_cast<int>(lyTrack) / VOICES;
         const int lyVerseNo = static_cast<int>(lyTrack) % VOICES;
         const track_idx_t chordTrack = static_cast<track_idx_t>(lyStaffIdx) * VOICES;
+
+        // A collapsed verse (every syllable at the same tick) but with distinct xoffsets is the
+        // tick=0 verse-2 case: remap each syllable's tick from its xoffset via the staff reference.
+        {
+            bool collapsed = entries.size() > 1;
+            bool xoffDistinct = false;
+            for (const auto& e : entries) {
+                if (e.encTick != entries.front().encTick) {
+                    collapsed = false;
+                }
+                if (e.xoffset != entries.front().xoffset) {
+                    xoffDistinct = true;
+                }
+            }
+            auto rit = xoffTickRefByStaff.find(lyStaffIdx);
+            if (collapsed && xoffDistinct && rit != xoffTickRefByStaff.end()) {
+                for (auto& e : entries) {
+                    int bestTick = -1;
+                    int bestDelta = INT_MAX;
+                    for (const auto& [rx, rt] : rit->second) {
+                        const int d = std::abs(rx - e.xoffset);
+                        if (d < bestDelta) {
+                            bestDelta = d;
+                            bestTick = rt;
+                        }
+                    }
+                    if (bestTick >= 0) {
+                        e.encTick = bestTick;
+                    }
+                }
+            }
+        }
 
         const std::vector<int>* noteTickList = nullptr;
         {
