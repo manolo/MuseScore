@@ -24,6 +24,7 @@
 #include "import.h"
 #include "emitters-internal.h"
 #include "../parser/elem.h"
+#include "../parser/readers.h"
 #include "mappers.h"
 #include "../parser/ticks.h"
 #include "emitters-tuplets.h"
@@ -494,6 +495,7 @@ static Fraction computeElementTick(
     if (et == EncElemType::NOTE) {
         ctx.scratch.prevMidiTick[trackKey] = e->tick;
         ctx.scratch.prevEncVoice[trackKey] = voice;
+        ctx.scratch.prevXoffset[trackKey] = static_cast<int>(e->xoffset);
         // Record note xoffset for bowing-mark cluster resolution.
         const auto* en = static_cast<const EncNote*>(e);
         auto& vec = ctx.noteXoffByMeasStaff[{ mc.measIdx, staffIdx }];
@@ -853,7 +855,21 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
 
     // Near-simultaneous notes (< CHORD_MIDI_THRESHOLD) extend the chord; same Encore voice required.
     constexpr int CHORD_MIDI_THRESHOLD = 2 * CHORD_CLUSTER_THRESHOLD;  // = 8
-    bool isChordExt = isNoteOrRest && ctx.scratch.prevMidiTick.count(trackKey)
+    // Two notes close in time but in different notated columns (xoffset) are sequential events,
+    // not one chord: tightly played tuplet members can land a few ticks apart yet belong to
+    // distinct triplet positions. Adjacent columns sit at least COLUMN_SEPARATION_MIN pixels apart,
+    // while a chord's members share a column (equal xoffset, or a few pixels of notehead offset for
+    // a cluster), so only a gap at or beyond that separation marks a genuine column change. Applied
+    // only for formats that store the column (see EncFormatReader::clustersChordsByXoffset).
+    constexpr int COLUMN_SEPARATION_MIN = 8;
+    const bool columnAware = ctx.enc.fmt && ctx.enc.fmt->clustersChordsByXoffset();
+    const bool differentColumn = columnAware && e->xoffset != 0
+                                 && ctx.scratch.prevXoffset.count(trackKey)
+                                 && ctx.scratch.prevXoffset.at(trackKey) != 0
+                                 && std::abs(ctx.scratch.prevXoffset.at(trackKey) - static_cast<int>(e->xoffset))
+                                 >= COLUMN_SEPARATION_MIN;
+    bool isChordExt = isNoteOrRest && !differentColumn
+                      && ctx.scratch.prevMidiTick.count(trackKey)
                       && ctx.scratch.prevEncVoice.count(trackKey)
                       && ctx.scratch.prevEncVoice.at(trackKey) == voice
                       && (int)e->tick - (int)ctx.scratch.prevMidiTick.at(trackKey) >= 0

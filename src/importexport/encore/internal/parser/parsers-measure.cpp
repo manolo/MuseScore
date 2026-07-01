@@ -133,6 +133,48 @@ void computeElementDurations(
     }
 }
 
+// Encore records a chord's notes with staggered playback ticks (a per-chord "strum" / live-recording
+// drift), but every note in one chord shares the same notated horizontal column, stored in the note
+// xoffset byte. Collapse each run of consecutive notes that share the same nonzero xoffset and face
+// value to the run's earliest tick, so the duration and chord-grouping logic downstream sees them as
+// simultaneous chord members instead of splitting the chord into separate short notes.
+// elems is one (staff, voice) group already sorted by tick. A run is treated as one chord only when
+// the members stay within a small cluster window of the anchor: real chord members (including chords
+// inside a tuplet) drift by at most a few dozen ticks, while the shortest sequential subdivision is
+// farther apart. The window is capped at one notated duration so a short face value stays tight, and
+// at CHORD_STRUM_MAX_SPAN so a long face value never absorbs a genuine later note that happens to
+// reuse the column. Notes with a zero xoffset (no stored column) are left untouched.
+// See ENCORE_FORMAT.md §Chord column (xoffset).
+static void normalizeChordColumnTicks(std::vector<EncMeasureElem*>& elems)
+{
+    // Observed chord "strum" spans reach ~30 Encore ticks; the tightest sequential subdivision
+    // Encore emits stays well above this, so 48 cleanly separates a chord column from a run of notes.
+    constexpr int CHORD_STRUM_MAX_SPAN = 48;
+    size_t i = 0;
+    while (i < elems.size()) {
+        EncNote* anchor = dynamic_cast<EncNote*>(elems[i]);
+        if (!anchor || anchor->xoffset == 0) {
+            ++i;
+            continue;
+        }
+        const int faceTicks = faceValue2ticks(anchor->faceValue);
+        const int window = std::min(faceTicks, CHORD_STRUM_MAX_SPAN);
+        size_t j = i + 1;
+        while (j < elems.size()) {
+            EncNote* n = dynamic_cast<EncNote*>(elems[j]);
+            if (!n || n->xoffset != anchor->xoffset
+                || fvLow(n->faceValue) != fvLow(anchor->faceValue)
+                || window <= 0
+                || (n->tick - anchor->tick) >= window) {
+                break;
+            }
+            n->tick = anchor->tick;
+            ++j;
+        }
+        i = j;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // EncMeasure
 // ---------------------------------------------------------------------------
@@ -280,6 +322,9 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, const EncFor
         const auto bIt = boundaryByStaff.find(key.first);
         const std::vector<qint16>& boundaries
             = (bIt != boundaryByStaff.end()) ? bIt->second : std::vector<qint16>{};
+        if (fmt.clustersChordsByXoffset()) {
+            normalizeChordColumnTicks(elems);
+        }
         computeElementDurations(elems, durTicks, hasGraceTimeBorrowing, boundaries);
         fmt.postProcessVoiceGroup(elems, durTicks);
     }

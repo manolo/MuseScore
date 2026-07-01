@@ -34,6 +34,7 @@ struct EncFormatReader_V0xC4Base : EncFormatReader
 {
     quint32 elemBlockOffset() const override { return 0x36; }
     bool probeInstrumentEncoding() const override { return true; }
+    bool clustersChordsByXoffset() const override { return true; }
 
     bool readInstrumentMeta(std::vector<EncInstrument>& instruments,
                             QDataStream& ds,

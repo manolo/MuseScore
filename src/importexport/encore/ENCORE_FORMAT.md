@@ -396,6 +396,39 @@ A gap between two consecutive same-voice events where `event.tick > prevEvent.ti
 **Detection threshold:** gaps ≥ 8 ticks are treated as intentional rests.
 Gaps < 8 ticks are MIDI timing slop (quantisation jitter) and should be snapped to the nearest on-grid position rather than turned into rests.
 
+### Chord column (xoffset)
+
+The notes of a single chord are not always stored at the same tick.
+A chord recorded live (or given a per-chord "strum") keeps its members at slightly staggered
+playback ticks, drifting by a handful of ticks up to a sizeable fraction of the note value
+(spans of 15-20 ticks for an eighth or sixteenth chord have been observed).
+A pure tick-gap grouping rule then splits such a chord into several short notes, and the split
+also breaks the bar's rhythm.
+
+The reliable signal for chord membership is the note `xoffset` (byte +10): it is the notated
+horizontal column of the note, and every member of one chord shares the same `xoffset`, while
+successive chords occupy distinct columns.
+To rebuild chords, take a run of consecutive same-voice notes that share the same non-zero
+`xoffset` and the same face value, and treat them as one chord anchored at the run's earliest
+tick.
+Restrict the run to members that lie within one face-value duration of the anchor tick, so a
+genuine following note (at least a full notated duration later) is never absorbed even if it
+happens to reuse the same column value.
+Notes with `xoffset == 0` carry no stored column and are left on their own ticks.
+
+The column also works the other way. Because live playing can place two notes only a few ticks
+apart even when they are written as separate events, a tick-proximity rule alone would wrongly
+merge them into a chord. A clear example is a tuplet whose members were played almost together:
+two of its positions can sit five ticks apart yet occupy different columns. Two near-simultaneous
+notes should be merged only when their columns agree; adjacent columns lie at least a small
+minimum apart (around eight pixels in the observed files), while a chord's members share a column
+(equal `xoffset`, give or take a notehead width for a cluster). When the columns differ by at
+least that separation the notes are kept as distinct events, which preserves the full member count
+of a tightly played tuplet.
+
+This applies to the formats that store a layout `xoffset` (v0xC2, v0xC4, and the macOS Encore 5
+variant); it is not used for v0xA6.
+
 ---
 
 ## CHORD element

@@ -150,6 +150,12 @@ struct EncFormatReader
     virtual bool hasGraceTimeBorrowing() const { return false; }  // v0xA6: grace borrows rdur from next note
     virtual const char* formatName() const { return "v0xC4"; }    // for logging
 
+    // True when a chord's notes are recorded with staggered playback ticks (a per-chord "strum")
+    // but share one notated horizontal column (the note xoffset byte). When set, a run of notes
+    // sharing the same nonzero xoffset and face value is collapsed to one tick before duration
+    // computation so they form a single chord. See ENCORE_FORMAT.md §Chord column (xoffset).
+    virtual bool clustersChordsByXoffset() const { return false; }
+
     // Called once per (staffIdx, voice) element group after computeElementDurations().
     // Override to perform format-specific per-voice post-processing:
     //   v0xA6: marks inner-grace notes (isInnerGrace)

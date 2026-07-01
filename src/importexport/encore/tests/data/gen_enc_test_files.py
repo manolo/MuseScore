@@ -497,6 +497,91 @@ def gen_v0c4_counter_bytes():
     e += end_marker()
     return assemble(0xC4,[(meas_hdr(2,4),e)],fill_ts=(2,4))
 
+# ===========================================================================
+# notes_chord_strum_xoffset.enc
+# 3/4 measure with eight four-note chords (B3 D4 G4 B4 = 59/62/67/71). Each chord
+# is recorded with staggered playback ticks (a per-chord "strum" / live-recording
+# drift) but all four members share one notated column stored in the note xoffset:
+#   chord 1 (eighth): ticks 5/7/15/20   xoffset 14
+#   chord 2 (16th):   ticks 122/127/132/137 xoffset 38
+#   chord 3 (16th):   ticks 182/187/192/197 xoffset 57
+#   chord 4 (eighth): ticks 242/247/252/257 xoffset 75
+#   chord 5 (16th):   ticks 362/367/372/377 xoffset 100
+#   chord 6 (16th):   ticks 422/427/432/437 xoffset 118
+#   chord 7 (eighth): ticks 482/485/485/487 xoffset 137
+#   chord 8 (eighth): ticks 602/605/605/607 xoffset 162
+# Chord 1 has an 8-tick step between its second and third members (7 -> 15): a
+# tick-gap chord-grouping threshold splits it into separate short notes, and the
+# split notes then trip the incomplete/overfull rhythm checks. With the xoffset
+# column fix the four members collapse onto the anchor tick and form one chord.
+# Expected: exactly 8 chords, each pitches 59/62/67/71, durations
+# eighth,16th,16th,eighth,16th,16th,eighth,eighth (fills the 3/4 bar).
+# ===========================================================================
+def gen_v0c4_chord_strum_xoffset():
+    chords = [
+        (4, 14,  [(5, 59), (7, 62), (15, 67), (20, 71)]),
+        (5, 38,  [(122, 59), (127, 62), (132, 67), (137, 71)]),
+        (5, 57,  [(182, 59), (187, 62), (192, 67), (197, 71)]),
+        (4, 75,  [(242, 59), (247, 62), (252, 67), (257, 71)]),
+        (5, 100, [(362, 59), (367, 62), (372, 67), (377, 71)]),
+        (5, 118, [(422, 59), (427, 62), (432, 67), (437, 71)]),
+        (4, 137, [(482, 59), (485, 67), (485, 62), (487, 71)]),
+        (4, 162, [(602, 59), (605, 67), (605, 62), (607, 71)]),
+    ]
+    e = b''
+    for fv, xoff, notes in chords:
+        for tick, pitch in notes:
+            e += note_v0c4_xoff(tick, 0, 0, fv=fv, pitch=pitch, xoff=xoff)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(3, 4), e)], fill_ts=(3, 4))
+
+
+# ===========================================================================
+# notes_diff_column_no_merge.enc
+# 3/4 measure. Two eighth notes are recorded only 5 ticks apart (0 and 5) but in
+# clearly different notated columns (xoffset 10 vs 40), then a quarter at tick 240.
+# The 5-tick gap is below the chord-extension window, so a tick-only rule merges
+# the two eighths into one chord. Because their columns differ by more than the
+# minimum column separation, they must stay two separate eighth notes instead.
+# This is the inverse of notes_chord_strum_xoffset (same column -> one chord).
+# Expected: note 1 = eighth [60], note 2 = eighth [64], note 3 = quarter [67].
+# ===========================================================================
+def gen_v0c4_diff_column_no_merge():
+    e  = note_v0c4_xoff(0,   0, 0, fv=4, pitch=60, xoff=10)
+    e += note_v0c4_xoff(5,   0, 0, fv=4, pitch=64, xoff=40)
+    e += note_v0c4_xoff(240, 0, 0, fv=3, pitch=67, xoff=70)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(3, 4), e)], fill_ts=(3, 4))
+
+# ===========================================================================
+# notes_tuplet_diff_column_keeps_members.enc
+# Faithful reproduction of the staff-6 corruption seen in a real live-recorded
+# score: an eighth-note 3:2 triplet (three positions in three columns) whose
+# second and third members were played only 5 ticks apart (ticks 80 and 85) but
+# sit in different notated columns (xoffset 40 vs 70). A tick-only chord rule
+# merges those two into one chord, leaving the triplet with 2 of 3 members; the
+# bar then no longer sums to a clean value and imports incomplete. Keeping the
+# columns distinct preserves all three members and the bar stays complete.
+# Layout: 3/4 bar = eighth triplet (a quarter) + a half note filling the rest.
+# Expected: a 3:2 tuplet with exactly 3 single-note members (60, 64, 67).
+# ===========================================================================
+def gen_v0c4_tuplet_diff_column():
+    def note_tup_xoff(tick, pitch, xoff, tup=0x32, fv=4):
+        d = bytearray(25)
+        d[0] = 28
+        d[2] = fv
+        d[7] = xoff & 0xFF   # xoffset at element +10
+        d[10] = tup          # tuplet ratio at element +13
+        d[12] = pitch
+        return struct.pack('<H', tick) + bytes([(9 << 4) | 0]) + bytes(d)
+
+    e  = note_tup_xoff(0,  60, 10)   # triplet position 1
+    e += note_tup_xoff(80, 64, 40)   # position 2
+    e += note_tup_xoff(85, 67, 70)   # position 3, only 5 ticks after position 2, different column
+    e += note_v0c4_xoff(240, 0, 0, fv=2, pitch=72, xoff=100)  # half note fills the rest of the 3/4 bar
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(3, 4), e)], fill_ts=(3, 4))
+
 def gen_v0xa6_basic():
     def mhdr_a6(tsNum,tsDen,bpm=100):
         h=bytearray(0x1A)
@@ -9494,6 +9579,9 @@ if __name__=='__main__':
     write("structure_v0c2_spurious_semitone_flag.enc", gen_v0c2_spurious_semitone_flag())
     write("importer_v0c2_snap.enc",          gen_v0c2_snap())
     write("notes_triplets.enc",      gen_v0c4_triplets())
+    write("notes_chord_strum_xoffset.enc",     gen_v0c4_chord_strum_xoffset())
+    write("notes_diff_column_no_merge.enc",    gen_v0c4_diff_column_no_merge())
+    write("notes_tuplet_diff_column_keeps_members.enc", gen_v0c4_tuplet_diff_column())
     write("notes_tuplet_sort.enc",   gen_v0c4_tuplet_sort())
     write("importer_counter_bytes.enc", gen_v0c4_counter_bytes())
     write("structure_v0xa6_basic.enc",        gen_v0xa6_basic())

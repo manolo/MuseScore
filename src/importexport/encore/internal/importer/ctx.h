@@ -289,6 +289,9 @@ struct BuildCtx
         std::map<std::pair<int, int>, int> prevMidiTick {};
         // Encore voice of last note placed; guards against chord-extension misdetection.
         std::map<std::pair<int, int>, int> prevEncVoice {};
+        // Notated column (xoffset) of last note placed; near-simultaneous notes in different
+        // columns are separate events (e.g. tightly played tuplet members), not one chord.
+        std::map<std::pair<int, int>, int> prevXoffset {};
         std::map<std::pair<int, int>, Fraction> lastChordPos {};
         // Last enc tick at which a REST was placed; absorbs duplicate rests when multiple
         // Encore voices route to the same MuseScore voice.

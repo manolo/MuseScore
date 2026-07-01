@@ -1366,3 +1366,148 @@ TEST_F(Tst_Structure, malformed_truncated_at_byte_boundaries_does_not_crash)
 
     setRootDir(ENC_DIR);
 }
+
+// ===========================================================================
+// FIX: chord members recorded with staggered playback ticks but sharing one
+// notated column (note xoffset) must collapse into a single chord.
+//
+// Encore stores a chord's notes with a small per-chord tick "strum" (live-recording
+// drift). A tick-gap chord-grouping threshold splits a chord whose members step by
+// the threshold amount (here 8 ticks between members 2 and 3 of chord 1), producing
+// extra short notes that also break the bar's rhythm. Because every note of a chord
+// shares its notated horizontal column (xoffset), the parser collapses same-column
+// runs onto the anchor tick so they form one chord.
+//
+// Fixture notes_chord_strum_xoffset.enc: 3/4 bar, eight B3 D4 G4 B4 chords
+// (59/62/67/71), durations eighth,16th,16th,eighth,16th,16th,eighth,eighth.
+// ===========================================================================
+TEST_F(Tst_Structure, chord_strum_xoffset_collapses_to_single_chord)
+{
+    MasterScore* score = readEncoreScore("notes_chord_strum_xoffset.enc");
+    ASSERT_NE(score, nullptr);
+
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "chord-strum score should pass sanityCheck: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    std::vector<Chord*> chords;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChord()) {
+            chords.push_back(toChord(e));
+        }
+    }
+
+    ASSERT_EQ(chords.size(), 8u) << "Expected exactly 8 chords (one per notated column)";
+
+    const std::vector<DurationType> expectedDur = {
+        DurationType::V_EIGHTH, DurationType::V_16TH, DurationType::V_16TH, DurationType::V_EIGHTH,
+        DurationType::V_16TH, DurationType::V_16TH, DurationType::V_EIGHTH, DurationType::V_EIGHTH
+    };
+    for (size_t i = 0; i < chords.size(); ++i) {
+        Chord* c = chords[i];
+        std::vector<int> pitches;
+        for (Note* n : c->notes()) {
+            pitches.push_back(n->pitch());
+        }
+        std::sort(pitches.begin(), pitches.end());
+        ASSERT_EQ(pitches.size(), 4u) << "Chord " << i << " must have 4 notes";
+        EXPECT_EQ(pitches[0], 59) << "Chord " << i;
+        EXPECT_EQ(pitches[1], 62) << "Chord " << i;
+        EXPECT_EQ(pitches[2], 67) << "Chord " << i;
+        EXPECT_EQ(pitches[3], 71) << "Chord " << i;
+        EXPECT_EQ(c->durationType().type(), expectedDur[i]) << "Chord " << i << " duration";
+    }
+
+    delete score;
+}
+
+// ===========================================================================
+// FIX (inverse of the chord-column collapse): two notes recorded a few ticks
+// apart but in different notated columns (xoffset) must stay separate events,
+// not be merged into one chord by the near-simultaneous chord-extension rule.
+// This is what keeps tightly played tuplet members (e.g. two triplet positions
+// only 5 ticks apart) as distinct notes so the tuplet stays complete.
+//
+// Fixture notes_diff_column_no_merge.enc: eighth [60] at tick 0 (xoffset 10) and
+// eighth [64] at tick 5 (xoffset 40), then a quarter [67]. The 5-tick gap is
+// inside the chord window but the columns differ, so the eighths must not merge.
+// ===========================================================================
+TEST_F(Tst_Structure, diff_column_notes_do_not_merge)
+{
+    MasterScore* score = readEncoreScore("notes_diff_column_no_merge.enc");
+    ASSERT_NE(score, nullptr);
+
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "diff-column score should pass sanityCheck: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    std::vector<Chord*> chords;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChord()) {
+            chords.push_back(toChord(e));
+        }
+    }
+
+    ASSERT_GE(chords.size(), 2u) << "The two eighths must not collapse into a single chord";
+    EXPECT_EQ(chords[0]->notes().size(), 1u) << "First eighth must be a single note (60)";
+    EXPECT_EQ(chords[0]->notes().front()->pitch(), 60);
+    EXPECT_EQ(chords[1]->notes().size(), 1u) << "Second eighth must be a single note (64)";
+    EXPECT_EQ(chords[1]->notes().front()->pitch(), 64);
+
+    delete score;
+}
+
+// ===========================================================================
+// FIX (faithful reproduction of the real staff-6 corruption): a 3:2 triplet whose
+// second and third positions were live-played only 5 ticks apart, in different
+// columns, must keep all three members as separate notes. Dropping the column
+// check merges positions 2 and 3 into one two-note chord, leaving a 2-member
+// triplet: this test then fails on the member count (and each member must be a
+// single note). Counting members (not pitches) is what makes the merge visible.
+// ===========================================================================
+TEST_F(Tst_Structure, tuplet_diff_column_keeps_all_members)
+{
+    MasterScore* score = readEncoreScore("notes_tuplet_diff_column_keeps_members.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    Tuplet* tuplet = nullptr;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChordRest() && toChordRest(e)->tuplet()) {
+            tuplet = toChordRest(e)->tuplet();
+            break;
+        }
+    }
+    ASSERT_NE(tuplet, nullptr) << "Expected a tuplet on staff 0";
+    EXPECT_EQ(tuplet->ratio(), Fraction(3, 2)) << "Expected a 3:2 triplet";
+
+    // Count note-bearing members. Merging positions 2 and 3 would give 2 members
+    // (one of them a two-note chord [64,67]) instead of the three single notes.
+    std::vector<int> memberPitches;
+    int noteMembers = 0;
+    for (DurationElement* de : tuplet->elements()) {
+        if (de->isChord()) {
+            ++noteMembers;
+            EXPECT_EQ(toChord(de)->notes().size(), 1u)
+                << "Each triplet member must be a single note, not a merged chord";
+            memberPitches.push_back(toChord(de)->notes().front()->pitch());
+        }
+    }
+    ASSERT_EQ(noteMembers, 3)
+        << "Triplet must keep all 3 members; merging positions 2 and 3 leaves 2";
+    std::sort(memberPitches.begin(), memberPitches.end());
+    EXPECT_EQ(memberPitches[0], 60);
+    EXPECT_EQ(memberPitches[1], 64);
+    EXPECT_EQ(memberPitches[2], 67);
+
+    delete score;
+}
