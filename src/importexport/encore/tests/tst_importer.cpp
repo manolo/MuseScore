@@ -2440,9 +2440,10 @@ static QString encWriteTempFile(const QString& name, const QByteArray& bytes)
 {
     const QString path = QDir::temp().filePath(name);
     QFile f(path);
-    f.open(QIODevice::WriteOnly | QIODevice::Truncate);
-    f.write(bytes);
-    f.close();
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        f.write(bytes);
+        f.close();
+    }
     return path;
 }
 

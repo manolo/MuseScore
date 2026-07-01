@@ -308,7 +308,7 @@ struct BuildCtx
         // promote the previous measure's final syllable so the word stays hyphenated
         // across the barline.
         std::map<track_idx_t, mu::engraving::Lyrics*> lastAttachedLyric {};
-    } scratch;
+    } scratch {};
 };
 } // namespace mu::iex::enc
 

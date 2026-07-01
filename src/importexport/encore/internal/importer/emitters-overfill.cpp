@@ -127,7 +127,7 @@ Fraction collectVoice(Measure* measure, track_idx_t tr, std::vector<ChordRest*>&
 // as the content fits. The last survivor is then dotted (up to 3 dots) to reach the barline
 // and any remainder is filled with an exact rest. Plain trailing overflow is just removed
 // from the right.
-static void removeExtraNotes(BuildCtx& ctx, Measure* measure, track_idx_t tr)
+static void removeExtraNotes(Measure* measure, track_idx_t tr)
 {
     const Fraction mLen = measure->ticks();
     const Fraction measTick = measure->tick();
@@ -276,7 +276,7 @@ static void addFillRest(Measure* measure, track_idx_t tr, const Fraction& startT
 // would be too small to be musical (tuplet bracket < half its natural span, or no space):
 // the caller then falls back to extending the measure (tier 3, IrregularMeasure).
 // Note: tier 1 (robbing value from earlier notes) is intentionally not implemented yet.
-static bool stretchOverfullVoice(BuildCtx& ctx, Measure* measure, track_idx_t tr)
+static bool stretchOverfullVoice(Measure* measure, track_idx_t tr)
 {
     const Fraction mLen = measure->ticks();
     const Fraction measTick = measure->tick();
@@ -385,14 +385,14 @@ void fitOverfullMeasure(BuildCtx& ctx, Measure* measure)
             }
             switch (ctx.opts.overfillMeasureStrategy) {
             case OverfillStrategy::Truncate:
-                removeExtraNotes(ctx, measure, tr);
+                removeExtraNotes(measure, tr);
                 break;
             case OverfillStrategy::StretchLastNote:
                 // Tier 2 (compress bracket) / lone-note reduce; decline -> tier 3 (irregular).
                 // Documented limitation: tier 1 (rob value from earlier notes in the bar) is not
                 // implemented, so a voice stretch cannot resolve degrades to IrregularMeasure
                 // output rather than a standard-length bar. See ENCORE_IMPORTER.md §Overfull measures.
-                if (!stretchOverfullVoice(ctx, measure, tr)) {
+                if (!stretchOverfullVoice(measure, tr)) {
                     needIrregularFallback = true;
                 }
                 break;

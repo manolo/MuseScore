@@ -331,7 +331,6 @@ void capMeasureLength(BuildCtx& ctx, Measure* measure)
 {
     const bool makeGap = (ctx.opts.underfillMeasureStrategy != UnderfillStrategy::VisibleRests);
     const Fraction mLen = measure->ticks();
-    const Fraction measTick = measure->tick();
 
     if (ctx.opts.overfillMeasureStrategy == OverfillStrategy::IrregularMeasure) {
         extendMeasureIrregular(ctx, measure);
