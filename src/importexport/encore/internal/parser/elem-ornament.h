@@ -38,6 +38,9 @@ struct EncOrnament : EncMeasureElem {
     quint8 noto      { 0 };
     quint8 tempo     { 0 };
     quint8 tind      { 0 };
+    // Byte offset of tind from the type/voice byte, or -1 to read it inline by size. Set from
+    // EncFormatReader::staffTextTindOffset(); v0xA6's compact ornament stores tind at +26.
+    int tindOffset  { -1 };
 
     using EncMeasureElem::EncMeasureElem;
 

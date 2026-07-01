@@ -167,11 +167,12 @@ bool isKnownMagic(const QString& magic);
 QString findNextKnownMagic(QDataStream& ds);
 void addSpannerEnds(std::vector<EncMeasure>& measures);
 
-// TEXT block: N-th entry referenced by ORN tind byte (+32). See ENCORE_FORMAT.md §TEXT block.
+// TEXT block: N-th entry referenced by ORN tind byte. textOffset (from EncFormatReader) is the
+// per-entry text offset (14 for v0xC4/v0xC2, 0 for v0xA6). See ENCORE_FORMAT.md §TEXT block.
 struct EncTextBlock {
     std::vector<QString> entries;
 
-    bool read(QDataStream& ds, quint32 varSize);
+    bool read(QDataStream& ds, quint32 varSize, int textOffset = 14);
 };
 
 // WINI block: margins in points (1/72 inch). See ENCORE_FORMAT.md §WINI block.

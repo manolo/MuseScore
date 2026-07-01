@@ -164,6 +164,15 @@ struct EncFormatReader
     // use 5 (kie at element +10); v0xA6 uses 0 (kie at +5). See ENCORE_FORMAT.md §Lyric element.
     virtual quint8 lyricPreKieSkip() const { return 5; }
 
+    // Byte offset of the text payload within a TEXT-block entry. v0xC4/v0xC2 use 14 (a per-entry
+    // header precedes the text); v0xA6 uses 0 (text starts at the entry). See ENCORE_FORMAT.md §TEXT block.
+    virtual quint8 textBlockEntryTextOffset() const { return 14; }
+
+    // Byte offset of a STAFFTEXT ornament's TEXT-entry index (tind) measured from the type/voice
+    // byte, or -1 to use the size-based location read inline. v0xA6 stores it at +26 in its compact
+    // ornament; other formats return -1. See ENCORE_FORMAT.md §Ornament subtypes.
+    virtual int staffTextTindOffset() const { return -1; }
+
     virtual ~EncFormatReader() = default;
 
     // Factory: returns the reader for the file. The 4-char magic string is needed because some

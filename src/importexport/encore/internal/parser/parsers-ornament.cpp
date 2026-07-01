@@ -25,6 +25,7 @@
 namespace mu::iex::enc {
 bool EncOrnament::read(QDataStream& ds)
 {
+    const qint64 elemPos = ds.device()->pos();   // first byte after the type/voice byte
     EncMeasureElem::read(ds);
     ds >> tipo;
     ds.skipRawData(4);
@@ -50,6 +51,17 @@ bool EncOrnament::read(QDataStream& ds)
         ds >> tind;
     } else {
         tind = tempo;
+    }
+    // Formats that store tind at a fixed offset from the type/voice byte (the compact v0xA6
+    // ornament) override the size-based read above. Only STAFFTEXT carries a tind, and the offset
+    // was measured for that subtype's slot; scope the seek to it and to the device so an unrelated
+    // ornament near EOF cannot desync the stream. elemPos points just past the type/voice byte.
+    if (tindOffset >= 0 && ornType() == EncOrnamentType::STAFFTEXT) {
+        const qint64 tindPos = elemPos - 1 + tindOffset;
+        if (tindPos >= 0 && tindPos < ds.device()->size()) {
+            ds.device()->seek(tindPos);
+            ds >> tind;
+        }
     }
     // No trailing skip: the element loop reseeks to the element end after read().
     return true;

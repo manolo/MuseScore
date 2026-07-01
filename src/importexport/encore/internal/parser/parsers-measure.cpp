@@ -43,7 +43,11 @@ static std::unique_ptr<EncMeasureElem> createMeasureElement(
     case EncElemType::CHORD:
         return std::make_unique<EncChordSym>(tick, tp, vo);
     case EncElemType::ORNAMENT:
-        return std::make_unique<EncOrnament>(tick, tp, vo);
+    {
+        auto orn = std::make_unique<EncOrnament>(tick, tp, vo);
+        orn->tindOffset = fmt.staffTextTindOffset();
+        return orn;
+    }
     case EncElemType::LYRIC:
     {
         auto lyr = std::make_unique<EncLyric>(tick, tp, vo);

@@ -76,7 +76,7 @@ bool EncHeader::read(QDataStream& ds, const EncFormatReader& fmt)
 // EncTextBlock - indexed text payload for STAFFTEXT 0x1E ornaments
 // ---------------------------------------------------------------------------
 
-bool EncTextBlock::read(QDataStream& ds, quint32 varSize)
+bool EncTextBlock::read(QDataStream& ds, quint32 varSize, int textOffset)
 {
     // See ENCORE_FORMAT.md §TEXT block for layout. Entry N referenced by ORN tind byte (+32).
     // varSize is untrusted; route every skip through skipBlock/skipToBlockEnd so a value above
@@ -116,24 +116,25 @@ bool EncTextBlock::read(QDataStream& ds, quint32 varSize)
             break;
         }
         consumed += entrySize;
-        // Payload text at +14, probe picks UTF-16 LE or Latin-1; see ENCORE_FORMAT.md §Encoding probe.
+        // Payload text at textOffset (format-supplied), probe picks UTF-16 LE or Latin-1;
+        // see ENCORE_FORMAT.md §Encoding probe.
         QString text;
-        if (entrySize >= 16) {
-            const quint8 b14 = static_cast<quint8>(payload[14]);
-            const quint8 b15 = static_cast<quint8>(payload[15]);
-            const bool isUtf16 = (b14 >= 0x20 && b14 < 0x7F && b15 == 0x00);
-            // Decode the whole text region from +14, then post-process. Multi-line
+        if (entrySize >= textOffset + 2) {
+            const quint8 b0 = static_cast<quint8>(payload[textOffset]);
+            const quint8 b1 = static_cast<quint8>(payload[textOffset + 1]);
+            const bool isUtf16 = (b0 >= 0x20 && b0 < 0x7F && b1 == 0x00);
+            // Decode the whole text region from textOffset, then post-process. Multi-line
             // comments separate lines with U+0004 and terminate the string with a
             // U+0000 null. The previous code stopped at the first U+0004, truncating
             // every line but the first; see ENCORE_FORMAT.md §TEXT block.
-            const int textBytes = entrySize - 14;
+            const int textBytes = entrySize - textOffset;
             if (textBytes > 0) {
                 if (isUtf16) {
                     text = QString::fromUtf16(
-                        reinterpret_cast<const char16_t*>(payload.constData() + 14),
+                        reinterpret_cast<const char16_t*>(payload.constData() + textOffset),
                         textBytes / 2);
                 } else {
-                    text = QString::fromLatin1(payload.constData() + 14, textBytes);
+                    text = QString::fromLatin1(payload.constData() + textOffset, textBytes);
                 }
                 // Truncate at the U+0000 null terminator.
                 int nullIdx = text.indexOf(QChar(QChar::Null));

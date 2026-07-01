@@ -590,6 +590,8 @@ A value of 0 (or an out-of-range byte from an older format) means no explicit un
 The TEXT block entry index at +32 is present only when the element is at least 33 bytes long.
 In shorter ornaments (notably v0xC2 size-32 STAFFTEXT elements) the +32 slot does not exist, and the entry index is read from the +30 slot instead, sharing it with the tempo byte.
 
+In v0xA6 the ornament is compact (declared size 15, i.e. a 30-byte slot) and the STAFFTEXT entry index lives at a fixed offset +26 from the element start (the type/voice byte), not at the size-based slot above.
+
 ### Ornament subtypes
 
 | Value | Name          | Notes                                                            |
@@ -1202,6 +1204,8 @@ Each entry:
 | +2     | 14   | header (partially decoded)                                  |
 | +16..  | var  | text (UTF-16 LE or Latin-1); lines separated by `0x04 0x00` |
 | (end)  | 2+   | `0x00 0x00` null terminator (may be followed by padding)    |
+
+In v0xA6 the entry has no 14-byte header: the text starts immediately after the payload-size field (payload offset 0, i.e. entry offset +2) and is null-terminated Latin-1. Reading at the newer +14 (entry +16) offset lands past a short v0xA6 entry and yields empty text.
 
 **Line separators.** `0x04 0x00` (U+0004) separates lines within a single comment; it is NOT the text terminator.
 Each line, including the last, is followed by a `0x04 0x00`, and the whole string ends at a `0x00 0x00` null.

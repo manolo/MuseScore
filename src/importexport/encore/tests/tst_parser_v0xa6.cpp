@@ -586,3 +586,46 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_compact_lyric_parses_text)
 
     EXPECT_EQ(lyr.text, QString("lent"));
 }
+
+// v0xA6 TEXT-block entries carry no per-entry header: the text starts at offset 0, not the +14 the
+// newer formats use. Reading at +14 leaves short v0xA6 entries empty. Verify a one-entry block whose
+// only entry is "Moderato" resolves when the format supplies textOffset 0.
+TEST_F(Tst_ImporterV0xa6, v0xa6_text_block_entry_text_at_offset_0)
+{
+    QByteArray buf;
+    auto u16 = [&](int v) { buf.append(char(v & 0xff)); buf.append(char((v >> 8) & 0xff)); };
+    u16(0);              // sync
+    u16(1);              // count = 1 entry
+    u16(0); u16(0);      // contentSize (4 bytes, unused)
+    u16(10);             // entrySize = 10
+    buf.append("Moderato"); buf.append(char(0)); buf.append(char(0));   // text + NUL + pad = 10 bytes
+
+    QDataStream ds(buf);
+    ds.setByteOrder(QDataStream::LittleEndian);
+
+    mu::iex::enc::EncTextBlock tb;
+    tb.read(ds, static_cast<quint32>(buf.size()), /*textOffset*/ 0);   // v0xA6
+
+    ASSERT_EQ(tb.entries.size(), size_t(1));
+    EXPECT_EQ(tb.entries[0], QString("Moderato"));
+}
+
+// v0xA6 STAFFTEXT ornaments are compact (size 15): the TEXT-entry index (tind) sits at a fixed +26
+// from the type/voice byte, not the size-based location the newer formats use. Verify the reader
+// picks tind from +26 when the format supplies that offset.
+TEST_F(Tst_ImporterV0xa6, v0xa6_stafftext_tind_at_offset_26)
+{
+    QByteArray buf(30, 0);   // size*2 slot
+    buf[0] = char(15);       // element size
+    buf[2] = char(0x1E);     // tipo = STAFFTEXT (read right after size + rawStaff)
+    buf[25] = char(0x04);    // tind: +26 from the type/voice byte, which sits one byte before the buffer
+
+    QDataStream ds(buf);
+    ds.setByteOrder(QDataStream::LittleEndian);
+
+    mu::iex::enc::EncOrnament orn(0, 5, 0);
+    orn.tindOffset = 26;     // v0xA6
+    orn.read(ds);
+
+    EXPECT_EQ(orn.tind, 4);
+}
