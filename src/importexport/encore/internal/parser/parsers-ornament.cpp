@@ -63,6 +63,15 @@ bool EncOrnament::read(QDataStream& ds)
             ds >> tind;
         }
     }
+    // The compact v0xA6 STAFFTEXT ornament stores its placement y at a fixed offset from the
+    // type/voice byte too, so the inline read above landed on an unrelated byte. Same scoping as tind.
+    if (yoffOffset >= 0 && ornType() == EncOrnamentType::STAFFTEXT) {
+        const qint64 yoffPos = elemPos - 1 + yoffOffset;
+        if (yoffPos >= 0 && yoffPos + 1 < ds.device()->size()) {
+            ds.device()->seek(yoffPos);
+            ds >> yoffset;
+        }
+    }
     // No trailing skip: the element loop reseeks to the element end after read().
     return true;
 }

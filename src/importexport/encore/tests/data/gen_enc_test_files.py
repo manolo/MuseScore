@@ -372,9 +372,11 @@ def lyric_v0xa6(tick, voice, staffIdx, text, kie=0):
     b[6:6 + len(tb)] = tb
     return bytes(b)
 
-def stafftext_orn_v0xa6(tick, voice, staffIdx, tind):
+def stafftext_orn_v0xa6(tick, voice, staffIdx, tind, yoffset=0):
     """v0xA6 compact STAFFTEXT ornament: size=15 (30-byte slot), tipo 0x1E at +5, and the
-    TEXT-block entry index at elemStart+28 (= +26 from the type/voice byte)."""
+    TEXT-block entry index at elemStart+28 (= +26 from the type/voice byte). The vertical
+    placement value (signed Cartesian y, positive = above, negative = below) lives at
+    elemStart+8 (= +6 from the type/voice byte), not at the v0xC4 offset."""
     size = 15
     b = bytearray(size * 2)
     struct.pack_into('<H', b, 0, tick)
@@ -382,6 +384,7 @@ def stafftext_orn_v0xa6(tick, voice, staffIdx, tind):
     b[3] = size
     b[4] = staffIdx & 0x3F
     b[5] = 0x1E                       # tipo = STAFFTEXT
+    struct.pack_into('<h', b, 8, yoffset)   # placement y at +6 from the type/voice byte
     b[28] = tind & 0xFF               # tind
     return bytes(b)
 
@@ -602,6 +605,18 @@ def gen_v0xa6_lyrics_and_stafftext():
     meas = b'MEAS' + struct.pack('<I', len(e)) + _mhdr_a6(2, 4) + e
     f = build_v0xa6([('Voz', 1, 0)], [meas], staff_size=1)
     return f + text_block_v0xa6(["dolce"])   # entry 0 = "dolce" (non-tempo -> stays StaffText)
+
+def gen_v0xa6_stafftext_placement():
+    """Two STAFFTEXT ornaments on one note: one with a positive placement value (above) and one
+    with a negative value (below). The v0xA6 compact ornament stores this y at +6 from the
+    type/voice byte; reading it at the v0xC4 offset (+10) yields 0 and forces both above."""
+    e  = note_v0xa6(0, 0, 0, 3, 0)
+    e += stafftext_orn_v0xa6(0, 0, 0, 0, yoffset=40)    # entry 0 -> above
+    e += stafftext_orn_v0xa6(0, 0, 0, 1, yoffset=-40)   # entry 1 -> below
+    e += end_marker()
+    meas = b'MEAS' + struct.pack('<I', len(e)) + _mhdr_a6(2, 4) + e
+    f = build_v0xa6([('Voz', 1, 0)], [meas], staff_size=1)
+    return f + text_block_v0xa6(["cresc.", "espressivo"])
 
 def gen_v0xa6_two_verse_alignment():
     """Two lyric verses over three notes. Encore stores verse 2 (voice 1) with tick=0 on EVERY
@@ -9474,6 +9489,7 @@ if __name__=='__main__':
     write("importer_v0xa6_lyrics_and_stafftext.enc", gen_v0xa6_lyrics_and_stafftext())
     write("importer_v0xa6_two_verse_alignment.enc", gen_v0xa6_two_verse_alignment())
     write("options_underfill_irregular_empty_staff.enc",   gen_v0c4_underfill_irregular_sparse_with_empty_staff())
+    write("importer_v0xa6_stafftext_placement.enc", gen_v0xa6_stafftext_placement())
     write("notes_corrupted.enc",     gen_v0c4_corrupted())
     write("notes_swing.enc",         gen_v0c4_swing())
     write("notes_grace.enc",             gen_v0c4_grace())

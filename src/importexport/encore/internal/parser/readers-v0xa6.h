@@ -58,6 +58,7 @@ struct EncFormatReader_V0xA6 final : EncFormatReader
     // TEXT entries carry no per-entry header; STAFFTEXT tind sits at +26 in the compact ornament.
     quint8 textBlockEntryTextOffset() const override { return 0; }
     int staffTextTindOffset() const override { return 26; }
+    int staffTextYoffsetOffset() const override { return 6; }
     const char* formatName() const override { return "v0xA6"; }
 
     void postProcessVoiceGroup(std::vector<EncMeasureElem*>& elems, qint16 durTicks) const override;

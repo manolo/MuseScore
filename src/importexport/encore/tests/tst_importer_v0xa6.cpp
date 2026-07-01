@@ -629,6 +629,44 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_stafftext_tind_at_offset_26)
     EXPECT_EQ(orn.tind, 4);
 }
 
+// The v0xA6 compact STAFFTEXT ornament stores its vertical placement (Cartesian y, positive = above,
+// negative = below) at +6 from the type/voice byte, not at the v0xC4 offset (+10). Two staff texts
+// sit on one note: "cresc." with a positive y (above) and "espressivo" with a negative y (below).
+// Reading the placement at the v0xC4 offset yields 0 for both, so before the fix "espressivo" landed
+// above instead of below.
+TEST_F(Tst_ImporterV0xa6, v0xa6_stafftext_placement_from_offset_6)
+{
+    MasterScore* score = readEncoreScore("importer_v0xa6_stafftext_placement.enc");
+    ASSERT_NE(score, nullptr);
+
+    bool sawAbove = false;
+    bool sawBelow = false;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        Measure* m = toMeasure(mb);
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* a : s->annotations()) {
+                if (!a || !a->isStaffText()) {
+                    continue;
+                }
+                const StaffText* st = toStaffText(a);
+                if (st->plainText() == String(u"cresc.")) {
+                    EXPECT_EQ(st->placement(), PlacementV::ABOVE) << "positive y must place above";
+                    sawAbove = true;
+                } else if (st->plainText() == String(u"espressivo")) {
+                    EXPECT_EQ(st->placement(), PlacementV::BELOW) << "negative y must place below";
+                    sawBelow = true;
+                }
+            }
+        }
+    }
+    EXPECT_TRUE(sawAbove) << "staff text 'cresc.' must be imported";
+    EXPECT_TRUE(sawBelow) << "staff text 'espressivo' must be imported";
+    delete score;
+}
+
 // Encore stores verse 2 (voice 1) with tick=0 on every syllable; its real position is the xoffset,
 // identical to verse 1. The importer must align verse 2 to the same notes as verse 1 rather than
 // collapsing every verse-2 syllable onto the first notes. Three notes carry verse 1 "A/B/C" and

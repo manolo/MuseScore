@@ -173,6 +173,12 @@ struct EncFormatReader
     // ornament; other formats return -1. See ENCORE_FORMAT.md §Ornament subtypes.
     virtual int staffTextTindOffset() const { return -1; }
 
+    // Byte offset of a STAFFTEXT ornament's vertical placement value (signed Cartesian y, positive =
+    // above, negative = below) measured from the type/voice byte, or -1 to use the offset read inline.
+    // v0xA6 stores it at +6 in its compact ornament; other formats return -1. See ENCORE_FORMAT.md
+    // §Ornament subtypes.
+    virtual int staffTextYoffsetOffset() const { return -1; }
+
     virtual ~EncFormatReader() = default;
 
     // Factory: returns the reader for the file. The 4-char magic string is needed because some

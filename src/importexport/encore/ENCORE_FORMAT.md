@@ -590,7 +590,7 @@ A value of 0 (or an out-of-range byte from an older format) means no explicit un
 The TEXT block entry index at +32 is present only when the element is at least 33 bytes long.
 In shorter ornaments (notably v0xC2 size-32 STAFFTEXT elements) the +32 slot does not exist, and the entry index is read from the +30 slot instead, sharing it with the tempo byte.
 
-In v0xA6 the ornament is compact (declared size 15, i.e. a 30-byte slot) and the STAFFTEXT entry index lives at a fixed offset +26 from the element start (the type/voice byte), not at the size-based slot above.
+In v0xA6 the ornament is compact (declared size 15, i.e. a 30-byte slot) and the STAFFTEXT entry index lives at a fixed offset +26 from the type/voice byte, not at the size-based slot above. Its signed s16 Cartesian y (the above/below placement, negative = below staff) is likewise compact: it sits at +6 from the type/voice byte, not at the +12-from-element-start slot used by the later formats. Reading it at the later offset lands on an unrelated byte, so a v0xA6 staff text that Encore places below the staff would otherwise import above it.
 
 ### Ornament subtypes
 

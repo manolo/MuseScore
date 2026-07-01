@@ -41,6 +41,9 @@ struct EncOrnament : EncMeasureElem {
     // Byte offset of tind from the type/voice byte, or -1 to read it inline by size. Set from
     // EncFormatReader::staffTextTindOffset(); v0xA6's compact ornament stores tind at +26.
     int tindOffset  { -1 };
+    // Byte offset of yoffset from the type/voice byte, or -1 to read it inline. Set from
+    // EncFormatReader::staffTextYoffsetOffset(); v0xA6's compact ornament stores it at +6.
+    int yoffOffset  { -1 };
 
     using EncMeasureElem::EncMeasureElem;
 
