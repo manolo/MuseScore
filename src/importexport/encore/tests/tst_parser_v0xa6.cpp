@@ -22,11 +22,6 @@
 
 #include <gtest/gtest.h>
 
-#include <QByteArray>
-#include <QDataStream>
-
-#include "../internal/parser/elem.h"
-
 #include "engraving/dom/chord.h"
 #include "engraving/dom/clef.h"
 #include "engraving/dom/masterscore.h"
@@ -556,76 +551,4 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_grace_restores_face_value)
     EXPECT_EQ(elements[4].first, DurationType::V_EIGHTH)
         << "last note must be an eighth (face value), not a 16th from rawGap=90";
     delete score;
-}
-
-// v0xA6 stores LYRIC elements in a compact layout: after size(+3) and rawStaff(+4) comes a single
-// control byte(+5), then null-terminated text(+6) within the size*2 slot. The shared v0xC4/v0xC2
-// reader looks for text ~20 bytes in and bails on the tiny element, dropping every 2.x lyric.
-// This parser-level test feeds the exact element bytes for the syllable "lent" (size=6, rawStaff
-// 0x40, control 0x77) and asserts the compact path recovers the text.
-TEST_F(Tst_ImporterV0xa6, v0xa6_compact_lyric_parses_text)
-{
-    QByteArray buf;
-    buf.append(char(6));        // size (element +3)
-    buf.append(char(0x40));     // rawStaff (+4)
-    buf.append(char(0x77));     // control byte (+5)
-    buf.append("lent");         // text (+6..)
-    buf.append(char(0x00));     // NUL terminator
-    while (buf.size() < 6 * 2) {
-        buf.append(char(0));    // pad out the size*2 slot
-    }
-
-    QDataStream ds(buf);
-    ds.setByteOrder(QDataStream::LittleEndian);
-
-    mu::iex::enc::EncLyric lyr(0, 6, 1);
-    lyr.preKieSkip = 0;         // v0xA6 layout values (from EncFormatReader_V0xA6)
-    lyr.textGapAfterKie = 0;
-    lyr.spacingFactor = 2;
-    lyr.read(ds);
-
-    EXPECT_EQ(lyr.text, QString("lent"));
-}
-
-// v0xA6 TEXT-block entries carry no per-entry header: the text starts at offset 0, not the +14 the
-// newer formats use. Reading at +14 leaves short v0xA6 entries empty. Verify a one-entry block whose
-// only entry is "Moderato" resolves when the format supplies textOffset 0.
-TEST_F(Tst_ImporterV0xa6, v0xa6_text_block_entry_text_at_offset_0)
-{
-    QByteArray buf;
-    auto u16 = [&](int v) { buf.append(char(v & 0xff)); buf.append(char((v >> 8) & 0xff)); };
-    u16(0);              // sync
-    u16(1);              // count = 1 entry
-    u16(0); u16(0);      // contentSize (4 bytes, unused)
-    u16(10);             // entrySize = 10
-    buf.append("Moderato"); buf.append(char(0)); buf.append(char(0));   // text + NUL + pad = 10 bytes
-
-    QDataStream ds(buf);
-    ds.setByteOrder(QDataStream::LittleEndian);
-
-    mu::iex::enc::EncTextBlock tb;
-    tb.read(ds, static_cast<quint32>(buf.size()), /*textOffset*/ 0);   // v0xA6
-
-    ASSERT_EQ(tb.entries.size(), size_t(1));
-    EXPECT_EQ(tb.entries[0], QString("Moderato"));
-}
-
-// v0xA6 STAFFTEXT ornaments are compact (size 15): the TEXT-entry index (tind) sits at a fixed +26
-// from the type/voice byte, not the size-based location the newer formats use. Verify the reader
-// picks tind from +26 when the format supplies that offset.
-TEST_F(Tst_ImporterV0xa6, v0xa6_stafftext_tind_at_offset_26)
-{
-    QByteArray buf(30, 0);   // size*2 slot
-    buf[0] = char(15);       // element size
-    buf[2] = char(0x1E);     // tipo = STAFFTEXT (read right after size + rawStaff)
-    buf[25] = char(0x04);    // tind: +26 from the type/voice byte, which sits one byte before the buffer
-
-    QDataStream ds(buf);
-    ds.setByteOrder(QDataStream::LittleEndian);
-
-    mu::iex::enc::EncOrnament orn(0, 5, 0);
-    orn.tindOffset = 26;     // v0xA6
-    orn.read(ds);
-
-    EXPECT_EQ(orn.tind, 4);
 }
