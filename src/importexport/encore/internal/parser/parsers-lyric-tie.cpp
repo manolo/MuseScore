@@ -26,20 +26,19 @@
 namespace mu::iex::enc {
 bool EncLyric::read(QDataStream& ds)
 {
-    EncMeasureElem::read(ds);   // consumed: size + staffIdx (5 bytes from elemStart)
+    EncMeasureElem::read(ds);   // consumes size + rawStaff; 5 bytes read from elemStart (tick + tv too)
 
-    // See ENCORE_FORMAT.md §Lyric element for field offsets and encoding detection.
-    // textGapAfterKie is 9 for v0xC4 (text at +20) and 7 for v0xC2 (text at +18).
-    const int fixedReads = 5 + 1 + static_cast<int>(textGapAfterKie);
-    int remaining = static_cast<int>(size) - 5;
-    if (remaining < fixedReads) {
+    // kie at +preKieSkip, text +textGapAfterKie later, null-terminated within the size*spacingFactor slot.
+    const int textOffset = 5 + static_cast<int>(preKieSkip) + 1 + static_cast<int>(textGapAfterKie);
+    const int slot = static_cast<int>(size) * static_cast<int>(spacingFactor);
+    int remaining = slot - textOffset;
+    if (remaining <= 0) {
         return true;   // too short to carry text; element loop reseeks past it
     }
 
-    ds.skipRawData(5);
+    ds.skipRawData(preKieSkip);
     ds >> kie;
     ds.skipRawData(textGapAfterKie);
-    remaining -= fixedReads;
 
     text = readEncodedStringRemaining(ds, remaining);
     // No trailing skip: the element loop reseeks to the element end after read().

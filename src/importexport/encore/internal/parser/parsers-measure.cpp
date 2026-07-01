@@ -47,7 +47,9 @@ static std::unique_ptr<EncMeasureElem> createMeasureElement(
     case EncElemType::LYRIC:
     {
         auto lyr = std::make_unique<EncLyric>(tick, tp, vo);
+        lyr->preKieSkip = fmt.lyricPreKieSkip();
         lyr->textGapAfterKie = fmt.lyricTextGapAfterKie();
+        lyr->spacingFactor = static_cast<quint8>(fmt.elemSpacing(1));   // element slot = size * factor
         return lyr;
     }
     case EncElemType::KEYCHANGE:

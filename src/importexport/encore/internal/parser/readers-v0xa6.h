@@ -52,6 +52,9 @@ struct EncFormatReader_V0xA6 final : EncFormatReader
     void readLineStaffKeys(EncLine& line, QDataStream& ds, qint64 lineContentStart) const override;
 
     bool hasGraceTimeBorrowing() const override { return true; }
+    // Compact lyric: kie byte immediately after rawStaff (+5), text at +6, no gap.
+    quint8 lyricPreKieSkip() const override { return 0; }
+    quint8 lyricTextGapAfterKie() const override { return 0; }
     const char* formatName() const override { return "v0xA6"; }
 
     void postProcessVoiceGroup(std::vector<EncMeasureElem*>& elems, qint16 durTicks) const override;

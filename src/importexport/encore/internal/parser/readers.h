@@ -157,7 +157,12 @@ struct EncFormatReader
     virtual void postProcessVoiceGroup(std::vector<EncMeasureElem*>& /*elems*/,
                                        qint16 /*durTicks*/) const {}
     // Bytes to skip between kie (byte +10) and text. v0xC4=9 (text at +20), v0xC2=7 (text at +18).
+    // v0xA6 uses 0 (compact lyric: kie at +5, text at +6). See ENCORE_FORMAT.md §Lyric element.
     virtual quint8 lyricTextGapAfterKie() const { return 9; }
+
+    // Bytes from the cursor after the element header (size + rawStaff) to the kie byte. v0xC4/v0xC2
+    // use 5 (kie at element +10); v0xA6 uses 0 (kie at +5). See ENCORE_FORMAT.md §Lyric element.
+    virtual quint8 lyricPreKieSkip() const { return 5; }
 
     virtual ~EncFormatReader() = default;
 

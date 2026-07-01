@@ -22,6 +22,11 @@
 
 #include <gtest/gtest.h>
 
+#include <QByteArray>
+#include <QDataStream>
+
+#include "../internal/parser/elem.h"
+
 #include "engraving/dom/chord.h"
 #include "engraving/dom/clef.h"
 #include "engraving/dom/masterscore.h"
@@ -551,4 +556,33 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_grace_restores_face_value)
     EXPECT_EQ(elements[4].first, DurationType::V_EIGHTH)
         << "last note must be an eighth (face value), not a 16th from rawGap=90";
     delete score;
+}
+
+// v0xA6 stores LYRIC elements in a compact layout: after size(+3) and rawStaff(+4) comes a single
+// control byte(+5), then null-terminated text(+6) within the size*2 slot. The shared v0xC4/v0xC2
+// reader looks for text ~20 bytes in and bails on the tiny element, dropping every 2.x lyric.
+// This parser-level test feeds the exact element bytes for the syllable "lent" (size=6, rawStaff
+// 0x40, control 0x77) and asserts the compact path recovers the text.
+TEST_F(Tst_ImporterV0xa6, v0xa6_compact_lyric_parses_text)
+{
+    QByteArray buf;
+    buf.append(char(6));        // size (element +3)
+    buf.append(char(0x40));     // rawStaff (+4)
+    buf.append(char(0x77));     // control byte (+5)
+    buf.append("lent");         // text (+6..)
+    buf.append(char(0x00));     // NUL terminator
+    while (buf.size() < 6 * 2) {
+        buf.append(char(0));    // pad out the size*2 slot
+    }
+
+    QDataStream ds(buf);
+    ds.setByteOrder(QDataStream::LittleEndian);
+
+    mu::iex::enc::EncLyric lyr(0, 6, 1);
+    lyr.preKieSkip = 0;         // v0xA6 layout values (from EncFormatReader_V0xA6)
+    lyr.textGapAfterKie = 0;
+    lyr.spacingFactor = 2;
+    lyr.read(ds);
+
+    EXPECT_EQ(lyr.text, QString("lent"));
 }

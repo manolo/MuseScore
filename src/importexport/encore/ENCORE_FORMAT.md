@@ -828,10 +828,27 @@ Null-terminated text, NOT fixed-width.
 | +0x0A   | 1    | text anchor (x-offset equivalent)                    |
 | +0x12.. | var  | text payload (UTF-16 LE or Latin-1, null-terminated) |
 
-Text offset: +0x14 (v0xC4) or +0x12 (v0xC2); the 2-byte difference is the only layout distinction between versions.
+**v0xA6 layout (compact, text at +6):**
+
+Encore 2.x uses a much smaller lyric element. There is no text-anchor-plus-gap run: a single control
+byte sits immediately after the staff byte, then the null-terminated text follows. Like every v0xA6
+measure element, the on-disk slot is twice the declared size.
+
+| Offset | Size | Description                                          |
+|--------|------|------------------------------------------------------|
+| +0     | 2    | within-measure tick                                  |
+| +2     | 1    | type/voice byte (high nibble = 6, low = voice)       |
+| +3     | 1    | element size (declared; on-disk slot is size x 2)    |
+| +4     | 1    | staffIdx & 0x3F                                      |
+| +5     | 1    | control byte (hyphen/anchor; not otherwise used)     |
+| +6..   | var  | text payload (Latin-1, null-terminated)              |
+
+Text offset: +0x14 (v0xC4), +0x12 (v0xC2), or +6 (v0xA6). Reading the newer offset against a v0xA6
+element lands past its tiny slot and yields empty text, so every Encore 2.x lyric would be dropped.
 
 Observed sizes in v0xC4: 24 (`-` dash), 26 (empty word-break), 30 (2 chars), 32 (3 chars), 34 (4 chars).
 Observed sizes in v0xC2: 20 (`-` dash), 22 (1-2 chars), 24 (3 chars), 26 (4-5 chars).
+Observed sizes in v0xA6: 5-8 (declared), i.e. 10-16 bytes on disk for 2-6 character syllables.
 
 **Encoding.** Detected per element via byte 0/1 probe (same as instrument names).
 Portuguese/Spanish scores from older Encore builds use Latin-1.

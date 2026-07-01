@@ -44,7 +44,10 @@ struct EncChordSym : EncMeasureElem {
 struct EncLyric : EncMeasureElem {
     QString text;
     quint8 kie { 0 };                // location/anchor byte (similar to xoffset)
-    quint8 textGapAfterKie { 9 };   // bytes to skip after kie before text; set from EncFormatReader
+    // Lyric layout, set from the EncFormatReader so read() stays format-agnostic.
+    quint8 preKieSkip { 5 };        // bytes from the post-header cursor to the kie byte
+    quint8 textGapAfterKie { 9 };   // bytes to skip after kie before text
+    quint8 spacingFactor { 1 };     // element slot = size * spacingFactor
 
     using EncMeasureElem::EncMeasureElem;
 
