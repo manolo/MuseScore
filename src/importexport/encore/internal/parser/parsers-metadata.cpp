@@ -34,7 +34,14 @@ namespace mu::iex::enc {
 
 bool EncInstrument::read(QDataStream& ds, quint32 vs, bool probeEncoding)
 {
-    offset = vs & 0xFFFF;
+    // The block-size field frames the container (magic + size + content) and is stored
+    // little-endian even in SCO5 files, whose stream is otherwise big-endian for the
+    // payload. Read big-endian, "70 00 00 00" (size 112) would decode to 0x70000000 and
+    // mask to 0, so the name-scan loop below never runs and every instrument name is lost
+    // except the first (which readInstrumentMeta later recovers by position). Undo the
+    // big-endian read so the low 16 bits hold the size in both byte orders.
+    const quint32 sizeField = (ds.byteOrder() == QDataStream::BigEndian) ? qbswap(vs) : vs;
+    offset = sizeField & 0xFFFF;
     // Encoding probe overrides charSize(); see ENCORE_FORMAT.md §Encoding probe.
     EncCharSize cs = charSize();
     if (probeEncoding) {

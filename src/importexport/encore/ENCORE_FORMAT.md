@@ -90,6 +90,8 @@ Parsers should stop after `header.measureCount` MEAS blocks; extra blocks beyond
 Carries the instrument name as Latin-1 or UTF-16 LE.
 Probe: byte 0 printable ASCII + byte 1 == `0x00` → UTF-16 LE; else Latin-1.
 
+**Size field byte order.** The 4-byte size field of a TK block is stored little-endian even in SCO5 files, whose other multi-byte fields are big-endian. A TK size of 112 appears on disk as `70 00 00 00`; read big-endian that decodes to 0x70000000, whose low 16 bits are 0, so the name length bounds to zero and every name past the first is lost (later recovered only by position). Read the TK size field little-endian regardless of the file's byte order.
+
 **MIDI program.** Layout depends on the TK block size (`varSize`, stored in the 4-byte size field of each TK block):
 
 - **Large-TK** (`varSize > 250`): fixed-offset table after TK blocks:

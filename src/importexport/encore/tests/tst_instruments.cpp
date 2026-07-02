@@ -1005,3 +1005,19 @@ TEST_F(Tst_Instruments, gm_family_fallback_for_unmapped_program)
     EXPECT_GE(prog, 40);
     EXPECT_LE(prog, 47) << "family fallback must stay within the Strings family, not Grand Piano";
 }
+
+// Regression: SCO5 (big-endian macOS Encore 5) frames every block's size big-endian
+// except the TK instrument blocks, whose size is little-endian ("70 00 00 00" = 112).
+// Reading it big-endian and masking to 16 bits yielded 0, so the name-scan loop ran
+// zero times and only the first instrument name survived (recovered by position); the
+// rest imported as "Part N". The importer must undo the big-endian read of the TK size.
+TEST_F(Tst_Instruments, sco5_tk_block_instrument_names)
+{
+    MasterScore* score = readEncoreScore("instruments_sco5_tk_names.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load instruments_sco5_tk_names.enc";
+    ASSERT_EQ(score->parts().size(), 2u) << "expected 2 instruments";
+    EXPECT_EQ(score->parts().at(0)->longName(), String(u"CORNETA 1"));
+    EXPECT_EQ(score->parts().at(1)->longName(), String(u"TROMPETA 2"))
+        << "second TK-block name must import, not fall back to a default";
+    delete score;
+}

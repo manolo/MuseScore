@@ -7996,6 +7996,72 @@ def gen_sco5_macos_page_setup():
 
 
 # ===========================================================================
+# instruments_sco5_tk_names.enc
+# SCO5 (big-endian macOS Encore 5) with two instruments, each carrying its name in
+# a TK block. Every block frames its size big-endian EXCEPT the TK blocks, whose
+# size field is little-endian ("70 00 00 00" = 112). Read big-endian and masked to
+# 16 bits, that size becomes 0, so the name-scan loop reads nothing: only the first
+# instrument name is later recovered by position and the rest are lost. The importer
+# must undo the big-endian read of the TK size so both names import.
+# ===========================================================================
+def gen_sco5_tk_instrument_names():
+    def be(fmt, *a):
+        return struct.pack('>' + fmt, *a)
+
+    def tk_block(idx, name):
+        # 112-byte TK block: magic(4) + LITTLE-endian size(4)=112 + 104 content
+        # bytes (Latin-1 name, NUL terminator, zero padding), mirroring real SCO5.
+        content = bytearray(104)
+        enc = name.encode('latin-1')
+        content[0:len(enc)] = enc            # name at content+0, NUL already present
+        magic = ('TK%02d' % idx).encode('ascii')
+        return magic + struct.pack('<I', 112) + bytes(content)
+
+    h = bytearray(194)
+    h[0:4] = b'SCO5'
+    h[4] = 0                                  # chuMagio -> default v0xC4 reader
+    struct.pack_into('>H', h, 0x28, 0x0420)   # chuVersio = Encore 5
+    struct.pack_into('>h', h, 0x2E, 1)        # lineCount
+    struct.pack_into('>h', h, 0x30, 1)        # pageCount
+    h[0x32] = 2                               # instrumentCount
+    h[0x33] = 2                               # staffPerSystem
+    struct.pack_into('>h', h, 0x34, 1)        # measureCount
+    h[0x52] = 4                               # scoreSize (default)
+
+    tk0 = tk_block(0, "CORNETA 1")
+    tk1 = tk_block(1, "TROMPETA 2")
+
+    # LINE: skip10 + start(u16) + measureCount(u8) + two 30-byte staff entries.
+    # Emitted BEFORE the TK blocks so the instrument name fields do not line up with
+    # the position-based name-recovery offsets (which would otherwise mask the bug);
+    # the names must then come from the TK block read itself.
+    line = bytearray(10) + be('H', 0) + bytes([1])
+    for si in range(2):
+        staff = bytearray(30)
+        staff[19] = 1                         # show staff (clef@14=0=G)
+        staff[21] = si                        # instrStaffIdx -> instrument si
+        line += staff
+    line_blk = b'LINE' + be('I', len(line)) + bytes(line)
+
+    # MEAS: 0x36 header (4/4, beatTicks=240) + one quarter note + end marker.
+    mh = bytearray(0x36)
+    struct.pack_into('>H', mh, 0, 100)        # bpm
+    struct.pack_into('>H', mh, 4, 240)        # beatTicks
+    struct.pack_into('>H', mh, 6, 960)        # durTicks
+    mh[8] = 4
+    mh[9] = 4
+    nd = bytearray(25)
+    nd[0] = 28        # element size
+    nd[2] = 3         # faceValue = quarter
+    nd[12] = 60       # pitch
+    note = be('H', 0) + bytes([0x90]) + bytes(nd)   # tick=0, typeVoice=NOTE|voice0
+    elems = bytes(note) + b'\xff\xff'
+    meas_blk = b'MEAS' + be('I', len(elems)) + bytes(mh) + elems
+
+    return bytes(h) + line_blk + tk0 + tk1 + meas_blk
+
+
+# ===========================================================================
 # ornaments_v0c2_same_measure_slur_no_cross.enc
 # Regression: v0xC2 slur starting mid-measure must end within the same measure,
 # not cross to the next. The cross-measure extension must not fire when there is
@@ -9891,6 +9957,7 @@ if __name__=='__main__':
     write("sintetico_all_features.enc",          gen_sintetico_all_features())
     write("notes_multiinstr_compact_routing.enc", gen_v0c4_multiinstr_compact_routing())
     write("structure_sco5_macos.enc",             gen_sco5_macos_page_setup())
+    write("instruments_sco5_tk_names.enc",         gen_sco5_tk_instrument_names(), layout=False)
     write("text_lyrics_grandstaff_routed_notes.enc", gen_v0c4_lyrics_grandstaff_routed_notes())
     write("importer_inner_tuplet_note_level_cap.enc", gen_v0c4_inner_tuplet_note_level_cap())
     write("importer_score_size2.enc", set_score_size(assemble(0xC4, [(meas_hdr(4, 4),
