@@ -2154,3 +2154,47 @@ TEST_F(Tst_Ornaments, bowing_tick0_stays_on_note1_when_xoffset_mismatches)
 
     delete score;
 }
+
+// Regression: Encore stores a run of articulations (an accent on each note of a bar) all
+// at the downbeat tick, separated only by xoffset. The importer used to trust the raw
+// tick when a note sat on the downbeat and stacked every accent on the first chord. It
+// must spread same-tick marks across the notes so each chord gets exactly one accent.
+TEST_F(Tst_Ornaments, v0c4_accents_distributed_across_notes)
+{
+    MasterScore* score = readEncoreScore("ornaments_accents_distributed.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load ornaments_accents_distributed.enc";
+
+    int chordsWithAccent = 0;
+    int totalAccents = 0;
+    int maxAccentsOnOneChord = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        Measure* m = toMeasure(mb);
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            int n = 0;
+            for (Articulation* a : toChord(el)->articulations()) {
+                // layout may flip the accent to its below-staff glyph variant.
+                if (a && (a->symId() == SymId::articAccentAbove
+                          || a->symId() == SymId::articAccentBelow)) {
+                    ++n;
+                }
+            }
+            if (n > 0) {
+                ++chordsWithAccent;
+            }
+            totalAccents += n;
+            maxAccentsOnOneChord = std::max(maxAccentsOnOneChord, n);
+        }
+    }
+    EXPECT_EQ(totalAccents, 4) << "all four accents must import";
+    EXPECT_EQ(chordsWithAccent, 4) << "each of the four notes must carry one accent";
+    EXPECT_EQ(maxAccentsOnOneChord, 1)
+        << "accents must not stack on a single chord";
+    delete score;
+}

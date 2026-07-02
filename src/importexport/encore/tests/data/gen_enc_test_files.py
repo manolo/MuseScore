@@ -2214,6 +2214,27 @@ def gen_v0c2_tempo_eighth_beat_unit():
 
 
 # ===========================================================================
+# ornaments_accents_distributed.enc
+# A 4/4 bar of four quarter notes, each carrying an "accent above" articulation.
+# Encore stores every accent ORN at the downbeat tick (0) and separates them only by
+# xoffset (matching each note's own xoffset). The importer used to trust the raw tick
+# whenever a note sat on the downbeat, stacking all four accents on the first chord.
+# It must instead spread a run of same-tick marks across the notes by xoffset, so each
+# of the four chords gets exactly one accent.
+# ===========================================================================
+def gen_v0c4_accents_distributed():
+    NOTE_XOFFS = [10, 30, 50, 70]
+    elems = b''
+    for i, xo in enumerate(NOTE_XOFFS):
+        elems += note_v0c4_xoff(tick=i * 240, voice=0, staffIdx=0, fv=3, pitch=60, xoff=xo)
+    # Four ACCENT (0xBE) ORNs, all at tick 0, xoffset aligned to each note.
+    for xo in NOTE_XOFFS:
+        elems += ornament_v0c4(0, 0, 0, tipo=0xBE, xoffset=xo)
+    elems += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), elems)], fill_ts=(4, 4))
+
+
+# ===========================================================================
 # notes_implicit_leading_rest.enc
 # A measure that encodes a leading silence implicitly: the first NOTE is at
 # Encore tick 240 (= MuseScore beat 2 of a 3/4 measure) instead of 0, and
@@ -9794,6 +9815,7 @@ if __name__=='__main__':
     write("text_multi_slot_stacked_text.enc",     gen_v0c4_multi_slot_stacked_text())
     write("text_duplicate_titl_block.enc",        gen_v0c4_duplicate_titl_block())
     write("text_tempo_changes.enc",               gen_v0c4_tempo_changes())
+    write("ornaments_accents_distributed.enc",     gen_v0c4_accents_distributed())
     write("tempo_v0c2_eighth_beat_unit.enc",      gen_v0c2_tempo_eighth_beat_unit(), layout=False)
     write("instruments_instrument_count_padding.enc", gen_v0c4_instrument_count_padding())
     write("instruments_name_recovery.enc",             gen_v0c4_name_recovery())

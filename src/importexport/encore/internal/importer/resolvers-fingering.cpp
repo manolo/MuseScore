@@ -151,14 +151,20 @@ static std::optional<Fraction> bowingTickFromNoteXoffset(const PendingBowing& pb
 static void correctBowingTickFromXoffset(
     PendingBowing& pb,
     const std::vector<PendingBowing>& allBowings,
-    const BuildCtx& ctx)
+    const BuildCtx& ctx,
+    bool multiAtRawTick)
 {
     // When xoffset == 0 the ornament has no visual displacement data, it is
     // already tagged at its correct note tick, so no correction is needed.
     if (pb.ornXoffset == 0) {
         return;
     }
-    if (bowingHasNoteAtRawTick(pb, ctx)) {
+    // Trust the raw tick when a note sits on the ORN's own beat, but not when several
+    // marks share that beat with distinct xoffsets: Encore stores a run of articulations
+    // (e.g. an accent on every note of the closing bar) all at the downbeat tick and
+    // spreads them only by xoffset. Trusting the raw tick would then stack them all on
+    // the first chord; fall through to xoffset placement so each lands on its own note.
+    if (!multiAtRawTick && bowingHasNoteAtRawTick(pb, ctx)) {
         return;  // a note exists at the ORN's own beat: trust the raw tick
     }
     if (std::optional<Fraction> t = bowingTickFromMatchingOrn(pb, allBowings)) {
@@ -172,13 +178,26 @@ static void correctBowingTickFromXoffset(
 
 static void applyPendingBowings(BuildCtx& ctx, MasterScore* score)
 {
+    // Count marks sharing the same measure/staff/raw-tick so a run of articulations
+    // stored at one downbeat (distinguished only by xoffset) is spread across notes.
+    std::map<std::tuple<int, int, int>, int> marksAtRawTick;
+    for (const PendingBowing& pb : ctx.pendingBowings) {
+        if (pb.crossMeasure) {
+            continue;
+        }
+        const int staffIdx = static_cast<int>(pb.track / VOICES);
+        ++marksAtRawTick[{ pb.measIdx, staffIdx, pb.encTickRaw }];
+    }
+
     // Tick correction: Encore sometimes stores ORN enc tick=0 when the mark visually
     // falls on a later beat. Correct before attachment.
     for (PendingBowing& pb : ctx.pendingBowings) {
         if (pb.crossMeasure || pb.encTickRaw > 0) {
             continue;
         }
-        correctBowingTickFromXoffset(pb, ctx.pendingBowings, ctx);
+        const int staffIdx = static_cast<int>(pb.track / VOICES);
+        const bool multi = marksAtRawTick[{ pb.measIdx, staffIdx, pb.encTickRaw }] > 1;
+        correctBowingTickFromXoffset(pb, ctx.pendingBowings, ctx, multi);
     }
 
     // Bowing marks: crossMeasure means Encore misplaced the ORN in the previous measure.
