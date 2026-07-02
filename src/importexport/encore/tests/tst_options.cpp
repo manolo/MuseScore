@@ -1030,3 +1030,22 @@ TEST_F(Tst_Options, v0c4_merge_removes_stray_upper_voice_rests)
         << "stray upper-voice rests must be removed when merging voices";
     delete score;
 }
+
+// Regression: Encore's "voice 4" is a silent-voice placeholder that routing folds into
+// voice 0. A whole-measure rest stored there (face value an eighth, but spanning the bar)
+// used to be emitted as a leading eighth rest in voice 0, shifting the real notes right and
+// inflating an otherwise-4/4 bar to 9/8. The importer must drop the voice-4 rest when the
+// staff already carries real notes.
+TEST_F(Tst_Options, v0c4_voice4_rest_dropped_when_staff_has_notes)
+{
+    mu::iex::enc::EncImportOptions opts;
+    opts.overfillMeasureStrategy = mu::iex::enc::OverfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("structure_voice4_rest_with_notes.enc", opts);
+    ASSERT_NE(score, nullptr) << "Failed to load structure_voice4_rest_with_notes.enc";
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->ticks(), m->timesig())
+        << "the redundant voice-4 rest must not inflate the 4/4 bar to 9/8";
+    EXPECT_TRUE(score->sanityCheck());
+    delete score;
+}

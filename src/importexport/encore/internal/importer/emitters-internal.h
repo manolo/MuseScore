@@ -72,6 +72,10 @@ struct MeasEmitCtx {
     std::multimap<std::tuple<int, int, int>, int8_t> tieStartSet;
     std::set<int> noteTicks;
     std::set<int> voice4NoteTicks;
+    // Staves (raw index) carrying a real voice-0..3 note in this measure. A whole-measure
+    // rest that arrives on Encore's "voice 4" (the silent-voice placeholder) is redundant on
+    // such a staff and would corrupt the bar if merged into voice 0; it is skipped.
+    std::set<int> stavesWithRealNote;
     std::map<int, int> v0NoteCountAtTick;
     std::map<int, int> ornFingCountAtTick;
     int maxVoice0Tick = -1;

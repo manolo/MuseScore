@@ -296,6 +296,7 @@ static void scanMeasureMetadata(const MeasureElemRefVec& sortedElems, MeasEmitCt
             } else {
                 mc.v0NoteCountAtTick[static_cast<int>(em->tick)]++;
                 mc.maxVoice0Tick = std::max(mc.maxVoice0Tick, static_cast<int>(em->tick));
+                mc.stavesWithRealNote.insert(static_cast<int>(em->staffIdx));
             }
             // Detect scale string number anchors (au in 0x39..0x40)
             const EncNote* enPre = static_cast<const EncNote*>(em);
@@ -859,6 +860,15 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
     const track_idx_t track = routed->track;
     const std::pair<int, int> trackKey = routed->trackKey;
     const std::pair<int, int> encVoiceKey = routed->encVoiceKey;
+
+    // Encore's "voice 4" is a silent-voice placeholder that routing folds into voice 0. When
+    // it is a rest and the staff already carries a real note, that rest is redundant: merging
+    // it into voice 0 collides with the notes and prepends a spurious rest that pushes the
+    // content past the barline (an otherwise-4/4 bar imports as 9/8). Drop it here.
+    if (et == EncElemType::REST && e->voice >= static_cast<int>(VOICES)
+        && mc.stavesWithRealNote.count(staffIdx)) {
+        return;
+    }
 
     // Near-simultaneous notes (< CHORD_MIDI_THRESHOLD) extend the chord; same Encore voice required.
     constexpr int CHORD_MIDI_THRESHOLD = 2 * CHORD_CLUSTER_THRESHOLD;  // = 8

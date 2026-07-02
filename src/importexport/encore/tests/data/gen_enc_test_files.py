@@ -2214,6 +2214,28 @@ def gen_v0c2_tempo_eighth_beat_unit():
 
 
 # ===========================================================================
+# structure_voice4_rest_with_notes.enc
+# A 4/4 bar whose voice 0 is full (a quarter/8th/8th/quarter/quarter rhythm) plus a
+# whole-measure rest on Encore's "voice 4" (the silent-voice placeholder, voice nibble
+# = 4, face value an eighth but spanning the bar). Routing folds voice 4 into voice 0;
+# emitting the redundant rest there prepends a leading eighth rest that pushes the
+# content past the barline, so the 4/4 bar imports as 9/8. The importer must drop the
+# voice-4 rest when the staff already has real notes.
+# ===========================================================================
+def gen_v0c4_voice4_rest_with_notes():
+    # voice-4 whole rest emitted BEFORE the notes (as in the real file), then a mixed
+    # rhythm that fills the 4/4 bar exactly (quarter, 8th, 8th, quarter, quarter).
+    elems = rest_v0c4(0, 4, 0, fv=4)                   # voice 4: eighth-face rest spanning the bar (rdur=960)
+    elems += note_v0c4(0,   0, 0, fv=3, pitch=60)
+    elems += note_v0c4(240, 0, 0, fv=4, pitch=62)
+    elems += note_v0c4(360, 0, 0, fv=4, pitch=64)
+    elems += note_v0c4(480, 0, 0, fv=3, pitch=65)
+    elems += note_v0c4(720, 0, 0, fv=3, pitch=67)
+    elems += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), elems)], fill_ts=(4, 4))
+
+
+# ===========================================================================
 # structure_merge_stray_voice_rests.enc
 # A single staff whose voice 1 (the second voice) holds only rests over a bar that voice 0
 # already fills. Encore leaves such stray rests behind; with "combine non-overlapping
@@ -9901,6 +9923,7 @@ if __name__=='__main__':
     write("ornaments_accents_distributed.enc",     gen_v0c4_accents_distributed())
     write("structure_start_double_barline.enc",    gen_v0c4_start_double_barline())
     write("ornaments_trill_between_notes.enc",      gen_v0c4_trill_between_notes())
+    write("structure_voice4_rest_with_notes.enc",  gen_v0c4_voice4_rest_with_notes())
     write("structure_merge_stray_voice_rests.enc", gen_v0c4_merge_stray_voice_rests())
     write("tempo_v0c2_eighth_beat_unit.enc",      gen_v0c2_tempo_eighth_beat_unit(), layout=False)
     write("instruments_instrument_count_padding.enc", gen_v0c4_instrument_count_padding())
