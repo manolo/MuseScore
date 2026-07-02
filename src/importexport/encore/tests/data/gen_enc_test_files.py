@@ -2214,6 +2214,24 @@ def gen_v0c2_tempo_eighth_beat_unit():
 
 
 # ===========================================================================
+# structure_merge_stray_voice_rests.enc
+# A single staff whose voice 1 (the second voice) holds only rests over a bar that voice 0
+# already fills. Encore leaves such stray rests behind; with "combine non-overlapping
+# voices" on they must be removed so no spurious empty second voice remains. There are no
+# upper-voice NOTES anywhere, so the staff is not a merge candidate -- the cleanup must run
+# regardless. Imported with mergeVoices=true.
+# ===========================================================================
+def gen_v0c4_merge_stray_voice_rests():
+    elems = b''
+    for t in (0, 240, 480, 720):
+        elems += note_v0c4(t, 0, 0, fv=3, pitch=60)   # voice 0 fills the 4/4 bar
+    for t in (0, 240, 480, 720):
+        elems += rest_v0c4(t, 1, 0, fv=3)             # voice 1: stray quarter rests
+    elems += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), elems)], fill_ts=(4, 4))
+
+
+# ===========================================================================
 # ornaments_trill_between_notes.enc
 # A simple "TR" trill whose stored tick (120) falls between two notes, with no note on
 # that exact tick. The importer's cumulative-tick anchor overshoots to the FOLLOWING
@@ -9883,6 +9901,7 @@ if __name__=='__main__':
     write("ornaments_accents_distributed.enc",     gen_v0c4_accents_distributed())
     write("structure_start_double_barline.enc",    gen_v0c4_start_double_barline())
     write("ornaments_trill_between_notes.enc",      gen_v0c4_trill_between_notes())
+    write("structure_merge_stray_voice_rests.enc", gen_v0c4_merge_stray_voice_rests())
     write("tempo_v0c2_eighth_beat_unit.enc",      gen_v0c2_tempo_eighth_beat_unit(), layout=False)
     write("instruments_instrument_count_padding.enc", gen_v0c4_instrument_count_padding())
     write("instruments_name_recovery.enc",             gen_v0c4_name_recovery())

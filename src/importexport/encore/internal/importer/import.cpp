@@ -222,10 +222,6 @@ static void mergeNonOverlappingVoices(MasterScore* score)
         }
     }
 
-    if (candidates.empty()) {
-        return;
-    }
-
     Measure* first = score->firstMeasure();
     Measure* last  = score->lastMeasure();
     if (!first || !last) {
@@ -235,6 +231,7 @@ static void mergeNonOverlappingVoices(MasterScore* score)
     // Pass 2: collapse each candidate staff. No undo transaction is opened, so the
     // editing commands below execute immediately and free themselves (see
     // UndoStack::pushAndPerform); the surrounding ScoreLoad keeps that path quiet.
+    // (May be empty; the stale-rest cleanup below still runs.)
     for (staff_idx_t si : candidates) {
         const track_idx_t base = si * VOICES;
 
@@ -291,6 +288,42 @@ static void mergeNonOverlappingVoices(MasterScore* score)
                     break;
                 }
             }
+        }
+    }
+
+    // Final pass: drop redundant upper-voice rests. An upper voice (index >= 1) that holds
+    // only rests in a measure is not a real second voice -- Encore leaves such stray rests
+    // behind, and after the collapse above voice 0 already fills the bar. They would show as
+    // a spurious extra voice (and can even inflate the measure's length), so remove them.
+    // A measure whose upper voice still carries a chord is a genuine overlapping voice and
+    // is left untouched.
+    for (staff_idx_t si = 0; si < score->nstaves(); ++si) {
+        const track_idx_t base = si * VOICES;
+        std::vector<Rest*> staleRests;
+        for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+            for (voice_idx_t v = 1; v < VOICES; ++v) {
+                bool voiceHasChord = false;
+                std::vector<Rest*> voiceRests;
+                for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+                    EngravingItem* e = s->element(base + v);
+                    if (!e) {
+                        continue;
+                    }
+                    if (e->isChord()) {
+                        voiceHasChord = true;
+                        break;
+                    }
+                    if (e->isRest()) {
+                        voiceRests.push_back(toRest(e));
+                    }
+                }
+                if (!voiceHasChord) {
+                    staleRests.insert(staleRests.end(), voiceRests.begin(), voiceRests.end());
+                }
+            }
+        }
+        for (Rest* r : staleRests) {
+            score->removeElement(r);
         }
     }
     score->deselectAll();

@@ -1004,3 +1004,29 @@ TEST_F(Tst_Options, mergeVoices_preserves_single_chord_tremolo)
         << "single-chord tremolo must survive when mergeVoices collapses its voice into voice 1";
     delete score;
 }
+
+// Regression: an upper voice that holds only rests over a bar that voice 0 already fills is
+// not a real second voice. With "combine non-overlapping voices" on, such stray rests must
+// be removed; the importer used to leave them (the staff has no upper-voice notes, so it was
+// not even a merge candidate), showing a spurious empty second voice.
+TEST_F(Tst_Options, v0c4_merge_removes_stray_upper_voice_rests)
+{
+    mu::iex::enc::EncImportOptions opts;
+    opts.mergeVoices = true;
+    MasterScore* score = readEncoreScoreWithOpts("structure_merge_stray_voice_rests.enc", opts);
+    ASSERT_NE(score, nullptr) << "Failed to load structure_merge_stray_voice_rests.enc";
+
+    int upperVoiceElems = 0;
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (int v = 1; v < (int)VOICES; ++v) {
+                if (s->element(v)) {
+                    ++upperVoiceElems;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(upperVoiceElems, 0)
+        << "stray upper-voice rests must be removed when merging voices";
+    delete score;
+}
