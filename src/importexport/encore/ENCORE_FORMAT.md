@@ -631,6 +631,8 @@ A value of 0 (or an out-of-range byte from an older format) means no explicit un
 
 **Tempo BPM.** In v0xC4 the BPM is at +30, expressed in the beat unit from +28. v0xC2 (Encore 3.x/4.x) has two layouts. Newer files match v0xC4: the BPM is at +30 and +28 holds a beat-unit code (low 7 bits in 0..6). Older files store the BPM directly at +28 and leave a constant unrelated byte (observed 0x34 = 52) in the +30 slot. Distinguish by +28: when it is a valid beat-unit code the BPM is at +30; otherwise the +28 byte itself is the BPM.
 
+In that older layout the per-mark beat unit is not at +28 (which now holds the BPM) but two bytes earlier, at +26, using the same note-value encoding as `noto` (0 = whole, 2 = quarter, 3 = eighth, ...). Recovering it matters in compound meters: an "eighth = 240" mark in 6/8 stored this way carries eighth at +26, and ignoring it would default to the compound-meter dotted quarter and mis-time playback threefold.
+
 The TEXT block entry index at +32 is present only when the element is at least 33 bytes long.
 In shorter ornaments (notably v0xC2 size-32 STAFFTEXT elements) the +32 slot does not exist, and the entry index is read from the +30 slot instead, sharing it with the tempo byte.
 

@@ -195,8 +195,21 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
                 const quint8 beatUnitCode = orn->noto & 0x7F;
                 const bool validBeatUnit = (orn->noto != 0) && (beatUnitCode <= 6);
                 if (!validBeatUnit) {
-                    orn->tempo = orn->noto;
-                    orn->noto = 0;   // older layout: no per-mark beat unit; fall back to the meter
+                    orn->tempo = orn->noto;   // older layout: element +28 IS the BPM (+30 is a constant 0x34)
+                    // The older layout still records the per-mark beat unit, two bytes before the BPM
+                    // at element +26 (same 0-indexed note encoding as the v0xC4 `noto`: 0=whole, 2=quarter,
+                    // 3=eighth, ...). Recover it so the mark shows the unit the composer chose (e.g.
+                    // eighth=240 in 6/8) instead of defaulting to the compound-meter dotted quarter.
+                    orn->noto = 0;
+                    const qint64 save = ds.device()->pos();
+                    if (ds.device()->seek(rawElemStart + 26)) {
+                        quint8 beatUnit = 0;
+                        ds >> beatUnit;
+                        if ((beatUnit & 0x7F) <= 6) {
+                            orn->noto = beatUnit;
+                        }
+                    }
+                    ds.device()->seek(save);
                 }
             }
             return false;

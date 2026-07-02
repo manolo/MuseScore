@@ -2171,6 +2171,48 @@ def gen_v0c4_tempo_changes():
     return pre + body + SKELETON_POST
 
 
+def tempo_orn_v0c2_old(tick, voice, staffIdx, beatUnit, bpm):
+    """36-byte v0xC2 TEMPO ornament in the OLDER layout (as written by Encore 3.x).
+
+    Unlike the newer v0xC2/v0xC4 layout (beat-unit code at element +28, real BPM at
+    +30), the older layout stores the BPM directly at element +28 and leaves a
+    constant 0x34 at +30. The per-mark beat unit lives two bytes earlier, at element
+    +26 (0-indexed note value: 0=whole, 2=quarter, 3=eighth, ...). The importer must
+    read +26 to show the composer's beat unit (e.g. eighth) instead of defaulting to
+    the compound-meter dotted quarter.
+    """
+    d = bytearray(36)
+    struct.pack_into('<H', d, 0, tick)
+    d[2] = (5 << 4) | (voice & 0xF)     # typeVoice: ORN | voice
+    d[3] = 36                            # size (older layout)
+    d[4] = staffIdx & 0x3F
+    d[5] = 0x32                          # tipo = TEMPO
+    d[26] = beatUnit & 0xFF             # older-layout beat unit
+    d[28] = bpm & 0xFF                  # older-layout BPM (read into `noto`, then moved to `tempo`)
+    d[30] = 0x34                         # constant marker (0x34=52) that the newer layout uses for BPM
+    return bytes(d)
+
+
+# ===========================================================================
+# tempo_v0c2_eighth_beat_unit.enc
+# A 6/8 measure (compound meter) with an older-layout v0xC2 TEMPO mark whose beat
+# unit is the eighth note (beatUnit=3) at BPM 240 -> "eighth = 240". Because 6/8 is
+# compound, the meter heuristic would render this as "dotted-quarter = 240" (and play
+# it 3x too fast) if the per-mark beat unit at element +26 were ignored. The importer
+# must recover the eighth beat unit and emit eighth=240 (playback = 2 beats/sec).
+# ===========================================================================
+def gen_v0c2_tempo_eighth_beat_unit():
+    # 6/8 measure = 720 Encore ticks; one dotted-half filling the bar, plus the tempo mark.
+    elems = (
+        tempo_orn_v0c2_old(tick=0, voice=0, staffIdx=0, beatUnit=3, bpm=240)
+      + note_v0c2(tick=0, voice=0, staffIdx=0, fv=2, pitch=60)   # half
+      + note_v0c2(tick=480, voice=0, staffIdx=0, fv=4, pitch=60) # eighth -> fills 6/8
+      + end_marker()
+    )
+    custom = [(meas_hdr(6, 8, bpm=0, beatTicks=120), elems)]
+    return assemble(0xC2, custom, fill_ts=(6, 8))
+
+
 # ===========================================================================
 # notes_implicit_leading_rest.enc
 # A measure that encodes a leading silence implicitly: the first NOTE is at
@@ -9686,6 +9728,7 @@ if __name__=='__main__':
     write("text_multi_slot_stacked_text.enc",     gen_v0c4_multi_slot_stacked_text())
     write("text_duplicate_titl_block.enc",        gen_v0c4_duplicate_titl_block())
     write("text_tempo_changes.enc",               gen_v0c4_tempo_changes())
+    write("tempo_v0c2_eighth_beat_unit.enc",      gen_v0c2_tempo_eighth_beat_unit(), layout=False)
     write("instruments_instrument_count_padding.enc", gen_v0c4_instrument_count_padding())
     write("instruments_name_recovery.enc",             gen_v0c4_name_recovery())
     write("instruments_staff_hidden.enc",             gen_v0c4_staff_hidden())

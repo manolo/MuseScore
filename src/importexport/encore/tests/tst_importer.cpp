@@ -22,6 +22,8 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
+
 #include "engraving/dom/articulation.h"
 #include "engraving/dom/barline.h"
 #include "engraving/dom/chord.h"
@@ -36,6 +38,7 @@
 #include "engraving/dom/marker.h"
 #include "engraving/dom/part.h"
 #include "engraving/dom/stafftext.h"
+#include "engraving/dom/tempotext.h"
 #include "engraving/dom/tremolosinglechord.h"
 #include "engraving/dom/tuplet.h"
 #include "engraving/dom/masterscore.h"
@@ -2540,4 +2543,44 @@ TEST(EncImporterErrors, NotAnEncoreFileMessage)
     const QString msg = mu::iex::enc::encoreLoadErrorMessage(path).toQString();
     EXPECT_TRUE(msg.contains("not a recognized Encore file", Qt::CaseInsensitive)) << msg.toStdString();
     QFile::remove(path);
+}
+
+// Regression: older-layout v0xC2 TEMPO marks store the BPM at element +28 (with a
+// constant 0x34 at +30) and the beat unit two bytes earlier at +26. The importer used
+// to drop that beat unit and fall back to the meter heuristic, so an "eighth = 240"
+// mark in 6/8 came out as "dotted-quarter = 240" and played back 3x too fast. The fix
+// reads the beat unit at +26; the mark must render with the eighth glyph and play at
+// 2 beats/sec (120 quarter/min), not 6.
+TEST_F(Tst_Importer, v0c2_older_layout_tempo_beat_unit_at_plus26)
+{
+    MasterScore* score = readEncoreScore("tempo_v0c2_eighth_beat_unit.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load tempo_v0c2_eighth_beat_unit.enc";
+
+    TempoText* tt = nullptr;
+    for (MeasureBase* mb = score->first(); mb && !tt; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        Measure* m = toMeasure(mb);
+        for (Segment* s = m->first(SegmentType::ChordRest); s && !tt; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isTempoText()) {
+                    tt = toTempoText(e);
+                    break;
+                }
+            }
+        }
+    }
+    ASSERT_NE(tt, nullptr) << "no TempoText emitted for the v0xC2 tempo mark";
+
+    // Eighth beat unit, not the compound-meter dotted quarter.
+    EXPECT_TRUE(tt->xmlText().contains(u"metNote8thUp"))
+        << "expected eighth beat unit, got: " << tt->xmlText().toStdString();
+    EXPECT_FALSE(tt->xmlText().contains(u"metAugmentationDot"))
+        << "beat unit must not be dotted: " << tt->xmlText().toStdString();
+    // eighth = 240 -> 120 quarter/min -> 2 beats/sec.
+    EXPECT_EQ(std::lround(tt->tempo().val), 2)
+        << "playback tempo must be 2 beats/sec, got " << tt->tempo().val;
+
+    delete score;
 }
