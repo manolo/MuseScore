@@ -297,6 +297,8 @@ Values other than 0x00, 0x43, and 0x63 have been observed (0x01, 0x02, 0x06, 0x0
 | 6     | double (right) |
 | 8     | dotted         |
 
+A non-repeat special barline that visually sits between two measures (a double or dotted divider) is stored on the *right* measure's **start** barline (0x0C), not the left measure's end barline (0x0D). In MuseScore's model that divider belongs to the end of the preceding measure, so a start barline of type 3/6/8 maps onto the previous measure's end barline. (A repeat-start at 0x0C stays on its own measure.)
+
 #### Volta (repeat-alternative) bitmask
 
 Byte 0x0F is a bitmask, bit `n` set means the measure belongs to ending `n+1`.

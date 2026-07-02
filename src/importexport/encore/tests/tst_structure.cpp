@@ -1511,3 +1511,18 @@ TEST_F(Tst_Structure, tuplet_diff_column_keeps_all_members)
 
     delete score;
 }
+
+// Regression: a double barline between two measures is stored by Encore as the SECOND
+// measure's start barline (byte 0x0C = DOUBLEL), not the first measure's end barline.
+// The importer handled only end barlines, so the divider was dropped. It must map a
+// special start barline onto the previous measure's end barline.
+TEST_F(Tst_Structure, v0c4_start_double_barline_maps_to_previous_end)
+{
+    MasterScore* score = readEncoreScore("structure_start_double_barline.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load structure_start_double_barline.enc";
+    Measure* first = score->firstMeasure();
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(first->endBarLineType(), BarLineType::DOUBLE)
+        << "the double bar before measure 2 must appear as measure 1's end barline";
+    delete score;
+}

@@ -2214,6 +2214,24 @@ def gen_v0c2_tempo_eighth_beat_unit():
 
 
 # ===========================================================================
+# structure_start_double_barline.enc
+# A double barline drawn between two measures is stored by Encore as the SECOND
+# measure's start barline (byte 0x0C = 3 = DOUBLEL), not the first measure's end
+# barline. The importer used to handle only end barlines, so the divider was dropped.
+# Fixture: measure 1 has barTypeStart = DOUBLEL. Expected: measure 0 ends with a
+# double barline.
+# ===========================================================================
+def gen_v0c4_start_double_barline():
+    def bar(pitch):
+        return (note_v0c4(0, 0, 0, fv=1, pitch=pitch) + end_marker())
+    h0 = meas_hdr(4, 4)
+    h1 = bytearray(meas_hdr(4, 4))
+    h1[0x0C] = 3                      # barTypeStart = DOUBLEL (double bar before this measure)
+    custom = [(bytes(h0), bar(60)), (bytes(h1), bar(62))]
+    return assemble(0xC4, custom, fill_ts=(4, 4))
+
+
+# ===========================================================================
 # ornaments_accents_distributed.enc
 # A 4/4 bar of four quarter notes, each carrying an "accent above" articulation.
 # Encore stores every accent ORN at the downbeat tick (0) and separates them only by
@@ -9841,6 +9859,7 @@ if __name__=='__main__':
     write("text_duplicate_titl_block.enc",        gen_v0c4_duplicate_titl_block())
     write("text_tempo_changes.enc",               gen_v0c4_tempo_changes())
     write("ornaments_accents_distributed.enc",     gen_v0c4_accents_distributed())
+    write("structure_start_double_barline.enc",    gen_v0c4_start_double_barline())
     write("tempo_v0c2_eighth_beat_unit.enc",      gen_v0c2_tempo_eighth_beat_unit(), layout=False)
     write("instruments_instrument_count_padding.enc", gen_v0c4_instrument_count_padding())
     write("instruments_name_recovery.enc",             gen_v0c4_name_recovery())

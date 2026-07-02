@@ -177,6 +177,23 @@ void buildMeasures(BuildCtx& ctx)
                 if (encMeas.startBarline() == EncBarlineType::REPEATSTART) {
                     measure->setRepeatStart(true);
                 }
+                // A non-repeat special barline drawn at a measure's START (e.g. a double bar
+                // before this measure) belongs, in MuseScore's model, to the end of the
+                // previous measure. Encore stores it as this measure's startBarline; map it
+                // onto the preceding measure's end barline so the divider is not dropped.
+                if (encMeas.startBarline() == EncBarlineType::DOUBLEL
+                    || encMeas.startBarline() == EncBarlineType::DOUBLER
+                    || encMeas.startBarline() == EncBarlineType::DOTTED) {
+                    if (Measure* prevMeas = score->lastMeasure()) {
+                        if (prevMeas->endBarLineType() == BarLineType::NORMAL) {
+                            const BarLineType t = (encMeas.startBarline() == EncBarlineType::DOTTED)
+                                                  ? BarLineType::DOTTED : BarLineType::DOUBLE;
+                            for (int s = 0; s < ctx.totalStaves; ++s) {
+                                prevMeas->setEndBarLineType(t, static_cast<track_idx_t>(s) * VOICES);
+                            }
+                        }
+                    }
+                }
                 if (encMeas.endBarline() == EncBarlineType::REPEATEND) {
                     measure->setRepeatEnd(true);
                     const int playCount = encRepeatPlayCount(enc.measures, mi);
