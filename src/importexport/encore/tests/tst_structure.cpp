@@ -45,6 +45,7 @@
 #include "engraving/dom/tempotext.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/note.h"
+#include "engraving/dom/page.h"
 #include "engraving/dom/part.h"
 #include "engraving/dom/rest.h"
 #include "engraving/dom/segment.h"
@@ -88,6 +89,66 @@ TEST_F(Tst_Structure, basic_measure_count)
     MasterScore* score = readEncoreScore("bazo.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_GT(score->nmeasures(), 0);
+    delete score;
+}
+
+// Page index (0-based) that the first PAGE layout break's measure is laid out on, -1 if none.
+static int firstPageBreakPage(MasterScore* score)
+{
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        bool hasPageBreak = false;
+        for (EngravingItem* e : mb->el()) {
+            if (e && e->isLayoutBreak() && toLayoutBreak(e)->isPageBreak()) {
+                hasPageBreak = true;
+                break;
+            }
+        }
+        if (!hasPageBreak) {
+            continue;
+        }
+        System* sys = toMeasure(mb)->system();
+        if (sys && sys->page()) {
+            for (size_t i = 0; i < score->pages().size(); ++i) {
+                if (score->pages()[i] == sys->page()) {
+                    return (int)i;
+                }
+            }
+        }
+        return -1;
+    }
+    return -2;
+}
+
+TEST_F(Tst_Structure, page_break_spill_shrinks_staff_space)
+{
+    // structure_page_break_spill.enc: 6 staves, 3 systems. Its first two systems (LINE pageIdx
+    // 0 then 1) belong on the first page, but at the default staff space they do not fit on its
+    // short custom page, so the second system spills onto the second page (leaving a near-empty
+    // page). With imported page breaks the importer shrinks the staff space (by <= 0.022 inch)
+    // until the first page break's measure returns to the first page.
+    MasterScore* score = readEncoreScore("structure_page_break_spill.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    EXPECT_EQ(firstPageBreakPage(score), 0)
+        << "the first page break's measure must be pulled back onto the first page";
+
+    // A reference import with page breaks off does not run the fit pass, so its staff space is
+    // the untouched default. The page-break import must have reduced it, but by no more than the
+    // 0.022-inch budget (1 inch == 1200 engraving units).
+    mu::iex::enc::EncImportOptions noBreaks;
+    noBreaks.importPageBreaks = false;
+    MasterScore* ref = readEncoreScoreWithOpts("structure_page_break_spill.enc", noBreaks);
+    ASSERT_NE(ref, nullptr);
+    const double defaultSp = ref->style().styleD(Sid::spatium);
+    const double sp = score->style().styleD(Sid::spatium);
+    EXPECT_LT(sp, defaultSp) << "staff space must be reduced to make the first page fit";
+    EXPECT_GE(sp, defaultSp - 0.022 * 1200.0) << "the reduction must not exceed 0.022 inch";
+
+    delete ref;
     delete score;
 }
 

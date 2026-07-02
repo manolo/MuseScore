@@ -84,6 +84,7 @@
 #include "engraving/dom/system.h"
 #include "engraving/dom/volta.h"
 #include "engraving/dom/mscore.h"
+#include "engraving/types/spatium.h"
 #include "engraving/engravingerrors.h"
 
 #include "engraving/editing/implodeexplode.h"
@@ -359,6 +360,14 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     score->style().set(Sid::tupletVHeadDistance,   0.0);
     score->style().set(Sid::tupletVStemDistance,   0.0);
 
+    // Encore does not stretch systems and staves to fill the page: it lays them out at fixed
+    // distances from the top. Keep vertical justification enabled but allow it no extra room
+    // (max system/staff spread = 0), so the imported spacing matches Encore instead of being
+    // spread to fill the page.
+    score->style().set(Sid::enableVerticalSpread, true);
+    score->style().set(Sid::maxSystemSpread,      Spatium(0.0));
+    score->style().set(Sid::maxStaffSpread,       Spatium(0.0));
+
     BuildCtx ctx{ score, enc, opts };
     buildParts(ctx);
     buildMeasures(ctx);
@@ -387,6 +396,10 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
         mergeNonOverlappingVoices(score);
         score->doLayout();
     }
+
+    // With imported page breaks, a first-page system may have spilled onto the next page at the
+    // default staff space; shrink it just enough (<= 0.022 inch) to pull that system back.
+    fitFirstPageStaffSpace(ctx);
 
     // doLayout computes and caches the repeat list; at that point voltas may not yet be
     // anchored, so the cached expansion ignores 1st/2nd endings and replays the 1st

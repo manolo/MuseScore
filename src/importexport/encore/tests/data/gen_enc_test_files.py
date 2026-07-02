@@ -9908,6 +9908,57 @@ def meas_hdr_volta(timeSigNum, timeSigDen, ending, hooks=0xC0, bpm=100, barTypeE
     return bytes(h)
 
 
+def gen_v0c4_page_break_spill():
+    """6-staff, 3-system score whose first two systems (LINE pageIdx 0 then 1) belong on the
+    first page, followed by a page break (line 2 resets pageIdx to 0). On a short custom page
+    (145 mm tall) the two systems do not quite fit at the default staff space, so the second
+    spills onto the next page. The importer must shrink the staff space (up to 0.022 inch) until
+    the first page break's measure returns to the first page. Verified: the spill is recovered
+    with a 0.006-inch reduction, comfortably inside the 0.022-inch budget."""
+    NSTAVES, NSYS, MPS = 6, 3, 3
+    total_meas = NSYS * MPS
+    pageidx = (0, 1, 0)
+
+    hdr = bytearray(194)
+    hdr[0:4] = b'SCOW'
+    hdr[4] = 0xC4
+    struct.pack_into('<H', hdr, 0x28, 0x0420)
+    struct.pack_into('<h', hdr, 0x2E, NSYS)          # lineCount
+    struct.pack_into('<h', hdr, 0x30, 2)             # pageCount
+    hdr[0x32] = NSTAVES                              # instrumentCount
+    hdr[0x33] = NSTAVES                              # staffPerSystem
+    struct.pack_into('<h', hdr, 0x34, total_meas)    # measureCount
+
+    def staff_entry(idx, pidx):
+        e = bytearray(30)
+        e[16] = pidx    # EncLineStaffData.pageIdx (row-on-page counter)
+        e[19] = 1       # visible
+        e[21] = idx     # instrument-staff index
+        return bytes(e)
+
+    lines = b''
+    for si in range(NSYS):
+        ld = b'\x00' * 10 + struct.pack('<H', si * MPS) + bytes([MPS])
+        for st in range(NSTAVES):
+            ld += staff_entry(st, pageidx[si])
+        lines += b'LINE' + struct.pack('<I', len(ld)) + ld
+
+    meas = b''
+    for _ in range(total_meas):
+        elems = b''.join(note_v0c4(0, 0, st, 3, 60) for st in range(NSTAVES)) + end_marker()
+        meas += meas_block(meas_hdr(4, 4), elems)
+
+    # Short custom page (145 mm tall) via the PREC DEVMODE: dmPaperSize=0 (custom), with
+    # dmPaperLength/Width in tenths of a millimetre.
+    post = bytearray(SKELETON_POST)
+    o = post.find(b'PREC')
+    base = o + 8 + 64
+    struct.pack_into('<h', post, base + 12, 1)       # orientation portrait
+    struct.pack_into('<h', post, base + 14, 0)       # dmPaperSize = custom
+    struct.pack_into('<h', post, base + 16, 1450)    # dmPaperLength = 145.0 mm
+    struct.pack_into('<h', post, base + 18, 2100)    # dmPaperWidth  = 210.0 mm
+    struct.pack_into('<h', post, base + 20, 100)     # scale
+    return bytes(hdr) + lines + meas + bytes(post)
 
 
 if __name__=='__main__':
@@ -10219,5 +10270,6 @@ if __name__=='__main__':
     write("instruments_c2_tilde_primary_block_midi.enc",    gen_v0c2_tilde_primary_block_midi())
     write("structure_clef_change_mid_measure.enc",         gen_v0c4_structure_clef_change_mid_measure())
     write("structure_clef_trailing_cautionary.enc",        gen_v0c4_structure_clef_trailing_cautionary())
+    write("structure_page_break_spill.enc",                gen_v0c4_page_break_spill())
     print("Done.")
 

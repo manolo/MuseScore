@@ -38,6 +38,9 @@
 #include "engraving/dom/layoutbreak.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
+#include "engraving/dom/mscore.h"
+#include "engraving/dom/page.h"
+#include "engraving/dom/system.h"
 #include "engraving/dom/systemlock.h"
 #include "engraving/style/style.h"
 
@@ -499,5 +502,69 @@ void applyPageSetup(BuildCtx& ctx)
     if (ctx.opts.importPageBreaks) {
         applyPageBreaksFromLines(ctx);
     }
+}
+
+// Page index (0-based) that the first imported PAGE break's measure is laid out on, or -1 when
+// there is no such break or its page cannot be resolved (caller then leaves the staff space
+// untouched).
+static int firstPageBreakPageIndex(MasterScore* score)
+{
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        bool hasPageBreak = false;
+        for (EngravingItem* e : mb->el()) {
+            if (e && e->isLayoutBreak() && toLayoutBreak(e)->isPageBreak()) {
+                hasPageBreak = true;
+                break;
+            }
+        }
+        if (!hasPageBreak) {
+            continue;
+        }
+        const System* sys = toMeasure(mb)->system();
+        if (!sys || !sys->page()) {
+            return -1;
+        }
+        const std::vector<Page*>& pages = score->pages();
+        for (size_t i = 0; i < pages.size(); ++i) {
+            if (pages[i] == sys->page()) {
+                return static_cast<int>(i);
+            }
+        }
+        return -1;
+    }
+    return -1;
+}
+
+void fitFirstPageStaffSpace(BuildCtx& ctx)
+{
+    if (!ctx.opts.importPageBreaks) {
+        return;
+    }
+    MasterScore* score = ctx.score;
+    if (firstPageBreakPageIndex(score) <= 0) {
+        // -1: no importable page break. 0: the first page already holds all its systems.
+        return;
+    }
+
+    const double sp0 = score->style().styleD(Sid::spatium);
+    constexpr double kStepInches = 0.002;   // reduction granularity
+    constexpr int kMaxSteps      = 11;      // up to 0.022 inch total
+
+    // Bubble up from the smallest reduction; the first that pulls the spilled system back onto
+    // the first page is the ideal (least change from Encore's staff size).
+    for (int k = 1; k <= kMaxSteps; ++k) {
+        score->style().set(Sid::spatium, sp0 - kStepInches * k * DPI);
+        score->doLayout();
+        if (firstPageBreakPageIndex(score) == 0) {
+            return;
+        }
+    }
+
+    // Even a 0.022 inch reduction was not enough: restore Encore's original staff size.
+    score->style().set(Sid::spatium, sp0);
+    score->doLayout();
 }
 } // namespace mu::iex::enc

@@ -49,4 +49,11 @@ double winiUnitsPerInch(int rightEdge, int left, double pageWIn);
 // size/orientation/scale (PREC), margins (WINI), the SCO5 uniform-margin default, and the
 // system-lock / page-break line layout. Each part is gated by its matching import option.
 void applyPageSetup(BuildCtx& ctx);
+
+// After the score is laid out, if imported page breaks pushed one of the first page's systems
+// onto the second page (leaving a near-empty page), nudge the staff space (spatium) down by up
+// to 0.022 inch in 0.002-inch steps until the first page break's measure lands back on the first
+// page. Uses the smallest reduction that works; keeps the original size if 0.022 inch is not
+// enough. No-op unless page breaks were imported. Must run after a full layout.
+void fitFirstPageStaffSpace(BuildCtx& ctx);
 } // namespace mu::iex::enc
