@@ -26,13 +26,13 @@
 
 #include "../parser/ticks.h"
 #include "engraving/dom/factory.h"
+#include "engraving/dom/fret.h"
 #include "engraving/dom/harmony.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/segment.h"
 
 namespace mu::iex::enc {
-
 // Create a Harmony (chord symbol) for an EncChordSym element and attach it to the
 // measure. CHD elements often carry a MIDI timing offset from the note they annotate.
 // Strategy: floor the CHD tick to the beat start, then attach to the first ChordRest
@@ -81,7 +81,20 @@ void handleChordSym(BuildCtx& ctx, const MeasEmitCtx& mc, const NoteElemCtx& ec)
     Harmony* h = Factory::createHarmony(ctx.score->dummy()->segment());
     h->setTrack(ec.track);
     h->setHarmony(String(raw));
-    seg->add(h);
-}
 
+    // When MuseScore's built-in chord database knows this chord, wrap the harmony in a
+    // fretboard diagram, matching the structure the "Add fretboard diagram" action produces:
+    // the FretDiagram becomes the segment annotation and the Harmony becomes its child.
+    // Chords the database does not recognise keep the plain text symbol (no empty diagram).
+    FretDiagram* fd = Factory::createFretDiagram(ctx.score->dummy()->segment());
+    fd->setTrack(ec.track);
+    fd->updateDiagram(h->harmonyName());
+    if (fd->isClear()) {
+        delete fd;
+        seg->add(h);
+    } else {
+        seg->add(fd);
+        fd->add(h);
+    }
+}
 } // namespace mu::iex::enc

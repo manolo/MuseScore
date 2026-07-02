@@ -30,6 +30,13 @@
 namespace mu::engraving {
 class MasterScore;
 class Score;
+class Segment;
+class Harmony;
+
+// Return the chord symbol attached at seg, whether it sits directly on the segment or is
+// nested inside a FretDiagram annotation (the importer wraps recognised chords in a
+// fretboard diagram). Returns nullptr when the segment carries no chord symbol.
+Harmony* segmentHarmony(const Segment* seg);
 
 class MTest
 {

@@ -6332,6 +6332,59 @@ def chordsym_v0c4(tick, voice, staffIdx, text_bytes):
     return struct.pack('<H', tick) + bytes([(7 << 4) | (voice & 0xF)]) + bytes(d)
 
 
+def chordsym_numeric_v0c4(tick, voice, staffIdx, toniko, radiko=0, baso=0, hasBass=False):
+    """14-byte CHORD-symbol element (type=7) WITHOUT a text slot (tipo bit0 clear), so the
+    chord name is built from the numeric toniko/radiko/baso instead of literal text."""
+    d = bytearray(11)
+    d[0] = 14                          # size (element bytes 0..13)
+    d[1] = staffIdx & 0x3F             # rawStaff
+    d[2] = toniko & 0xFF               # element +5: chord quality index
+    d[3] = 0x02 if hasBass else 0x00   # tipo: bit1 = bass present, bit0 (text) clear
+    d[9] = radiko & 0xFF               # element +12: root
+    d[10] = baso & 0xFF                # element +13: bass
+    return struct.pack('<H', tick) + bytes([(7 << 4) | (voice & 0xF)]) + bytes(d)
+
+
+def gen_v0c4_chord_quality_table():
+    """One numeric C chord per measure at the toniko values whose quality strings the
+    importer used to get wrong: 4 (was dominant 7, is diminished 7), 16 (was blank,
+    is maj7#11), 34 (was 11, is 9#11), 40 (was +7, is 13#11), 48 (was 9sus4, is 7sus4)
+    and 63 (was blank, is m13). Each measure carries a whole note so the bar is full."""
+    tonikos = [4, 16, 34, 40, 48, 63]
+    custom = []
+    for tk in tonikos:
+        e  = note_v0c4(0, 0, 0, fv=1, pitch=60)   # whole note C4
+        e += chordsym_numeric_v0c4(0, 0, 0, tk)
+        e += end_marker()
+        custom.append((meas_hdr(4, 4), e))
+    return assemble(0xC4, custom, fill_ts=(4, 4))
+
+
+def gen_v0c4_chord_symbol_fretboard():
+    """Two chord symbols: a common chord the built-in database knows ("Am") and one it
+    does not ("Zzz"). The importer wraps the recognised chord in a FretDiagram (the
+    Harmony becomes its child) and leaves the unknown chord as a plain text symbol."""
+    # Measure 0: note + chord "Am" (Latin-1: bytes 0/1 both non-zero -> ONE_BYTE probe).
+    am = bytearray(36)
+    am[0:2] = b'Am'
+    e0  = note_v0c4(0, 0, 0, fv=3, pitch=60)
+    e0 += chordsym_v0c4(0, 0, 0, bytes(am))
+    e0 += note_v0c4(240, 0, 0, fv=3, pitch=62)
+    e0 += note_v0c4(480, 0, 0, fv=3, pitch=64)
+    e0 += note_v0c4(720, 0, 0, fv=3, pitch=65)
+    e0 += end_marker()
+    # Measure 1: note + chord "Zzz" (a name absent from the fretboard database).
+    zz = bytearray(36)
+    zz[0:3] = b'Zzz'
+    e1  = note_v0c4(0, 0, 0, fv=3, pitch=60)
+    e1 += chordsym_v0c4(0, 0, 0, bytes(zz))
+    e1 += note_v0c4(240, 0, 0, fv=3, pitch=62)
+    e1 += note_v0c4(480, 0, 0, fv=3, pitch=64)
+    e1 += note_v0c4(720, 0, 0, fv=3, pitch=65)
+    e1 += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e0), (meas_hdr(4, 4), e1)])
+
+
 def gen_v0c4_chord_sym_latin1():
     # 36-byte slot. Bytes 0/1 = "Am" (Latin-1, probe says ONE_BYTE), then
     # NUL terminator, then padding.
@@ -10072,6 +10125,8 @@ if __name__=='__main__':
     write("text_text_block_latin1_decoding.enc",      gen_v0c4_text_block_latin1_decoding())
     write("importer_two_dynamics_in_one_measure.enc",     gen_v0c4_two_dynamics_in_one_measure())
     write("text_chord_sym_latin1.enc",                gen_v0c4_chord_sym_latin1())
+    write("notes_chord_symbol_fretboard.enc",         gen_v0c4_chord_symbol_fretboard())
+    write("text_chord_quality_table.enc",             gen_v0c4_chord_quality_table())
     write("text_titl_latin1_small_varsize.enc",       gen_v0c4_titl_latin1_small_varsize())
     write("text_recovered_name_latin1.enc",           gen_v0c4_recovered_name_latin1())
     write("importer_hairpin_speguleco_bit0.enc",          gen_v0c4_hairpin_speguleco_bit0())

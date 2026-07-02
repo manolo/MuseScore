@@ -24,15 +24,17 @@
 #include "parsers-encoding.h"
 
 namespace mu::iex::enc {
-// Chord quality suffixes indexed by toniko value (0-62).
-// Derived from Enc2MusicXML's tnk[] table (textfile.cpp).
-// Empty entries denote undefined/reserved chord types; they degrade to major.
+// Chord quality suffixes indexed by toniko value (0-63).
+// This is Encore's own chord palette, in palette order, verified against the labels Encore
+// displays for a score carrying one chord per measure across the full toniko range.
+// Encore's typography is mapped to what the MuseScore chord parser expects: Encore's
+// augmented-fifth "+5" becomes "#5", and Encore's "sus2,sus4" drops the comma.
 static const char* const kChordQuality[] = {
     "",            //  0: major (no suffix)
     "m",           //  1: minor
     "+",           //  2: augmented
     "dim",         //  3: diminished
-    "7",           //  4: dominant 7
+    "dim7",        //  4: diminished 7
     "5",           //  5: power chord
     "6",           //  6: major 6
     "6/9",         //  7
@@ -43,54 +45,55 @@ static const char* const kChordQuality[] = {
     "maj7",        // 12
     "maj7(b5)",    // 13
     "maj7(6/9)",   // 14
-    "maj7(#5)",    // 15
-    "",            // 16: undefined
+    "maj7(#5)",    // 15 (Encore "maj7(+5)")
+    "maj7(#11)",   // 16
     "maj9",        // 17
     "maj9(b5)",    // 18
-    "maj9(#5)",    // 19
-    "",            // 20: undefined
+    "maj9(#5)",    // 19 (Encore "maj9(+5)")
+    "maj9(#11)",   // 20
     "maj13",       // 21
     "maj13(b5)",   // 22
-    "",            // 23: undefined
-    "7",           // 24: dominant 7 (alternate encoding)
+    "maj13(#11)",  // 23
+    "7",           // 24: dominant 7
     "7(b5)",       // 25
     "7(b9)",       // 26
     "7(#9)",       // 27
-    "",            // 28: undefined
-    "",            // 29: undefined
-    "",            // 30: undefined
-    "",            // 31: undefined
+    "7(#11)",      // 28
+    "7(b5,b9)",    // 29
+    "7(b5,#9)",    // 30
+    "7(b9,#9)",    // 31
     "9",           // 32
     "9(b5)",       // 33
-    "11",          // 34
-    "13",          // 35
-    "13(b5)",      // 36
-    "13(b9)",      // 37
-    "13(#9)",      // 38
-    "",            // 39: undefined
-    "+7",          // 40: augmented 7
-    "+7(b9)",      // 41
-    "+7(#9)",      // 42
-    "+9",          // 43
-    "sus2",        // 44
-    "sus2sus4",    // 45 (Encore "sus2,sus4"; comma removed for MuseScore parser)
-    "sus4",        // 46
-    "7sus4",       // 47
-    "9sus4",       // 48
-    "13sus4",      // 49
-    "m(add2)",     // 50
-    "m(add9)",     // 51
-    "m6",          // 52
-    "m6/9",        // 53
-    "m7",          // 54
-    "m(maj7)",     // 55
-    "m7(b5)",      // 56
-    "m7(add4)",    // 57
-    "m7(add11)",   // 58
-    "m9",          // 59
-    "m(maj9)",     // 60
-    "m11",         // 61
-    "m13",         // 62
+    "9(#11)",      // 34
+    "11",          // 35
+    "13",          // 36
+    "13(b5)",      // 37
+    "13(b9)",      // 38
+    "13(#9)",      // 39
+    "13(#11)",     // 40
+    "+7",          // 41: augmented 7
+    "+7(b9)",      // 42
+    "+7(#9)",      // 43
+    "+9",          // 44
+    "sus2",        // 45
+    "sus2sus4",    // 46 (Encore "sus2,sus4"; comma removed for MuseScore parser)
+    "sus4",        // 47
+    "7sus4",       // 48
+    "9sus4",       // 49
+    "13sus4",      // 50
+    "m(add2)",     // 51
+    "m(add9)",     // 52
+    "m6",          // 53
+    "m6/9",        // 54
+    "m7",          // 55
+    "m(maj7)",     // 56
+    "m7(b5)",      // 57
+    "m7(add4)",    // 58
+    "m7(add11)",   // 59
+    "m9",          // 60
+    "m9(maj7)",    // 61
+    "m11",         // 62
+    "m13",         // 63
 };
 static constexpr int kChordQualityCount = static_cast<int>(sizeof(kChordQuality) / sizeof(kChordQuality[0]));
 

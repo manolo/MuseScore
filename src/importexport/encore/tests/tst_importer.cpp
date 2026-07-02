@@ -585,11 +585,9 @@ TEST_F(Tst_Importer, v0c4_chord_sym_latin1)
             continue;
         }
         for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
-            for (EngravingItem* ann : s->annotations()) {
-                if (ann && ann->isHarmony()) {
-                    found = toHarmony(ann);
-                    break;
-                }
+            if (Harmony* h = segmentHarmony(s)) {
+                found = h;
+                break;
             }
         }
     }
@@ -1621,13 +1619,8 @@ TEST_F(Tst_Importer, chord_symbols_present)
         }
         for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
              s; s = s->next(SegmentType::ChordRest)) {
-            for (EngravingItem* e : s->annotations()) {
-                if (e->isHarmony()) {
-                    foundHarmony = true;
-                    break;
-                }
-            }
-            if (foundHarmony) {
+            if (segmentHarmony(s)) {
+                foundHarmony = true;
                 break;
             }
         }
@@ -2237,10 +2230,8 @@ TEST_F(Tst_Importer, numeric_chord_symbols)
         }
         for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
              s; s = s->next(SegmentType::ChordRest)) {
-            for (EngravingItem* ann : s->annotations()) {
-                if (ann && ann->isHarmony()) {
-                    harmonyByMeasure[measureIdx] = toHarmony(ann)->harmonyName();
-                }
+            if (Harmony* h = segmentHarmony(s)) {
+                harmonyByMeasure[measureIdx] = h->harmonyName();
             }
         }
         ++measureIdx;
@@ -2265,8 +2256,42 @@ TEST_F(Tst_Importer, numeric_chord_symbols)
     delete score;
 }
 
+// Regression: the numeric chord-quality table (toniko -> suffix) was wrong from index 4 on.
+// Encore's real palette has "dim7" at 4 (the importer had dominant "7"), fills the slots the
+// importer left blank (maj7#11, 7#11, the multi-alteration dominants), and from 34 onward the
+// importer's entries were all shifted by one, so e.g. toniko 48 rendered as 9sus4 instead of
+// 7sus4. The fixture carries one numeric C chord per measure at the affected toniko values.
+TEST_F(Tst_Importer, numeric_chord_quality_table)
+{
+    MasterScore* score = readEncoreScore("text_chord_quality_table.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::map<int, String> byMeasure;
+    int measureIdx = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            if (Harmony* h = segmentHarmony(s)) {
+                byMeasure[measureIdx] = h->harmonyName();
+            }
+        }
+        ++measureIdx;
+    }
+
+    EXPECT_EQ(byMeasure[0], String(u"Cdim7")) << "toniko=4 is diminished 7, not dominant 7";
+    EXPECT_EQ(byMeasure[1], String(u"CMaj7#11")) << "toniko=16 was blank, is maj7(#11)";
+    EXPECT_EQ(byMeasure[2], String(u"C9#11")) << "toniko=34 is 9(#11), not 11";
+    EXPECT_EQ(byMeasure[3], String(u"C13#11")) << "toniko=40 is 13(#11), not +7";
+    EXPECT_EQ(byMeasure[4], String(u"C7sus")) << "toniko=48 is 7sus4, not 9sus4";
+    EXPECT_EQ(byMeasure[5], String(u"Cm13")) << "toniko=63 was blank, is m13";
+
+    delete score;
+}
+
 // Regression: numeric chord with bass note (tipo bit 1 set) should produce a slash chord.
-// akordo.enc measure 1 has toniko=49 (13sus4), radiko=0x25 (Ab), baso=0x13 (F#), tipo=2.
+// akordo.enc measure 1 has toniko=49 (9sus4), radiko=0x25 (Ab), baso=0x13 (F#), tipo=2.
 TEST_F(Tst_Importer, numeric_chord_with_bass_note)
 {
     MasterScore* score = readEncoreScore("akordo.enc");
@@ -2279,12 +2304,9 @@ TEST_F(Tst_Importer, numeric_chord_with_bass_note)
         }
         for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
              s && !slashChord; s = s->next(SegmentType::ChordRest)) {
-            for (EngravingItem* ann : s->annotations()) {
-                if (ann && ann->isHarmony()) {
-                    Harmony* h = toHarmony(ann);
-                    if (h->harmonyName().contains(u"/")) {
-                        slashChord = h;
-                    }
+            if (Harmony* h = segmentHarmony(s)) {
+                if (h->harmonyName().contains(u"/")) {
+                    slashChord = h;
                 }
             }
         }
@@ -2473,7 +2495,7 @@ TEST_F(Tst_Importer, v0c4_volta_repeat_playcount_from_endings)
 
     EXPECT_EQ(endRepeat->repeatCount(), 4)
         << "end-repeat barline must play 4 times (highest ending is '4.'); the default "
-           "of 2 stops before the 4th ending (got " << endRepeat->repeatCount() << ")";
+        "of 2 stops before the 4th ending (got " << endRepeat->repeatCount() << ")";
 
     // The repeated body (the measure carrying the repeat-start) must be played on all
     // four passes; the 4th ending is entered exactly once, on the last pass.

@@ -119,14 +119,15 @@ TEST(Tst_EncChordSym, diminished)
     EXPECT_EQ(makeNumeric(3, 0x00).chordName(), "Cdim");
 }
 
-TEST(Tst_EncChordSym, dominant7_index4)
+TEST(Tst_EncChordSym, diminished7_index4)
 {
-    EXPECT_EQ(makeNumeric(4, 0x03).chordName(), "F7");
+    // toniko=4 is diminished 7 in Encore's palette (not dominant 7).
+    EXPECT_EQ(makeNumeric(4, 0x03).chordName(), "Fdim7");
 }
 
-TEST(Tst_EncChordSym, dominant7_index24_alternate_encoding)
+TEST(Tst_EncChordSym, dominant7_index24)
 {
-    // toniko=24 and toniko=4 both map to "7" quality.
+    // Dominant 7 lives at toniko=24.
     EXPECT_EQ(makeNumeric(24, 0x03).chordName(), "F7");
 }
 
@@ -135,30 +136,42 @@ TEST(Tst_EncChordSym, maj7)
     EXPECT_EQ(makeNumeric(12, 0x00).chordName(), "Cmaj7");
 }
 
+TEST(Tst_EncChordSym, ninth_sharp11_index34)
+{
+    // toniko=34 is 9(#11) (was mislabeled 11 by an off-by-one in the table).
+    EXPECT_EQ(makeNumeric(34, 0x00).chordName(), "C9(#11)");
+}
+
 TEST(Tst_EncChordSym, minor7)
 {
-    EXPECT_EQ(makeNumeric(54, 0x01).chordName(), "Dm7");
+    EXPECT_EQ(makeNumeric(55, 0x01).chordName(), "Dm7");
 }
 
 TEST(Tst_EncChordSym, sus4)
 {
-    EXPECT_EQ(makeNumeric(46, 0x04).chordName(), "Gsus4");
+    EXPECT_EQ(makeNumeric(47, 0x04).chordName(), "Gsus4");
 }
 
 TEST(Tst_EncChordSym, sus2)
 {
-    EXPECT_EQ(makeNumeric(44, 0x04).chordName(), "Gsus2");
+    EXPECT_EQ(makeNumeric(45, 0x04).chordName(), "Gsus2");
+}
+
+TEST(Tst_EncChordSym, seventh_sus4_index48)
+{
+    // toniko=48 is 7sus4 (the table used to map it to 9sus4).
+    EXPECT_EQ(makeNumeric(48, 0x01).chordName(), "D7sus4");
 }
 
 TEST(Tst_EncChordSym, half_diminished)
 {
-    EXPECT_EQ(makeNumeric(56, 0x05).chordName(), "Am7(b5)");
+    EXPECT_EQ(makeNumeric(57, 0x05).chordName(), "Am7(b5)");
 }
 
 TEST(Tst_EncChordSym, out_of_range_toniko_treated_as_major)
 {
-    // toniko=63 is beyond the table; degrades to just the root.
-    EXPECT_EQ(makeNumeric(63, 0x00).chordName(), "C");
+    // toniko=64 is beyond the 0-63 table; degrades to just the root.
+    EXPECT_EQ(makeNumeric(64, 0x00).chordName(), "C");
 }
 
 // ---------------------------------------------------------------------------

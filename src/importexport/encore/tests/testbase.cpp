@@ -28,6 +28,9 @@
 #include "io/file.h"
 
 #include "engraving/dom/masterscore.h"
+#include "engraving/dom/fret.h"
+#include "engraving/dom/harmony.h"
+#include "engraving/dom/segment.h"
 
 #include "engraving/engravingerrors.h"
 #include "engraving/compat/mscxcompat.h"
@@ -64,6 +67,27 @@ static MasterScore* loadEncore(const QString& path, const iex::enc::EncImportOpt
         s->doLayout();
     }
     return score;
+}
+
+Harmony* segmentHarmony(const Segment* seg)
+{
+    if (!seg) {
+        return nullptr;
+    }
+    for (EngravingItem* ann : seg->annotations()) {
+        if (!ann) {
+            continue;
+        }
+        if (ann->isHarmony()) {
+            return toHarmony(ann);
+        }
+        if (ann->isFretDiagram()) {
+            if (Harmony* h = toFretDiagram(ann)->harmony()) {
+                return h;
+            }
+        }
+    }
+    return nullptr;
 }
 
 MasterScore* MTest::readEncoreScore(const QString& name)

@@ -30,7 +30,9 @@
 #include "engraving/dom/dynamic.h"
 #include "engraving/dom/fermata.h"
 #include "engraving/dom/fingering.h"
+#include "engraving/dom/fret.h"
 #include "engraving/dom/hairpin.h"
+#include "engraving/dom/harmony.h"
 #include "engraving/dom/jump.h"
 #include "engraving/dom/keysig.h"
 #include "engraving/dom/lyrics.h"
@@ -1666,23 +1668,14 @@ TEST_F(Tst_Notes, chord_symbol_snaps_to_beat1_despite_midi_offset)
     Segment* firstSeg = m->first(SegmentType::ChordRest);
     ASSERT_NE(firstSeg, nullptr);
 
-    bool harmonyOnBeat1 = false;
-    for (EngravingItem* ann : firstSeg->annotations()) {
-        if (ann && ann->isHarmony()) {
-            harmonyOnBeat1 = true;
-            break;
-        }
-    }
-    EXPECT_TRUE(harmonyOnBeat1)
+    EXPECT_NE(segmentHarmony(firstSeg), nullptr)
         << "Chord symbol with tick=6 (MIDI offset from note at tick=0) must snap to beat-1 segment";
 
     // The second segment must NOT have the Harmony.
     Segment* secondSeg = firstSeg->next(SegmentType::ChordRest);
     if (secondSeg) {
-        for (EngravingItem* ann : secondSeg->annotations()) {
-            EXPECT_FALSE(ann && ann->isHarmony())
-                << "Chord symbol must NOT land on beat-2 segment due to MIDI drift";
-        }
+        EXPECT_EQ(segmentHarmony(secondSeg), nullptr)
+            << "Chord symbol must NOT land on beat-2 segment due to MIDI drift";
     }
 
     delete score;
@@ -1699,14 +1692,7 @@ TEST_F(Tst_Notes, chord_symbol_large_midi_drift_still_on_beat1)
     Segment* first = m->first(SegmentType::ChordRest);
     ASSERT_NE(first, nullptr);
 
-    bool harmonyOnBeat1 = false;
-    for (EngravingItem* ann : first->annotations()) {
-        if (ann && ann->isHarmony()) {
-            harmonyOnBeat1 = true;
-            break;
-        }
-    }
-    EXPECT_TRUE(harmonyOnBeat1)
+    EXPECT_NE(segmentHarmony(first), nullptr)
         << "CHD@87 (large drift from note@0) must still snap to beat-1 segment";
 
     delete score;
@@ -1728,25 +1714,70 @@ TEST_F(Tst_Notes, chord_symbol_snaps_to_beat_not_nearby_subdivision)
     EXPECT_EQ(beat1seg->tick() - m->tick(), Fraction(0, 1))
         << "First segment must be at tick=0 (beat 1)";
 
-    bool harmonyOnBeat1 = false;
-    for (EngravingItem* ann : beat1seg->annotations()) {
-        if (ann && ann->isHarmony()) {
-            harmonyOnBeat1 = true;
-            break;
-        }
-    }
-    EXPECT_TRUE(harmonyOnBeat1)
+    EXPECT_NE(segmentHarmony(beat1seg), nullptr)
         << "CHD@62 with note at tick=60 only 2t away must NOT snap to tick=60; "
         "beat-floor forces it to tick=0 (beat 1)";
 
     // Second segment (tick=60) must NOT have a harmony
     Segment* seg60 = beat1seg->next(SegmentType::ChordRest);
     if (seg60) {
-        for (EngravingItem* ann : seg60->annotations()) {
-            EXPECT_FALSE(ann && ann->isHarmony())
-                << "CHD must not land on the tick=60 subdivision segment";
+        EXPECT_EQ(segmentHarmony(seg60), nullptr)
+            << "CHD must not land on the tick=60 subdivision segment";
+    }
+
+    delete score;
+}
+
+TEST_F(Tst_Notes, chord_symbol_gets_fretboard_diagram)
+{
+    // Fixture: measure 0 carries chord "Am" (a chord MuseScore's built-in fretboard
+    // database knows) and measure 1 carries "Zzz" (a chord the database does not know).
+    // The recognised chord must be wrapped in a populated FretDiagram that carries the
+    // Harmony as its child; the unknown chord must stay a plain text Harmony with no
+    // diagram. Before this feature the importer emitted no FretDiagram at all.
+    MasterScore* score = readEncoreScore("notes_chord_symbol_fretboard.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    // Measure 0: "Am" -> FretDiagram wrapping the Harmony.
+    Measure* m0 = measureAt(score, 0);
+    ASSERT_NE(m0, nullptr);
+    Segment* s0 = m0->first(SegmentType::ChordRest);
+    ASSERT_NE(s0, nullptr);
+
+    FretDiagram* fd = nullptr;
+    bool bareHarmony0 = false;
+    for (EngravingItem* ann : s0->annotations()) {
+        if (ann && ann->isFretDiagram()) {
+            fd = toFretDiagram(ann);
+        } else if (ann && ann->isHarmony()) {
+            bareHarmony0 = true;
         }
     }
+    ASSERT_NE(fd, nullptr) << "Known chord \"Am\" must be wrapped in a FretDiagram";
+    EXPECT_FALSE(fd->isClear()) << "FretDiagram for \"Am\" must be populated from the database";
+    ASSERT_NE(fd->harmony(), nullptr) << "FretDiagram must carry the Harmony as its child";
+    EXPECT_EQ(fd->harmony()->harmonyName(), String(u"Am"));
+    EXPECT_FALSE(bareHarmony0)
+        << "Harmony must live under the FretDiagram, not directly on the segment";
+
+    // Measure 1: "Zzz" -> plain Harmony, no FretDiagram.
+    Measure* m1 = measureAt(score, 1);
+    ASSERT_NE(m1, nullptr);
+    Segment* s1 = m1->first(SegmentType::ChordRest);
+    ASSERT_NE(s1, nullptr);
+
+    bool hasFret1 = false;
+    Harmony* plain = nullptr;
+    for (EngravingItem* ann : s1->annotations()) {
+        if (ann && ann->isFretDiagram()) {
+            hasFret1 = true;
+        } else if (ann && ann->isHarmony()) {
+            plain = toHarmony(ann);
+        }
+    }
+    EXPECT_FALSE(hasFret1) << "Unknown chord \"Zzz\" must NOT get a FretDiagram";
+    EXPECT_NE(plain, nullptr) << "Unknown chord \"Zzz\" must remain a plain Harmony";
 
     delete score;
 }

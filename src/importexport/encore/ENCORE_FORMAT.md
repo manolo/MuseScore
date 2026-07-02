@@ -463,7 +463,7 @@ Encodes a chord symbol (harmony marking) above the staff.
 
 | Offset | Size | Field     | Description                                                        |
 |--------|------|-----------|--------------------------------------------------------------------|
-| +5     | 1    | `toniko`  | Chord quality type (index 0-62 into the quality table below)       |
+| +5     | 1    | `toniko`  | Chord quality type (index 0-63 into the quality table below)       |
 | +6     | 1    | `tipo`    | Flags: bit 0 = text present, bit 1 = bass note present             |
 | +7-9   | 3    | ,         | skipped                                                            |
 | +10    | 1    | `xoffset` | Horizontal display offset                                          |
@@ -487,42 +487,46 @@ Examples: `0x05`=A, `0x26`=Bb, `0x13`=F#, `0x21`=Db.
 When `tipo & 0x01` is set, `teksto` overrides `toniko` and `radiko` (the chord name is taken directly from the text field).
 When `tipo & 0x01` is clear, the chord name is constructed as `root + quality` from the table below.
 
+This is Encore's own chord palette, in palette order. It was verified against the labels
+Encore displays for a score carrying one numeric chord per measure across the full range.
+
 | Index | Quality suffix     | Index | Quality suffix |
 |-------|--------------------|-------|----------------|
 | 0     | (major, no suffix) | 32    | 9              |
 | 1     | m                  | 33    | 9(b5)          |
-| 2     | +                  | 34    | 11             |
-| 3     | dim                | 35    | 13             |
-| 4     | 7                  | 36    | 13(b5)         |
-| 5     | 5                  | 37    | 13(b9)         |
-| 6     | 6                  | 38    | 13(#9)         |
-| 7     | 6/9                | 39    | (undefined)    |
-| 8     | (add2)             | 40    | +7             |
-| 9     | (add9)             | 41    | +7(b9)         |
-| 10    | (omit3)            | 42    | +7(#9)         |
-| 11    | (omit5)            | 43    | +9             |
-| 12    | maj7               | 44    | sus2           |
-| 13    | maj7(b5)           | 45    | sus2sus4       |
-| 14    | maj7(6/9)          | 46    | sus4           |
-| 15    | maj7(#5)           | 47    | 7sus4          |
-| 16    | (undefined)        | 48    | 9sus4          |
-| 17    | maj9               | 49    | 13sus4         |
-| 18    | maj9(b5)           | 50    | m(add2)        |
-| 19    | maj9(#5)           | 51    | m(add9)        |
-| 20    | (undefined)        | 52    | m6             |
-| 21    | maj13              | 53    | m6/9           |
-| 22    | maj13(b5)          | 54    | m7             |
-| 23    | (undefined)        | 55    | m(maj7)        |
-| 24    | 7 (alternate)      | 56    | m7(b5)         |
-| 25    | 7(b5)              | 57    | m7(add4)       |
-| 26    | 7(b9)              | 58    | m7(add11)      |
-| 27    | 7(#9)              | 59    | m9             |
-| 28-31 | (undefined)        | 60    | m(maj9)        |
-|       |                    | 61    | m11            |
-|       |                    | 62    | m13            |
+| 2     | +                  | 34    | 9(#11)         |
+| 3     | dim                | 35    | 11             |
+| 4     | dim7               | 36    | 13             |
+| 5     | 5                  | 37    | 13(b5)         |
+| 6     | 6                  | 38    | 13(b9)         |
+| 7     | 6/9                | 39    | 13(#9)         |
+| 8     | (add2)             | 40    | 13(#11)        |
+| 9     | (add9)             | 41    | +7             |
+| 10    | (omit3)            | 42    | +7(b9)         |
+| 11    | (omit5)            | 43    | +7(#9)         |
+| 12    | maj7               | 44    | +9             |
+| 13    | maj7(b5)           | 45    | sus2           |
+| 14    | maj7(6/9)          | 46    | sus2,sus4      |
+| 15    | maj7(#5)           | 47    | sus4           |
+| 16    | maj7(#11)          | 48    | 7sus4          |
+| 17    | maj9               | 49    | 9sus4          |
+| 18    | maj9(b5)           | 50    | 13sus4         |
+| 19    | maj9(#5)           | 51    | m(add2)        |
+| 20    | maj9(#11)          | 52    | m(add9)        |
+| 21    | maj13              | 53    | m6             |
+| 22    | maj13(b5)          | 54    | m6/9           |
+| 23    | maj13(#11)         | 55    | m7             |
+| 24    | 7                  | 56    | m(maj7)        |
+| 25    | 7(b5)              | 57    | m7(b5)         |
+| 26    | 7(b9)              | 58    | m7(add4)       |
+| 27    | 7(#9)              | 59    | m7(add11)      |
+| 28    | 7(#11)             | 60    | m9             |
+| 29    | 7(b5,b9)           | 61    | m9(maj7)       |
+| 30    | 7(b5,#9)           | 62    | m11            |
+| 31    | 7(b9,#9)           | 63    | m13            |
 
-Indices 16, 20, 23, 28-31, 39 are undefined; treat as major (empty quality suffix).
-Index 45 encodes "sus2,sus4"; use "sus2sus4" (no comma) to avoid chord-parser conflicts.
+Encore writes the augmented fifth as "+5" (indices 15, 19); MuseScore expects "#5". Index 46
+is "sus2,sus4" in Encore; use "sus2sus4" (no comma) to avoid chord-parser conflicts.
 
 ---
 
