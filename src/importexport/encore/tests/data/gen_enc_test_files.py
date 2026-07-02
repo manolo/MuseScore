@@ -2214,6 +2214,28 @@ def gen_v0c2_tempo_eighth_beat_unit():
 
 
 # ===========================================================================
+# ornaments_trill_between_notes.enc
+# A simple "TR" trill whose stored tick (120) falls between two notes, with no note on
+# that exact tick. The importer's cumulative-tick anchor overshoots to the FOLLOWING
+# note; Encore actually draws the TR on the preceding note (its xoffset aligns with it).
+# The importer must anchor from the raw tick and snap to the note it sits on.
+#   note@0   xoff=10 (the trill's note)   note@240 xoff=40   note@480/720 fill the bar
+#   TR ORN @120, xoff=15 (aligned to note@0, left of note@240)
+# Expected: the trill lands on note@0, not note@240.
+# ===========================================================================
+def gen_v0c4_trill_between_notes():
+    elems = (
+        note_v0c4_xoff(  0, 0, 0, fv=3, pitch=60, xoff=10)
+      + ornament_v0c4( 120, 0, 0, tipo=0xB0, xoffset=15)   # TRILL_TR between note@0 and note@240
+      + note_v0c4_xoff(240, 0, 0, fv=3, pitch=62, xoff=40)
+      + note_v0c4_xoff(480, 0, 0, fv=3, pitch=64, xoff=70)
+      + note_v0c4_xoff(720, 0, 0, fv=3, pitch=65, xoff=100)
+      + end_marker()
+    )
+    return assemble(0xC4, [(meas_hdr(4, 4), elems)], fill_ts=(4, 4))
+
+
+# ===========================================================================
 # structure_start_double_barline.enc
 # A double barline drawn between two measures is stored by Encore as the SECOND
 # measure's start barline (byte 0x0C = 3 = DOUBLEL), not the first measure's end
@@ -9860,6 +9882,7 @@ if __name__=='__main__':
     write("text_tempo_changes.enc",               gen_v0c4_tempo_changes())
     write("ornaments_accents_distributed.enc",     gen_v0c4_accents_distributed())
     write("structure_start_double_barline.enc",    gen_v0c4_start_double_barline())
+    write("ornaments_trill_between_notes.enc",      gen_v0c4_trill_between_notes())
     write("tempo_v0c2_eighth_beat_unit.enc",      gen_v0c2_tempo_eighth_beat_unit(), layout=False)
     write("instruments_instrument_count_padding.enc", gen_v0c4_instrument_count_padding())
     write("instruments_name_recovery.enc",             gen_v0c4_name_recovery())

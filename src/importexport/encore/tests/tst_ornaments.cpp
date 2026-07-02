@@ -2198,3 +2198,34 @@ TEST_F(Tst_Ornaments, v0c4_accents_distributed_across_notes)
         << "accents must not stack on a single chord";
     delete score;
 }
+
+// Regression: a simple "TR" trill whose stored tick falls between two notes (no note on
+// that exact tick) used to anchor via the cumulative tick, which overshoots to the
+// following note. Encore draws the TR on the preceding note; the importer must anchor
+// from the raw tick and snap to the note it sits on.
+TEST_F(Tst_Ornaments, v0c4_trill_between_notes_snaps_to_preceding)
+{
+    MasterScore* score = readEncoreScore("ornaments_trill_between_notes.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load ornaments_trill_between_notes.enc";
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    Fraction trillTick(-1, 1);
+    int trillCount = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        for (Articulation* a : toChord(el)->articulations()) {
+            if (a && (a->symId() == SymId::ornamentTrill || a->symId() == SymId::ornamentShortTrill)) {
+                trillTick = s->tick() - m->tick();
+                ++trillCount;
+            }
+        }
+    }
+    EXPECT_EQ(trillCount, 1) << "exactly one trill must import";
+    EXPECT_EQ(trillTick, Fraction(0, 1))
+        << "the TR must land on its own (preceding) note, not the following one";
+    delete score;
+}

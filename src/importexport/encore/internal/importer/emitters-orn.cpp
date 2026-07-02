@@ -349,11 +349,23 @@ static void handleTrillOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
             }
         }
         constexpr int TRILL_SNAP_THRESHOLD = 20;
-        if (crXoffAtTick >= 0 && ornXoff < crXoffAtTick - TRILL_SNAP_THRESHOLD) {
-            pt.tick = snapStartTickByXoffset(elemTick, encMeas, staffIdx,
-                                             static_cast<int>(eo->xoffset), measTick);
+        if (crXoffAtTick >= 0) {
+            if (ornXoff < crXoffAtTick - TRILL_SNAP_THRESHOLD) {
+                pt.tick = snapStartTickByXoffset(elemTick, encMeas, staffIdx,
+                                                 static_cast<int>(eo->xoffset), measTick);
+            } else {
+                pt.tick = elemTick;
+            }
         } else {
-            pt.tick = elemTick;
+            // No note sits on the ORN's own tick: the cumTick-based elemTick can overshoot to
+            // a later note (Encore stores the trill slightly past its note). Anchor from the raw
+            // Encore tick and snap to the note it visually sits on, so a "TR" between two notes
+            // lands on the preceding one rather than the following.
+            const int wt = encWholeNoteTicks(encMeas);
+            const Fraction rawTick = measTick
+                                     + Fraction(static_cast<int>(e->tick), wt).reduced();
+            pt.tick = snapStartTickByXoffset(rawTick, encMeas, staffIdx,
+                                             static_cast<int>(eo->xoffset), measTick);
         }
         pt.simpleSymId = (eo->ornType() == EncOrnamentType::TRILL_SHORT)
                          ? SymId::ornamentShortTrill
