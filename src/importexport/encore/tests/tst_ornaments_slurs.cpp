@@ -56,6 +56,7 @@
 #include "engraving/dom/trill.h"
 
 #include "testbase.h"
+#include "../internal/importer/import-options.h"
 
 static const QString ENC_DIR(QString(iex_encore_tests_DATA_ROOT) + "/data/");
 
@@ -88,6 +89,38 @@ TEST_F(Tst_OrnamentsSlurs, no_nan_crash_opus27)
 {
     MasterScore* score = readEncoreScore("notes_corrupted.enc");
     ASSERT_NE(score, nullptr);
+    delete score;
+}
+
+TEST_F(Tst_OrnamentsSlurs, overfull_measure_slur_no_zero_length_arc)
+{
+    // An overfull measure shifts the ticks of the measures that follow, and a later
+    // cross-measure slur can then have both grips resolve to the same chord: findCR for the
+    // start grip finds no chord at/before the start tick and falls back to the measure's first
+    // chord, which is also what the (exact) end-tick lookup returns. startElement == endElement
+    // makes the Bezier layout take atan of a zero-length span and assert on a NaN control point.
+    // The importer must drop such a slur, so loading (which lays out) must not crash and no
+    // surviving slur may be zero-length.
+    //
+    // Fixture: a minimized, anonymized real-world v0xC4 (Encore 4.5) score - one staff, an
+    // overfull bar near the start, and the slur near the end. The degenerate layout only arises
+    // from this accumulated overfull tick drift, which a hand-built synthetic bar does not
+    // reproduce, so the fixture is a trimmed real file rather than generator output.
+    //
+    // The drift only appears under the IrregularMeasure overfill strategy (the shipped GUI/CLI
+    // default), which extends the bar instead of truncating it; the struct default used by
+    // readEncoreScore() is Truncate, which drops the overflow and hides the bug.
+    mu::iex::enc::EncImportOptions opts;
+    opts.overfillMeasureStrategy = mu::iex::enc::OverfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("structure_v0c4_slur_zero_length_overfull.enc", opts);
+    ASSERT_NE(score, nullptr) << "must load and lay out without a NaN crash";
+    for (auto& [tick, sp] : score->spannerMap().map()) {
+        if (!sp->isSlur()) {
+            continue;
+        }
+        EXPECT_NE(sp->startElement(), sp->endElement())
+            << "no slur may have a coinciding start and end element (zero-length arc)";
+    }
     delete score;
 }
 

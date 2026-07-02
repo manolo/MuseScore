@@ -89,7 +89,12 @@ static void removeOrphanSlurs(MasterScore* score, const std::set<const Spanner*>
             if (!graceToMain) {
                 spanner->computeEndElement();
             }
-            if (!spanner->startElement() || !spanner->endElement()) {
+            // An overfull measure can leave the score with a degenerate segment layout in
+            // which a slur's start and end grips resolve to the same chord (a zero-length
+            // arc). Laying that out takes atan of a zero-length span and asserts on a NaN
+            // Bezier control point, so drop such a slur along with the orphans.
+            if (!spanner->startElement() || !spanner->endElement()
+                || spanner->startElement() == spanner->endElement()) {
                 toRemove.push_back(spanner);
             }
         }
