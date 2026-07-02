@@ -839,3 +839,34 @@ TEST_F(Tst_OrnamentsSlurs, v0c4_ottava_two_spanners)
 
     delete score;
 }
+
+// Regression: some v0xC2 files store noise in the slur measure-count field (+16), mixing
+// plausible small values with out-of-range sentinels (0xFE/0xFF) even though every slur is
+// a within-bar arc. When any slur's count points past the last measure the whole file's
+// +16 field is unreliable; every slur must then resolve inside its own bar rather than
+// over-extending the plausible-looking counts into later measures.
+TEST_F(Tst_OrnamentsSlurs, v0c2_unreliable_slur_count_stays_in_measure)
+{
+    MasterScore* score = readEncoreScore("ornaments_v0c2_unreliable_slur_count.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load ornaments_v0c2_unreliable_slur_count.enc";
+
+    int total = 0;
+    int crossMeasure = 0;
+    for (auto it : score->spanner()) {
+        Spanner* sp = it.second;
+        if (!sp || !sp->isSlur()) {
+            continue;
+        }
+        ++total;
+        Measure* m1 = score->tick2measure(sp->tick());
+        Measure* m2 = score->tick2measure(sp->tick2());
+        if (m1 && m2 && m1 != m2) {
+            ++crossMeasure;
+        }
+    }
+    EXPECT_EQ(total, 2) << "both slurs must import";
+    EXPECT_EQ(crossMeasure, 0)
+        << "a plausible-looking count must not extend a slur past its bar when the file's "
+           "+16 field is unreliable";
+    delete score;
+}

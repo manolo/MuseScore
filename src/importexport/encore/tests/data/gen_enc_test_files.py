@@ -8140,6 +8140,31 @@ def gen_v0c2_same_measure_slur_no_cross():
 
 
 # ===========================================================================
+# ornaments_v0c2_unreliable_slur_count.enc
+# Some v0xC2 files store noise in the slur measure-count field (+16): plausible small
+# values mixed with out-of-range sentinels (0xFE/0xFF), even though every slur is a
+# within-bar arc. When any slur's count points past the last measure, the whole file's
+# +16 field is unreliable and every slur must resolve within its own bar.
+#   slur A @0:   +16 = 255 (0xFF, out of range) -> marks the file's counts unreliable
+#   slur B @480: +16 = 1   (plausible, would wrongly span to m1 if trusted)
+# Measure 1 has a note so a wrongly-trusted count would form a real cross-measure slur.
+# Expected: both slurs stay inside measure 0.
+# ===========================================================================
+def gen_v0c2_unreliable_slur_count():
+    e0 = (note_v0c2_xoff(  0, 0, 0, fv=3, pitch=60, xoffset=9)
+        + ornament_v0c4(    0, 0, 0, tipo=0x21, xoffset=11, xoffset2=12, altMezuro=255)  # sentinel
+        + note_v0c2_xoff(240, 0, 0, fv=3, pitch=62, xoffset=20)
+        + note_v0c2_xoff(480, 0, 0, fv=3, pitch=64, xoffset=50)
+        + ornament_v0c4(  480, 0, 0, tipo=0x21, xoffset=50, xoffset2=70, altMezuro=1)     # plausible
+        + note_v0c2_xoff(720, 0, 0, fv=3, pitch=65, xoffset=70)
+        + end_marker())
+    e1 = (note_v0c2_xoff(0, 0, 0, fv=3, pitch=67, xoffset=9)
+        + end_marker())
+    hdr = meas_hdr(4, 4)
+    return assemble(0xC2, [(hdr, e0), (hdr, e1)])
+
+
+# ===========================================================================
 # notes_v0c2_multiinstr_compact_routing.enc
 # v0xC2 counterpart of notes_multiinstr_compact_routing.enc.
 # Verifies compact rawStaff routing in v0xC2 format (different note size=22).
@@ -9998,6 +10023,7 @@ if __name__=='__main__':
     write("importer_enc4x_line_size3_75pct.enc",
           set_line_staff_size_hint(_enc4x_base, sz0indexed=2))  # byte[13]=2 -> Size=3 -> 75%
     write("ornaments_v0c2_same_measure_slur_no_cross.enc", gen_v0c2_same_measure_slur_no_cross())
+    write("ornaments_v0c2_unreliable_slur_count.enc", gen_v0c2_unreliable_slur_count())
     write("ornaments_multiinstr_slur_routing.enc",         gen_v0c4_multiinstr_slur_routing())
     write("ornaments_v0c2_slur_firstnote_xoff_mismatch.enc", gen_v0c2_slur_firstnote_xoff_mismatch())
     write("notes_v0c2_multiinstr_compact_routing.enc",       gen_v0c2_multiinstr_compact_routing())

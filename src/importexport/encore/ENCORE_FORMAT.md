@@ -737,8 +737,9 @@ alMezuro (+18) = count of measures forward to the end measure. xoffset2 (+20) = 
 No separate WEDGESTOP or SLURSTOP element is emitted.
 
 **v0xC2 caveat.** In v0xC2 files the +18 alMezuro slot is unreliable and often holds stale or zero values, so for non-slur ornaments (hairpins, trills) it should be ignored in favor of the xoffset heuristic.
-**Slurs are the exception:** in v0xC2 the slur's forward measure-count lives at +16 (altMezuro), not +18, and is reliable (including the value 0, which means a within-measure slur).
+**Slurs are the exception:** in v0xC2 the slur's forward measure-count lives at +16 (altMezuro), not +18, and is usually reliable (including the value 0, which means a within-measure slur).
 The absolute slur xoffset2 in v0xC2 lives in a stale ornament-coordinate origin and must not be matched directly; use the +16 count instead (see Slur endpoint below).
+Not every v0xC2 file uses +16 as a count, though: some store noise there, mixing plausible small values with out-of-range sentinels (0xFE/0xFF) even though every slur is a within-bar arc. A count that points past the last measure cannot be a real span, so when any slur in the file carries one, the +16 field is unreliable for that whole file and every slur should be resolved by the xoffset heuristic instead.
 
 **Hairpin endpoint.** Three-tier resolution:
 1. **Next-dynamic** (primary): walk forward for the first Dynamic on the same track within the alMezuro

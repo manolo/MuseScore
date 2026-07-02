@@ -464,8 +464,32 @@ void resolveSlurs(BuildCtx& ctx)
     // the recompute in removeOrphanSlurs.
     std::set<const Spanner*> explicitSlurs;
 
+    // v0xC2 files vary in whether element +16 is a real forward measure-count. Some (e.g.
+    // XEQUEABU) use it faithfully; others store noise there, mixing plausible small values
+    // with out-of-range sentinels (0xFE/0xFF) even though every slur is a within-bar arc.
+    // A count that points past the last measure cannot be a real span, so if any v0xC2 slur
+    // carries one, treat the whole file's +16 field as unreliable and resolve every slur by
+    // the xoffset heuristic instead of over-extending the plausible-looking counts.
+    bool v0c2SlurCountUnreliable = false;
+    if (enc.fmt->slurXoffset2Stale()) {
+        const int measCount = static_cast<int>(ctx.measuresByIdx.size());
+        for (const PendingSlur& ps : ctx.pendingSlurs) {
+            if (ps.alMezuroValid && ps.alMezuro > 0
+                && ps.startMeasIdx + ps.alMezuro >= measCount) {
+                v0c2SlurCountUnreliable = true;
+                break;
+            }
+        }
+    }
+
     // .enc has no SLURSTOP; endpoint derived from alMezuro (target measure) + xoffset heuristic.
-    for (const PendingSlur& ps : ctx.pendingSlurs) {
+    for (PendingSlur ps : ctx.pendingSlurs) {
+        // File-level: +16 is noise here, so drop the count and let the heuristic anchor the arc.
+        if (v0c2SlurCountUnreliable) {
+            ps.alMezuroValid = false;
+            ps.alMezuro = 0;
+            ps.endMeasIdx = ps.startMeasIdx;
+        }
         // When alMezuro is not a reliable measure count, clamp to the start measure
         // so the same-measure xoffset heuristic handles it.
         int clampedEndMeasIdx = ps.endMeasIdx;
