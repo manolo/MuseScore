@@ -441,6 +441,14 @@ minimum apart (around eight pixels in the observed files), while a chord's membe
 least that separation the notes are kept as distinct events, which preserves the full member count
 of a tightly played tuplet.
 
+Because the layout runs strictly left to right, the `xoffset` column also increases with tick and
+is aligned across the staves of a system: notes on the same beat share a column across staves. A
+note whose column matches an earlier beat but whose MIDI tick is later is a stale-tick artifact
+(the note was moved in Encore and kept its old playback tick); Encore draws it at the column's
+beat. Such a note, when it is the earliest in its own voice, should be snapped back to its
+column's tick (keeping its notated value, so the vacated time becomes a rest) rather than placed
+at the stale tick.
+
 This applies to the formats that store a layout `xoffset` (v0xC2, v0xC4, and the macOS Encore 5
 variant); it is not used for v0xA6.
 

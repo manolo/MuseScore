@@ -328,5 +328,83 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, const EncFor
         computeElementDurations(elems, durTicks, hasGraceTimeBorrowing, boundaries);
         fmt.postProcessVoiceGroup(elems, durTicks);
     }
+
+    reconcileStaleNoteTicksByColumn();
+}
+
+// Encore lays notes out left-to-right, so a note's xoffset column identifies its beat and is
+// consistent across the staves of a system. A note edited in Encore can keep a stale MIDI
+// tick that no longer matches its column: it draws at the column's beat but the importer,
+// trusting the tick, places it later (e.g. a half note stored at tick 480 with the beat-1
+// xoffset imports as rest+note instead of note+rest). Snap such a note back to its column's
+// tick, keeping the realDuration already computed from its stored tick so its notated value
+// (and the trailing rest the gap becomes) are preserved. Runs after duration computation so
+// rdur is not recomputed from the corrected tick.
+void EncMeasure::reconcileStaleNoteTicksByColumn()
+{
+    // Column (xoffset) -> earliest tick a non-grace note occupies it at, across all staves.
+    std::map<int, qint16> colTick;
+    for (auto& elem : elements) {
+        const EncNote* en = dynamic_cast<const EncNote*>(elem.get());
+        if (!en || en->graceType() != EncGraceType::NORMAL || en->tick >= durTicks) {
+            continue;
+        }
+        const int xo = static_cast<int>(static_cast<quint8>(en->xoffset));
+        if (xo <= 0) {
+            continue;
+        }
+        auto it = colTick.find(xo);
+        if (it == colTick.end() || en->tick < it->second) {
+            colTick[xo] = en->tick;
+        }
+    }
+    // Plan the moves against the ORIGINAL ticks, then apply them, so chord siblings (which
+    // share a tick and column) all move together rather than the first move making itself look
+    // like an "earlier voice-mate" that blocks the rest.
+    std::vector<std::pair<EncNote*, qint16> > moves;
+    for (auto& elem : elements) {
+        EncNote* en = dynamic_cast<EncNote*>(elem.get());
+        if (!en || en->graceType() != EncGraceType::NORMAL || en->tick >= durTicks) {
+            continue;
+        }
+        const int xo = static_cast<int>(static_cast<quint8>(en->xoffset));
+        if (xo <= 0) {
+            continue;
+        }
+        auto it = colTick.find(xo);
+        if (it == colTick.end() || it->second >= en->tick) {
+            continue;   // already the column's earliest tick (or later note is genuine)
+        }
+        const qint16 target = it->second;
+        // Reconcile only a note that is the EARLIEST in its own staff/voice: the stale-tick
+        // artifact is a whole voice drawn one column too far right, established as "too late"
+        // by the other staves' aligned columns. A note that already has an earlier voice-mate
+        // is part of a genuine sequence (its tick is meaningful relative to its neighbours,
+        // and same-xoffset neighbours are just a low-resolution/synthetic layout) -- leave it.
+        // Never merge two independent notes either: block when a DIFFERENT column already sits
+        // at the target tick on this staff/voice (same-column notes are chord siblings).
+        bool hasEarlierVoiceMate = false;
+        bool occupied = false;
+        for (auto& other : elements) {
+            const EncNote* on = dynamic_cast<const EncNote*>(other.get());
+            if (!on || on == en || on->staffIdx != en->staffIdx || on->voice != en->voice) {
+                continue;
+            }
+            if (on->tick < en->tick) {
+                hasEarlierVoiceMate = true;
+                break;
+            }
+            if (on->tick == target
+                && static_cast<int>(static_cast<quint8>(on->xoffset)) != xo) {
+                occupied = true;
+            }
+        }
+        if (!hasEarlierVoiceMate && !occupied) {
+            moves.emplace_back(en, target);
+        }
+    }
+    for (auto& [en, target] : moves) {
+        en->tick = target;
+    }
 }
 } // namespace mu::iex::enc

@@ -2214,6 +2214,23 @@ def gen_v0c2_tempo_eighth_beat_unit():
 
 
 # ===========================================================================
+# structure_stale_tick_by_column.enc
+# A 4/4 bar. Voice 0 plays quarter/quarter/half, establishing the xoffset columns (8 -> beat
+# 1, 25 -> beat 2, 49 -> beat 3). Voice 1 holds a single half note drawn in the beat-1 column
+# (xoff 8) but stored with a stale MIDI tick of 480 (beat 3), as happens when a note is edited
+# in Encore. The importer used to trust the tick and place rest+note; it must snap the note to
+# its column's beat so it imports as note (beat 1) + rest (beat 3), matching what Encore draws.
+# ===========================================================================
+def gen_v0c4_stale_tick_by_column():
+    v0 = (note_v0c4_xoff(  0, 0, 0, fv=3, pitch=72, xoff=8)
+        + note_v0c4_xoff(240, 0, 0, fv=3, pitch=74, xoff=25)
+        + note_v0c4_xoff(480, 0, 0, fv=2, pitch=76, xoff=49))
+    v1 = note_v0c4_xoff(480, 1, 0, fv=2, pitch=60, xoff=8)   # stale tick: xoff 8 = beat 1
+    elems = v0 + v1 + end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), elems)], fill_ts=(4, 4))
+
+
+# ===========================================================================
 # structure_voice4_rest_with_notes.enc
 # A 4/4 bar whose voice 0 is full (a quarter/8th/8th/quarter/quarter rhythm) plus a
 # whole-measure rest on Encore's "voice 4" (the silent-voice placeholder, voice nibble
@@ -9923,6 +9940,7 @@ if __name__=='__main__':
     write("ornaments_accents_distributed.enc",     gen_v0c4_accents_distributed())
     write("structure_start_double_barline.enc",    gen_v0c4_start_double_barline())
     write("ornaments_trill_between_notes.enc",      gen_v0c4_trill_between_notes())
+    write("structure_stale_tick_by_column.enc",    gen_v0c4_stale_tick_by_column())
     write("structure_voice4_rest_with_notes.enc",  gen_v0c4_voice4_rest_with_notes())
     write("structure_merge_stray_voice_rests.enc", gen_v0c4_merge_stray_voice_rests())
     write("tempo_v0c2_eighth_beat_unit.enc",      gen_v0c2_tempo_eighth_beat_unit(), layout=False)

@@ -1049,3 +1049,31 @@ TEST_F(Tst_Options, v0c4_voice4_rest_dropped_when_staff_has_notes)
     EXPECT_TRUE(score->sanityCheck());
     delete score;
 }
+
+// Regression: Encore lays notes out left-to-right, so a note's xoffset column identifies its
+// beat consistently across a system. A note edited in Encore can keep a stale MIDI tick that
+// no longer matches its column -- it draws at the column's beat but imports one beat late. Here
+// a half note drawn in the beat-1 column (xoff 8) but stored at tick 480 (beat 3) must import
+// as note (beat 1) + rest (beat 3), not rest + note.
+TEST_F(Tst_Options, v0c4_stale_note_tick_snaps_to_xoffset_column)
+{
+    MasterScore* score = readEncoreScore("structure_stale_tick_by_column.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load structure_stale_tick_by_column.enc";
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    ChordRest* firstV1 = nullptr;
+    for (Segment* s = m->first(SegmentType::ChordRest); s && !firstV1; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(1);   // voice 1
+        if (e && e->isChordRest()) {
+            firstV1 = toChordRest(e);
+        }
+    }
+    ASSERT_NE(firstV1, nullptr) << "voice 1 must have content";
+    EXPECT_EQ(firstV1->tick(), m->tick())
+        << "the stale-tick half note must land on beat 1 (its xoffset column), not beat 3";
+    EXPECT_TRUE(firstV1->isChord())
+        << "beat 1 must carry the note, with the rest after it";
+    EXPECT_TRUE(score->sanityCheck());
+    delete score;
+}

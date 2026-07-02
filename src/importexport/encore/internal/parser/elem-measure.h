@@ -60,6 +60,8 @@ struct EncMeasure {
 
     bool read(QDataStream& ds, const quint32 vs, const struct EncFormatReader& fmt);
     void calculateRealDurations(bool hasGraceTimeBorrowing, const struct EncFormatReader& fmt);
+    // Snap a note with a stale MIDI tick back to its xoffset column's tick (see impl).
+    void reconcileStaleNoteTicksByColumn();
 };
 
 } // namespace mu::iex::enc
