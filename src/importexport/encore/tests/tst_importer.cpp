@@ -2584,3 +2584,35 @@ TEST_F(Tst_Importer, v0c2_older_layout_tempo_beat_unit_at_plus26)
 
     delete score;
 }
+
+// Regression: a volta's end hook must reflect its measure's barline. The 1st ending
+// ends on a repeat-end barline (the repeat jumps back) and is drawn closed; the final
+// ending has no repeat barline and must be drawn open. The importer used to hard-code
+// every volta closed, so Encore's open "2." bracket imported as a closed second box.
+TEST_F(Tst_Importer, v0c4_final_ending_volta_is_open)
+{
+    MasterScore* score = readEncoreScore("structure_volta_repeat_playback.enc");
+    ASSERT_NE(score, nullptr);
+
+    const Volta* firstEnding = nullptr;
+    const Volta* secondEnding = nullptr;
+    for (const auto& p : score->spanner()) {
+        const Spanner* sp = p.second;
+        if (!sp || !sp->isVolta()) {
+            continue;
+        }
+        const Volta* v = toVolta(sp);
+        if (v->endings().size() == 1 && v->endings()[0] == 1) {
+            firstEnding = v;
+        } else if (v->endings().size() == 1 && v->endings()[0] == 2) {
+            secondEnding = v;
+        }
+    }
+    ASSERT_NE(firstEnding, nullptr) << "expected a 1st-ending volta";
+    ASSERT_NE(secondEnding, nullptr) << "expected a 2nd-ending volta";
+    EXPECT_EQ(firstEnding->voltaType(), Volta::Type::CLOSED)
+        << "the 1st ending ends on a repeat barline and must be closed";
+    EXPECT_EQ(secondEnding->voltaType(), Volta::Type::OPEN)
+        << "the final ending has no repeat barline and must be open, not a closed box";
+    delete score;
+}

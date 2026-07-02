@@ -551,9 +551,16 @@ static void fillExpandedMrestMeasure(Measure* vm, int totalStaves)
 static void coalesceVolta(BuildCtx& ctx, Measure* measure,
                           const EncMeasure& encMeas, Fraction measTick)
 {
+    // A volta ends "closed" (an end hook that turns down) only when its last measure
+    // carries a repeat-end barline, i.e. the repeat jumps back after this ending. The
+    // terminal ending of a repeat group has no repeat barline and must be drawn open, or
+    // Encore's "2." bracket imports as a closed second box instead of an open final volta.
+    const bool voltaClosed = (encMeas.endBarline() == EncBarlineType::REPEATEND);
     if (encMeas.repeatAlternative != 0) {
         if (ctx.activeVolta && ctx.activeVoltaBits == encMeas.repeatAlternative) {
             ctx.activeVolta->setTick2(measTick + measure->ticks());
+            // The volta now ends at this later measure; its hook follows that measure's barline.
+            ctx.activeVolta->setVoltaType(voltaClosed ? Volta::Type::CLOSED : Volta::Type::OPEN);
         } else {
             // Accumulate the bits from the bracket we are closing so the next bracket
             // can filter out already-labelled endings (e.g. "1.-3." then raw bits {2,4}
@@ -573,7 +580,7 @@ static void coalesceVolta(BuildCtx& ctx, Measure* measure,
                 }
             }
             Volta* volta = Factory::createVolta(ctx.score->dummy());
-            volta->setVoltaType(Volta::Type::CLOSED);
+            volta->setVoltaType(voltaClosed ? Volta::Type::CLOSED : Volta::Type::OPEN);
             volta->setTrack(0);
             volta->setTrack2(0);
             volta->setTick(measTick);
