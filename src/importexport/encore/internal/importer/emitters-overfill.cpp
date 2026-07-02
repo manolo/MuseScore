@@ -35,10 +35,12 @@
 #include "engraving/dom/durationtype.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/measure.h"
+#include "engraving/dom/note.h"
 #include "engraving/dom/rest.h"
 #include "engraving/dom/score.h"
 #include "engraving/dom/segment.h"
 #include "engraving/dom/spanner.h"
+#include "engraving/dom/tie.h"
 #include "engraving/dom/tuplet.h"
 
 #include <vector>
@@ -120,13 +122,78 @@ Fraction collectVoice(Measure* measure, track_idx_t tr, std::vector<ChordRest*>&
     return sum;
 }
 
+// Recut a trailing chord/rest that crosses the barline so it ends exactly at the barline,
+// keeping its notes. The fitting duration (`room`) is expressed as the minimal chain of
+// tied figures rather than collapsed to a single smaller value: e.g. a dotted half stranded
+// in a 5/8 bar becomes a half tied to an eighth, preserving the full sounding value up to
+// the barline. Rests are refigured the same way (no tie). Returns nothing; the crossing
+// element is replaced in place.
+static void recutCrossingCR(Measure* measure, track_idx_t tr, ChordRest* cr, const Fraction& room)
+{
+    const Fraction measTick = measure->tick();
+    const Fraction startOff = cr->tick() - measTick;
+    const bool isChord = cr->isChord();
+
+    // Snapshot the chord's pitches/spellings so the tied chain reproduces them.
+    struct NoteSpec { int pitch; int tpc1; int tpc2; };
+    std::vector<NoteSpec> notes;
+    if (isChord) {
+        for (Note* n : toChord(cr)->notes()) {
+            notes.push_back({ n->pitch(), n->tpc1(), n->tpc2() });
+        }
+    }
+    detachSpannersAt(cr);
+    cr->segment()->remove(cr);
+    delete cr;
+
+    Fraction pos = startOff;
+    Chord* prevChord = nullptr;
+    for (const TDuration& d : toDurationList(room, true /*useDots*/, 3 /*maxDots*/, false)) {
+        if (!d.isValid()) {
+            break;
+        }
+        Segment* seg = measure->getSegment(SegmentType::ChordRest, measTick + pos);
+        if (isChord) {
+            Chord* c = Factory::createChord(seg);
+            c->setTrack(tr);
+            c->setDurationType(d);
+            c->setTicks(d.fraction());
+            c->setDots(d.dots());
+            seg->add(c);
+            for (size_t i = 0; i < notes.size(); ++i) {
+                Note* n = Factory::createNote(c);
+                n->setTrack(tr);
+                n->setPitch(notes[i].pitch, notes[i].tpc1, notes[i].tpc2);
+                c->add(n);
+                if (prevChord && i < prevChord->notes().size()) {
+                    Note* prev = prevChord->notes()[i];
+                    Tie* tie = Factory::createTie(prev);
+                    tie->setStartNote(prev);
+                    tie->setEndNote(n);
+                    tie->setTrack(tr);
+                    prev->add(tie);
+                }
+            }
+            prevChord = c;
+        } else {
+            Rest* r = Factory::createRest(seg, d);
+            r->setTicks(d.fraction());
+            r->setTrack(tr);
+            r->setGap(false);
+            seg->add(r);
+        }
+        pos += d.fraction();
+    }
+}
+
 // "Remove extra notes" (Truncate). When the overflow is a trailing tuplet, the tuplet is
 // dissolved (members revert to plain face value) and the resulting notes are SHRUNK from the
 // right to keep as many of them as possible: each trailing note is halved (down to a quarter
 // of its value) and only removed if even a quarter still overflows; the process stops as soon
 // as the content fits. The last survivor is then dotted (up to 3 dots) to reach the barline
-// and any remainder is filled with an exact rest. Plain trailing overflow is just removed
-// from the right.
+// and any remainder is filled with an exact rest. A plain trailing note that crosses the
+// barline is recut to end exactly at it (as a tied chain) rather than dropped, so a note
+// stranded in a short bar keeps its value up to the barline.
 static void removeExtraNotes(Measure* measure, track_idx_t tr)
 {
     const Fraction mLen = measure->ticks();
@@ -134,16 +201,23 @@ static void removeExtraNotes(Measure* measure, track_idx_t tr)
 
     std::vector<ChordRest*> crs;
 
-    // 1. Remove trailing PLAIN notes from the right until the voice fits or a tuplet surfaces.
+    // 1. Resolve trailing PLAIN overflow from the right until the voice fits or a tuplet
+    //    surfaces. A note that starts within the bar but crosses it is recut to the barline
+    //    (keeping its value as a tied chain); a note that starts at/after the barline has no
+    //    room and is removed.
     while (true) {
         Fraction sum = collectVoice(measure, tr, crs);
         if (crs.empty() || sum <= mLen || crs.back()->tuplet()) {
             break;
         }
-        detachSpannersAt(crs.back());
-        Segment* s = crs.back()->segment();
         ChordRest* last = crs.back();
-        s->remove(last);
+        const Fraction lastStart = last->tick() - measTick;
+        if (lastStart < mLen) {
+            recutCrossingCR(measure, tr, last, mLen - lastStart);
+            break;
+        }
+        detachSpannersAt(last);
+        last->segment()->remove(last);
         delete last;
     }
 
@@ -346,21 +420,15 @@ static bool stretchOverfullVoice(Measure* measure, track_idx_t tr)
         return true;
     }
 
-    // Lone trailing note (no tuplet): reduce it to the largest dotted figure that fits.
+    // Lone trailing note (no tuplet): recut it to end exactly at the barline, keeping its full
+    // value up to that point as a tied chain (e.g. a dotted half in 5/8 -> half tied to eighth)
+    // rather than collapsing it to the largest single figure and padding with a rest.
     const Fraction preContent = voiceSum - last->actualTicks();
     const Fraction available = mLen - preContent;
     if (available <= Fraction(0, 1)) {
         return false;
     }
-    const Fraction newDur = largestDottedLE(available, 3 /*maxDots*/);
-    if (newDur <= Fraction(0, 1)) {
-        return false;
-    }
-    const TDuration td(newDur);
-    last->setDurationType(td);
-    last->setTicks(td.fraction());
-    last->setDots(td.dots());
-    addFillRest(measure, tr, measTick + preContent + newDur, mLen - (preContent + newDur));
+    recutCrossingCR(measure, tr, last, available);
     return true;
 }
 

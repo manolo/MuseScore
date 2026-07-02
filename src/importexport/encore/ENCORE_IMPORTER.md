@@ -94,20 +94,26 @@ The collapse moves notes from the upper voices into voice 1 with the generic voi
 
 ## Overfull measures
 
-Some Encore measures carry more content than the time signature allows (most often a trailing tuplet that overshoots the barline by a small, rounding-sized amount).
-Because a tuplet is indivisible, the note loop lets such content overshoot (it is not cut mid-stream) and a single post-pass, `fitOverfullMeasure` in `emitters-overfill.cpp`, resolves each overfull voice according to `overfillMeasureStrategy`.
+Some Encore measures carry more content than the time signature allows (a trailing tuplet that overshoots the barline by a small, rounding-sized amount, or a plain note whose value simply runs past the barline).
+The note loop never cuts such content mid-stream: it lets the voice overshoot the barline for every strategy, and a single post-pass, `fitOverfullMeasure` in `emitters-overfill.cpp`, resolves each overfull voice according to `overfillMeasureStrategy`.
 A tuplet is always preserved whole, compressed whole, or dissolved whole; a partial tuplet is never produced.
 
 - **Remove last notes** (`Truncate`): a trailing tuplet that is cut is dissolved (its
-  members revert to their plain face value); trailing notes are then removed until the
-  content fits; the last surviving note is lengthened by up to 3 augmentation dots, and
-  any remainder is filled with an exact rest. Destructive but always a standard measure.
+  members revert to their plain face value); trailing notes are then removed from the right
+  until the content fits. A plain note that begins within the bar but runs past the barline
+  is not dropped: it is recut to end exactly at the barline, keeping its full value up to that
+  point as a chain of tied figures (for example a dotted half stranded in a 5/8 bar becomes a
+  half tied to an eighth). Only a note that begins at or after the barline, having no room, is
+  removed outright. The last surviving note is lengthened by up to 3 augmentation dots and any
+  remainder is filled with an exact rest. Always a standard measure.
 
 - **Stretch last notes** (`StretchLastNote`): preserves all the notes by compressing the
   trailing tuplet's bracket to the largest value that fits (base limited to 3 dots so the
   notation survives layout) and filling the remainder with an exact rest; a lone trailing
-  note is reduced with up to 3 dots instead. If the compressed bracket would be smaller
-  than half the tuplet's natural span, it falls back to `IrregularMeasure` for that measure.
+  note that crosses the barline is recut to end exactly at it as a chain of tied figures (the
+  same tied-chain recut as `Truncate`), keeping its full value up to the barline. If the
+  compressed bracket would be smaller than half the tuplet's natural span, it falls back to
+  `IrregularMeasure` for that measure.
   Known limitation: the "rob value from earlier notes in the bar" refinement is not
   implemented, so a measure that cannot be resolved by compressing or reducing the trailing
   content silently degrades to `IrregularMeasure` output rather than a standard-length bar.

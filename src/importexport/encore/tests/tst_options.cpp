@@ -29,6 +29,7 @@
 #include "engraving/dom/spanner.h"
 #include "engraving/dom/volta.h"
 #include "engraving/dom/chord.h"
+#include "engraving/dom/note.h"
 #include "engraving/dom/tremolosinglechord.h"
 #include "engraving/dom/rest.h"
 #include "engraving/dom/segment.h"
@@ -1076,4 +1077,56 @@ TEST_F(Tst_Options, v0c4_stale_note_tick_snaps_to_xoffset_column)
         << "beat 1 must carry the note, with the rest after it";
     EXPECT_TRUE(score->sanityCheck());
     delete score;
+}
+
+TEST_F(Tst_Options, overfull_note_recut_to_tied_chain)
+{
+    // structure_overfill_recut_tie.enc is a minimized, anonymized 5/8 score whose third staff
+    // holds a lone dotted-half note (6/8) in the first few bars, i.e. it overruns the 5/8 barline
+    // by an eighth. Under "Remove extra notes" (Truncate) and "Stretch last notes" the note must
+    // be recut to a chain of tied figures that ends exactly at the barline (a half tied to an
+    // eighth = 5/8), preserving its sounding value up to the barline.
+    //
+    // Before the fix the note was collapsed to a single half figure during emission and the
+    // leftover eighth became a REST (an eighth of sounding value was lost). The regressive check
+    // is that the second element in the bar is a tied chord, not a rest.
+    for (OverfillStrategy strat : { OverfillStrategy::Truncate, OverfillStrategy::StretchLastNote }) {
+        EncImportOptions opts;
+        opts.overfillMeasureStrategy = strat;
+        MasterScore* score = readEncoreScoreWithOpts("structure_overfill_recut_tie.enc", opts);
+        ASSERT_NE(score, nullptr);
+        EXPECT_TRUE(score->sanityCheck()) << "recut measure must pass sanity check";
+
+        Measure* m = score->firstMeasure();
+        ASSERT_NE(m, nullptr);
+        EXPECT_EQ(m->ticks(), Fraction(5, 8)) << "Truncate/Stretch keep the nominal 5/8 bar";
+
+        // Third staff (index 2), voice 0: the overrunning dotted half.
+        const track_idx_t tr = 2 * VOICES;
+        std::vector<ChordRest*> crs;
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* e = s->element(tr);
+            if (e && e->isChordRest()) {
+                crs.push_back(toChordRest(e));
+            }
+        }
+        ASSERT_EQ(crs.size(), 2u) << "recut note becomes exactly two tied chords, no trailing rest";
+
+        // First figure: a half chord tied forward.
+        ASSERT_TRUE(crs[0]->isChord());
+        EXPECT_EQ(crs[0]->actualTicks(), Fraction(1, 2));
+        Chord* first = toChord(crs[0]);
+        ASSERT_EQ(first->notes().size(), 1u);
+        EXPECT_NE(first->notes()[0]->tieFor(), nullptr) << "first figure must tie into the leftover";
+
+        // Second figure: an eighth chord tied back, same pitch, NOT a rest (the bug left a rest).
+        ASSERT_TRUE(crs[1]->isChord()) << "leftover must be a tied note, not a rest";
+        EXPECT_EQ(crs[1]->actualTicks(), Fraction(1, 8));
+        Chord* second = toChord(crs[1]);
+        ASSERT_EQ(second->notes().size(), 1u);
+        EXPECT_NE(second->notes()[0]->tieBack(), nullptr) << "leftover must be tied from the first figure";
+        EXPECT_EQ(first->notes()[0]->pitch(), second->notes()[0]->pitch());
+
+        delete score;
+    }
 }

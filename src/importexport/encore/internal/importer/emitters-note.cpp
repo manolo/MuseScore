@@ -395,9 +395,7 @@ static bool advanceCumulativeTick(
     const int preACheck = dec.actualN;
     const int preNCheck = dec.normalN;
     const bool isInnerMember = mc.innerGroupMembers.count(ec.e) > 0;
-    Measure* measure = mc.measure;
     const auto& trackKey = ec.trackKey;
-    int savedPrevMidiTick = ec.savedPrevMidiTick;
 
     auto& tt = ctx.scratch.tuplets[trackKey];
     auto& innerTtAdv = ctx.scratch.innerTuplets[trackKey];
@@ -450,47 +448,13 @@ static bool advanceCumulativeTick(
         }
     }
 
-    // Cap advance to remaining space; remove tuplet membership to avoid sanityCheck overshoot.
-    // IrregularMeasure: skip the cap so cumTick can exceed measure ticks and capMeasureLength extends it.
-    // Tuplet members: never cut here for any strategy. A tuplet is atomic; let it overshoot
-    // and resolve the whole tuplet in the post-pass (fitOverfullMeasure). Cutting a member
-    // here would leave an invalid partial tuplet.
-    Fraction remaining = measure->ticks() - ctx.scratch.cumTick[trackKey];
-    if (advance > remaining && remaining > Fraction(0, 1)
-        && ctx.opts.overfillMeasureStrategy != OverfillStrategy::IrregularMeasure
-        && !(chord && chord->tuplet())) {
-        advance = TDuration(remaining, true).fraction();
-        if (advance.numerator() == 0) {
-            // Remaining smaller than any standard duration; chord would become zero-tick. Remove it.
-            if (chord->tuplet()) {
-                Tuplet* t = chord->tuplet();
-                chord->setTuplet(nullptr);
-                t->remove(chord);
-                tt.faceTicks -= chord->ticks();
-            }
-            chord->segment()->remove(chord);
-            delete chord;
-            chord = nullptr;
-            if (savedPrevMidiTick >= 0) {
-                ctx.scratch.prevMidiTick[trackKey] = savedPrevMidiTick;
-            } else {
-                ctx.scratch.prevMidiTick.erase(trackKey);
-            }
-            return false;
-        }
-        if (chord) {
-            if (chord->tuplet()) {
-                Tuplet* t = chord->tuplet();
-                chord->setTuplet(nullptr);
-                t->remove(chord);
-                tt.faceTicks -= chord->ticks();
-            }
-            TDuration cappedDur(advance);
-            chord->setDurationType(cappedDur);
-            chord->setTicks(cappedDur.fraction());
-            chord->setDots(0);
-        }
-    }
+    // No in-emission cap for a plain (non-tuplet) note that overruns the barline: let cumTick
+    // exceed the measure and resolve the overflow in the post-pass (fitOverfullMeasure). This is
+    // what IrregularMeasure already relied on; Truncate and StretchLastNote now do the same so a
+    // stranded note keeps its full value and is recut there to a tied chain that reaches the
+    // barline exactly (e.g. a dotted half in a 5/8 bar becomes a half tied to an eighth) rather
+    // than being collapsed to a single smaller figure with a trailing rest. Tuplet members are
+    // likewise never cut here (a tuplet is atomic; the post-pass dissolves it whole).
     ctx.scratch.cumTick[trackKey] += advance;
     if (tt.inTuplet()) {
         tt.placedTicks += advance;
@@ -616,12 +580,15 @@ static bool resolveNoteDuration(
             if (remaining > Fraction(0, 1) && fullDur.fraction() > remaining
                 && ctx.opts.overfillMeasureStrategy != OverfillStrategy::IrregularMeasure) {
                 TDuration capped(remaining, true);
-                // 1/3072-type residual: no valid TDuration; zero-tick chord breaks sanityCheck.
+                // 1/3072-type residual: no representable duration fits (the note begins a hair
+                // before the barline). A zero-tick chord breaks sanityCheck, so drop the note.
                 if (capped.fraction().numerator() == 0) {
                     return bailOut();
                 }
-                dt   = capped.type();
-                dots = capped.dots();
+                // Otherwise keep the note's full value and let it overrun the barline; the
+                // post-pass (fitOverfullMeasure) recuts the crossing note to a tied chain that
+                // ends exactly at the barline, for both Truncate and StretchLastNote. Collapsing
+                // to a single figure here would strand the sub-figure remainder as a rest.
             }
         }
     }
