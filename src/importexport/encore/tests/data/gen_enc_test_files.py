@@ -5711,6 +5711,20 @@ def gen_v0c4_prec_page_ansi_a3():
     return pre + body + _set_prec(SKELETON_POST, paper=8, ansi=True)   # DMPAPER_A3
 
 
+def gen_v0c4_prec_landscape_no_wini():
+    """PREC A4 landscape (dmPaperSize=9, dmOrientation=2) with NO WINI block. The page becomes
+    wider than the default portrait, so MuseScore's default portrait printable width would leave
+    the extra width as a lopsided right margin (~4"). The importer must recompute the printable
+    width so the right margin equals the left. WINI is the last block in SKELETON_POST, so
+    truncating before it drops the margins (PREC/TITL/TEXT stay intact)."""
+    pre = _patch_tk00('LandNoWini'.encode('utf-16-le') + b'\x00\x00')
+    body = meas_block(meas_hdr(4, 4), end_marker())
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    post = _set_prec(SKELETON_POST, paper=9, orient=2)   # A4 landscape
+    post_no_wini = post[:22964]                          # drop the trailing WINI block
+    return pre + body + post_no_wini
+
+
 def _set_wini(post, top, left, bottom_edge, right_edge):
     """Return SKELETON_POST with the WINI margin int32 fields overridden:
     @24=top, @28=left, @32=bottomEdge, @36=rightEdge (see ENCORE_FORMAT.md §WINI)."""
@@ -10334,6 +10348,7 @@ if __name__=='__main__':
     write("instruments_weak_name_defers_to_midi.enc",      gen_v0c4_weak_name_defers_to_midi())
     write("structure_prec_page_letter.enc",                gen_v0c4_prec_page_letter())
     write("structure_prec_page_a3.enc",                    gen_v0c4_prec_page_ansi_a3())
+    write("structure_prec_landscape_no_wini.enc",          gen_v0c4_prec_landscape_no_wini())
     write("structure_wini_large_margins_a3.enc",           gen_v0c4_wini_large_margins_a3())
     write("structure_non_octave_key_keeps_clef.enc",       gen_v0c4_non_octave_key_keeps_clef())
     write("structure_g_clef_key0_stays_plain.enc",         gen_v0c4_g_clef_key0_stays_plain())

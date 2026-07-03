@@ -493,6 +493,15 @@ void applyPageSetup(BuildCtx& ctx)
             score->style().set(Sid::pageOddBottomMargin,  kMacMarginIn);
             score->style().set(Sid::pageEvenBottomMargin, kMacMarginIn);
             score->style().set(Sid::pagePrintableWidth,   pageWIn - 2.0 * kMacMarginIn);
+        } else if (sizeFromPrec && !enc.pageSetup.hasData) {
+            // No WINI margins, but PREC set the page size (e.g. A4 landscape). MuseScore's default
+            // printable width is sized for the portrait page, so the extra landscape width becomes a
+            // lopsided right margin (~4" on A4 landscape). Keep the default margins but recompute the
+            // printable width so the right margin equals the left. On a portrait page whose size
+            // matches the default this is a no-op (printable already = width - 2*leftMargin).
+            const double pageWIn = score->style().styleD(Sid::pageWidth);
+            const double leftIn  = score->style().styleD(Sid::pageOddLeftMargin);
+            score->style().set(Sid::pagePrintableWidth, pageWIn - 2.0 * leftIn);
         }
     }
 

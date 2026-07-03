@@ -245,6 +245,29 @@ TEST_F(Tst_Structure, key_sig_v0xa6_from_line_entry)
 }
 
 // ===========================================================================
+// BUG: a no-WINI file whose PREC sets a landscape page kept MuseScore's default
+// printable width (sized for portrait), so the extra landscape width became a
+// lopsided right margin (~4" vs ~0.6" elsewhere). The importer must recompute the
+// printable width so the right margin equals the left.
+// ===========================================================================
+TEST_F(Tst_Structure, page_margins_no_wini_landscape_right_matches_left)
+{
+    MasterScore* score = readEncoreScore("structure_prec_landscape_no_wini.enc");
+    ASSERT_NE(score, nullptr);
+
+    const double pageW  = score->style().styleD(Sid::pageWidth);
+    const double pageH  = score->style().styleD(Sid::pageHeight);
+    EXPECT_GT(pageW, pageH) << "PREC orientation=2 must yield a landscape page";
+
+    const double leftM  = score->style().styleD(Sid::pageOddLeftMargin);
+    const double printW = score->style().styleD(Sid::pagePrintableWidth);
+    const double rightM = pageW - leftM - printW;
+    EXPECT_NEAR(rightM, leftM, 0.01)
+        << "landscape no-WINI: right margin must match the left, not leave the extra page width";
+    delete score;
+}
+
+// ===========================================================================
 // FIX: KEYCHANGE tipo=0 (C major modulation) must be emitted; previous guard silently dropped it.
 // ===========================================================================
 

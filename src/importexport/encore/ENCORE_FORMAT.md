@@ -1365,6 +1365,8 @@ If two blocks both have content (identical copies are common in single-page file
 Optional block written only when the user explicitly opens and saves Page Setup in Encore. Files that have never been through Page Setup have no WINI block; in that case use default margins.
 Present in all files saved by Encore 5.0.2 (`chuVersio = 1056`).
 
+When the WINI block is absent but PREC sets a page size, keep the default margins but recompute the printable width so the right margin equals the left. The default printable width is sized for a portrait page; on a PREC-supplied landscape page the extra width would otherwise all fall on the right (a ~4" right margin on A4 landscape against ~0.6" elsewhere). On a portrait page whose size matches the default this recompute is a no-op.
+
 Block layout (after 8-byte magic + varsize header):
 
 | Offset | Size | Type    | Description                                                       |
