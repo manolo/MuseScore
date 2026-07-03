@@ -82,19 +82,22 @@ void handleChordSym(BuildCtx& ctx, const MeasEmitCtx& mc, const NoteElemCtx& ec)
     h->setTrack(ec.track);
     h->setHarmony(String(raw));
 
-    // When MuseScore's built-in chord database knows this chord, wrap the harmony in a
-    // fretboard diagram, matching the structure the "Add fretboard diagram" action produces:
-    // the FretDiagram becomes the segment annotation and the Harmony becomes its child.
-    // Chords the database does not recognise keep the plain text symbol (no empty diagram).
-    FretDiagram* fd = Factory::createFretDiagram(ctx.score->dummy()->segment());
-    fd->setTrack(ec.track);
-    fd->updateDiagram(h->harmonyName());
-    if (fd->isClear()) {
+    // Encore records per chord symbol whether a guitar frame is drawn above it (tipo bit 2).
+    // Only then wrap the harmony in a fretboard diagram, matching the structure the "Add
+    // fretboard diagram" action produces: the FretDiagram becomes the segment annotation and
+    // the Harmony becomes its child. Chords without the frame flag, and chords whose name the
+    // built-in database cannot resolve to a diagram, keep the plain text symbol.
+    if (ecs->hasFretDiagram) {
+        FretDiagram* fd = Factory::createFretDiagram(ctx.score->dummy()->segment());
+        fd->setTrack(ec.track);
+        fd->updateDiagram(h->harmonyName());
+        if (!fd->isClear()) {
+            seg->add(fd);
+            fd->add(h);
+            return;
+        }
         delete fd;
-        seg->add(h);
-    } else {
-        seg->add(fd);
-        fd->add(h);
     }
+    seg->add(h);
 }
 } // namespace mu::iex::enc

@@ -464,7 +464,7 @@ Encodes a chord symbol (harmony marking) above the staff.
 | Offset | Size | Field     | Description                                                        |
 |--------|------|-----------|--------------------------------------------------------------------|
 | +5     | 1    | `toniko`  | Chord quality type (index 0-63 into the quality table below)       |
-| +6     | 1    | `tipo`    | Flags: bit 0 = text present, bit 1 = bass note present             |
+| +6     | 1    | `tipo`    | Flags: bit 0 = text present, bit 1 = bass note present, bit 2 = guitar frame drawn |
 | +7-9   | 3    | ,         | skipped                                                            |
 | +10    | 1    | `xoffset` | Horizontal display offset                                          |
 | +11    | 1    | ,         | skipped                                                            |
@@ -473,6 +473,8 @@ Encodes a chord symbol (harmony marking) above the staff.
 | +14    | 36   | `teksto`  | Chord text slot (present when `tipo & 0x01`; UTF-16 LE or Latin-1) |
 
 Trailing bytes (beyond `+14` when no text, beyond `+50` when text is present) are skipped using the element `size` field.
+
+Bit 2 of `tipo` (`0x04`) records whether Encore draws a guitar frame (fretboard diagram) above the chord symbol. When it is set the score shows both the chord name and its diagram; when it is clear only the chord text appears. The flag is independent of whether the chord name is recognisable: a chord with the bit clear never gets a diagram even for a common name, and a chord with the bit set but an unresolvable name shows text only.
 
 ### Root note encoding (`radiko` / `baso`)
 

@@ -1730,54 +1730,67 @@ TEST_F(Tst_Notes, chord_symbol_snaps_to_beat_not_nearby_subdivision)
 
 TEST_F(Tst_Notes, chord_symbol_gets_fretboard_diagram)
 {
-    // Fixture: measure 0 carries chord "Am" (a chord MuseScore's built-in fretboard
-    // database knows) and measure 1 carries "Zzz" (a chord the database does not know).
-    // The recognised chord must be wrapped in a populated FretDiagram that carries the
-    // Harmony as its child; the unknown chord must stay a plain text Harmony with no
-    // diagram. Before this feature the importer emitted no FretDiagram at all.
+    // Fixture: all three measures carry the same chord name, differing only in the tipo
+    // fret-frame bit (0x04). Encore draws a guitar frame only when that bit is set,
+    // independently of whether MuseScore's chord database recognises the name.
+    //   Measure 0: "Am" WITH the frame bit -> populated FretDiagram wrapping the Harmony.
+    //   Measure 1: "Am" WITHOUT the frame bit -> plain Harmony (Encore shows only the text).
+    //   Measure 2: "Zzz" WITH the frame bit but unknown to the database -> plain Harmony.
+    // Before the fix the importer gated the diagram on database recognition alone, so
+    // measure 1 wrongly received a FretDiagram (the reported bug: a frame under every chord).
     MasterScore* score = readEncoreScore("notes_chord_symbol_fretboard.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_TRUE(score->sanityCheck());
 
-    // Measure 0: "Am" -> FretDiagram wrapping the Harmony.
+    auto scanSeg = [](Segment* s, FretDiagram** fdOut, Harmony** bareOut) {
+        *fdOut = nullptr;
+        *bareOut = nullptr;
+        for (EngravingItem* ann : s->annotations()) {
+            if (ann && ann->isFretDiagram()) {
+                *fdOut = toFretDiagram(ann);
+            } else if (ann && ann->isHarmony()) {
+                *bareOut = toHarmony(ann);
+            }
+        }
+    };
+
+    // Measure 0: "Am" with frame bit -> FretDiagram wrapping the Harmony.
     Measure* m0 = measureAt(score, 0);
     ASSERT_NE(m0, nullptr);
     Segment* s0 = m0->first(SegmentType::ChordRest);
     ASSERT_NE(s0, nullptr);
-
-    FretDiagram* fd = nullptr;
-    bool bareHarmony0 = false;
-    for (EngravingItem* ann : s0->annotations()) {
-        if (ann && ann->isFretDiagram()) {
-            fd = toFretDiagram(ann);
-        } else if (ann && ann->isHarmony()) {
-            bareHarmony0 = true;
-        }
-    }
-    ASSERT_NE(fd, nullptr) << "Known chord \"Am\" must be wrapped in a FretDiagram";
-    EXPECT_FALSE(fd->isClear()) << "FretDiagram for \"Am\" must be populated from the database";
-    ASSERT_NE(fd->harmony(), nullptr) << "FretDiagram must carry the Harmony as its child";
-    EXPECT_EQ(fd->harmony()->harmonyName(), String(u"Am"));
-    EXPECT_FALSE(bareHarmony0)
+    FretDiagram* fd0 = nullptr;
+    Harmony* bare0 = nullptr;
+    scanSeg(s0, &fd0, &bare0);
+    ASSERT_NE(fd0, nullptr) << "\"Am\" with the frame bit must be wrapped in a FretDiagram";
+    EXPECT_FALSE(fd0->isClear()) << "FretDiagram for \"Am\" must be populated from the database";
+    ASSERT_NE(fd0->harmony(), nullptr) << "FretDiagram must carry the Harmony as its child";
+    EXPECT_EQ(fd0->harmony()->harmonyName(), String(u"Am"));
+    EXPECT_EQ(bare0, nullptr)
         << "Harmony must live under the FretDiagram, not directly on the segment";
 
-    // Measure 1: "Zzz" -> plain Harmony, no FretDiagram.
+    // Measure 1: "Am" WITHOUT the frame bit -> plain Harmony, no FretDiagram.
     Measure* m1 = measureAt(score, 1);
     ASSERT_NE(m1, nullptr);
     Segment* s1 = m1->first(SegmentType::ChordRest);
     ASSERT_NE(s1, nullptr);
+    FretDiagram* fd1 = nullptr;
+    Harmony* bare1 = nullptr;
+    scanSeg(s1, &fd1, &bare1);
+    EXPECT_EQ(fd1, nullptr)
+        << "\"Am\" WITHOUT the frame bit must NOT get a FretDiagram, even though the database knows it";
+    EXPECT_NE(bare1, nullptr) << "\"Am\" without the frame bit must remain a plain Harmony";
 
-    bool hasFret1 = false;
-    Harmony* plain = nullptr;
-    for (EngravingItem* ann : s1->annotations()) {
-        if (ann && ann->isFretDiagram()) {
-            hasFret1 = true;
-        } else if (ann && ann->isHarmony()) {
-            plain = toHarmony(ann);
-        }
-    }
-    EXPECT_FALSE(hasFret1) << "Unknown chord \"Zzz\" must NOT get a FretDiagram";
-    EXPECT_NE(plain, nullptr) << "Unknown chord \"Zzz\" must remain a plain Harmony";
+    // Measure 2: "Zzz" with frame bit but unknown chord -> plain Harmony (no diagram to draw).
+    Measure* m2 = measureAt(score, 2);
+    ASSERT_NE(m2, nullptr);
+    Segment* s2 = m2->first(SegmentType::ChordRest);
+    ASSERT_NE(s2, nullptr);
+    FretDiagram* fd2 = nullptr;
+    Harmony* bare2 = nullptr;
+    scanSeg(s2, &fd2, &bare2);
+    EXPECT_EQ(fd2, nullptr) << "Unknown chord \"Zzz\" must NOT get a FretDiagram";
+    EXPECT_NE(bare2, nullptr) << "Unknown chord \"Zzz\" must remain a plain Harmony";
 
     delete score;
 }

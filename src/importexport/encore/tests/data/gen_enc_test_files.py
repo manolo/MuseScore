@@ -6317,16 +6317,18 @@ def gen_v0c4_hairpin_ends_at_next_dynamic():
 # chord name reads as "Am" instead of two Latin-1 bytes merged into a
 # single BMP code unit.
 # ===========================================================================
-def chordsym_v0c4(tick, voice, staffIdx, text_bytes):
+def chordsym_v0c4(tick, voice, staffIdx, text_bytes, fretboard=False):
     """50-byte CHORD-symbol element (type=7) with `tipo` low bit set so
     the text payload is included. `text_bytes` is the 36-byte text slot
-    inserted verbatim (caller controls encoding and terminator)."""
+    inserted verbatim (caller controls encoding and terminator). When
+    `fretboard` is true, tipo bit 2 (0x04) is set: Encore draws a guitar
+    frame above this chord symbol."""
     assert len(text_bytes) == 36, len(text_bytes)
     d = bytearray(47)
     d[0] = 50              # size
     d[1] = staffIdx & 0x3F
     d[2] = 0               # toniko
-    d[3] = 1               # tipo, low bit = hasText
+    d[3] = 1 | (0x04 if fretboard else 0)  # tipo: bit0 = hasText, bit2 = show fret frame
     # d[4..6] skip3, d[7] xoffset, d[8] skip1, d[9] radiko, d[10] baso
     d[11:47] = text_bytes
     return struct.pack('<H', tick) + bytes([(7 << 4) | (voice & 0xF)]) + bytes(d)
@@ -6361,28 +6363,28 @@ def gen_v0c4_chord_quality_table():
 
 
 def gen_v0c4_chord_symbol_fretboard():
-    """Two chord symbols: a common chord the built-in database knows ("Am") and one it
-    does not ("Zzz"). The importer wraps the recognised chord in a FretDiagram (the
-    Harmony becomes its child) and leaves the unknown chord as a plain text symbol."""
-    # Measure 0: note + chord "Am" (Latin-1: bytes 0/1 both non-zero -> ONE_BYTE probe).
+    """Three chord symbols, all named "Am" or "Zzz", differing only in the tipo fret-frame
+    bit (0x04). A guitar frame is drawn only when that bit is set, regardless of whether the
+    built-in database knows the chord. Measure 0: "Am" with the frame bit -> FretDiagram
+    wrapping the Harmony. Measure 1: "Am" WITHOUT the frame bit -> plain Harmony (Encore shows
+    only the chord text). Measure 2: "Zzz" with the frame bit but unknown to the database ->
+    plain Harmony, since no diagram can be drawn."""
+    def mk(text_bytes, fretboard):
+        e  = note_v0c4(0, 0, 0, fv=3, pitch=60)
+        e += chordsym_v0c4(0, 0, 0, bytes(text_bytes), fretboard=fretboard)
+        e += note_v0c4(240, 0, 0, fv=3, pitch=62)
+        e += note_v0c4(480, 0, 0, fv=3, pitch=64)
+        e += note_v0c4(720, 0, 0, fv=3, pitch=65)
+        e += end_marker()
+        return e
     am = bytearray(36)
     am[0:2] = b'Am'
-    e0  = note_v0c4(0, 0, 0, fv=3, pitch=60)
-    e0 += chordsym_v0c4(0, 0, 0, bytes(am))
-    e0 += note_v0c4(240, 0, 0, fv=3, pitch=62)
-    e0 += note_v0c4(480, 0, 0, fv=3, pitch=64)
-    e0 += note_v0c4(720, 0, 0, fv=3, pitch=65)
-    e0 += end_marker()
-    # Measure 1: note + chord "Zzz" (a name absent from the fretboard database).
     zz = bytearray(36)
     zz[0:3] = b'Zzz'
-    e1  = note_v0c4(0, 0, 0, fv=3, pitch=60)
-    e1 += chordsym_v0c4(0, 0, 0, bytes(zz))
-    e1 += note_v0c4(240, 0, 0, fv=3, pitch=62)
-    e1 += note_v0c4(480, 0, 0, fv=3, pitch=64)
-    e1 += note_v0c4(720, 0, 0, fv=3, pitch=65)
-    e1 += end_marker()
-    return assemble(0xC4, [(meas_hdr(4, 4), e0), (meas_hdr(4, 4), e1)])
+    e0 = mk(am, True)    # frame bit set, known chord -> FretDiagram
+    e1 = mk(am, False)   # no frame bit, known chord -> plain Harmony
+    e2 = mk(zz, True)    # frame bit set, unknown chord -> plain Harmony
+    return assemble(0xC4, [(meas_hdr(4, 4), e0), (meas_hdr(4, 4), e1), (meas_hdr(4, 4), e2)])
 
 
 def gen_v0c4_chord_sym_latin1():

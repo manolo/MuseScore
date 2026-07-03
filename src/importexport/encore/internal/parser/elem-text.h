@@ -33,6 +33,7 @@ struct EncChordSym : EncMeasureElem {
     quint8 tipo   { 0 };
     quint8 radiko { 0 };
     quint8 baso   { 0 };
+    bool hasFretDiagram { false };   // tipo bit 2 (0x04): Encore draws a guitar frame
     QString teksto;
 
     using EncMeasureElem::EncMeasureElem;

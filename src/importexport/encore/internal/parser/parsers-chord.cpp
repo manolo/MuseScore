@@ -125,6 +125,9 @@ bool EncChordSym::read(QDataStream& ds)
     ds >> xoffset;
     ds.skipRawData(1);
     ds >> radiko >> baso;
+    // tipo bit 2 (0x04) means Encore draws a guitar frame (fretboard diagram) above the
+    // chord symbol; when clear only the chord text is shown.
+    hasFretDiagram = (tipo & 0x04) != 0;
     const bool hasText = (tipo & 1);
     if (hasText) {
         // 36-byte slot; UTF-16 LE in modern files, Latin-1 in legacy scores.
