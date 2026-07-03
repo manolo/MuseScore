@@ -654,6 +654,43 @@ TEST_F(Tst_Options, stretch_falls_back_to_irregular_for_tiny_bracket)
     delete score;
 }
 
+TEST_F(Tst_Options, stretch_robs_preceding_rest_to_fit_overflow)
+{
+    // notes_stretch_rob_rest.enc: a 4/4 bar filled by quarter + quarter-rest + quarter + quarter-rest,
+    // then a 3-sixteenth flourish that arrives after the voice is already full. StretchLastNote keeps
+    // the flourish (rather than dropping it at the voice-full guard) and its tier 1 reclaims the
+    // preceding rests so all three sixteenths survive in a standard 4/4 bar. Without the fix the
+    // flourish is dropped and only the two quarters remain.
+    EncImportOptions opts;
+    opts.overfillMeasureStrategy = OverfillStrategy::StretchLastNote;
+    MasterScore* score = readEncoreScoreWithOpts("notes_stretch_rob_rest.enc", opts);
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "Rest-robbed measure must pass sanity check";
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->ticks(), m->timesig()) << "Rest-robbing keeps a standard 4/4 bar (no extension)";
+
+    std::vector<Fraction> chordDurs;
+    Fraction sum(0, 1);
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChordRest()) {
+            ChordRest* cr = toChordRest(e);
+            sum += cr->actualTicks();
+            if (cr->isChord()) {
+                chordDurs.push_back(cr->actualTicks());
+            }
+        }
+    }
+    EXPECT_EQ(sum, Fraction(4, 4)) << "Voice 0 sums to exactly 4/4";
+    // Two quarters + the three-sixteenth flourish = five notes, none dropped.
+    ASSERT_EQ(chordDurs.size(), 5u) << "All five notes preserved (2 quarters + 3-sixteenth flourish)";
+    EXPECT_EQ(chordDurs[2], Fraction(1, 16));
+    EXPECT_EQ(chordDurs[3], Fraction(1, 16));
+    EXPECT_EQ(chordDurs[4], Fraction(1, 16)) << "The flourish sixteenths survive instead of being dropped";
+    delete score;
+}
+
 TEST_F(Tst_Options, overfill_irregular_measure_does_not_crash)
 {
     EncImportOptions opts;

@@ -107,17 +107,23 @@ A tuplet is always preserved whole, compressed whole, or dissolved whole; a part
   removed outright. The last surviving note is lengthened by up to 3 augmentation dots and any
   remainder is filled with an exact rest. Always a standard measure.
 
-- **Stretch last notes** (`StretchLastNote`): preserves all the notes by compressing the
-  trailing tuplet's bracket to the largest value that fits (base limited to 3 dots so the
-  notation survives layout) and filling the remainder with an exact rest; a lone trailing
-  note that crosses the barline is recut to end exactly at it as a chain of tied figures (the
-  same tied-chain recut as `Truncate`), keeping its full value up to the barline. If the
-  compressed bracket would be smaller than half the tuplet's natural span, it falls back to
+- **Stretch last notes** (`StretchLastNote`): preserves all the notes, in three tiers.
+  Tier 1 (**reclaim preceding rests**): if the overflow can be absorbed by shortening (or
+  dropping) rests that precede it, those rests are reclaimed and the following notes shift
+  earlier so the whole voice fits a standard bar with every note at its full value. This is
+  non-destructive (only rest space is taken, never note value) and applies only when the
+  reclaimable rest is at least the overflow and the voice holds no tuplet. It handles the
+  common "a figure preceded by a rest overruns the bar" case (e.g. a percussion flourish after
+  a beat of rest). Tier 2 (**compress the trailing tuplet's bracket**) to the largest value
+  that fits (base limited to 3 dots so the notation survives layout), filling the remainder
+  with an exact rest; a lone trailing note that crosses the barline is recut to end exactly at
+  it as a chain of tied figures (the same tied-chain recut as `Truncate`). Tier 3: if none of
+  the above resolves the bar (for instance the compressed bracket would be smaller than half
+  the tuplet's natural span, or there is not enough rest to reclaim), it falls back to
   `IrregularMeasure` for that measure.
-  Known limitation: the "rob value from earlier notes in the bar" refinement is not
-  implemented, so a measure that cannot be resolved by compressing or reducing the trailing
-  content silently degrades to `IrregularMeasure` output rather than a standard-length bar.
-  Prefer `Truncate` when a standard bar length is required.
+  Because Stretch preserves notes, the note loop also keeps notes that arrive after the voice
+  is already full (rather than dropping them as `Truncate` does), so tier 1 can reclaim rests
+  to fit them. Prefer `Truncate` when a standard bar length is required unconditionally.
 
 - **Mark as irregular measure** (`IrregularMeasure`): the measure's actual duration is
   extended to hold all the content, preserving the exact rhythm at the cost of a

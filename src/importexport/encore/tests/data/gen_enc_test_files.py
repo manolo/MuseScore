@@ -1423,6 +1423,23 @@ def gen_v0c4_stretch_irregular_fallback():
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
 
+def gen_v0c4_stretch_rob_rest():
+    # 4/4 percussion "flourish preceded by rests" (Himno instrument 9, m3/m5): a quarter, a quarter
+    # rest, a quarter and a quarter rest fill the bar (cumTick reaches 4/4), then a 3-sixteenth
+    # flourish arrives. With the voice already full, the non-IrregularMeasure path used to DROP the
+    # flourish; keeping it (for Stretch) lets the overfull post-pass reclaim the preceding rests
+    # (robRestsToFit) so all three sixteenths survive in a standard 4/4 bar. Truncate still drops.
+    e  = note_v0c4(  0, 0, 0, fv=3, pitch=60)   # quarter (beat 1)
+    e += rest_v0c4(240, 0, 0, fv=3)             # quarter rest (beat 2)
+    e += note_v0c4(480, 0, 0, fv=3, pitch=62)   # quarter (beat 3)
+    e += rest_v0c4(720, 0, 0, fv=3)             # quarter rest (beat 4) -> bar full at cumTick 4/4
+    e += note_v0c4(840, 0, 0, fv=5, pitch=64)   # 16th flourish, arrives with the voice full
+    e += note_v0c4(870, 0, 0, fv=5, pitch=64)   # 16th flourish
+    e += note_v0c4(900, 0, 0, fv=5, pitch=64)   # 16th flourish
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
 # ===========================================================================
 # importer_inner_tuplet_note_level_cap.enc
 #
@@ -10234,6 +10251,7 @@ if __name__=='__main__':
     write("notes_v0c2_implied_group_boundary.enc", gen_v0c2_implied_group_boundary())
     write("notes_capped_tuplet_note.enc",    gen_v0c4_capped_tuplet_note())
     write("notes_stretch_irregular_fallback.enc", gen_v0c4_stretch_irregular_fallback())
+    write("notes_stretch_rob_rest.enc", gen_v0c4_stretch_rob_rest())
     write("notes_overfull_messy_precontent_tuplet.enc", gen_v0c4_overfull_messy_precontent_tuplet())
     write("notes_overfull_tuplet_with_slur.enc", gen_v0c4_overfull_tuplet_with_slur())
     write("notes_perc_clef_positions.enc",   gen_v0c4_perc_clef_positions())

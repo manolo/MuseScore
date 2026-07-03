@@ -25,8 +25,8 @@
 // always handled atomically (never left as an invalid partial tuplet):
 //   - Truncate ("Remove extra notes"): dissolve any cut tuplet, drop trailing notes,
 //     dot the last survivor, fill the remainder with an exact rest. Destructive.
-//   - StretchLastNote ("Stretch last notes"): preserve the notes by robbing value from
-//     earlier notes / compressing the tuplet bracket; fall back to irregular.
+//   - StretchLastNote ("Stretch last notes"): preserve the notes by reclaiming preceding rests
+//     (tier 1) / compressing the tuplet bracket (tier 2); fall back to irregular.
 //   - IrregularMeasure: extend the measure to fit (handled by capMeasureLength).
 
 #include "emitters-internal.h"
@@ -344,12 +344,82 @@ static void addFillRest(Measure* measure, track_idx_t tr, const Fraction& startT
     }
 }
 
-// "Stretch last notes" for one overfull voice. Preserves all notes by either compressing
-// the trailing tuplet's bracket (tier 2) or, for a lone trailing note, reducing it with
-// dots; fills the remainder with an exact rest. Returns false (declining) when the result
-// would be too small to be musical (tuplet bracket < half its natural span, or no space):
-// the caller then falls back to extending the measure (tier 3, IrregularMeasure).
-// Note: tier 1 (robbing value from earlier notes) is intentionally not implemented yet.
+// Stretch tier 1: reclaim space from preceding rests so all notes fit within the nominal measure
+// length. Non-destructive: only shortens/removes rests, never alters note values. The overflow is
+// reclaimed from the latest rests first, so the least content shifts (typically only the trailing
+// notes move earlier onto the shortened rest). Returns true if the voice was made to fit; false if
+// there is not enough reclaimable rest (the caller falls through to tier 2/3), or if the voice holds
+// a tuplet (moving tuplet members individually is unsafe here; tier 2 compresses the bracket).
+static bool robRestsToFit(Measure* measure, track_idx_t tr)
+{
+    const Fraction mLen = measure->ticks();
+    const Fraction measTick = measure->tick();
+
+    std::vector<ChordRest*> crs;
+    const Fraction voiceSum = collectVoice(measure, tr, crs);
+    const Fraction overflow = voiceSum - mLen;
+    if (overflow <= Fraction(0, 1) || crs.empty()) {
+        return true;   // already fits
+    }
+    // Sum the reclaimable rest, and decline on any tuplet member (handled by bracket compression).
+    Fraction reclaimable(0, 1);
+    for (ChordRest* cr : crs) {
+        if (cr->tuplet()) {
+            return false;
+        }
+        if (cr->isRest()) {
+            reclaimable += cr->actualTicks();
+        }
+    }
+    if (reclaimable < overflow) {
+        return false;   // not enough rest to absorb the overflow; caller falls back
+    }
+
+    // Decide each element's kept duration: chords unchanged; reclaim `overflow` from the latest
+    // rests first (a rest reclaimed in full is dropped, a partially reclaimed one is re-split).
+    std::vector<Fraction> keepDur(crs.size());
+    Fraction need = overflow;
+    for (size_t i = crs.size(); i-- > 0;) {
+        if (crs[i]->isRest()) {
+            const Fraction cur = crs[i]->actualTicks();
+            const Fraction take = (cur < need) ? cur : need;
+            keepDur[i] = cur - take;
+            need -= take;
+        } else {
+            keepDur[i] = crs[i]->actualTicks();
+        }
+    }
+
+    // Detach everything from its (now stale) segment, then re-place sequentially from measTick.
+    // Chords are moved intact (notes/ties preserved); rests are re-created at their reduced length
+    // via addFillRest so an odd remainder splits into exact figures; fully-reclaimed rests vanish.
+    for (ChordRest* cr : crs) {
+        detachSpannersAt(cr);
+        cr->segment()->remove(cr);
+    }
+    Fraction pos(0, 1);
+    for (size_t i = 0; i < crs.size(); ++i) {
+        if (crs[i]->isRest()) {
+            delete crs[i];
+            if (keepDur[i] > Fraction(0, 1)) {
+                addFillRest(measure, tr, measTick + pos, keepDur[i]);
+                pos += keepDur[i];
+            }
+        } else {
+            Segment* seg = measure->getSegment(SegmentType::ChordRest, measTick + pos);
+            crs[i]->setTrack(tr);
+            seg->add(crs[i]);
+            pos += crs[i]->actualTicks();
+        }
+    }
+    return true;
+}
+
+// "Stretch last notes" for one overfull voice. Preserves all notes by, in order: reclaiming space
+// from preceding rests (tier 1), compressing the trailing tuplet's bracket (tier 2), or, for a lone
+// trailing note, recutting it to the barline; fills the remainder with an exact rest. Returns false
+// (declining) when the result would be too small to be musical (tuplet bracket < half its natural
+// span, or no space): the caller then falls back to extending the measure (tier 3, IrregularMeasure).
 static bool stretchOverfullVoice(Measure* measure, track_idx_t tr)
 {
     const Fraction mLen = measure->ticks();
@@ -358,6 +428,12 @@ static bool stretchOverfullVoice(Measure* measure, track_idx_t tr)
     std::vector<ChordRest*> crs;
     const Fraction voiceSum = collectVoice(measure, tr, crs);
     if (crs.empty() || voiceSum <= mLen) {
+        return true;
+    }
+
+    // Tier 1: reclaim space from preceding rests so every note keeps its full value at the
+    // nominal measure length. Only when there is enough rest (and no tuplet to preserve).
+    if (robRestsToFit(measure, tr)) {
         return true;
     }
 
@@ -456,10 +532,10 @@ void fitOverfullMeasure(BuildCtx& ctx, Measure* measure)
                 removeExtraNotes(measure, tr);
                 break;
             case OverfillStrategy::StretchLastNote:
-                // Tier 2 (compress bracket) / lone-note reduce; decline -> tier 3 (irregular).
-                // Documented limitation: tier 1 (rob value from earlier notes in the bar) is not
-                // implemented, so a voice stretch cannot resolve degrades to IrregularMeasure
-                // output rather than a standard-length bar. See ENCORE_IMPORTER.md §Overfull measures.
+                // Tier 1 (reclaim preceding rests) / tier 2 (compress bracket) / lone-note recut;
+                // decline -> tier 3 (irregular). Tier 1 robs value only from rests (non-destructive),
+                // so a stretch that still cannot resolve degrades to IrregularMeasure output rather
+                // than a standard-length bar. See ENCORE_IMPORTER.md §Overfull measures.
                 if (!stretchOverfullVoice(measure, tr)) {
                     needIrregularFallback = true;
                 }

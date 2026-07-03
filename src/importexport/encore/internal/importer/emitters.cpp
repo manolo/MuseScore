@@ -900,12 +900,14 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
     }
 
     // Drop overflow notes when voice is full; MIDI artifacts must not spill to the next MuseScore voice.
-    // IrregularMeasure: skip the cap so capMeasureLength can extend the measure to hold all notes.
+    // Only Truncate ("remove extra notes") drops here. IrregularMeasure keeps them (capMeasureLength
+    // extends the bar), and StretchLastNote keeps them too so the post-pass can reclaim preceding
+    // rests (robRestsToFit) to fit the extra notes into a regular-length bar instead of losing them.
     // Open tuplet: keep placing members so the whole tuplet lands intact; the post-pass
     // (fitOverfullMeasure) resolves an overshooting tuplet atomically.
     const bool inOpenTuplet = ctx.scratch.tuplets.count(trackKey) && ctx.scratch.tuplets.at(trackKey).inTuplet();
     if (isNoteOrRest && !isChordExt && ctx.scratch.cumTick[trackKey] >= measure->ticks()
-        && ctx.opts.overfillMeasureStrategy != OverfillStrategy::IrregularMeasure
+        && ctx.opts.overfillMeasureStrategy == OverfillStrategy::Truncate
         && !inOpenTuplet) {
         return;
     }
