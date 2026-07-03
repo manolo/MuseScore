@@ -57,6 +57,7 @@ struct EncFormatReader_V0xA6 final : EncFormatReader
     quint8 lyricTextGapAfterKie() const override { return 0; }
     // TEXT entries carry no per-entry header; STAFFTEXT tind sits at +26 in the compact ornament.
     quint8 textBlockEntryTextOffset() const override { return 0; }
+    bool textBlockEntryHasRunHeader() const override { return false; }
     int staffTextTindOffset() const override { return 26; }
     int staffTextYoffsetOffset() const override { return 6; }
     const char* formatName() const override { return "v0xA6"; }

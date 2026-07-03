@@ -172,7 +172,7 @@ void addSpannerEnds(std::vector<EncMeasure>& measures);
 struct EncTextBlock {
     std::vector<QString> entries;
 
-    bool read(QDataStream& ds, quint32 varSize, int textOffset = 14);
+    bool read(QDataStream& ds, quint32 varSize, int textOffset = 14, bool hasRunHeader = true);
 };
 
 // WINI block: margins in points (1/72 inch). See ENCORE_FORMAT.md §WINI block.

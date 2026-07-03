@@ -1272,16 +1272,28 @@ Each entry:
 | Offset | Size | Description                                                 |
 |--------|------|-------------------------------------------------------------|
 | +0     | 2    | payload size                                                |
-| +2     | 14   | header (partially decoded)                                  |
-| +16..  | var  | text (UTF-16 LE or Latin-1); lines separated by `0x04 0x00` |
+| +2..   | var  | rich-text run header (see below)                            |
+| after  | var  | text (UTF-16 LE or Latin-1); lines separated by `0x04 0x00` |
 | (end)  | 2+   | `0x00 0x00` null terminator (may be followed by padding)    |
 
-In v0xA6 the entry has no 14-byte header: the text starts immediately after the payload-size field (payload offset 0, i.e. entry offset +2) and is null-terminated Latin-1. Reading at the newer +14 (entry +16) offset lands past a short v0xA6 entry and yields empty text.
+**Rich-text run header.** The payload begins with a formatting header before the text, measured from the payload start (entry offset +2):
+
+| Payload offset | Size          | Description                                             |
+|----------------|---------------|---------------------------------------------------------|
+| +0             | 2             | run count (number of formatting runs in the text)       |
+| +2             | 2             | flags (`0x0001`)                                        |
+| +4             | run count × 4 | run-offset table (per-run character positions)          |
+| after table    | 6             | descriptor (2-byte style + 4-byte field)                |
+| after          | var           | the displayed text                                      |
+
+The text therefore starts at payload offset `4 + run count × 4 + 6`. A single-run comment (run count 1) puts the text at payload offset 14, which is why older single-run scores decoded correctly with a fixed offset of 14; a comment with several formatting runs (for example a rhythm line split into styled segments) pushes the text further, and reading at a fixed 14 lands inside the run-offset table and yields empty text. Derive the offset from the run count. When the run count is 0 (or the computed offset would exceed the entry), fall back to offset 14.
+
+In v0xA6 the entry has no rich-text header: the text starts immediately after the payload-size field (payload offset 0, i.e. entry offset +2) and is null-terminated Latin-1. Reading at the +14 offset lands past a short v0xA6 entry and yields empty text.
 
 **Line separators.** `0x04 0x00` (U+0004) separates lines within a single comment; it is NOT the text terminator.
 Each line, including the last, is followed by a `0x04 0x00`, and the whole string ends at a `0x00 0x00` null.
 A single-line entry therefore ends with `0x04 0x00 0x00 0x00`.
-To recover the text, decode from +16 up to the null, replace each U+0004 with a newline, and drop the resulting trailing newline.
+To recover the text, decode from the run-count-derived text offset up to the null, replace each U+0004 with a newline, and drop the resulting trailing newline.
 Reading the text as ending at the first `0x04 0x00` truncates a multi-line comment to its first line.
 
 Text length is bounded by the null terminator, **not** by `payload_size - 14 - 4` (some entries carry padding after the terminator).

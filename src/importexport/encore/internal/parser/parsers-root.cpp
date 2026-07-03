@@ -299,7 +299,7 @@ bool EncRoot::read(QDataStream& ds)
             // block, so keep the first non-empty block and skip later ones
             // (mirrors the TITL handling above).
             EncTextBlock tmp;
-            tmp.read(ds, varSize, fmt->textBlockEntryTextOffset());
+            tmp.read(ds, varSize, fmt->textBlockEntryTextOffset(), fmt->textBlockEntryHasRunHeader());
             if (textBlock.entries.empty()) {
                 textBlock = std::move(tmp);
             }

@@ -76,7 +76,7 @@ bool EncHeader::read(QDataStream& ds, const EncFormatReader& fmt)
 // EncTextBlock - indexed text payload for STAFFTEXT 0x1E ornaments
 // ---------------------------------------------------------------------------
 
-bool EncTextBlock::read(QDataStream& ds, quint32 varSize, int textOffset)
+bool EncTextBlock::read(QDataStream& ds, quint32 varSize, int textOffset, bool hasRunHeader)
 {
     // See ENCORE_FORMAT.md §TEXT block for layout. Entry N referenced by ORN tind byte (+32).
     // varSize is untrusted; route every skip through skipBlock/skipToBlockEnd so a value above
@@ -116,25 +116,41 @@ bool EncTextBlock::read(QDataStream& ds, quint32 varSize, int textOffset)
             break;
         }
         consumed += entrySize;
-        // Payload text at textOffset (format-supplied), probe picks UTF-16 LE or Latin-1;
+        // Payload text starts at a format-supplied offset. Formats with the rich-text run header
+        // store the text after a variable-length header: a uint16 run count, a flags word, a
+        // run-offset table (run count * uint32), then a 6-byte descriptor. The fixed textOffset
+        // (14) is only the single-run case (4 + 1*4 + 6); a multi-run comment pushes the text
+        // further, so derive the offset from the run count. See ENCORE_FORMAT.md §TEXT block.
+        int effTextOffset = textOffset;
+        if (hasRunHeader && entrySize >= 4) {
+            const int runCount = static_cast<quint8>(payload[0])
+                                 | (static_cast<quint8>(payload[1]) << 8);
+            if (runCount >= 1) {
+                const int computed = 4 + runCount * 4 + 6;
+                if (computed + 2 <= entrySize) {
+                    effTextOffset = computed;
+                }
+            }
+        }
+        // Payload text at effTextOffset, probe picks UTF-16 LE or Latin-1;
         // see ENCORE_FORMAT.md §Encoding probe.
         QString text;
-        if (entrySize >= textOffset + 2) {
-            const quint8 b0 = static_cast<quint8>(payload[textOffset]);
-            const quint8 b1 = static_cast<quint8>(payload[textOffset + 1]);
+        if (entrySize >= effTextOffset + 2) {
+            const quint8 b0 = static_cast<quint8>(payload[effTextOffset]);
+            const quint8 b1 = static_cast<quint8>(payload[effTextOffset + 1]);
             const bool isUtf16 = (b0 >= 0x20 && b0 < 0x7F && b1 == 0x00);
-            // Decode the whole text region from textOffset, then post-process. Multi-line
+            // Decode the whole text region from effTextOffset, then post-process. Multi-line
             // comments separate lines with U+0004 and terminate the string with a
             // U+0000 null. The previous code stopped at the first U+0004, truncating
             // every line but the first; see ENCORE_FORMAT.md §TEXT block.
-            const int textBytes = entrySize - textOffset;
+            const int textBytes = entrySize - effTextOffset;
             if (textBytes > 0) {
                 if (isUtf16) {
                     text = QString::fromUtf16(
-                        reinterpret_cast<const char16_t*>(payload.constData() + textOffset),
+                        reinterpret_cast<const char16_t*>(payload.constData() + effTextOffset),
                         textBytes / 2);
                 } else {
-                    text = QString::fromLatin1(payload.constData() + textOffset, textBytes);
+                    text = QString::fromLatin1(payload.constData() + effTextOffset, textBytes);
                 }
                 // Truncate at the U+0000 null terminator.
                 int nullIdx = text.indexOf(QChar(QChar::Null));

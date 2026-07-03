@@ -2897,6 +2897,30 @@ def text_block_v0c4(entries):
     return bytes(block)
 
 
+def text_block_v0c4_rich(entries, run_count=2):
+    """Build a TEXT block whose entries carry Encore's rich-text run header, as real
+    v0xC4/v0xC2 files do:
+      +0..+1: run count (uint16 LE)
+      +2..+3: flags (0x0001)
+      +4.. : run-offset table (run_count * uint32; formatting metadata, ignored on import)
+      then a 6-byte descriptor, then the UTF-16 LE text and a U+0000 terminator.
+    The text therefore starts at 4 + run_count*4 + 6, which is the fixed offset 14 only
+    when run_count == 1. A multi-run comment (run_count > 1) pushes it further, so an
+    importer that assumes offset 14 reads garbage. Used to reproduce that bug."""
+    content_size = 0
+    entries_bytes = bytearray()
+    for text in entries:
+        text_bytes = text.encode('utf-16-le') + b'\x00\x00'
+        header = struct.pack('<HH', run_count, 1)      # run count + flags
+        header += b'\x00\x00\x00\x00' * run_count      # run-offset table (dummy offsets)
+        header += b'\x7f\x01' + struct.pack('<I', 8)   # 6-byte descriptor
+        payload = bytes(header) + text_bytes
+        entries_bytes += struct.pack('<H', len(payload)) + payload
+        content_size += len(payload)
+    body = struct.pack('<HHI', 0, len(entries), content_size) + bytes(entries_bytes)
+    return b'TEXT' + struct.pack('<I', len(body)) + bytes(body)
+
+
 def keychange_v0c4(tick, voice, staffIdx, tipo):
     """6-byte KEYCHANGE element (type=2). tipo encodes the fifths index:
     0=C, 1=F, 2=Bb, ..., 8=G, 9=D, ..., 14=C#. tipo=0 is a modulation back
@@ -2927,6 +2951,27 @@ def gen_v0c4_staff_text():
     e += note_v0c4( 720, 0, 0, fv=3, pitch=65)
     e += end_marker()
     text = text_block_v0c4(['Allegretto', 'cresc.', 'dimin.', 'ten.'])
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4), text_override=text)
+
+
+# ===========================================================================
+# text_staff_text_multirun.enc
+#
+# A STAFFTEXT whose TEXT-block entry uses Encore's rich-text run header with more
+# than one formatting run (run_count=3). The displayed text ("TAN TRAN") then
+# starts at offset 4 + 3*4 + 6 = 22, not the single-run offset 14. An importer
+# that hard-codes offset 14 lands inside the run-offset table and imports nothing;
+# the text offset must be derived from the run count. 'TAN TRAN' is a non-tempo
+# phrase so it stays a StaffText rather than being promoted to TempoText.
+# ===========================================================================
+def gen_v0c4_staff_text_multirun():
+    e  = stafftext_v0c4(0, 0, 0, text_index=0)
+    e += note_v0c4(0, 0, 0, fv=3, pitch=60)
+    e += note_v0c4(240, 0, 0, fv=3, pitch=62)
+    e += note_v0c4(480, 0, 0, fv=3, pitch=64)
+    e += note_v0c4(720, 0, 0, fv=3, pitch=65)
+    e += end_marker()
+    text = text_block_v0c4_rich(['TAN TRAN'], run_count=3)
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4), text_override=text)
 
 
@@ -10131,6 +10176,7 @@ if __name__=='__main__':
     write("notes_tie_spurious_far_receiver.enc", gen_v0c4_tie_spurious_far_receiver())
     write("structure_keychange_to_c.enc",          gen_v0c4_keychange_to_c())
     write("text_staff_text.enc",              gen_v0c4_staff_text())
+    write("text_staff_text_multirun.enc",     gen_v0c4_staff_text_multirun())
     write("ornaments_arpeggio.enc",                gen_v0c4_arpeggio())
     write("text_staff_text_placement.enc",    gen_v0c4_staff_text_placement())
     write("ornaments_dynamics.enc",                gen_v0c4_dynamics())

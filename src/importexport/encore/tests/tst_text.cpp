@@ -861,6 +861,41 @@ TEST_F(Tst_Text, staff_text_resolved_via_text_block)
 }
 
 // ===========================================================================
+// BUG: a TEXT-block entry with Encore's rich-text run header stores the text after
+// a variable-length header (run count + flags + run-offset table + descriptor). The
+// importer assumed the single-run offset 14, so a comment with more than one
+// formatting run (the fixture uses 3) resolved to garbage/empty and no StaffText was
+// created. The offset must be derived from the run count. Fixture: one STAFFTEXT
+// referencing a 3-run entry whose text is "TAN TRAN" (offset 22, not 14).
+// ===========================================================================
+TEST_F(Tst_Text, staff_text_multirun_header)
+{
+    MasterScore* score = readEncoreScore("text_staff_text_multirun.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isStaffText()) {
+                    seen.push_back(toStaffText(e)->plainText());
+                }
+            }
+        }
+    }
+    std::vector<String> expected = { u"TAN TRAN" };
+    EXPECT_EQ(seen, expected)
+        << "A multi-run TEXT entry must resolve its text via the run-count-derived offset";
+    delete score;
+}
+
+// ===========================================================================
 // FEATURE: STAFFTEXT placement from ORN yoffset: positive keeps ABOVE; negative (Cartesian below staff) maps to BELOW.
 // ===========================================================================
 TEST_F(Tst_Text, staff_text_placement_from_yoffset)

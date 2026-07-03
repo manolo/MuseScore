@@ -174,6 +174,12 @@ struct EncFormatReader
     // header precedes the text); v0xA6 uses 0 (text starts at the entry). See ENCORE_FORMAT.md §TEXT block.
     virtual quint8 textBlockEntryTextOffset() const { return 14; }
 
+    // True when a TEXT-block entry begins with Encore's rich-text run header: a uint16 run count,
+    // a flags word, a run-offset table (run count * uint32), then a 6-byte descriptor before the
+    // text. The text offset is then variable (14 is only the single-run case). v0xA6 has no such
+    // header. See ENCORE_FORMAT.md §TEXT block.
+    virtual bool textBlockEntryHasRunHeader() const { return true; }
+
     // Byte offset of a STAFFTEXT ornament's TEXT-entry index (tind) measured from the type/voice
     // byte, or -1 to use the size-based location read inline. v0xA6 stores it at +26 in its compact
     // ornament; other formats return -1. See ENCORE_FORMAT.md §Ornament subtypes.
