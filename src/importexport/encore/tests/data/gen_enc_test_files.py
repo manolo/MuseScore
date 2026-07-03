@@ -8362,6 +8362,34 @@ def gen_v0c2_unreliable_slur_count():
 
 
 # ===========================================================================
+# ornaments_v0c2_constant_slur_count.enc
+# Some v0xC2 files store a per-staff CONSTANT at the slur +16 field (altMezuro) instead of a
+# per-slur measure count: every slur carries the same large value regardless of where it starts.
+# The value is in range (not the 0xFF sentinel), so the past-the-end guard misses it, and trusting
+# it draws a phantom multi-measure slur. The real arcs are short (within the bar). Two SLURSTARTs
+# at measures 0 and 4 both carry altMezuro=11; because the same span >= 3 recurs at different start
+# measures, the importer must treat +16 as unreliable and resolve each slur inside its own measure.
+# Reproduces 39 Rueda de La Ribera (top staff constant 13, bottom staff 11 -> 11/13-measure phantoms).
+# ===========================================================================
+def gen_v0c2_constant_slur_count():
+    hdr = meas_hdr(4, 4)
+    measures = []
+    for mi in range(16):
+        if mi in (0, 4):
+            # Tiny pixel span (xoffset2 - xoffset = 1) => short next-note arc once the count is dropped.
+            e = (note_v0c2_xoff(  0, 0, 0, fv=3, pitch=60, xoffset=10)
+                 + ornament_v0c4(  0, 0, 0, tipo=0x21, xoffset=10, xoffset2=11, altMezuro=11)
+                 + note_v0c2_xoff(240, 0, 0, fv=3, pitch=62, xoffset=20)
+                 + note_v0c2_xoff(480, 0, 0, fv=3, pitch=64, xoffset=30)
+                 + note_v0c2_xoff(720, 0, 0, fv=3, pitch=65, xoffset=40)
+                 + end_marker())
+        else:
+            e = note_v0c2_xoff(0, 0, 0, fv=1, pitch=60, xoffset=5) + end_marker()  # whole-note filler
+        measures.append((hdr, e))
+    return assemble(0xC2, measures)
+
+
+# ===========================================================================
 # notes_v0c2_multiinstr_compact_routing.enc
 # v0xC2 counterpart of notes_multiinstr_compact_routing.enc.
 # Verifies compact rawStaff routing in v0xC2 format (different note size=22).
@@ -10280,6 +10308,7 @@ if __name__=='__main__':
           set_line_staff_size_hint(_enc4x_base, sz0indexed=2))  # byte[13]=2 -> Size=3 -> 75%
     write("ornaments_v0c2_same_measure_slur_no_cross.enc", gen_v0c2_same_measure_slur_no_cross())
     write("ornaments_v0c2_unreliable_slur_count.enc", gen_v0c2_unreliable_slur_count())
+    write("ornaments_v0c2_constant_slur_count.enc", gen_v0c2_constant_slur_count())
     write("ornaments_multiinstr_slur_routing.enc",         gen_v0c4_multiinstr_slur_routing())
     write("ornaments_v0c2_slur_firstnote_xoff_mismatch.enc", gen_v0c2_slur_firstnote_xoff_mismatch())
     write("notes_v0c2_multiinstr_compact_routing.enc",       gen_v0c2_multiinstr_compact_routing())

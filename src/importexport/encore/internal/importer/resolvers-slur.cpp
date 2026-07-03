@@ -27,6 +27,7 @@
 #include "../parser/elem.h"
 #include <optional>
 #include <set>
+#include <map>
 #include <cstdlib>
 #include "engraving/dom/chord.h"
 #include "engraving/dom/slur.h"
@@ -470,14 +471,32 @@ void resolveSlurs(BuildCtx& ctx)
     // A count that points past the last measure cannot be a real span, so if any v0xC2 slur
     // carries one, treat the whole file's +16 field as unreliable and resolve every slur by
     // the xoffset heuristic instead of over-extending the plausible-looking counts.
+    //
+    // Some files store a per-staff CONSTANT at +16 (e.g. every slur on the top staff carries
+    // 13, every slur on the bottom staff 11) rather than a per-slur count. Those values are
+    // in range, so the past-the-end test above misses them, yet a real forward count varies
+    // from slur to slur: the same large value repeated across slurs that start in different
+    // measures is a constant field, not a span. Treat it as unreliable too.
     bool v0c2SlurCountUnreliable = false;
     if (enc.fmt->slurXoffset2Stale()) {
         const int measCount = static_cast<int>(ctx.measuresByIdx.size());
+        std::map<int, std::set<int>> startMeasuresByCount;   // alMezuro value -> distinct start measures
         for (const PendingSlur& ps : ctx.pendingSlurs) {
-            if (ps.alMezuroValid && ps.alMezuro > 0
-                && ps.startMeasIdx + ps.alMezuro >= measCount) {
+            if (!ps.alMezuroValid || ps.alMezuro <= 0) {
+                continue;
+            }
+            if (ps.startMeasIdx + ps.alMezuro >= measCount) {
                 v0c2SlurCountUnreliable = true;
                 break;
+            }
+            // A multi-measure span (>= 3) repeated at two or more different start measures is a
+            // constant, not a per-slur count. Small spans (1-2 measures) legitimately recur.
+            if (ps.alMezuro >= 3) {
+                startMeasuresByCount[ps.alMezuro].insert(ps.startMeasIdx);
+                if (startMeasuresByCount[ps.alMezuro].size() >= 2) {
+                    v0c2SlurCountUnreliable = true;
+                    break;
+                }
             }
         }
     }

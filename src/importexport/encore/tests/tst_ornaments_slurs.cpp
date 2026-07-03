@@ -870,3 +870,35 @@ TEST_F(Tst_OrnamentsSlurs, v0c2_unreliable_slur_count_stays_in_measure)
            "+16 field is unreliable";
     delete score;
 }
+
+// Regression: some v0xC2 files store a per-staff CONSTANT at the slur +16 field instead of a
+// per-slur measure count, so every slur carries the same in-range value (e.g. 11) regardless of
+// where it starts. The past-the-end guard misses in-range values, so trusting the count draws a
+// phantom multi-measure slur; the real arcs are short. Two SLURSTARTs 4 bars apart both carry
+// altMezuro=11, and the repeated span >= 3 across different start measures marks +16 unreliable,
+// so each slur must resolve inside its own bar. Reproduces 39 Rueda de La Ribera (11/13-bar phantoms).
+TEST_F(Tst_OrnamentsSlurs, v0c2_constant_slur_count_stays_in_measure)
+{
+    MasterScore* score = readEncoreScore("ornaments_v0c2_constant_slur_count.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load ornaments_v0c2_constant_slur_count.enc";
+
+    int total = 0;
+    int crossMeasure = 0;
+    for (auto it : score->spanner()) {
+        Spanner* sp = it.second;
+        if (!sp || !sp->isSlur()) {
+            continue;
+        }
+        ++total;
+        Measure* m1 = score->tick2measure(sp->tick());
+        Measure* m2 = score->tick2measure(sp->tick2());
+        if (m1 && m2 && m1 != m2) {
+            ++crossMeasure;
+        }
+    }
+    EXPECT_EQ(total, 2) << "both slurs must import";
+    EXPECT_EQ(crossMeasure, 0)
+        << "a constant +16 value repeated across start measures must not extend the slurs "
+           "into an 11-measure phantom span";
+    delete score;
+}
