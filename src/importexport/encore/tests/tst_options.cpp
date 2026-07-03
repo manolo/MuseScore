@@ -792,6 +792,28 @@ TEST_F(Tst_Options, overfill_irregular_measure_extends_measure_ticks)
     delete score;
 }
 
+TEST_F(Tst_Options, overfill_irregular_measure_length_is_reduced)
+{
+    // structure_v0c4_irregular_len_reduced.enc: a 2/4 bar overfilled with eighth-note triplets.
+    // Under IrregularMeasure the bar is extended to hold the content (here 7/8). Summing triplet
+    // ticks (denominator 24) leaves the raw fraction unreduced (21/24), which is the same duration
+    // as 7/8 but a disproportionate-looking time signature (the real-world 99/96 and 21/24 came
+    // from this). The stored actual duration must be in lowest terms.
+    EncImportOptions opts;
+    opts.overfillMeasureStrategy = OverfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("structure_v0c4_irregular_len_reduced.enc", opts);
+    ASSERT_NE(score, nullptr);
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_GT(m->ticks(), m->timesig()) << "measure extended past 2/4 to hold the triplet content";
+    EXPECT_EQ(m->ticks(), Fraction(7, 8)) << "extended actual duration equals the content";
+    EXPECT_EQ(m->ticks().reduced(), m->ticks())
+        << "irregular measure duration must be stored in lowest terms, not the raw 21/24";
+    EXPECT_EQ(m->ticks().denominator(), 8)
+        << "reduced 7/8 has denominator 8, not the unreduced 24";
+    delete score;
+}
+
 TEST_F(Tst_Options, overfill_irregular_measure_extends_past_exact_boundary)
 {
     // options_overfill_irregular_emitdrop.enc: 4/4 measure with Q+DH+Q+Q.

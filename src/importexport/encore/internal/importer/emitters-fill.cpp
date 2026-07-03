@@ -44,6 +44,12 @@ namespace mu::iex::enc {
 // after the measure's content boundary shift; ticks inside the kept content never move.
 static void resizeMeasureAndShift(BuildCtx& ctx, Measure* measure, Fraction newLen)
 {
+    // Store the actual measure duration in lowest terms. Summing triplet content (1/24, 1/12, ...)
+    // leaves the raw fraction unreduced (e.g. 99/96 or 21/24), which is the same duration but a
+    // disproportionate-looking time signature; reduce it to its canonical form (33/32, 7/8) so an
+    // irregular measure reads as a sensible value. reduced() does not change the duration, only its
+    // numerator/denominator, so the shift arithmetic below is unaffected.
+    newLen = newLen.reduced();
     const Fraction oldLen = measure->ticks();
     const Fraction delta = newLen - oldLen;
     if (delta == Fraction(0, 1)) {

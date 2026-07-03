@@ -482,6 +482,16 @@ def gen_v0c4_triplets():
     e2 += end_marker()
     return assemble(0xC4,[(meas_hdr(3,4),e1),(meas_hdr(3,4),e2)],fill_ts=(3,4))
 
+def gen_v0c4_irregular_measure_len_reduced():
+    """A 2/4 bar overfilled with nine eighth-note triplets: content = 9 * 1/12 = 9/12 = 3/4, one
+    beat past the 2/4 nominal. Under the IrregularMeasure strategy the bar is extended to hold the
+    content, and its actual duration must be stored in lowest terms (3/4), not the raw unreduced
+    9/12 that summing triplet ticks (denominator 12/24/96) produces. Reproduces the 99/96 and 21/24
+    measure lengths seen in real files (Ritmo de Tango, Ritmo de fandango castellano)."""
+    e = b''.join(note_v0c4(i*80, 0, 0, fv=4, pitch=60, tuplet=0x32) for i in range(9))
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(2, 4), e)], fill_ts=(2, 4))
+
 def gen_v0c4_tuplet_sort():
     e  = note_v0c4(0,  0,0,fv=3,pitch=67,tuplet=0x00)
     e += note_v0c4(0,  0,0,fv=4,pitch=60,tuplet=0x32)
@@ -10047,6 +10057,7 @@ if __name__=='__main__':
     write("structure_v0c2_spurious_semitone_flag.enc", gen_v0c2_spurious_semitone_flag())
     write("importer_v0c2_snap.enc",          gen_v0c2_snap())
     write("notes_triplets.enc",      gen_v0c4_triplets())
+    write("structure_v0c4_irregular_len_reduced.enc", gen_v0c4_irregular_measure_len_reduced())
     write("notes_chord_strum_xoffset.enc",     gen_v0c4_chord_strum_xoffset())
     write("notes_diff_column_no_merge.enc",    gen_v0c4_diff_column_no_merge())
     write("notes_tuplet_diff_column_keeps_members.enc", gen_v0c4_tuplet_diff_column())

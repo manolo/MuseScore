@@ -121,7 +121,10 @@ A tuplet is always preserved whole, compressed whole, or dissolved whole; a part
 
 - **Mark as irregular measure** (`IrregularMeasure`): the measure's actual duration is
   extended to hold all the content, preserving the exact rhythm at the cost of a
-  non-standard bar length.
+  non-standard bar length. The extended duration is stored in lowest terms: summing
+  triplet content (ticks with a denominator of 24, 96, ...) yields an unreduced fraction
+  such as `21/24` or `99/96`, which is the same duration as `7/8` or `33/32` but reads as a
+  disproportionate time signature, so it is reduced to its canonical form.
 
 The fill durations are split into individually notatable figures (up to 3 dots) via `toDurationList`, so a residual that is not a single note value becomes a tied sequence rather than a non-notatable duration.
 
