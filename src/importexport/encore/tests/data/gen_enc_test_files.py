@@ -2980,23 +2980,28 @@ def text_block_v0c4(entries):
     return bytes(block)
 
 
-def text_block_v0c4_rich(entries, run_count=2):
+def text_block_v0c4_rich(entries, run_count=2, desc_count=1, latin1=False):
     """Build a TEXT block whose entries carry Encore's rich-text run header, as real
     v0xC4/v0xC2 files do:
-      +0..+1: run count (uint16 LE)
-      +2..+3: flags (0x0001)
+      +0..+1: run-offset table count (uint16 LE)
+      +2..+3: formatting-descriptor count (uint16 LE)
       +4.. : run-offset table (run_count * uint32; formatting metadata, ignored on import)
-      then a 6-byte descriptor, then the UTF-16 LE text and a U+0000 terminator.
-    The text therefore starts at 4 + run_count*4 + 6, which is the fixed offset 14 only
-    when run_count == 1. A multi-run comment (run_count > 1) pushes it further, so an
-    importer that assumes offset 14 reads garbage. Used to reproduce that bug."""
+      then desc_count 6-byte descriptors, then the text and a null terminator.
+    The text therefore starts at 4 + run_count*4 + desc_count*6. A single-run, single-descriptor
+    entry lands at the fixed offset 14; more runs or more descriptors push it further, so an
+    importer that assumes a fixed offset (or a single descriptor) reads garbage. Real files use
+    both one and two descriptors on the same block. `latin1` stores the text as Latin-1 (as older
+    Windows files do) instead of UTF-16 LE, which is what turns a wrong offset into CJK gibberish."""
     content_size = 0
     entries_bytes = bytearray()
     for text in entries:
-        text_bytes = text.encode('utf-16-le') + b'\x00\x00'
-        header = struct.pack('<HH', run_count, 1)      # run count + flags
-        header += b'\x00\x00\x00\x00' * run_count      # run-offset table (dummy offsets)
-        header += b'\x7f\x01' + struct.pack('<I', 8)   # 6-byte descriptor
+        if latin1:
+            text_bytes = text.encode('latin-1') + b'\x00'
+        else:
+            text_bytes = text.encode('utf-16-le') + b'\x00\x00'
+        header = struct.pack('<HH', run_count, desc_count)   # run-offset count + descriptor count
+        header += b'\x00\x00\x00\x00' * run_count            # run-offset table (dummy offsets)
+        header += (b'\x7f\x01' + struct.pack('<I', 8)) * desc_count  # desc_count 6-byte descriptors
         payload = bytes(header) + text_bytes
         entries_bytes += struct.pack('<H', len(payload)) + payload
         content_size += len(payload)
@@ -3055,6 +3060,29 @@ def gen_v0c4_staff_text_multirun():
     e += note_v0c4(720, 0, 0, fv=3, pitch=65)
     e += end_marker()
     text = text_block_v0c4_rich(['TAN TRAN'], run_count=3)
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4), text_override=text)
+
+
+# ===========================================================================
+# text_staff_text_two_descriptors.enc
+#
+# A STAFFTEXT whose TEXT-block entry has TWO formatting descriptors (the header
+# descriptor count at +2 is 2, not 1) and stores its text as Latin-1, as older
+# Windows Encore files do for multi-run staff labels (e.g. "Cajas y Tambores").
+# The text starts at 4 + run_count*4 + desc_count*6 = 4 + 2*4 + 2*6 = 24.
+# An importer that assumes a single descriptor reads from offset 18, lands inside
+# the second descriptor, and the encoding probe there sees a byte followed by 0x00
+# and decodes the Latin-1 text as byte-swapped UTF-16 (CJK gibberish). Deriving the
+# descriptor count from +2 recovers the correct text.
+# ===========================================================================
+def gen_v0c4_staff_text_two_descriptors():
+    e  = stafftext_v0c4(0, 0, 0, text_index=0)
+    e += note_v0c4(0, 0, 0, fv=3, pitch=60)
+    e += note_v0c4(240, 0, 0, fv=3, pitch=62)
+    e += note_v0c4(480, 0, 0, fv=3, pitch=64)
+    e += note_v0c4(720, 0, 0, fv=3, pitch=65)
+    e += end_marker()
+    text = text_block_v0c4_rich(['Cajas y Tambores'], run_count=2, desc_count=2, latin1=True)
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4), text_override=text)
 
 
@@ -10327,6 +10355,7 @@ if __name__=='__main__':
     write("structure_keychange_to_c.enc",          gen_v0c4_keychange_to_c())
     write("text_staff_text.enc",              gen_v0c4_staff_text())
     write("text_staff_text_multirun.enc",     gen_v0c4_staff_text_multirun())
+    write("text_staff_text_two_descriptors.enc", gen_v0c4_staff_text_two_descriptors())
     write("ornaments_arpeggio.enc",                gen_v0c4_arpeggio())
     write("text_staff_text_placement.enc",    gen_v0c4_staff_text_placement())
     write("ornaments_dynamics.enc",                gen_v0c4_dynamics())

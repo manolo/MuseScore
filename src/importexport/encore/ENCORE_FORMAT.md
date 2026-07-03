@@ -1290,15 +1290,15 @@ Each entry:
 
 **Rich-text run header.** The payload begins with a formatting header before the text, measured from the payload start (entry offset +2):
 
-| Payload offset | Size          | Description                                             |
-|----------------|---------------|---------------------------------------------------------|
-| +0             | 2             | run count (number of formatting runs in the text)       |
-| +2             | 2             | flags (`0x0001`)                                        |
-| +4             | run count × 4 | run-offset table (per-run character positions)          |
-| after table    | 6             | descriptor (2-byte style + 4-byte field)                |
-| after          | var           | the displayed text                                      |
+| Payload offset | Size            | Description                                             |
+|----------------|-----------------|---------------------------------------------------------|
+| +0             | 2               | run-offset table count (number of formatting runs)      |
+| +2             | 2               | descriptor count (number of 6-byte style descriptors)   |
+| +4             | table count × 4 | run-offset table (per-run character positions)          |
+| after table    | desc count × 6  | descriptors (each 2-byte style + 4-byte field)          |
+| after          | var             | the displayed text                                      |
 
-The text therefore starts at payload offset `4 + run count × 4 + 6`. A single-run comment (run count 1) puts the text at payload offset 14, which is why older single-run scores decoded correctly with a fixed offset of 14; a comment with several formatting runs (for example a rhythm line split into styled segments) pushes the text further, and reading at a fixed 14 lands inside the run-offset table and yields empty text. Derive the offset from the run count. When the run count is 0 (or the computed offset would exceed the entry), fall back to offset 14.
+The text therefore starts at payload offset `4 + tableCount × 4 + descCount × 6`. The word at +2 is a genuine count, not a fixed flag: an entry can carry two descriptors as well as one. A single-run, single-descriptor comment puts the text at payload offset 14, which is why older such scores decoded correctly with a fixed offset of 14; more runs push the text further (a fixed 14 lands inside the run-offset table and yields empty text), and a second descriptor pushes it another 6 bytes (assuming a single descriptor lands 6 bytes early, inside the second descriptor, where the encoding probe then reads a byte followed by `0x00` and decodes a Latin-1 label as byte-swapped UTF-16 — CJK gibberish). Derive the offset from both counts. When either count is 0 (or the computed offset would exceed the entry), fall back to offset 14.
 
 In v0xA6 the entry has no rich-text header: the text starts immediately after the payload-size field (payload offset 0, i.e. entry offset +2) and is null-terminated Latin-1. Reading at the +14 offset lands past a short v0xA6 entry and yields empty text.
 

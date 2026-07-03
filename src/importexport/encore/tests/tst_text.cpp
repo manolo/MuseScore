@@ -896,6 +896,42 @@ TEST_F(Tst_Text, staff_text_multirun_header)
 }
 
 // ===========================================================================
+// BUG: a rich-text TEXT entry can carry more than one formatting descriptor
+// (the descriptor count at header +2, not a fixed 1). The importer assumed a
+// single 6-byte descriptor, so a two-descriptor entry read its text 6 bytes too
+// early, landing inside a descriptor; the encoding probe there saw a byte + 0x00
+// and decoded the Latin-1 label as byte-swapped UTF-16 (CJK gibberish). Fixture:
+// a STAFFTEXT whose entry has run count 2 and descriptor count 2, Latin-1 text
+// "Cajas y Tambores" at offset 4 + 2*4 + 2*6 = 24.
+// ===========================================================================
+TEST_F(Tst_Text, staff_text_two_descriptors_header)
+{
+    MasterScore* score = readEncoreScore("text_staff_text_two_descriptors.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isStaffText()) {
+                    seen.push_back(toStaffText(e)->plainText());
+                }
+            }
+        }
+    }
+    std::vector<String> expected = { u"Cajas y Tambores" };
+    EXPECT_EQ(seen, expected)
+        << "A two-descriptor TEXT entry must resolve its text via the descriptor-count-derived offset";
+    delete score;
+}
+
+// ===========================================================================
 // FEATURE: STAFFTEXT placement from ORN yoffset: positive keeps ABOVE; negative (Cartesian below staff) maps to BELOW.
 // ===========================================================================
 TEST_F(Tst_Text, staff_text_placement_from_yoffset)

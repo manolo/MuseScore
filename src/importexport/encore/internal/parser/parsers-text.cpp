@@ -123,10 +123,20 @@ bool EncTextBlock::read(QDataStream& ds, quint32 varSize, int textOffset, bool h
         // further, so derive the offset from the run count. See ENCORE_FORMAT.md §TEXT block.
         int effTextOffset = textOffset;
         if (hasRunHeader && entrySize >= 4) {
-            const int runCount = static_cast<quint8>(payload[0])
-                                 | (static_cast<quint8>(payload[1]) << 8);
-            if (runCount >= 1) {
-                const int computed = 4 + runCount * 4 + 6;
+            // The rich-text header carries two independent counts: a run-offset table count at +0
+            // (each table entry is a uint32) and a formatting-descriptor count at +2 (each
+            // descriptor is 6 bytes). The text starts after both: 4 + tableCount*4 + descCount*6.
+            // Older code treated +2 as a fixed flags word and assumed a single 6-byte descriptor;
+            // that matches only when the descriptor count is 1. Entries with two descriptors then
+            // read 6 bytes too early, landing inside a descriptor, and the encoding probe there
+            // sees a byte followed by 0x00 and decodes the Latin-1 text as byte-swapped UTF-16
+            // (CJK gibberish). Deriving both counts fixes such multi-descriptor staff texts.
+            const int tableCount = static_cast<quint8>(payload[0])
+                                   | (static_cast<quint8>(payload[1]) << 8);
+            const int descCount  = static_cast<quint8>(payload[2])
+                                   | (static_cast<quint8>(payload[3]) << 8);
+            if (tableCount >= 1 && descCount >= 1) {
+                const int computed = 4 + tableCount * 4 + descCount * 6;
                 if (computed + 2 <= entrySize) {
                     effTextOffset = computed;
                 }
