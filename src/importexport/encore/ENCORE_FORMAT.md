@@ -790,6 +790,12 @@ Using signed arithmetic gives a huge spurious pixel span; unsigned gives the cor
 In compound meters (e.g. 6/8 with beatTicks=240, durTicks=720): `beatTicks × timeSigDen = 240 × 8 = 1920 ≠ wt = 720 × 8/6 = 960`.
 Using the wrong formula shifts `firstNoteXoff` to the wrong note and causes slurs to end too late.
 
+### Stacked dynamics on one beat
+
+A file can carry two dynamic ornaments at the identical tick and `xoffset` on the same staff and voice.
+Two forms occur: an identical pair (e.g. two MF ORNs) and a contradictory pair where the score view and a part view each hold a different dynamic (e.g. `ff` at `yoffset > 0` and `fff` at `yoffset < 0`, differing only in placement).
+Encore renders one dynamic per beat. Keep the first dynamic read on a given chord-rest and drop any later dynamic already present on that beat, regardless of subtype.
+
 ### Dynamic staff displacement (yoffset > 0)
 
 Normally `yoffset < 0` (below the staff).

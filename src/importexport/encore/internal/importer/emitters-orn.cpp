@@ -73,13 +73,14 @@ static void handleDynamicOrnament(BuildCtx& /*ctx*/, MeasEmitCtx& mc,
     if (!seg) {
         seg = measure->getSegment(SegmentType::ChordRest, measTick);
     }
-    // Skip duplicate dynamics at the same tick (Encore can emit e.g. two MF ORNs).
+    // A ChordRest carries at most one dynamic per track. Encore can stack two dynamic ORNs on
+    // the same beat: an identical pair (e.g. two MF ORNs) or a contradictory one where the score
+    // view and a part view each hold a different dynamic (e.g. ff plus fff, differing only in
+    // y-placement). Either way Encore renders one; keep the first emitted and drop any later
+    // dynamic already present on this track in the segment, regardless of type.
     bool dupDyn = false;
     for (EngravingItem* ann : seg->annotations()) {
-        if (!ann || !ann->isDynamic() || ann->track() != track) {
-            continue;
-        }
-        if (toDynamic(ann)->dynamicType() == dt) {
+        if (ann && ann->isDynamic() && ann->track() == track) {
             dupDyn = true;
             break;
         }

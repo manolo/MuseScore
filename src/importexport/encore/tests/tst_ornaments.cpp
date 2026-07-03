@@ -695,6 +695,40 @@ TEST_F(Tst_Ornaments, dynamics_from_size16_ornaments)
 }
 
 // ===========================================================================
+// BUG: two dynamic ORNs at the identical tick+xoffset on one staff (e.g. an
+// ff from the score view and an fff from a part view) were both emitted,
+// stacking two contradictory dynamics on one ChordRest. Encore renders only
+// one per beat; the importer must keep the first (ff) and drop the second.
+// The fixture places ff (0x86) then fff (0x87) at tick 0, xoffset 13.
+// ===========================================================================
+TEST_F(Tst_Ornaments, dynamics_stacked_collapsed_to_first)
+{
+    MasterScore* score = readEncoreScore("ornaments_dynamics_stacked.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<DynamicType> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isDynamic()) {
+                    seen.push_back(toDynamic(e)->dynamicType());
+                }
+            }
+        }
+    }
+    // Only the first-read dynamic (ff) survives; the stacked fff is dropped.
+    const std::vector<DynamicType> expected = { DynamicType::FF };
+    EXPECT_EQ(seen, expected);
+    delete score;
+}
+
+// ===========================================================================
 // FEATURE: Voice=4 ORN with staffByte high bit (0x40) produces system-level dynamics (full 0x80..0x8A ladder).
 // ===========================================================================
 TEST_F(Tst_Ornaments, dynamics_full_ladder_voice4_system_mark)

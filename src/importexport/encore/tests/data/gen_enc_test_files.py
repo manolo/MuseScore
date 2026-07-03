@@ -3229,6 +3229,28 @@ def gen_v0c4_dynamics():
 
 
 # ===========================================================================
+# ornaments_dynamics_stacked.enc
+#
+# 4/4 measure whose first chord carries TWO dynamic ORNs at the identical
+# tick (0) and xoffset (13): 0x86=ff followed by 0x87=fff. Encore stores
+# such collisions when the score view and a part view each hold a dynamic
+# on the same beat (the two differ only in y-placement). Encore renders one
+# dynamic per beat; the importer must collapse the pair to a single Dynamic
+# (the first-read one, ff) rather than stacking two contradictory dynamics
+# on one ChordRest. Before the fix the importer kept both ff and fff.
+# ===========================================================================
+def gen_v0c4_dynamics_stacked():
+    e  = ornament_v0c4(0, 0, 0, tipo=0x86, xoffset=13, yoffset=15)
+    e += ornament_v0c4(0, 0, 0, tipo=0x87, xoffset=13, yoffset=-4)
+    e += note_v0c4(  0, 0, 0, fv=3, pitch=60)
+    e += note_v0c4(240, 0, 0, fv=3, pitch=62)
+    e += note_v0c4(480, 0, 0, fv=3, pitch=64)
+    e += note_v0c4(720, 0, 0, fv=3, pitch=65)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+# ===========================================================================
 # ornaments_dynamics_full.enc
 #
 # Two-measure 4/4 piece with one of every currently mapped dynamic ORN
@@ -10219,6 +10241,7 @@ if __name__=='__main__':
     write("ornaments_arpeggio.enc",                gen_v0c4_arpeggio())
     write("text_staff_text_placement.enc",    gen_v0c4_staff_text_placement())
     write("ornaments_dynamics.enc",                gen_v0c4_dynamics())
+    write("ornaments_dynamics_stacked.enc",        gen_v0c4_dynamics_stacked())
     write("ornaments_dynamics_full.enc",           gen_v0c4_dynamics_full())
     write("ornaments_wedgestart_at_measure_end.enc", gen_v0c4_wedgestart_at_measure_end())
     write("ornaments_double_barline_multi_staff.enc", gen_v0c4_double_barline_multi_staff())
