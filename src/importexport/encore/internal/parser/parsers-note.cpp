@@ -39,7 +39,11 @@ EncGraceType EncNote::graceType() const
     if (g1 == 0x20 && g2 == 0x04) {
         return EncGraceType::ACCIACCATURA;
     }
-    if (g1 > 0x10 && g2 != 0x01) {
+    // grace2 bit 0x04 is the acciaccatura slash marker; a real appoggiatura leaves it clear.
+    // Some normal notes (e.g. percussion) carry grace1 & 0x30 == 0x30 together with the 0x04
+    // bit set. Without excluding that bit they were misread as appoggiaturas, queued as grace
+    // chords, and discarded when no principal chord followed, dropping whole runs of notes.
+    if (g1 > 0x10 && g2 != 0x01 && !(g2 & 0x04)) {
         return EncGraceType::APPOGGIATURA;
     }
     return EncGraceType::NORMAL;

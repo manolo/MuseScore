@@ -817,6 +817,26 @@ def gen_v0c4_grace():
     e += end_marker()
     return assemble(0xC4,[(meas_hdr(2,4),e)],fill_ts=(2,4))
 
+# ===========================================================================
+# importer_grace1_0x30_normal_notes.enc
+#
+# 4/4 measure with four eighth notes at distinct ticks (0, 120, 240, 360),
+# each with grace1=0x30 (bits 0x20 and 0x10 both set) and grace2=0x04. The
+# eighth face value (>= 4) clears the grace-size filter so graceType() runs.
+# Encore uses grace1 & 0x30 == 0x20 for an appoggiatura and == 0x10 for an
+# inner grace; == 0x30 is NOT a grace. Before the fix, graceType() treated
+# any grace1 & 0x30 > 0x10 (so also 0x30) as an appoggiatura, so these normal
+# notes were queued as grace chords and, with no principal chord to attach to,
+# discarded -- the measure ended up with only a rest.
+# ===========================================================================
+def gen_v0c4_grace1_0x30_normal_notes():
+    e  = note_v0c4_grace(  0, 0, 0, fv=4, pitch=60, grace1=0x30, grace2=0x04)
+    e += note_v0c4_grace(120, 0, 0, fv=4, pitch=62, grace1=0x30, grace2=0x04)
+    e += note_v0c4_grace(240, 0, 0, fv=4, pitch=64, grace1=0x30, grace2=0x04)
+    e += note_v0c4_grace(360, 0, 0, fv=4, pitch=65, grace1=0x30, grace2=0x04)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
 def gen_v0c4_rest_not_chord_anchor():
     """A rest must not act as a chord-extension anchor. With the bug, prevMidiTick
     was updated for both notes and rests, so a NOTE arriving at the same MIDI tick
@@ -10150,6 +10170,7 @@ if __name__=='__main__':
     write("notes_corrupted.enc",     gen_v0c4_corrupted())
     write("notes_swing.enc",         gen_v0c4_swing())
     write("notes_grace.enc",             gen_v0c4_grace())
+    write("importer_grace1_0x30_normal_notes.enc", gen_v0c4_grace1_0x30_normal_notes())
     write("importer_grace_beam.enc",        gen_v0c4_grace_beam())
     write("importer_rest_in_tuplet.enc",    gen_v0c4_rest_in_tuplet())
     write("importer_full_voice_skipped.enc",        gen_v0c4_full_voice_skipped_via_loop())

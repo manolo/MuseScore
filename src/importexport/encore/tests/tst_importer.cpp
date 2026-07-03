@@ -186,6 +186,40 @@ TEST_F(Tst_Importer, grace_with_beamed_eighths_no_layout_crash)
     delete score;
 }
 
+// BUG: notes with grace1 & 0x30 == 0x30 (both the 0x20 and 0x10 bits set) were
+// misread as appoggiaturas and, having no principal chord to attach to, discarded.
+// Only 0x20 (appoggiatura) and 0x10 (inner grace) are grace markers; 0x30 is a
+// normal note. The fixture has four such eighth notes; all must survive as
+// normal chords. Before the fix the measure held only a rest.
+TEST_F(Tst_Importer, grace1_0x30_is_normal_note_not_discarded)
+{
+    MasterScore* score = readEncoreScore("importer_grace1_0x30_normal_notes.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_GT(score->nmeasures(), 0);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    int normalChords = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->elist()) {
+                if (e && e->isChord() && toChord(e)->noteType() == NoteType::NORMAL) {
+                    ++normalChords;
+                    EXPECT_TRUE(toChord(e)->graceNotes().empty())
+                        << "grace1==0x30 notes must not be attached as grace notes";
+                }
+            }
+        }
+    }
+    EXPECT_EQ(normalChords, 4)
+        << "All four grace1==0x30 notes must be imported as normal chords, not discarded";
+    delete score;
+}
+
 // FIX: the grace path applied articulations to a still-detached grace chord, where it could
 // only create plain Articulations. A trill byte therefore produced a plain Articulation
 // (isOrnament()==false) instead of an Ornament. Articulations are now applied after the grace
