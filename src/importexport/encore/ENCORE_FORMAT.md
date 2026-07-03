@@ -177,6 +177,8 @@ The step between consecutive instrument names is resolved at runtime using the s
 This step resolution applies only when recovering names from a no-TK file that also lacks a `~~~~` marker.
 Files with a `~~~~` marker (Variant A) follow the compact table path regardless of the first-block offset.
 
+**Empty name on a real TK block is authoritative.** An instrument that has its own TK block but whose name field is empty is genuinely unnamed; leave the name empty (the "Part N" fallback applies) and do NOT probe the formula/compact offsets for it. Positional name recovery is only for instruments that lack a TK block, plus, in `~~~~`-marker files, the TK-block instruments whose names the compact table legitimately supplies. Without a `~~~~` marker, the formula offset for a real-TK instrument (`202 + n*2158`) falls on unrelated music or structure bytes and would be read as a garbage name.
+
 **Percussion quirk.** Percussion tracks always report MIDI program 1 (GM Grand Piano); infer the actual kit from the track name.
 
 ---

@@ -596,6 +596,27 @@ TEST_F(Tst_Instruments, total_size_tk_midi_read_from_content_offset)
     delete score;
 }
 
+// ===========================================================================
+// BUG: an instrument with a REAL TK block but an empty name had a name
+// positionally recovered from music/structure bytes, producing garbage. An
+// empty name on a real TK block is authoritative; the importer must leave it
+// empty and fall back to "Part N" rather than probing the formula offset.
+// ===========================================================================
+TEST_F(Tst_Instruments, tk_empty_name_is_authoritative_not_recovered)
+{
+    // instruments_tk_empty_name_authoritative.enc: TK00="InstrA", TK01=empty
+    // name (real block). "ZZTOP" is planted at the formula recovery offset for
+    // instrument 1 (2360). Before the fix, instrument 1 was named "ZZTOP".
+    MasterScore* score = readEncoreScore("instruments_tk_empty_name_authoritative.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_GE(static_cast<int>(score->parts().size()), 2)
+        << "File declares 2 instruments; both must appear as parts";
+    EXPECT_EQ(score->parts()[1]->longName(), String(u"Part 2"))
+        << "An empty name on a real TK block is authoritative; instrument 1 "
+           "must fall back to 'Part 2', not recover garbage from the formula offset";
+    delete score;
+}
+
 TEST_F(Tst_Instruments, no_tk_blocks_reads_midi_and_key_from_large_tk_offsets)
 {
     // instruments_no_tk_blocks_midi_key.enc: TK00 magic zeroed, MIDI=69 at 2278, Key=6 at 2255.

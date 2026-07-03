@@ -2556,6 +2556,59 @@ def gen_v0c4_name_recovery():
     return bytes(pre) + body + SKELETON_POST
 
 
+# ===========================================================================
+# instruments_tk_empty_name_authoritative.enc
+# v0xC4 file with two REAL TK blocks (total-block-size layout): TK00 named
+# "InstrA", TK01 with an EMPTY name. There is no ~~~~ block. A printable
+# string "ZZTOP" sits at the formula recovery offset for instrument 1
+# (NAME_BASE + 1*NAME_STEP = 202 + 2158 = 2360), mimicking a real file where
+# that offset falls on unrelated music/structure bytes.
+#
+# An empty name on a real TK block is authoritative (the instrument is
+# genuinely unnamed), so the importer must leave it empty and apply the
+# "Part N" fallback -- it must NOT positionally recover a name.
+# Before the fix, recoverMissingNames probed offset 2360 and assigned the
+# garbage "ZZTOP" to instrument 1.
+# ===========================================================================
+def gen_v0c4_tk_empty_name_authoritative():
+    VARSIZE      = 80
+    CONTENT      = VARSIZE - 8
+    MIDI_IN_CONT = 60
+    TK_START     = 194
+
+    header = bytearray(SKELETON_PRE[:TK_START])
+    header[0x32] = 2   # instrumentCount = 2
+
+    def make_tk(idx, name_str, midi_1idx):
+        magic   = 'TK{:02d}'.format(idx).encode('ascii')
+        content = bytearray(CONTENT)
+        nb      = (name_str.encode('ascii') + b'\x00') if name_str else b'\x00'
+        content[:len(nb)] = nb
+        content[MIDI_IN_CONT] = midi_1idx & 0xFF
+        return bytes(magic) + struct.pack('<I', VARSIZE) + bytes(content)
+
+    tk00 = make_tk(0, 'InstrA', 49)
+    tk01 = make_tk(1, '',       34)   # real TK block, deliberately unnamed
+
+    LEGACY_TK_END = 194 + 8 + 2158
+    page_line     = SKELETON_PRE[LEGACY_TK_END:]
+
+    pre  = bytes(header) + tk00 + tk01 + page_line
+    e    = end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    data = bytearray(pre + body + SKELETON_POST)
+
+    # Plant printable garbage at instrument 1's formula recovery offset (2360),
+    # past all real blocks so findNextKnownMagic ignores it.
+    target  = 202 + 1 * 2158
+    planted = b'ZZTOP\x00'
+    if len(data) < target + len(planted):
+        data.extend(b'\x00' * (target + len(planted) - len(data)))
+    data[target:target + len(planted)] = planted
+    return bytes(data)
+
+
 def gen_v0c4_staff_hidden():
     import struct as _s
     pre = bytearray(SKELETON_PRE)
@@ -10181,6 +10234,7 @@ if __name__=='__main__':
     write("instruments_small_tk_key6.enc",               gen_v0c4_small_tk_key6())
     write("instruments_small_tk_midi49.enc",            gen_v0c4_small_tk_midi49())
     write("instruments_total_size_tk_two_instrs.enc",   gen_v0c4_total_size_tk_two_instrs())
+    write("instruments_tk_empty_name_authoritative.enc", gen_v0c4_tk_empty_name_authoritative())
     write("instruments_instr_perc_clef_drumset.enc",    gen_v0c4_instr_perc_clef_drumset())
     write("instruments_instr_drums_name_drumset.enc",   gen_v0c4_instr_drums_name_drumset())
     write("instruments_instr_laud_accent.enc",          gen_v0c4_instr_laud_accent())

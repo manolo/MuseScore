@@ -172,8 +172,19 @@ void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& d
         return;
     }
 
+    // An instrument that has its own TK block (contentFilePos >= 0) carries an authoritative
+    // name: if that name came back empty, the instrument is genuinely unnamed and must stay
+    // empty (the "Part N" fallback applies later). Positional recovery from the formula/compact
+    // offsets is only for instruments WITHOUT a TK block, and for ~~~~-block files whose compact
+    // table legitimately names even the TK-block instruments. Without a ~~~~ block, probing the
+    // formula offset for a real-TK instrument reads unrelated music/structure bytes as garbage.
+    const bool hasTilde = findTildeBlockOffset(ds) >= 0;
+    auto resolvedByTkBlock = [&](size_t n) {
+        return !hasTilde && instruments[n].contentFilePos >= 0;
+    };
+
     for (size_t n = 0; n < instruments.size(); ++n) {
-        if (!instruments[n].name.isEmpty()) {
+        if (!instruments[n].name.isEmpty() || resolvedByTkBlock(n)) {
             continue;
         }
         // Primary probe.
@@ -188,7 +199,8 @@ void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& d
         size_t nextTarget = 0;
         for (size_t k = 0; k < instruments.size(); ++k) {
             while (nextTarget < instruments.size()
-                   && !instruments[nextTarget].name.trimmed().isEmpty()) {
+                   && (!instruments[nextTarget].name.trimmed().isEmpty()
+                       || resolvedByTkBlock(nextTarget))) {
                 ++nextTarget;
             }
             if (nextTarget >= instruments.size()) {
