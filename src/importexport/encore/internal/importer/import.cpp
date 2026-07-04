@@ -364,6 +364,7 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     buildInitialSignatures(ctx);
     emitMeasures(ctx);
 
+    applyPageSetup(ctx);
     if (ctx.opts.importStaffSize) {
         applyStaffScale(score, enc);
     }
@@ -385,6 +386,10 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
         mergeNonOverlappingVoices(score);
         score->doLayout();
     }
+
+    // With imported page breaks, a first-page system may have spilled onto the next page at the
+    // default staff space; shrink it just enough (<= 0.022 inch) to pull that system back.
+    fitFirstPageStaffSpace(ctx);
 
     // doLayout computes and caches the repeat list; at that point voltas may not yet be
     // anchored, so the cached expansion ignores 1st/2nd endings and replays the 1st
