@@ -20,6 +20,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Internal interface shared across the emitters-*.cpp files: the per-measure and per-element
+// context structs, element handlers (note/rest/ornament/chord symbol), staff/voice routing,
+// measure gap-fill and overfull-fit helpers, lyrics and tempo emission.
+
 #ifndef MU_IEX_ENCORE_NOTELOOP_INTERNAL_H
 #define MU_IEX_ENCORE_NOTELOOP_INTERNAL_H
 
@@ -43,6 +47,10 @@ class Tuplet;
 }
 
 namespace mu::iex::enc {
+// Spare voice reserved for Encore cue notes (and cue-ified dangling graces), kept separate from the
+// principal line. Voice index 1 within the staff (track = staffIdx*VOICES + kCueVoice).
+inline constexpr int kCueVoice = 1;
+
 // faceValue low nibble: 1=whole, 2=half ... 8=256th; 0 and 9..15 are invalid.
 bool isValidFaceValue(quint8 faceValue);
 void applyConcertPitch(mu::engraving::Note* n, int semitone);
@@ -72,6 +80,10 @@ struct MeasEmitCtx {
     std::multimap<std::tuple<int, int, int>, int8_t> tieStartSet;
     std::set<int> noteTicks;
     std::set<int> voice4NoteTicks;
+    // (staffIdx, voice, tick) of every NOTE. A plain (non-tuplet) REST at a position that also holds
+    // a note in the same voice is a redundant placeholder Encore writes for the voice; it must be
+    // dropped so the note keeps the beat instead of being pushed after the rest.
+    std::set<std::tuple<int, int, int> > noteStaffVoiceTicks;
     // Staves (raw index) carrying a real voice-0..3 note in this measure. A whole-measure
     // rest that arrives on Encore's "voice 4" (the silent-voice placeholder) is redundant on
     // such a staff and would corrupt the bar if merged into voice 0; it is skipped.
@@ -137,12 +149,14 @@ struct RoutedTrack {
 std::optional<RoutedTrack> routeElementStaffVoice(
     const EncMeasureElem* e, bool isNoteOrRest, const std::array<int, 256>& lineSlotByRawByte, const MeasEmitCtx& mc, const BuildCtx& ctx);
 
-// Case-B pickup adjustment: shorten measure 0 if loop placed less than its nominal length. (emitters-fill.cpp)
-void adjustPickupMeasure(BuildCtx& ctx, mu::engraving::Measure* measure, int measIdx);
-// Pre-fill trailing silence with invisible gap rests. (emitters-fill.cpp)
-void fillTrailingGaps(BuildCtx& ctx, mu::engraving::Measure* measure, mu::engraving::Fraction measTick);
-// Fix over/undershoots up to 1/24. (emitters-fill.cpp)
-void correctMeasureLength(BuildCtx& ctx, mu::engraving::Measure* measure);
+// Reconcile a finalized measure to its shared length on every track: pickup shorten, trailing-gap
+// fill (or irregular shrink), MuseScore's empty-voice fill, small-delta correction, then overfull
+// resolution. The one owner of "every voice sums to the measure length". (emitters-fill.cpp)
+void reconcileMeasureLength(BuildCtx& ctx, mu::engraving::Measure* measure, mu::engraving::Fraction measTick, int measIdx);
+// End-of-score handling of grace chords that never found a principal chord: re-place them as small
+// audible cue notes in the spare cue voice of their own bar (flush to the barline) instead of
+// dropping them. Clears ctx.scratch.pendingGraces. (emitters-fill.cpp)
+void handleDanglingGraces(BuildCtx& ctx);
 // Extend the measure to the max voice content (IrregularMeasure / Stretch fallback). (emitters-fill.cpp)
 void extendMeasureIrregular(BuildCtx& ctx, mu::engraving::Measure* measure);
 // Nuclear hard-cap: remove trailing elements and fill deficit. (emitters-fill.cpp)
