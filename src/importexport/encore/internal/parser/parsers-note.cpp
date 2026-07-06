@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Read the note-family elements: NOTE, REST, KEYCHANGE, CLEF, MIDI CC, and grace-type decode.
+
 #include "elem-note.h"
 
 namespace mu::iex::enc {
@@ -34,19 +36,16 @@ bool EncMeasureElem::read(QDataStream& ds)
 
 EncGraceType EncNote::graceType() const
 {
-    quint8 g1 = grace1 & 0x30;
-    quint8 g2 = grace2 & 0x05;
-    if (g1 == 0x20 && g2 == 0x04) {
+    // Decode the grace/cue flags; see ENCORE_FORMAT.md §Grace and cue notes. A no-slash small note
+    // is reported APPOGGIATURA here; the emitter later reclassifies it as a cue when it stands alone
+    // with no principal note to ornament.
+    if (!(grace1 & 0x20) || smallCueMuteSpurious) {
+        return EncGraceType::NORMAL;
+    }
+    if (grace2 & 0x04) {
         return EncGraceType::ACCIACCATURA;
     }
-    // grace2 bit 0x04 is the acciaccatura slash marker; a real appoggiatura leaves it clear.
-    // Some normal notes (e.g. percussion) carry grace1 & 0x30 == 0x30 together with the 0x04
-    // bit set. Without excluding that bit they were misread as appoggiaturas, queued as grace
-    // chords, and discarded when no principal chord followed, dropping whole runs of notes.
-    if (g1 > 0x10 && g2 != 0x01 && !(g2 & 0x04)) {
-        return EncGraceType::APPOGGIATURA;
-    }
-    return EncGraceType::NORMAL;
+    return EncGraceType::APPOGGIATURA;
 }
 
 bool EncNote::read(QDataStream& ds)
@@ -111,10 +110,9 @@ bool EncGenericElem::read(QDataStream& ds)
 
 bool EncMidiCc::read(QDataStream& ds)
 {
-    EncMeasureElem::read(ds);   // consumes size (d[3]) + rawStaff (d[4]); ds now at d[5]
-    // d[5] CC marker, d[6..9] zeros, d[10] controller, d[11] value. Only present when the
-    // element is the full 12 bytes; the measure loop reseeks to elemStart+elemSpacing(size)
-    // afterwards, so a short/garbage element stays aligned with controller/value left at 0.
+    EncMeasureElem::read(ds);
+    // Controller/value only exist in the full 12-byte element; a short/garbage one stays aligned
+    // (the measure loop reseeks past it) with controller/value left at 0.
     if (size >= 12) {
         ds.skipRawData(5);
         ds >> controller >> value;
