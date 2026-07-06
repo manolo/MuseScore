@@ -475,6 +475,10 @@ Err importEncore(MasterScore* score, const QString& path, const EncImportOptions
     if (!integrity) {
         LOGW() << "Encore import: score corruption detected:\n" << integrity.text();
     }
+    // reconcileMeasureLength guarantees every voice on every staff sums to its measure length, so a
+    // finalized score is always sanity-clean. Fail loudly in debug/test builds if that ever breaks,
+    // rather than shipping a corrupt score silently.
+    DO_ASSERT(integrity);
 
     return Err::NoError;
 }
