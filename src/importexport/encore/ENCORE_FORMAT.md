@@ -903,8 +903,22 @@ The correct interpretation depends on the LINE block's multi-staff configuration
 
 ### Out-of-range voice on regular elements
 
-Some files store NOTE/REST/BEAM with `voice = 4` WITHOUT the `0x40` staff-byte flag.
-These are real content; treat them as voice 0 of that staff for attachment purposes.
+Encore allows more than four voices; the low nibble of the type/voice byte can be 0-7. MuseScore has
+only four voices, so the higher values are mapped:
+
+- `voice = 4` is the canonical staff-2 / silent-voice marker: on a grand-staff instrument it routes to
+  the next staff; otherwise it is treated as voice 0 of the note's own staff.
+- `voice = 5, 6, 7` are genuine extra voices on the note's OWN staff (they do NOT indicate the second
+  staff). They collapse to voice 0 of that staff. A voice-7 melody sharing a grand-staff instrument
+  with staffWithin-routed content must stay on its own staff, not be pushed to the second staff.
+
+### Placeholder rest coincident with a note
+
+A voice that carries a real note may also carry a redundant plain (non-tuplet) REST stored at the SAME
+tick in the same voice (Encore writes a rest slot for the voice even where the note sits). The rest is
+a placeholder and must be dropped, or the note is pushed to the position after the rest and the bar
+overflows. This differs from same-tick TUPLET members (a tuplet rest followed by a tuplet note at the
+same MIDI tick), which are sequential members and are both kept.
 
 ---
 

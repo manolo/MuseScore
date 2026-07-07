@@ -1339,6 +1339,33 @@ TEST_F(Tst_Notes, grandstaff_staffwithin_four_voices)
     delete score;
 }
 
+// A voice number above the staff-2 marker (voice 5..7, staffWithin 0) is a genuine extra voice on
+// its OWN staff, not a request to move to the next staff. On a grand-staff instrument the old
+// voice>=VOICES rule pushed a voice-7 top-staff note onto the bass staff. Fixture: a voice-7 note
+// (raw_staff = top staff) on a Piano grand staff must land on staff 0, not staff 1.
+TEST_F(Tst_Notes, grandstaff_high_voice_stays_on_own_staff)
+{
+    MasterScore* score = readEncoreScore("notes_grandstaff_high_voice_own_staff.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    bool onTopStaff = false, onBassStaff = false;
+    for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        for (int tr = 0; tr < 2 * static_cast<int>(VOICES); ++tr) {
+            EngravingItem* e = seg->element(static_cast<track_idx_t>(tr));
+            if (e && e->isChord() && !toChord(e)->notes().empty()
+                && toChord(e)->notes().front()->pitch() == 67) {
+                (tr < static_cast<int>(VOICES) ? onTopStaff : onBassStaff) = true;
+            }
+        }
+    }
+    EXPECT_TRUE(onTopStaff) << "the voice-7 note must stay on its own (top) staff";
+    EXPECT_FALSE(onBassStaff) << "the voice-7 note must not be pushed onto the bass staff";
+    delete score;
+}
+
 // ===========================================================================
 // grandstaff_staffwithin_sequential
 //

@@ -76,6 +76,10 @@ struct MeasEmitCtx {
     std::multimap<std::tuple<int, int, int>, int8_t> tieStartSet;
     std::set<int> noteTicks;
     std::set<int> voice4NoteTicks;
+    // (staffIdx, voice, tick) of every NOTE. A plain (non-tuplet) REST at a position that also holds
+    // a note in the same voice is a redundant placeholder Encore writes for the voice; it must be
+    // dropped so the note keeps the beat instead of being pushed after the rest.
+    std::set<std::tuple<int, int, int> > noteStaffVoiceTicks;
     // Staves (raw index) carrying a real voice-0..3 note in this measure. A whole-measure
     // rest that arrives on Encore's "voice 4" (the silent-voice placeholder) is redundant on
     // such a staff and would corrupt the bar if merged into voice 0; it is skipped.

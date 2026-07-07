@@ -1610,3 +1610,25 @@ TEST_F(Tst_Structure, v0c4_start_double_barline_maps_to_previous_end)
         << "the double bar before measure 2 must appear as measure 1's end barline";
     delete score;
 }
+
+// A voice that carries a real note can also carry a redundant placeholder REST stored at the SAME
+// tick (Encore writes a rest slot for the voice even where the note sits). The non-tuplet rest must
+// be dropped so the note keeps beat 1; with the bug the rest was emitted first and pushed the note
+// off the beat, overflowing the bar. Fixture: 2/4, voice 0 = eighth rest @0 + quarter @0 + quarter.
+TEST_F(Tst_Structure, coincident_placeholder_rest_dropped_note_keeps_beat)
+{
+    MasterScore* score = readEncoreScore("structure_rest_coincident_with_note.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load structure_rest_coincident_with_note.enc";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    Segment* first = m->first(SegmentType::ChordRest);
+    ASSERT_NE(first, nullptr);
+    EngravingItem* e = first->element(0);
+    ASSERT_NE(e, nullptr);
+    EXPECT_TRUE(e->isChord())
+        << "beat 1 must be the note, not a placeholder rest pushed ahead of it";
+    EXPECT_EQ(first->tick(), m->tick());
+}

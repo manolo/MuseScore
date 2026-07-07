@@ -291,6 +291,8 @@ static void scanMeasureMetadata(const MeasureElemRefVec& sortedElems, MeasEmitCt
         const EncElemType et2 = static_cast<EncElemType>(em->type);
         if (et2 == EncElemType::NOTE) {
             mc.noteTicks.insert(static_cast<int>(em->tick));
+            mc.noteStaffVoiceTicks.insert({ static_cast<int>(em->staffIdx),
+                                            static_cast<int>(em->voice), static_cast<int>(em->tick) });
             if (em->voice >= static_cast<int>(VOICES)) {
                 mc.voice4NoteTicks.insert(static_cast<int>(em->tick));
             } else {
@@ -380,9 +382,10 @@ std::optional<RoutedTrack> routeElementStaffVoice(
         return std::nullopt;
     }
     // Multi-staff routing:
-    // (A) voice >= VOICES: route to staffIdx+1, voice=0.
+    // (A) voice == VOICES (the canonical staff-2 / silent-voice marker): route to staffIdx+1, voice=0.
+    // (A') voice > VOICES (5..7): a genuine extra voice on the SAME staff, mapped into 0..3.
     // (B) staffWithin > 0: route to staffIdx+sw, remap voice down by sw*(VOICES/2).
-    if (voice >= static_cast<int>(VOICES)) {
+    if (voice == static_cast<int>(VOICES)) {
         if (staffIdx < nLineStaves) {
             const int instrIdx = lineStaffInstrIdx[staffIdx];
             if (instrIdx >= 0
@@ -393,6 +396,11 @@ std::optional<RoutedTrack> routeElementStaffVoice(
                 staffIdx += 1;
             }
         }
+        voice = 0;
+    } else if (voice > static_cast<int>(VOICES)) {
+        // Voices 5..7 are extra voices on this SAME staff, not a staff-2 marker: collapse them to
+        // voice 0 without changing the staff (a voice-7 melody on staff 1 was wrongly pushed onto
+        // staff 2 by the old voice>=VOICES rule, while voices 5/6 legitimately share voice 0).
         voice = 0;
     } else if (!rawByteResolved && origStaffWithin > 0) {
         // Standalone ORNs always have voice=0 and route by staffWithin alone.
@@ -902,6 +910,16 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
     if (!isChordExt && et == EncElemType::REST
         && ctx.scratch.cumTick.count(trackKey)
         && Fraction(static_cast<int>(e->tick), kEncWholeTicks) < ctx.scratch.cumTick.at(trackKey)) {
+        return;
+    }
+    // Same as above for a coincident rest that is serialized BEFORE its voice's note (cumTick has not
+    // advanced yet): a plain (non-tuplet) REST sharing its (staff, voice, tick) with a NOTE is a
+    // redundant placeholder Encore writes for the voice; drop it so the note keeps the beat instead of
+    // being pushed after the rest. Tuplet rests are exempt (a same-tick tuplet rest + note are
+    // sequential members, see rest_not_chord_anchor).
+    if (et == EncElemType::REST && e->tupletByte() == 0
+        && mc.noteStaffVoiceTicks.count({ static_cast<int>(e->staffIdx),
+                                          static_cast<int>(e->voice), static_cast<int>(e->tick) })) {
         return;
     }
 

@@ -10240,6 +10240,52 @@ def gen_v0c4_page_break_spill():
     return bytes(hdr) + lines + meas + bytes(post)
 
 
+def _gs_header_line(n_meas=1):
+    """SCOW header + LINE block: single Piano (1 instr, 2 staves, grand staff)."""
+    hdr = bytearray(194)
+    hdr[0:4] = b'SCOW'; hdr[4] = 0xC4
+    struct.pack_into('<H', hdr, 0x28, 0x0420)
+    struct.pack_into('<H', hdr, 0x2C, 0xF000)
+    struct.pack_into('<h', hdr, 0x2E, 1)
+    struct.pack_into('<h', hdr, 0x30, 1)
+    hdr[0x32] = 1; hdr[0x33] = 2
+    struct.pack_into('<h', hdr, 0x34, n_meas)
+    def se(clef, isidx):
+        e = bytearray(30); e[14] = clef; e[19] = 1; e[21] = isidx; return bytes(e)
+    ld = b'\x00' * 10 + struct.pack('<H', 0) + bytes([n_meas]) + se(0, 0x00) + se(1, 0x40)
+    return bytes(hdr), b'LINE' + struct.pack('<I', len(ld)) + ld
+
+
+def _nraw(tick, voice, raw_staff, fv, pitch):
+    """28-byte v0xC4 note with unmasked raw_staff byte (bit6 preserved for grand-staff routing)."""
+    d = bytearray(25)
+    d[0] = 28; d[1] = raw_staff & 0xFF; d[2] = fv; d[12] = pitch
+    return struct.pack('<H', tick) + bytes([(9 << 4) | (voice & 0xF)]) + bytes(d)
+
+
+def gen_v0c4_rest_coincident_with_note():
+    """Encore stores a placeholder rest at the SAME tick as the beat's note in one voice (a voice
+    that has a real note still gets a rest slot). The redundant, non-tuplet rest must be dropped so
+    the note keeps beat 1: with the bug the rest is placed first (0..120) and pushes the note to
+    tick 120, also overflowing the bar. Distinct from rest_not_chord_anchor, where same-tick TUPLET
+    members are kept sequential. Layout: 2/4, voice 0 = eighth rest @0 + quarter @0 + quarter @beat2."""
+    e  = rest_v0c4(0, 0, 0, fv=4)                 # placeholder eighth rest at tick 0
+    e += note_v0c4(0, 0, 0, fv=3, pitch=60)       # quarter at tick 0 (coincident, the real note)
+    e += note_v0c4(240, 0, 0, fv=3, pitch=62)     # quarter at beat 2 fills the 2/4 bar
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(2, 4), e)], fill_ts=(2, 4))
+
+
+def gen_v0c4_grandstaff_high_voice_own_staff():
+    """Grand-staff: a voice-7 melody note (raw_staff 0x00 = top staff, staffWithin 0) must stay on the
+    TOP staff, not be pushed to the bass staff. Only voice==4 is the staff-2 marker; voices 5..7 are
+    genuine extra voices on the same staff. With the bug the voice>=VOICES rule routed it to staff+1."""
+    hdr, lb = _gs_header_line(1)
+    e  = _nraw(0, 7, 0x00, fv=3, pitch=67)   # G4 quarter on the TOP staff, voice 7, staffWithin 0
+    e += end_marker()
+    return bytes(hdr) + lb + meas_block(meas_hdr(4, 4), e) + SKELETON_POST
+
+
 if __name__=='__main__':
     print("Generating synthetic Encore test files (using bazo.enc skeleton):")
     write("structure_v0c2_pitches.enc",       gen_v0c2_pitches())
@@ -10333,6 +10379,8 @@ if __name__=='__main__':
     write("structure_stale_tick_by_column.enc",    gen_v0c4_stale_tick_by_column())
     write("structure_voice4_rest_with_notes.enc",  gen_v0c4_voice4_rest_with_notes())
     write("structure_merge_stray_voice_rests.enc", gen_v0c4_merge_stray_voice_rests())
+    write("structure_rest_coincident_with_note.enc", gen_v0c4_rest_coincident_with_note())
+    write("notes_grandstaff_high_voice_own_staff.enc", gen_v0c4_grandstaff_high_voice_own_staff())
     write("tempo_v0c2_eighth_beat_unit.enc",      gen_v0c2_tempo_eighth_beat_unit(), layout=False)
     write("instruments_instrument_count_padding.enc", gen_v0c4_instrument_count_padding())
     write("instruments_name_recovery.enc",             gen_v0c4_name_recovery())
