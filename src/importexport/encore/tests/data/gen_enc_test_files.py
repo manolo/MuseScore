@@ -10286,6 +10286,25 @@ def gen_v0c4_grandstaff_high_voice_own_staff():
     return bytes(hdr) + lb + meas_block(meas_hdr(4, 4), e) + SKELETON_POST
 
 
+def gen_v0c4_singlestaff_voice4_second_voice():
+    """A single-staff instrument stores a genuine second melodic voice as Encore voice nibble 4,
+    overlapping voice 0 (both sound on every beat). Voice 4 must import as a SEPARATE MuseScore
+    voice (voice 1), not be concatenated onto voice 0. With the bug, voice 4 collapsed to voice 0,
+    doubling voice 0 (overfull, voice 1 left empty); on real files the concatenation also mis-groups
+    the overlapping triplets into a non-dyadic bar that fails sanityCheck and refuses to open.
+    Layout: 4/4, voice 0 = C4 D4 E4 F4 quarters, voice 4 = G4 A4 B4 C5 quarters at the same ticks."""
+    e  = note_v0c4(0,   0, 0, fv=3, pitch=60)          # voice 0, beat 1
+    e += note_v0c4_voice4(0,   0, fv=3, pitch=67)      # voice 4, beat 1 (overlaps)
+    e += note_v0c4(240, 0, 0, fv=3, pitch=62)
+    e += note_v0c4_voice4(240, 0, fv=3, pitch=69)
+    e += note_v0c4(480, 0, 0, fv=3, pitch=64)
+    e += note_v0c4_voice4(480, 0, fv=3, pitch=71)
+    e += note_v0c4(720, 0, 0, fv=3, pitch=65)
+    e += note_v0c4_voice4(720, 0, fv=3, pitch=72)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
 if __name__=='__main__':
     print("Generating synthetic Encore test files (using bazo.enc skeleton):")
     write("structure_v0c2_pitches.enc",       gen_v0c2_pitches())
@@ -10381,6 +10400,7 @@ if __name__=='__main__':
     write("structure_merge_stray_voice_rests.enc", gen_v0c4_merge_stray_voice_rests())
     write("structure_rest_coincident_with_note.enc", gen_v0c4_rest_coincident_with_note())
     write("notes_grandstaff_high_voice_own_staff.enc", gen_v0c4_grandstaff_high_voice_own_staff())
+    write("notes_singlestaff_voice4_second_voice.enc", gen_v0c4_singlestaff_voice4_second_voice())
     write("tempo_v0c2_eighth_beat_unit.enc",      gen_v0c2_tempo_eighth_beat_unit(), layout=False)
     write("instruments_instrument_count_padding.enc", gen_v0c4_instrument_count_padding())
     write("instruments_name_recovery.enc",             gen_v0c4_name_recovery())

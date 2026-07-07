@@ -386,17 +386,28 @@ std::optional<RoutedTrack> routeElementStaffVoice(
     // (A') voice > VOICES (5..7): a genuine extra voice on the SAME staff, mapped into 0..3.
     // (B) staffWithin > 0: route to staffIdx+sw, remap voice down by sw*(VOICES/2).
     if (voice == static_cast<int>(VOICES)) {
+        bool routedToSecondStaff = false;
+        bool singleStaffInstr = false;
         if (staffIdx < nLineStaves) {
             const int instrIdx = lineStaffInstrIdx[staffIdx];
-            if (instrIdx >= 0
-                && instrIdx < static_cast<int>(enc.instruments.size())
-                && enc.instruments[instrIdx].nstaves > 1
-                && lineStaffWithin[staffIdx] + 1 < enc.instruments[instrIdx].nstaves
-                && staffIdx + 1 < ctx.totalStaves) {
-                staffIdx += 1;
+            if (instrIdx >= 0 && instrIdx < static_cast<int>(enc.instruments.size())) {
+                singleStaffInstr = (enc.instruments[instrIdx].nstaves <= 1);
+                if (enc.instruments[instrIdx].nstaves > 1
+                    && lineStaffWithin[staffIdx] + 1 < enc.instruments[instrIdx].nstaves
+                    && staffIdx + 1 < ctx.totalStaves) {
+                    staffIdx += 1;
+                    routedToSecondStaff = true;
+                }
             }
         }
-        voice = 0;
+        // Grand-staff: voice 4 is the second staff's silent voice -> voice 0 there.
+        // Single-staff instrument whose own voice 0 already carries a line: voice 4 is a genuine
+        // second melodic voice (stems down) -> MuseScore voice 1, kept separate so two overlapping
+        // streams are not concatenated onto voice 0 (mergeNonOverlappingVoices later folds it back
+        // when they never sound together). Single-staff whose voice 0 is empty (e.g. an SATB part
+        // whose only line is stored as voice 4): keep it on voice 0.
+        const bool hasOwnVoice0 = mc.stavesWithRealNote.count(static_cast<int>(e->staffIdx)) > 0;
+        voice = (singleStaffInstr && !routedToSecondStaff && hasOwnVoice0) ? 1 : 0;
     } else if (voice > static_cast<int>(VOICES)) {
         // Voices 5..7 are extra voices on this SAME staff, not a staff-2 marker: collapse them to
         // voice 0 without changing the staff (a voice-7 melody on staff 1 was wrongly pushed onto

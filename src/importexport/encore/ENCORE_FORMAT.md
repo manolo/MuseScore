@@ -907,7 +907,11 @@ Encore allows more than four voices; the low nibble of the type/voice byte can b
 only four voices, so the higher values are mapped:
 
 - `voice = 4` is the canonical staff-2 / silent-voice marker: on a grand-staff instrument it routes to
-  the next staff; otherwise it is treated as voice 0 of the note's own staff.
+  the next staff (as voice 0 there). On a single-staff instrument it is a genuine second melodic voice
+  (stems down): it becomes voice 1 when that staff's voice 0 already carries a line (the two voices
+  overlap and must stay separate, otherwise the two streams are concatenated onto one voice and the bar
+  overflows, and overlapping triplets mis-group into a non-representable bar length). When the staff's
+  voice 0 is empty (e.g. an SATB part whose only line is stored as voice 4) it stays on voice 0.
 - `voice = 5, 6, 7` are genuine extra voices on the note's OWN staff (they do NOT indicate the second
   staff). They collapse to voice 0 of that staff. A voice-7 melody sharing a grand-staff instrument
   with staffWithin-routed content must stay on its own staff, not be pushed to the second staff.

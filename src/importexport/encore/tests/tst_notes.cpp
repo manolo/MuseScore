@@ -1367,6 +1367,44 @@ TEST_F(Tst_Notes, grandstaff_high_voice_stays_on_own_staff)
 }
 
 // ===========================================================================
+// singlestaff_voice4_second_voice
+//
+// On a single-staff instrument, Encore voice nibble 4 is a genuine second melodic
+// voice (stems down), not the grand-staff silent-voice marker. It overlaps voice 0
+// (both sound on every beat) and must import as a SEPARATE MuseScore voice (voice 1).
+// With the bug voice 4 collapsed onto voice 0, concatenating both lines into one
+// voice (overfull, voice 1 empty); on real files that concatenation mis-groups the
+// overlapping triplets into a non-dyadic bar that fails sanityCheck and refuses to open.
+// Fixture: 4/4, voice 0 = C4 D4 E4 F4 quarters, voice 4 = G4 A4 B4 C5 quarters, same ticks.
+// ===========================================================================
+TEST_F(Tst_Notes, singlestaff_voice4_second_voice)
+{
+    MasterScore* score = readEncoreScore("notes_singlestaff_voice4_second_voice.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck()) << "sanity check failed";
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+
+    auto countChordsInVoice = [&](int voice) {
+        int count = 0;
+        for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+            EngravingItem* e = seg->element(static_cast<track_idx_t>(voice));   // staff 0, given voice
+            if (e && e->isChord()) {
+                ++count;
+            }
+        }
+        return count;
+    };
+
+    // Voice 0 keeps only its own four notes; the second voice lands on voice 1 (not concatenated
+    // onto voice 0, which the bug did -> 8 chords in voice 0 and 0 in voice 1).
+    EXPECT_EQ(countChordsInVoice(0), 4) << "voice 0 must hold only its own four notes";
+    EXPECT_EQ(countChordsInVoice(1), 4) << "the voice-4 second voice must import as a separate voice 1";
+    delete score;
+}
+
+// ===========================================================================
 // grandstaff_staffwithin_sequential
 //
 // Sequential notes on both staves use independent cumTick accumulators.
