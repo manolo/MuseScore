@@ -826,9 +826,37 @@ Walk backwards on the same (staffIdx, voice) for the latest NOTE/REST with `xoff
 | CHORD-symbol text        | byte 0/1 probe                                              |
 | TITL block               | varsize < 5000 → Latin-1; varsize ≥ 10000 → UTF-16          |
 
-### Grace-note detection (grace1 / grace2)
+### Grace and cue notes (grace1 / grace2 / playbackDurTicks)
 
-A note is a grace only when `grace1 & 0x30` is `0x20` (appoggiatura, or acciaccatura when `grace2 & 0x05 == 0x04`) or `0x10` (inner grace). `grace1 & 0x30 == 0x30` (both bits set) is NOT a grace: it appears on ordinary notes, for example percussion notes that also carry the `grace2` 0x04 bit. The 0x04 bit in `grace2` is the acciaccatura slash marker and is only meaningful together with `grace1 & 0x30 == 0x20`; on any other note it must be ignored. Treating a `0x30` note as an appoggiatura queues it as a grace chord that is discarded when no principal chord follows, dropping whole runs of ordinary notes.
+These correspond to Encore's "Grace / Cue Note" dialog and were confirmed against controlled files
+whose note types were set deliberately (the dialog itself reads back the last-used values, not the
+selected note's state, so it cannot be trusted for reverse-engineering).
+
+`grace1` bit `0x20` marks a SMALL note (a grace or a cue); an ordinary note leaves it clear. Among
+small notes, `grace2` bit `0x04` = slash (acciaccatura); a small note without the slash bit is either
+an appoggiatura or a cue. `grace2` bit `0x01` is the per-note MUTE flag (playback off), independent of
+size and kind: a cue is small and muted by default, but any note can be muted, and a cue can be
+un-muted. So the bits are orthogonal:
+
+| bit | meaning |
+|-----|---------|
+| `grace1 & 0x20` | small note (grace or cue) |
+| `grace1 & 0x10` | member of a BEAMED grace group (a percussion ruff); does not change the kind, so `grace1 & 0x30 == 0x30` is still a grace |
+| `grace1 & 0x40` | per-note attribute of the top chord member; unrelated to grace/cue |
+| `grace2 & 0x04` | slash (acciaccatura) |
+| `grace2 & 0x01` | muted (playback off) |
+
+A small no-slash note is an appoggiatura when it ornaments an adjacent principal note, or a cue (a
+full-value small note) when it stands alone; the two are byte-identical, so the distinction is made
+from context (whether a principal note sits at, after, or contiguously before the small note).
+
+The played length is `playbackDurTicks` (byte offset +16) = the dialog's "Scale duration by N%"
+applied to the note's face value (e.g. an eighth face value with `playbackDurTicks == 30` is 25% of
+120). A single grace is drawn as a slashed eighth regardless of its stored face value; a beamed grace
+group keeps its written figure.
+
+Rhythmically, a CUE note keeps its full beat value in the measure (it is a normal note drawn small,
+muted by default), while a GRACE note occupies no measure time and borrows from an adjacent note.
 
 ### v0xA6 grace note time-borrowing
 

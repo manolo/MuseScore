@@ -211,6 +211,9 @@ struct PendingLyric {
 struct PendingGrace {
     mu::engraving::Chord* gc { nullptr };
     const EncNote* en { nullptr };
+    // Measure the grace was queued in, so a grace that never finds a principal chord (dangling at end
+    // of score) can be re-placed as a cue note in its own bar instead of being discarded.
+    mu::engraving::Measure* measure { nullptr };
 };
 
 // Shared importer context threaded through builders, emitters and resolvers: the target score,
@@ -303,6 +306,11 @@ struct BuildCtx
         std::map<std::pair<int, int>, std::vector<PendingGrace> > pendingGraces {};
         // Ticks borrowed by grace notes; suppresses spurious gap-snap rests after a grace group.
         std::map<std::pair<int, int>, int> graceStolenTicks {};
+        // The most recent grace chord created for a track and the enc tick it sits at. Encore stores
+        // each chord member as its own note at the same tick; a same-tick grace member merges into
+        // this chord instead of spawning a separate grace. Covers both before- and after-graces.
+        std::map<std::pair<int, int>, mu::engraving::Chord*> lastGraceChord {};
+        std::map<std::pair<int, int>, int> lastGraceTick {};
 
         // Lyric syllables queued for attachment; drained each measure by attachPendingLyrics.
         std::map<track_idx_t, std::vector<PendingLyric> > pendingLyrics {};

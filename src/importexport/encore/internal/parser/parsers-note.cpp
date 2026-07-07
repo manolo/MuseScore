@@ -34,19 +34,19 @@ bool EncMeasureElem::read(QDataStream& ds)
 
 EncGraceType EncNote::graceType() const
 {
-    quint8 g1 = grace1 & 0x30;
-    quint8 g2 = grace2 & 0x05;
-    if (g1 == 0x20 && g2 == 0x04) {
+    // grace1 bit 0x20 is the "small note" marker (a grace or a cue); standard notes leave it clear.
+    // With the small bit set, grace2 bit 0x04 = slash (acciaccatura); otherwise the note is a
+    // no-slash small note. grace1 bit 0x10 flags a beamed grace-group member (a percussion ruff); it
+    // does not change the kind. grace2 bit 0x01 is the mute flag (playback), NOT a kind, so it is not
+    // read here. A no-slash small note is reported APPOGGIATURA; the emitter reclassifies it as a cue
+    // (a full-value small note) when it stands alone with no principal note to ornament.
+    if (!(grace1 & 0x20)) {
+        return EncGraceType::NORMAL;
+    }
+    if (grace2 & 0x04) {
         return EncGraceType::ACCIACCATURA;
     }
-    // grace2 bit 0x04 is the acciaccatura slash marker; a real appoggiatura leaves it clear.
-    // Some normal notes (e.g. percussion) carry grace1 & 0x30 == 0x30 together with the 0x04
-    // bit set. Without excluding that bit they were misread as appoggiaturas, queued as grace
-    // chords, and discarded when no principal chord followed, dropping whole runs of notes.
-    if (g1 > 0x10 && g2 != 0x01 && !(g2 & 0x04)) {
-        return EncGraceType::APPOGGIATURA;
-    }
-    return EncGraceType::NORMAL;
+    return EncGraceType::APPOGGIATURA;
 }
 
 bool EncNote::read(QDataStream& ds)

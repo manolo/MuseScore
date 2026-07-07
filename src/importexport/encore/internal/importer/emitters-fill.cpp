@@ -30,6 +30,7 @@
 #include "engraving/dom/durationtype.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/measure.h"
+#include "engraving/dom/note.h"
 #include "engraving/dom/rest.h"
 #include "engraving/dom/segment.h"
 #include "engraving/dom/sig.h"
@@ -373,5 +374,67 @@ void capMeasureLength(BuildCtx& ctx, Measure* measure)
             }
         }
     }
+}
+
+void handleDanglingGraces(BuildCtx& ctx)
+{
+    // Grace chords that never found a principal chord (e.g. a percussion ruff in the final bar, with
+    // no following downbeat to ornament). Rather than dropping them, re-place them as small AUDIBLE
+    // cue notes ("con ejecucion") in the spare cue voice of their own bar, flush to the barline, so
+    // the figure and its timing survive. Their written figures are placed consecutively; the rest of
+    // the cue voice is filled with invisible gap rests.
+    for (auto& [key, vec] : ctx.scratch.pendingGraces) {
+        const int staffIdx = key.first;
+        const track_idx_t track = static_cast<track_idx_t>(staffIdx * static_cast<int>(VOICES) + kCueVoice);
+
+        std::map<Measure*, std::vector<PendingGrace*> > byMeasure;
+        for (PendingGrace& g : vec) {
+            byMeasure[g.measure].push_back(&g);
+        }
+        for (auto& [measure, graces] : byMeasure) {
+            if (!measure) {
+                for (PendingGrace* g : graces) {
+                    delete g->gc;
+                }
+                continue;
+            }
+            Fraction total(0, 1);
+            for (PendingGrace* g : graces) {
+                total += g->gc->ticks();
+            }
+            const Fraction mLen = measure->ticks();
+            const Fraction measTick = measure->tick();
+            Fraction pos = (total < mLen) ? (mLen - total) : Fraction(0, 1);
+            if (pos > Fraction(0, 1)) {
+                addGapRests(measure, measTick, pos, track, true /*gap*/);
+            }
+            for (PendingGrace* g : graces) {
+                Chord* src = g->gc;
+                const Fraction d = src->ticks();
+                Segment* seg = measure->getSegment(SegmentType::ChordRest, measTick + pos);
+                Chord* c = Factory::createChord(seg);
+                c->setTrack(track);
+                c->setDurationType(src->durationType());
+                c->setTicks(d);
+                c->setDots(0);
+                for (Note* sn : src->notes()) {
+                    Note* n = Factory::createNote(c);
+                    n->setPitch(sn->pitch());
+                    n->setTpc1(sn->tpc1());
+                    n->setTpc2(sn->tpc2());
+                    n->setSmall(true);
+                    n->setPlay(!g->en->isMuted());   // honor the Encore mute flag
+                    c->add(n);
+                }
+                seg->add(c);
+                pos += d;
+                delete src;
+            }
+            if (pos < mLen) {
+                addGapRests(measure, measTick + pos, mLen - pos, track, true /*gap*/);
+            }
+        }
+    }
+    ctx.scratch.pendingGraces.clear();
 }
 } // namespace mu::iex::enc

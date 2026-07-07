@@ -837,6 +837,46 @@ def gen_v0c4_grace1_0x30_normal_notes():
     e += end_marker()
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
+
+# A cue note: grace1 0x20 (small bit) + grace2 0x01 (cue). It keeps its full quarter value but must
+# import small (Note::setSmall) and muted (Note::setPlay(false)), routed to the spare cue voice.
+def gen_v0c4_cue_note():
+    e  = note_v0c4_grace(0, 0, 0, fv=3, pitch=67, grace1=0x20, grace2=0x01)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+# A principal quarter (span 0..240) with an acciaccatura at tick 120, inside that span (contiguous,
+# no silence between). The grace belongs to the preceding note and must import as a grace-AFTER
+# (a GRACE*_AFTER), staying in the same bar rather than jumping to a later note.
+def gen_v0c4_grace_after_contiguous():
+    e  = note_v0c4(0, 0, 0, fv=3, pitch=60)
+    e += note_v0c4_grace(120, 0, 0, fv=4, pitch=67, grace1=0x20, grace2=0x04)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+# A quarter at tick 0 followed only by a grace at tick 360 (a dotted-quarter distance). The grace has
+# no rhythmic footprint and must NOT inflate the quarter into a dotted quarter: it stays a plain
+# quarter + rest. The trailing grace, having no principal to attach to, becomes a cue note.
+def gen_v0c4_grace_trailing_no_dot():
+    e  = note_v0c4(0, 0, 0, fv=3, pitch=60)
+    e += note_v0c4_grace(360, 0, 0, fv=5, pitch=67, grace1=0x20, grace2=0x04)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+# Isolates grace1 bit 0x20 (small) and grace2 bit 0x01 (mute) with one standalone note per bar:
+#   m1 cue muted (0x20/0x01), m2 cue sounding (0x20/0x00), m3 normal muted (0x00/0x01), m4 normal.
+# Each small note is alone in its bar (no principal to ornament) so it imports as a cue, not a grace.
+def gen_v0c4_cue_mute_flags():
+    m1 = note_v0c4_grace(0, 0, 0, fv=3, pitch=69, grace1=0x20, grace2=0x01) + end_marker()
+    m2 = note_v0c4_grace(0, 0, 0, fv=3, pitch=69, grace1=0x20, grace2=0x00) + end_marker()
+    m3 = note_v0c4_grace(0, 0, 0, fv=3, pitch=69, grace1=0x00, grace2=0x01) + end_marker()
+    m4 = note_v0c4_grace(0, 0, 0, fv=3, pitch=69, grace1=0x00, grace2=0x00) + end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), m1), (meas_hdr(4, 4), m2),
+                           (meas_hdr(4, 4), m3), (meas_hdr(4, 4), m4)], fill_ts=(4, 4))
+
 def gen_v0c4_rest_not_chord_anchor():
     """A rest must not act as a chord-extension anchor. With the bug, prevMidiTick
     was updated for both notes and rests, so a NOTE arriving at the same MIDI tick
@@ -10230,6 +10270,10 @@ if __name__=='__main__':
     write("notes_swing.enc",         gen_v0c4_swing())
     write("notes_grace.enc",             gen_v0c4_grace())
     write("importer_grace1_0x30_normal_notes.enc", gen_v0c4_grace1_0x30_normal_notes())
+    write("importer_cue_note.enc",               gen_v0c4_cue_note())
+    write("importer_grace_after_contiguous.enc", gen_v0c4_grace_after_contiguous())
+    write("importer_grace_trailing_no_dot.enc",  gen_v0c4_grace_trailing_no_dot())
+    write("importer_cue_mute_flags.enc",         gen_v0c4_cue_mute_flags())
     write("importer_grace_beam.enc",        gen_v0c4_grace_beam())
     write("importer_rest_in_tuplet.enc",    gen_v0c4_rest_in_tuplet())
     write("importer_full_voice_skipped.enc",        gen_v0c4_full_voice_skipped_via_loop())

@@ -72,8 +72,8 @@ static std::unique_ptr<EncMeasureElem> createMeasureElement(
         return std::make_unique<EncClefChange>(tick, tp, vo);
     case EncElemType::NONE:
     case EncElemType::BEAM:
-        // BEAM is intentionally not modeled: MuseScore auto-beams from note durations and time
-        // signature, so Encore's explicit beam groups are dropped. See ENCORE_FORMAT.md.
+    // BEAM is intentionally not modeled: MuseScore auto-beams from note durations and time
+    // signature, so Encore's explicit beam groups are dropped. See ENCORE_FORMAT.md.
     default:
         return std::make_unique<EncGenericElem>(tick, tp, vo);
     }
@@ -125,6 +125,19 @@ void computeElementDurations(
                            && (dur - faceTicks) <= totalGraceFace) {
                     dur = faceTicks;
                 }
+            }
+        }
+        // A following GRACE note has no rhythmic footprint, so it must not extend (inflate) the
+        // current principal note's held duration. Cap the duration at the written face value so a
+        // note trailed by an ornament (e.g. a percussion beat followed by a grace flourish) stays
+        // its written value plus a rest, instead of being promoted to a dotted/longer note when the
+        // gap to the grace happens to match a dotted ratio.
+        if (enCur && enCur->graceType() == EncGraceType::NORMAL && j < elems.size()) {
+            const EncNote* enNext = dynamic_cast<const EncNote*>(elems[j]);
+            const qint16 faceTicks = faceValue2ticks(enCur->faceValue);
+            if (enNext && enNext->graceType() != EncGraceType::NORMAL
+                && faceTicks > 0 && dur > faceTicks) {
+                dur = faceTicks;
             }
         }
         if (dur > 0) {
@@ -296,7 +309,7 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, const EncFor
     // Collect per-staff boundary ticks from non-note elements (CLEF, KEYCHANGE).
     // These cap the MIDI-gap duration of a preceding rest so it doesn't stretch to fill
     // the whole measure when the next event is a clef or key change rather than a note.
-    std::map<int, std::vector<qint16>> boundaryByStaff;
+    std::map<int, std::vector<qint16> > boundaryByStaff;
     for (auto& elem : elements) {
         const EncElemType et = static_cast<EncElemType>(elem->type);
         if ((et == EncElemType::CLEF || et == EncElemType::KEYCHANGE)
@@ -321,7 +334,7 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, const EncFor
         });
         const auto bIt = boundaryByStaff.find(key.first);
         const std::vector<qint16>& boundaries
-            = (bIt != boundaryByStaff.end()) ? bIt->second : std::vector<qint16>{};
+            = (bIt != boundaryByStaff.end()) ? bIt->second : std::vector<qint16> {};
         if (fmt.clustersChordsByXoffset()) {
             normalizeChordColumnTicks(elems);
         }

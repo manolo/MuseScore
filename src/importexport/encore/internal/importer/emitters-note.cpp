@@ -778,6 +778,17 @@ void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
     applyConcertPitch(note, concertPitch);
     chord->add(note);
 
+    // A small note reaching the normal note path is an Encore cue note (a full-value note drawn
+    // small): graces never reach here. Draw it small. The mute flag (grace2 0x01) is honored below
+    // for every note, so a cue muted in Encore is silent and an un-muted cue plays.
+    if (en->isSmall()) {
+        note->setSmall(true);
+    }
+    // Encore per-note mute flag: applies to any note (normal, cue, or grace), independent of size.
+    if (en->isMuted()) {
+        note->setPlay(false);
+    }
+
     configureNoteHeadForDrumset(note, en);
 
     // Fingerings 1..5 (0x0D..0x11) and open-string 0x46 are packed in the artic byte.

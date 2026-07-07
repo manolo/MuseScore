@@ -115,6 +115,10 @@ struct EncNote : EncMeasureElem {
     int normalNotes() const { return tuplet & 0x0F; }
 
     EncGraceType graceType() const;
+    // grace1 bit 0x20 = small note (a grace or a cue). grace2 bit 0x01 = muted (playback off), a
+    // per-note Encore flag independent of size; a cue is small and muted by default.
+    bool isSmall() const { return grace1 & 0x20; }
+    bool isMuted() const { return grace2 & 0x01; }
 
     bool read(QDataStream& ds) override;
 };

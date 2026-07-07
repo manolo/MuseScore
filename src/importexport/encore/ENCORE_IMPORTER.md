@@ -446,6 +446,45 @@ Observed `(+5, +6)` byte pairs and their roles:
 
 A significant share of outgoing ties use the secondary +6 flag with an arc-only +5 byte; ignoring the +6 byte loses those ties.
 
+## Grace and cue notes
+
+Encore's "Grace / Cue Note" dialog produces three kinds of small note, decoded from `grace1`/`grace2`
+(see ENCORE_FORMAT.md "Grace and cue notes"): CUE, grace ACCIACCATURA (slash), grace APPOGGIATURA.
+MuseScore has no dedicated cue element and (issue #19701) cannot attach a grace to a rest, so the
+importer maps them as follows.
+
+**Mute flag.** `grace2` bit `0x01` is a per-note mute (`EncNote::isMuted()`), independent of size. Any
+imported note with it set gets `Note::setPlay(false)` (normal notes, cue notes and grace notes alike).
+
+**Cue notes** (`EncNote::isSmall()`, i.e. a small note that is NOT a grace): imported as a normal,
+full-duration note drawn small (`Note::setSmall(true)`), audible unless the mute flag is set. A cue is
+small and muted by default in Encore, but an un-muted cue plays. A cue that stands alone in its bar
+does not overlap the principal line, so it needs no separate voice.
+
+**Grace vs cue vs appoggiatura** (`tryHandleGraceNote`), decided from the raw enc measure (same
+staff+voice). A slash (`grace2 0x04`) is always a grace (acciaccatura); a no-slash small note is:
+- a grace-AFTER when a CONTIGUOUS preceding principal note (face-value span reaches the grace tick, no
+  silence) exists (`GRACE*_AFTER`; keeps it in its own bar without displacing it left);
+- an appoggiatura (grace-BEFORE) when a principal note is co-located with or follows it;
+- a CUE (handed back to the normal note path, drawn small, full value) when it stands ALONE with no
+  principal at, after, or contiguously before it.
+An acciaccatura with only silence before it (a percussion ruff after the last beat) is a grace-BEFORE
+the following principal, which via the cross-barline carry is the next bar's downbeat; it is written
+as consecutive grace figures (a beamed group), not at its sub-tick playback spacing. A beamed group
+keeps its written figure (GRACE16 for sixteenths, etc.); a lone acciaccatura uses the ACCIACCATURA
+(slashed eighth) glyph.
+
+**Cross-barline carry.** `resetPerMeasureState` does NOT discard pending graces at the measure
+boundary, so a trailing grace attaches to the next bar's first principal chord. Any grace that never
+finds a principal chord (a ruff in the final bar) is re-placed by `handleDanglingGraces` as a small
+cue note (played unless muted) in the spare voice of its own bar, flush to the barline, rather than
+being dropped.
+
+**A following grace does not inflate the preceding note.** In `computeElementDurations`, when the next
+element is a grace, the current principal note's held duration is capped at its face value, so a beat
+trailed by an ornament stays a plain note + rest instead of being promoted to a dotted/longer note
+when the gap happens to match a dotted ratio.
+
 ## v0xA6 grace groups (inner graces and snap suppression)
 
 Encore v0xA6 files can contain grace-note groups with multiple notes: a LEADING grace (grace1 bit-field & 0x30 == 0x20 = APPOGGIATURA) and one or more INNER graces (bit-field & 0x30 == 0x10).

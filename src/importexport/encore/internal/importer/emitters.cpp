@@ -608,7 +608,7 @@ static void coalesceVolta(BuildCtx& ctx, Measure* measure,
     }
 }
 
-static void resetPerMeasureState(BuildCtx& ctx, int measIdx)
+static void resetPerMeasureState(BuildCtx& ctx)
 {
     for (auto& [key, tt] : ctx.scratch.tuplets) {
         if (tt.inTuplet()) {
@@ -628,16 +628,13 @@ static void resetPerMeasureState(BuildCtx& ctx, int measIdx)
     ctx.scratch.lastChordPos.clear();
     ctx.scratch.prevRestTick.clear();
     ctx.scratch.graceStolenTicks.clear();
+    ctx.scratch.lastGraceChord.clear();
+    ctx.scratch.lastGraceTick.clear();
 
-    // Unattached grace chords are not in the score tree and need explicit deletion.
-    for (auto& [key, vec] : ctx.scratch.pendingGraces) {
-        for (PendingGrace& g : vec) {
-            LOGW() << "Encore import: discarding dangling grace chord at measure " << measIdx
-                   << " (staff " << key.first << ", voice " << key.second << ")";
-            delete g.gc;
-        }
-    }
-    ctx.scratch.pendingGraces.clear();
+    // NOTE: pendingGraces are deliberately NOT cleared here. Grace notes at the end of a measure
+    // (e.g. a percussion ruff) ornament the FIRST note of the following measure, so they must carry
+    // across the barline to be attached by the next measure's first principal chord. Any that never
+    // find a principal chord are re-placed as cue notes by handleDanglingGraces() at end of score.
 }
 
 static void buildNestedTupletMaps(MeasEmitCtx& mc,
@@ -898,6 +895,15 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
         && ctx.scratch.prevRestTick.at(trackKey) == static_cast<int>(e->tick)) {
         return;
     }
+    // A REST that lies before its voice's already-filled position is redundant: a chord (or an
+    // earlier rest) has already covered that beat. Encore can store such a coincident rest right next
+    // to a beat's chord (a note and a rest at the same tick in one voice). Placing it would push all
+    // later content forward and inflate the bar (a 4/4 bar came out at 39/32). Drop it.
+    if (!isChordExt && et == EncElemType::REST
+        && ctx.scratch.cumTick.count(trackKey)
+        && Fraction(static_cast<int>(e->tick), kEncWholeTicks) < ctx.scratch.cumTick.at(trackKey)) {
+        return;
+    }
 
     // Drop overflow notes when voice is full; MIDI artifacts must not spill to the next MuseScore voice.
     // Only Truncate ("remove extra notes") drops here. IrregularMeasure keeps them (capMeasureLength
@@ -955,19 +961,6 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
         break;
     default: break;
     }
-}
-
-// Unattached grace chords are not in the score tree and need explicit deletion.
-static void discardDanglingGraces(BuildCtx& ctx)
-{
-    for (auto& [key, vec] : ctx.scratch.pendingGraces) {
-        for (PendingGrace& g : vec) {
-            LOGW() << "Encore import: discarding dangling grace chord at end of score"
-                   << " (staff " << key.first << ", voice " << key.second << ")";
-            delete g.gc;
-        }
-    }
-    ctx.scratch.pendingGraces.clear();
 }
 
 // Main emit phase: walk every parsed measure, route and dispatch each element to its type
@@ -1029,7 +1022,7 @@ void emitMeasures(BuildCtx& ctx)
         mc.lineStaffWithin = &lineStaffWithin;
         mc.lineSlotByRawByte = &lineSlotByRawByte;
 
-        resetPerMeasureState(ctx, measIdx);
+        resetPerMeasureState(ctx);
 
         EncRepeatType rt = encMeas.repeatMark();
         if (rt != EncRepeatType::NONE) {
@@ -1054,7 +1047,7 @@ void emitMeasures(BuildCtx& ctx)
     }
 
     applyMeasureBpmMarks(ctx);
-    discardDanglingGraces(ctx);
+    handleDanglingGraces(ctx);
 
     // One-line summary of elements that could not be placed (they reference a staff/voice the
     // score does not have), instead of a debug line per dropped element.
@@ -1072,7 +1065,7 @@ void emitMeasures(BuildCtx& ctx)
                << " (" << ctx.totalStaves << " staves built"
                << (byStaff.empty() ? std::string() : "; missing-staff refs: " + byStaff)
                << (ctx.scratch.droppedByBadVoice ? "; out-of-range voice: "
-                   + std::to_string(ctx.scratch.droppedByBadVoice) : std::string())
+            + std::to_string(ctx.scratch.droppedByBadVoice) : std::string())
                << "). These usually come from staves deleted in Encore (not shown there).";
     }
 }

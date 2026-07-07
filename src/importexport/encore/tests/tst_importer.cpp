@@ -27,6 +27,7 @@
 #include "engraving/dom/articulation.h"
 #include "engraving/dom/barline.h"
 #include "engraving/dom/chord.h"
+#include "engraving/dom/durationtype.h"
 #include "engraving/dom/clef.h"
 #include "engraving/dom/ornament.h"
 #include "engraving/dom/keysig.h"
@@ -186,12 +187,11 @@ TEST_F(Tst_Importer, grace_with_beamed_eighths_no_layout_crash)
     delete score;
 }
 
-// BUG: notes with grace1 & 0x30 == 0x30 (both the 0x20 and 0x10 bits set) were
-// misread as appoggiaturas and, having no principal chord to attach to, discarded.
-// Only 0x20 (appoggiatura) and 0x10 (inner grace) are grace markers; 0x30 is a
-// normal note. The fixture has four such eighth notes; all must survive as
-// normal chords. Before the fix the measure held only a rest.
-TEST_F(Tst_Importer, grace1_0x30_is_normal_note_not_discarded)
+// grace1 & 0x30 == 0x30 is the small bit (0x20) plus the beamed-grace-group bit (0x10), so with the
+// slash marker (grace2 0x04) these are acciaccatura graces, not ordinary notes. The fixture is four
+// such quarter graces with no principal chord to ornament, so they are a dangling group; instead of
+// being discarded they are re-placed as small cue notes (normal-type chords, not grace) that survive.
+TEST_F(Tst_Importer, grace1_0x30_dangling_graces_become_cue_notes)
 {
     MasterScore* score = readEncoreScore("importer_grace1_0x30_normal_notes.enc");
     ASSERT_NE(score, nullptr);
@@ -199,7 +199,7 @@ TEST_F(Tst_Importer, grace1_0x30_is_normal_note_not_discarded)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
 
-    int normalChords = 0;
+    int cueChords = 0;
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
         if (!mb->isMeasure()) {
             continue;
@@ -207,16 +207,146 @@ TEST_F(Tst_Importer, grace1_0x30_is_normal_note_not_discarded)
         for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
              s; s = s->next(SegmentType::ChordRest)) {
             for (EngravingItem* e : s->elist()) {
-                if (e && e->isChord() && toChord(e)->noteType() == NoteType::NORMAL) {
-                    ++normalChords;
-                    EXPECT_TRUE(toChord(e)->graceNotes().empty())
-                        << "grace1==0x30 notes must not be attached as grace notes";
+                if (e && e->isChord() && toChord(e)->noteType() == NoteType::NORMAL
+                    && !toChord(e)->notes().empty() && toChord(e)->notes().front()->isSmall()) {
+                    ++cueChords;
                 }
             }
         }
     }
-    EXPECT_EQ(normalChords, 4)
-        << "All four grace1==0x30 notes must be imported as normal chords, not discarded";
+    EXPECT_EQ(cueChords, 4)
+        << "All four dangling grace notes must survive as small cue chords, not be discarded";
+    delete score;
+}
+
+// A cue note (grace1 0x20 + grace2 0x01) keeps its full rhythmic value but imports SMALL and MUTED
+// (Note::setPlay(false)), in the spare cue voice.
+TEST_F(Tst_Importer, cue_note_small_and_muted)
+{
+    MasterScore* score = readEncoreScore("importer_cue_note.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    int noteCount = 0;
+    bool smallAndMuted = false;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->elist()) {
+                if (!e || !e->isChord()) {
+                    continue;
+                }
+                for (Note* n : toChord(e)->notes()) {
+                    ++noteCount;
+                    if (n->isSmall() && !n->play()) {
+                        smallAndMuted = true;
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_EQ(noteCount, 1) << "the cue note is the only note in the score";
+    EXPECT_TRUE(smallAndMuted) << "cue note must be small and muted";
+    delete score;
+}
+
+// A quarter with an acciaccatura at a tick inside its span (contiguous, no silence between) imports
+// the ornament as a grace-AFTER the quarter (a *_AFTER note type), keeping it in the same bar.
+TEST_F(Tst_Importer, acciaccatura_after_contiguous_note)
+{
+    MasterScore* score = readEncoreScore("importer_grace_after_contiguous.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    bool foundGraceAfter = false;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->elist()) {
+                if (!e || !e->isChord()) {
+                    continue;
+                }
+                for (Chord* gc : toChord(e)->graceNotes()) {
+                    const NoteType nt = gc->noteType();
+                    if (nt == NoteType::GRACE8_AFTER || nt == NoteType::GRACE16_AFTER
+                        || nt == NoteType::GRACE32_AFTER) {
+                        foundGraceAfter = true;
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_TRUE(foundGraceAfter)
+        << "an acciaccatura contiguous with the preceding note must be a grace-after";
+    delete score;
+}
+
+// A quarter trailed only by a grace at a dotted-quarter distance must stay a PLAIN quarter: a grace
+// has no rhythmic footprint and must not promote the preceding note to a dotted note.
+TEST_F(Tst_Importer, trailing_grace_does_not_dot_preceding_note)
+{
+    MasterScore* score = readEncoreScore("importer_grace_trailing_no_dot.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    const Chord* first = nullptr;
+    for (Segment* s = m->first(SegmentType::ChordRest); s && !first; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChord()) {
+            first = toChord(e);
+        }
+    }
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(first->durationType().type(), DurationType::V_QUARTER)
+        << "the quarter must not be inflated by the trailing grace";
+    EXPECT_EQ(first->dots(), 0) << "a note trailed only by a grace must not become dotted";
+    delete score;
+}
+
+// grace2 bit 0x01 is the Encore per-note MUTE flag (independent of size). grace1 bit 0x20 is small.
+// One standalone note per bar: m1 cue muted, m2 cue sounding, m3 normal muted, m4 normal. A small
+// note alone in its bar is a cue (small, full value); its play state follows the mute flag.
+TEST_F(Tst_Importer, cue_mute_flag_and_sounding_cue)
+{
+    MasterScore* score = readEncoreScore("importer_cue_mute_flags.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    std::vector<std::pair<bool, bool> > perMeasure;   // {isSmall, plays}
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* e = s->element(0);
+            if (e && e->isChord() && !toChord(e)->notes().empty()) {
+                const Note* n = toChord(e)->notes().front();
+                perMeasure.push_back({ n->isSmall(), n->play() });
+                break;
+            }
+        }
+    }
+    ASSERT_GE(perMeasure.size(), 4u);
+    EXPECT_TRUE(perMeasure[0].first);
+    EXPECT_FALSE(perMeasure[0].second);                                       // cue muted: small, silent
+    EXPECT_TRUE(perMeasure[1].first);
+    EXPECT_TRUE(perMeasure[1].second);                                        // cue sounding: small, plays
+    EXPECT_FALSE(perMeasure[2].first);
+    EXPECT_FALSE(perMeasure[2].second);                                       // normal muted: full, silent
+    EXPECT_FALSE(perMeasure[3].first);
+    EXPECT_TRUE(perMeasure[3].second);                                        // normal: full, plays
     delete score;
 }
 

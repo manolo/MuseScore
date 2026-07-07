@@ -43,6 +43,10 @@ class Tuplet;
 }
 
 namespace mu::iex::enc {
+// Spare voice reserved for Encore cue notes (and cue-ified dangling graces), kept separate from the
+// principal line. Voice index 1 within the staff (track = staffIdx*VOICES + kCueVoice).
+inline constexpr int kCueVoice = 1;
+
 // faceValue low nibble: 1=whole, 2=half ... 8=256th; 0 and 9..15 are invalid.
 bool isValidFaceValue(quint8 faceValue);
 void applyConcertPitch(mu::engraving::Note* n, int semitone);
@@ -141,6 +145,10 @@ std::optional<RoutedTrack> routeElementStaffVoice(
 void adjustPickupMeasure(BuildCtx& ctx, mu::engraving::Measure* measure, int measIdx);
 // Pre-fill trailing silence with invisible gap rests. (emitters-fill.cpp)
 void fillTrailingGaps(BuildCtx& ctx, mu::engraving::Measure* measure, mu::engraving::Fraction measTick);
+// End-of-score handling of grace chords that never found a principal chord: re-place them as small
+// audible cue notes in the spare cue voice of their own bar (flush to the barline) instead of
+// dropping them. Clears ctx.scratch.pendingGraces. (emitters-fill.cpp)
+void handleDanglingGraces(BuildCtx& ctx);
 // Fix over/undershoots up to 1/24. (emitters-fill.cpp)
 void correctMeasureLength(BuildCtx& ctx, mu::engraving::Measure* measure);
 // Extend the measure to the max voice content (IrregularMeasure / Stretch fallback). (emitters-fill.cpp)
