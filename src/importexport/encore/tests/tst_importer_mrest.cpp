@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Multi-measure rest expansion: a single MEAS block with mrestCount > 1 must expand to that many measures.
+
 #include <gtest/gtest.h>
 
 #include "engraving/dom/barline.h"
@@ -62,12 +64,7 @@ protected:
     }
 };
 
-// Regression: a single MEAS block whose lone REST element has mrestCount > 1
-// must expand to that many MuseScore measures.
-// Synthetic file: 7 MEAS blocks (notes, notes, notes, mrest=3, notes, notes, notes)
-// with 2 LINE blocks (system 1 = MEAS[0..3], system 2 = MEAS[4..6]).
-// Expected: 9 MuseScore measures (7 + 2 extra from expansion), measures 1-3 with
-// notes, 4-6 empty, 7-9 with notes.  System 1 ends at measure 6, system 2 at 9.
+// Fixture: 7 MEAS blocks (notes x3, mrest=3, notes x3), so 7 + 2 extra = 9 measures.
 TEST_F(Tst_ImporterMrest, mrest_single_block_expands_and_system_locks_correct)
 {
     MasterScore* score = readEncoreScore("importer_mrest_single_block.enc");
@@ -97,32 +94,20 @@ TEST_F(Tst_ImporterMrest, mrest_single_block_expands_and_system_locks_correct)
         return false;
     };
 
-    // Measures 1-3: notes
     EXPECT_TRUE(hasPitchedNotes(measureAt(score, 0))) << "measure 1 must have notes";
     EXPECT_TRUE(hasPitchedNotes(measureAt(score, 1))) << "measure 2 must have notes";
     EXPECT_TRUE(hasPitchedNotes(measureAt(score, 2))) << "measure 3 must have notes";
-    // Measures 4-6: virtual empty measures from the single-block multi-measure rest
+    // Measures 4-6 are the virtual empty measures from the mrest expansion.
     EXPECT_FALSE(hasPitchedNotes(measureAt(score, 3))) << "measure 4 must be empty";
     EXPECT_FALSE(hasPitchedNotes(measureAt(score, 4))) << "measure 5 must be empty";
     EXPECT_FALSE(hasPitchedNotes(measureAt(score, 5))) << "measure 6 must be empty";
-    // Measures 7-9: notes
     EXPECT_TRUE(hasPitchedNotes(measureAt(score, 6))) << "measure 7 must have notes";
 
     delete score;
 }
 
-// ===========================================================================
-// Regression: mrestCount expansion must not require the successor MEAS block
-// to contain pitched notes. A block with mrestCount=3 followed by a plain
-// rest measure (not notes) must still expand to 3 MuseScore measures.
-// Without the fix, encMeasDisplayCount collapsed the mrest to 1 because
-// encMeasHasPitchedNotes(next) returned false for the rest successor.
-//
-// Synthetic file: 5 real MEAS blocks [note, note, mrest=3, rest, note] plus
-// 1 filler block added by assemble() = 6 blocks total.
-// Expected: 2 + 3 + 1 + 1 + 1(filler) = 8 MuseScore measures.
-// Without fix: 2 + 1 + 1 + 1 + 1(filler) = 6 measures (loses 2 from unexpanded mrest).
-// ===========================================================================
+// Guards that mrest expansion does not require the successor block to hold pitched notes.
+// Fixture: [note, note, mrest=3, rest, note] + 1 filler = 8 measures; without the fix only 6.
 TEST_F(Tst_ImporterMrest, mrest_single_block_expands_when_successor_is_rest)
 {
     MasterScore* score = readEncoreScore("importer_mrest_followed_by_rest.enc");
@@ -152,34 +137,21 @@ TEST_F(Tst_ImporterMrest, mrest_single_block_expands_when_successor_is_rest)
         return false;
     };
 
-    // Measures 1-2: notes
     EXPECT_TRUE(hasPitchedNotes(measureAt(score, 0))) << "measure 1 must have notes";
     EXPECT_TRUE(hasPitchedNotes(measureAt(score, 1))) << "measure 2 must have notes";
-    // Measures 3-5: virtual empty measures from the mrest expansion (key regression case)
     EXPECT_FALSE(hasPitchedNotes(measureAt(score, 2))) << "measure 3 (mrest) must be empty";
     EXPECT_FALSE(hasPitchedNotes(measureAt(score, 3))) << "measure 4 (mrest) must be empty";
     EXPECT_FALSE(hasPitchedNotes(measureAt(score, 4))) << "measure 5 (mrest) must be empty";
-    // Measure 6: the single-rest successor (not a note measure, this is what triggered the bug)
+    // Measure 6 is the plain-rest successor: the case that triggered the bug.
     EXPECT_FALSE(hasPitchedNotes(measureAt(score, 5))) << "measure 6 (single rest) must be empty";
-    // Measure 7: note
     EXPECT_TRUE(hasPitchedNotes(measureAt(score, 6))) << "measure 7 must have notes";
-    // Measure 8: filler (empty measure added by assemble())
     EXPECT_FALSE(hasPitchedNotes(measureAt(score, 7))) << "measure 8 (filler) must be empty";
 
     delete score;
 }
 
-// ===========================================================================
-// Regression: a single MEAS block with mrestCount > 1 must expand even when
-// the immediately preceding MEAS block is a plain single-measure rest
-// (mrestCount == 1).  Before the fix, encMeasHasSingleRest(*prev) incorrectly
-// returned true for any REST element (ignoring mrestCount), so the guard
-// suppressed expansion whenever the predecessor happened to be a rest measure.
-//
-// Synthetic file: [rest][rest][mrest=7][note]  (assemble() pads 4 blocks to min 6)
-// Expected: 1 + 1 + 7 + 1 + 1(pad) + 1(pad) = 12 MuseScore measures.
-// Without fix: 1 + 1 + 1 + 1 + 1 + 1 = 6 (the mrest=7 collapses to 1).
-// ===========================================================================
+// Guards that mrest expansion is not suppressed when the preceding block is a plain rest.
+// Fixture: [rest][rest][mrest=7][note], assemble() pads to 6 blocks = 12 measures; without the fix 6.
 TEST_F(Tst_ImporterMrest, mrest_single_block_expands_when_preceded_by_rest)
 {
     MasterScore* score = readEncoreScore("importer_mrest_preceded_by_rest.enc");
@@ -209,33 +181,22 @@ TEST_F(Tst_ImporterMrest, mrest_single_block_expands_when_preceded_by_rest)
         return false;
     };
 
-    // Measures 1-2: plain single-measure rests (the predecessor case that triggered the bug)
+    // Measures 1-2 are the plain-rest predecessors: the case that triggered the bug.
     EXPECT_FALSE(hasPitchedNotes(measureAt(score, 0))) << "measure 1 must be empty";
     EXPECT_FALSE(hasPitchedNotes(measureAt(score, 1))) << "measure 2 must be empty";
-    // Measures 3-9: the 7-measure multi-measure rest expanded correctly
     for (int i = 2; i < 9; ++i) {
         EXPECT_FALSE(hasPitchedNotes(measureAt(score, i)))
             << "measure " << (i + 1) << " must be empty (mrest expansion)";
     }
-    // Measure 10: note after the multi-measure rest
     EXPECT_TRUE(hasPitchedNotes(measureAt(score, 9))) << "measure 10 must have notes";
-    // Measures 11-12: padding empty measures added by assemble()
     EXPECT_FALSE(hasPitchedNotes(measureAt(score, 10))) << "measure 11 (pad) must be empty";
     EXPECT_FALSE(hasPitchedNotes(measureAt(score, 11))) << "measure 12 (pad) must be empty";
 
     delete score;
 }
 
-// ===========================================================================
-// Regression: a multi-staff file stores one REST element per staff inside the
-// mrest MEAS block, so m.elements.size() > 1.  The old guard
-// 'if (m.elements.size() != 1) return 1' incorrectly collapsed the block to
-// a single measure for any file with more than one staff.
-//
-// Synthetic file: 2-staff, [mrest=7 (2 staves)][note (2 staves)]
-// Expected: 7 + 1 = 8 MuseScore measures.
-// Without fix: 1 + 1 = 2 (both staves' REST counted as size==2, suppressed).
-// ===========================================================================
+// Guards that mrest expansion works when the block has one REST element per staff (size > 1).
+// Fixture: 2-staff [mrest=7][note] = 8 measures; without the fix only 2.
 TEST_F(Tst_ImporterMrest, mrest_single_block_expands_for_multi_staff_file)
 {
     MasterScore* score = readEncoreScore("importer_mrest_multistaff.enc");
@@ -265,23 +226,17 @@ TEST_F(Tst_ImporterMrest, mrest_single_block_expands_for_multi_staff_file)
         return false;
     };
 
-    // Measures 1-7: virtual empty measures from the 2-staff mrest expansion
     for (int i = 0; i < 7; ++i) {
         EXPECT_FALSE(hasPitchedNotes(measureAt(score, i)))
             << "measure " << (i + 1) << " must be empty (mrest expansion)";
     }
-    // Measure 8: note measure (both staves)
     EXPECT_TRUE(hasPitchedNotes(measureAt(score, 7))) << "measure 8 must have notes";
 
     delete score;
 }
 
-// ===========================================================================
-// createMultiMeasureRests style flag: only set when the Encore file has at
-// least one MEAS block whose lone REST element carries mrestCount > 1.
-// Before the fix the flag was always true; files with only individual rests
-// were incorrectly getting MMRest display (collapsing separate rest measures).
-// ===========================================================================
+// The createMultiMeasureRests style flag must be set only when the file has an mrestCount > 1
+// block; otherwise separate rest measures would be wrongly collapsed into an MMRest.
 TEST_F(Tst_ImporterMrest, mmrest_flag_off_when_file_has_no_mrest_blocks)
 {
     // bazo.enc has no multi-measure rest blocks, only chord/note content.

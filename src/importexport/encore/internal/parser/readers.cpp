@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Shared block-skip/clamp helper implementations and the EncFormatReader factory (version to reader).
+
 #include "readers.h"
 #include "readers-v0xa6.h"
 #include "readers-v0xc2.h"
@@ -69,10 +71,8 @@ qint64 clampMeasureEnd(qint64 measStart, quint32 varsize, qint64 elemBlockOffset
     return std::min(end, deviceSize);
 }
 
-// Selects a format reader. SCO5 (macOS Encore 5) is identified by its magic string rather than
-// chuMagio (which is not 0xC4 in those files); it shares the v0xC4 binary format and differs
-// only in page-margin handling. Otherwise the format byte (chuMagio) picks the reader; add new
-// format cases here.
+// Selects a format reader. SCO5 (macOS Encore 5) is matched by magic string because its chuMagio
+// is not 0xC4 even though it shares the v0xC4 format; otherwise chuMagio picks the reader.
 std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 chuMagio, const QString& magic)
 {
     if (magic == "SCO5") {

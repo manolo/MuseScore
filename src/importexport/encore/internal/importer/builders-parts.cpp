@@ -124,11 +124,9 @@ static void applyInstrumentOrFallback(Part* part, const InstrumentTemplate* tmpl
     if (tmpl) {
         Instrument ins = Instrument::fromTemplate(tmpl);
         setInstrName(ins);
-        // A few generic templates (recorder, clarinet, trumpet, ...) carry no
-        // track name in instruments.xml because their UI name is supplied by the
-        // muse instruments, which are unavailable here. That would leave the
-        // mixer and Instruments panel blank, so derive the sounding instrument's
-        // name from the template id rather than from the Encore part label.
+        // A few generic templates carry no track name in instruments.xml (their UI name comes from
+        // the muse instruments, unavailable here). Derive it from the template id so the mixer and
+        // Instruments panel are not left blank.
         if (ins.trackName().isEmpty()) {
             ins.setTrackName(humanizeTemplateId(tmpl->id));
         }
@@ -157,12 +155,8 @@ static void applyInstrumentOrFallback(Part* part, const InstrumentTemplate* tmpl
 }
 
 // Step 2: name+MIDI score with transposition filter. A contains-only (substring) name match can
-// outrank the GM instrument via the MIDI bonus: e.g. "Bajo" hits "Contrabajo"/"Clarín contrabajo"
-// (a treble bugle sharing the tuba's program) instead of the bass-clef Tuba. When the name match
-// is not exact, prefer the MIDI-program instrument if it differs. Exact matches are kept as-is, so
-// the deliberate "Bass" -> acoustic-bass MIDI tiebreak (findTemplateByMidi returns the same
-// template) is unaffected. A unique name match (a needle no other template's name contains, e.g.
-// "Dulzaina") is as trustworthy as an exact one, so it is kept too.
+// outrank the right GM instrument via the MIDI bonus, so when the name match is neither exact nor
+// unique, prefer the MIDI-program instrument if it differs. Exact and unique name matches are kept.
 static const InstrumentTemplate* tryNameMidiScore(const EncInstrument& instr, int encMidi,
                                                   int encKey, bool isRhythm)
 {
@@ -250,7 +244,7 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         }
     };
 
-    // Step 1: PERC clef or GM Percussive range (113 to 128 1-indexed) → drumset.
+    // Step 1: PERC clef or GM Percussive range (113 to 128 1-indexed) -> drumset.
     static constexpr int GM_PERC_FIRST = 113;
     if (isPercByClef || instr.midiProgram >= GM_PERC_FIRST) {
         tryStep(MatchStep::PercClef, searchTemplate(String(u"drumset")));
@@ -334,13 +328,10 @@ void buildParts(BuildCtx& ctx)
 
         const int pitchOffset = static_cast<int>(instr.keyTransposeSemitones);
         // Transposition handling depends on the offset:
-        //  - non-octave (Bb, Eb, F instruments): set on instrument so the display shows the
-        //    written (Encore-stored) pitch.
-        //  - positive octave (instrument sounds higher): also set on instrument, so the staff
-        //    keeps a plain clef and the notes stay at their written height (the octave is a
-        //    playback transposition). applyOctaveToClef() deliberately produces no 8va clef.
-        //  - negative octave (instrument sounds lower): left to the octave-down clef applied by
-        //    pickStaffClef()/applyOctaveToClef() plus the template's own transposition.
+        //  - non-octave and positive octave: set on the instrument so the display keeps the written
+        //    pitch under a plain clef (the octave is a playback transposition, no 8va clef).
+        //  - negative octave: left to the octave-down clef from pickStaffClef()/applyOctaveToClef()
+        //    plus the template's own transposition.
         Instrument* instrument = part->instrument();
         if (instrument) {
             if (pitchOffset != 0 && (std::abs(pitchOffset) % 12 != 0 || pitchOffset > 0)) {
@@ -354,10 +345,9 @@ void buildParts(BuildCtx& ctx)
                        << "\": transposition in " << keyNames[keyIdx]
                        << " (chromatic=" << iv.chromatic << " diatonic=" << iv.diatonic << ")";
             } else if (pitchOffset == 0) {
-                // encKey=0 means "sounds as written" (ENCORE_FORMAT.md). Zero out any
-                // transposition the template carries, including octave offsets (±12, ±24):
-                // a double-bass template has chromatic=-12, but notes are already stored at
-                // written pitch, so keeping it would shift the display up one octave.
+                // encKey=0 means "sounds as written" (ENCORE_FORMAT.md). Zero out any transposition
+                // the template carries, including octave offsets: notes are already at written pitch,
+                // so a template offset would shift the display by an octave.
                 const Interval tmplT = instrument->transpose();
                 if (!tmplT.isZero()) {
                     instrument->setTranspose(Interval(0, 0));

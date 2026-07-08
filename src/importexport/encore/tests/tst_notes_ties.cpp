@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Tie import: TIE element direction/arc-span decoding, tie-start detection, and receiver matching.
+
 #include <gtest/gtest.h>
 
 #include "engraving/dom/arpeggio.h"
@@ -139,9 +141,7 @@ TEST_F(Tst_NotesTies, tie_direction_02_creates_tie)
 
 TEST_F(Tst_NotesTies, tie_18byte_intra_chord_arc_no_spurious_tie)
 {
-    // 4 duplicate 18-byte TIE@0 with arcX1==arcX2==12 (same as POPURRI).
-    // Two chord notes p60+p62 at tick=0. Same pitches again at tick=480.
-    // Fix: arcX1==arcX2 → isTieStart=false → no ties created.
+    // A zero-extent TIE arc (arcX1==arcX2) is an intra-chord curve, not a forward tie.
     MasterScore* score = readEncoreScore("notes_tie_intra_chord_arc_no_spurious.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -172,8 +172,7 @@ TEST_F(Tst_NotesTies, tie_18byte_intra_chord_arc_no_spurious_tie)
 
 TEST_F(Tst_NotesTies, tie_18byte_real_forward_still_creates_tie)
 {
-    // 18-byte TIE@0 with arcX1=12, arcX2=50 (different x positions → real forward tie).
-    // dirByte=0x02 → isTieStart=true. C4@tick=0 must be tied to C4@tick=480.
+    // A nonzero-extent TIE arc (arcX1 != arcX2) is a real forward tie.
     MasterScore* score = readEncoreScore("notes_tie_18byte_real_forward.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -263,14 +262,8 @@ TEST_F(Tst_NotesTies, tie_start_flag_on_byte6_creates_tie)
 
 TEST_F(Tst_NotesTies, tie_source_position_partial_chord)
 {
-    // notes_tie_partial_chord_source_position.enc: one measure.
-    // At tick=0: TIE(18-byte, dir=0x04, flag=0x80, sourcePosition=5) + C#4(pos=0) + A4(pos=5).
-    // Later in the same measure: C#4(pos=0) and A4(pos=5) as potential tie receivers.
-    //
-    // Bug (before fix): isTieStartAt returns true for the entire chord tick, so BOTH
-    //   C#4 and A4 register tie-starts. C#4 gets a spurious tie to its later occurrence.
-    // Fix: sourcePosition=5 at TIE byte +14 matches only A4 (pos=5). C#4 (pos=0) gets
-    //   no tie; A4 gets exactly one tie.
+    // A TIE's sourcePosition (byte +14) picks a single chord note, so a tie on one member
+    // of a chord (A4, pos=5) does not spill onto the other member (C#4, pos=0).
     MasterScore* score = readEncoreScore("notes_tie_partial_chord_source_position.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -306,13 +299,8 @@ TEST_F(Tst_NotesTies, tie_source_position_partial_chord)
 
 TEST_F(Tst_NotesTies, tie_crossmeasure_arcxx_equal_with_startflag)
 {
-    // notes_tie_crossmeasure_arcxx_equal.enc: two 4/4 measures. Measure 1
-    // has a whole note C4 with an 18-byte TIE element where arcX1==arcX2==12
-    // (zero horizontal extent) but startFlag=0x80 (explicit tie-start bit).
-    // Measure 2 has a whole note C4.
-    //
-    // Without fix: arcX1==arcX2 override sets isTieStart=false → no tie.
-    // With fix: startFlag=0x80 prevents the override → tie created.
+    // An explicit tie-start flag (byte +6 = 0x80) must force a tie even when the arc is
+    // zero-extent (arcX1==arcX2), so a cross-measure whole-note tie is not suppressed.
     MasterScore* score = readEncoreScore("notes_tie_crossmeasure_arcxx_equal.enc");
     ASSERT_NE(score, nullptr);
 
@@ -346,17 +334,9 @@ TEST_F(Tst_NotesTies, tie_crossmeasure_arcxx_equal_with_startflag)
 
 TEST_F(Tst_NotesTies, tie_spurious_far_receiver_dropped)
 {
-    // notes_tie_spurious_far_receiver.enc: one 4/4 measure, four quarters.
-    // C4@0 carries a real forward TIE (arcX1<arcX2 -> isTieStart). The next note
-    // is D4@240 (different pitch), then D4@480, then C4@720 (same pitch, but far).
-    //
-    // Bug (before fix): the pending tie keyed only by (staff, voice, pitch)
-    //   persisted until the next same-pitch note and completed C4@0 -> C4@720,
-    //   producing a tie arcing across the whole measure (the cross-measure
-    //   "ligaduras" the user saw spanning many bars).
-    // Fix: a tie completes only when the receiver begins exactly where the
-    //   tie-start note ends (the consecutive note). C4@720 starts at 720 but
-    //   C4@0 ends at 240 -> no consecutive same-pitch note -> tie dropped.
+    // A tie completes only when the receiver begins exactly where the tie-start note ends;
+    // a later same-pitch note that is not consecutive must not become a far receiver.
+    // Fixture: C4@0 tie-start, then D4, D4, and a distant C4@720 (ends of C4@0 is 240).
     MasterScore* score = readEncoreScore("notes_tie_spurious_far_receiver.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -387,8 +367,7 @@ TEST_F(Tst_NotesTies, tie_spurious_far_receiver_dropped)
 
 TEST_F(Tst_NotesTies, tie_element_creates_mscore_tie)
 {
-    // C4 quarter at tick=0 and C4 quarter at tick=240 with TIE element: must link via a Tie.
-    // Bug: TIE elements (type=3) were discarded. Fix: EncTie + pendingTieNote creates Factory::createTie().
+    // A TIE element (type 3) must link two consecutive same-pitch notes with a MuseScore Tie.
     MasterScore* score = readEncoreScore("notes_tie.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -426,8 +405,7 @@ TEST_F(Tst_NotesTies, tie_element_creates_mscore_tie)
 
 TEST_F(Tst_NotesTies, sf_tiestart_not_filtered_by_rdur)
 {
-    // 64th note at tick=0 with rdur=11 (<15) and a TIE element: must not be filtered.
-    // Fix: 64th/128th notes with a TIE element at their tick bypass the rdur<15 filter.
+    // A 64th/128th note with a TIE element at its tick must bypass the rdur<15 MIDI-artifact filter.
     MasterScore* score = readEncoreScore("notes_sf_tiestart.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -464,16 +442,9 @@ TEST_F(Tst_NotesTies, sf_tiestart_not_filtered_by_rdur)
 
 TEST_F(Tst_NotesTies, tie_direction_04_forward_creates_tie)
 {
-    // notes_tie_dir_04_forward.enc: 18-byte TIE@0 with +5=0x04, +6=0x00,
-    // arcX1=56, arcX2=112 (genuine forward horizontal span). Byte +5 is a
-    // signed arc-curvature value, not a bitfield: 0x04 curves down just like
-    // 0xFC curves up; both are real ties. C4@tick=0 must tie to C4@tick=480.
-    //
-    // Bug (before fix): the bit-based rule (+5&0x80 || +5&0x02 || +6&0x80)
-    //   classified 0x04 as not-a-start and dropped the tie. In a real
-    //   multi-staff score this silently lost ties on every staff whose arc
-    //   curved down (+5=0x04) while staves with +5=0xFC kept theirs.
-    // Fix: arcX1 < arcX2 marks a forward tie regardless of the +5 sign.
+    // Byte +5 is a signed arc-curvature value, not a bitfield: a down-curving arc (+5=0x04)
+    // is a real tie just like an up-curving one (+5=0xFC). Forward ties are recognized by
+    // arcX1 < arcX2 regardless of the +5 sign.
     MasterScore* score = readEncoreScore("notes_tie_dir_04_forward.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();

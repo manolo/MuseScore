@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Implements the tick table and the 3:2 / 5:4 implied-tuplet probe.
+
 #include "ticks.h"
 
 namespace mu::iex::enc {

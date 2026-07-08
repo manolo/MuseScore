@@ -37,9 +37,7 @@
 namespace mu::iex::enc {
 using namespace mu::engraving;
 
-// Apply articulations, ornaments, fermatas, tremolos, and string numbers to a
-// note/chord from the two articulation bytes (articulationUp, articulationDown).
-// Also handles scale string numbers from the options byte and position field.
+// See ENCORE_IMPORTER.md §Articulations, technical markings, tremolos.
 void applyNoteArticulations(BuildCtx& ctx, Note* note, Chord* chord, const EncNote* en,
                             track_idx_t track, const MeasEmitCtx& mc)
 {

@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Text-bearing measure elements: chord symbols, lyrics and ties, each with the format
+// layout fields (anchor bytes, gaps, arc endpoints) their read() needs.
+
 #pragma once
 
 #include <QString>

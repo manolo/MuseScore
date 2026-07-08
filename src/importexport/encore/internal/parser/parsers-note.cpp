@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Read the note-family elements: NOTE, REST, KEYCHANGE, CLEF, MIDI CC, and grace-type decode.
+
 #include "elem-note.h"
 
 namespace mu::iex::enc {
@@ -34,12 +36,9 @@ bool EncMeasureElem::read(QDataStream& ds)
 
 EncGraceType EncNote::graceType() const
 {
-    // grace1 bit 0x20 is the "small note" marker (a grace or a cue); standard notes leave it clear.
-    // With the small bit set, grace2 bit 0x04 = slash (acciaccatura); otherwise the note is a
-    // no-slash small note. grace1 bit 0x10 flags a beamed grace-group member (a percussion ruff); it
-    // does not change the kind. grace2 bit 0x01 is the mute flag (playback), NOT a kind, so it is not
-    // read here. A no-slash small note is reported APPOGGIATURA; the emitter reclassifies it as a cue
-    // (a full-value small note) when it stands alone with no principal note to ornament.
+    // Decode the grace/cue flags; see ENCORE_FORMAT.md §Grace and cue notes. A no-slash small note
+    // is reported APPOGGIATURA here; the emitter later reclassifies it as a cue when it stands alone
+    // with no principal note to ornament.
     if (!(grace1 & 0x20)) {
         return EncGraceType::NORMAL;
     }
@@ -111,10 +110,9 @@ bool EncGenericElem::read(QDataStream& ds)
 
 bool EncMidiCc::read(QDataStream& ds)
 {
-    EncMeasureElem::read(ds);   // consumes size (d[3]) + rawStaff (d[4]); ds now at d[5]
-    // d[5] CC marker, d[6..9] zeros, d[10] controller, d[11] value. Only present when the
-    // element is the full 12 bytes; the measure loop reseeks to elemStart+elemSpacing(size)
-    // afterwards, so a short/garbage element stays aligned with controller/value left at 0.
+    EncMeasureElem::read(ds);
+    // Controller/value only exist in the full 12-byte element; a short/garbage one stays aligned
+    // (the measure loop reseeks past it) with controller/value left at 0.
     if (size >= 12) {
         ds.skipRawData(5);
         ds >> controller >> value;

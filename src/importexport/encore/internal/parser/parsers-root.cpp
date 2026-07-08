@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Top-level file walk: scan block magics and dispatch to each block reader; page/print setup.
+
 #include "elem.h"
 
 #include <algorithm>
@@ -33,9 +35,8 @@ namespace mu::iex::enc {
 // EncRoot - top-level container
 // ---------------------------------------------------------------------------
 
-// WINI page-setup block. Layout: 21 uint16 LE values (42 bytes). The margins are int32 LE (two
-// adjacent uint16s, high word always 0): [12,13]=top, [14,15]=left, [16,17]=pageHeight_pts -
-// bottomMargin, [18,19]=pageWidth_pts - rightMargin. All values in typographic points (1/72 inch).
+// WINI page-setup block: page margins in typographic points (1/72 inch). Layout and field offsets
+// in ENCORE_FORMAT.md §WINI block.
 void EncPageSetup::read(QDataStream& ds, quint32 varSize)
 {
     if (varSize < 40) {

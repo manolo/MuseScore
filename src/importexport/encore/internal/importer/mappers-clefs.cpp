@@ -78,17 +78,13 @@ void addInitialKeySig(MasterScore* score, int staffIdx, quint8 encKey)
     // key for the staff timeline; the written key is stored explicitly for display.
     Interval v = staff->part()->instrument()->transpose();
     Key concertKey = v.isZero() ? writtenKey : Transpose::transposeKey(writtenKey, v);
-    // Prefer sharp enharmonics (F# over Gb, B over Cb) when transposeKey returns an extreme
-    // flat key. Transpose::transposeKey(Key::C, Interval(3,6)) returns Key::Gb (-6) for a
-    // +6 (augmented-4th) transposing instrument, causing pitch2tpc to spell concert B4 as Cb
-    // and the written note as Gbb. Using F# instead gives the correct spelling (F).
+    // Prefer sharp enharmonics (F# over Gb) for extreme flat keys: an augmented-4th transposing
+    // instrument yields Gb (-6), which makes pitch2tpc spell notes with double flats. F# spells them right.
     if (static_cast<int>(concertKey) <= -6) {
         concertKey = Key(static_cast<int>(concertKey) + 12);
     }
-    // Always store the concert key on the staff's key timeline so Staff::concertKey() returns
-    // the normalized value. Without this, C-major (fifths==0) returns early and the staff
-    // computes the concert key on-the-fly from the instrument transposition, which may return
-    // the flat enharmonic and produce double-flat note spellings.
+    // Store the concert key even for C major so Staff::concertKey() returns the normalized value
+    // rather than recomputing it from the transposition (which may pick the flat enharmonic).
     Fraction tick = Fraction(0, 1);
     KeySigEvent ke;
     ke.setConcertKey(concertKey);
@@ -125,9 +121,8 @@ void addInitialTimeSig(MasterScore* score, int nstaves, Fraction ts, TimeSigType
     }
 }
 
-// Encore encodes common time as 0x43 ('C') or 0x63 ('c'); 0x00 means normal numeric.
-// Cut time (alla breve) uses a glyph value not yet confirmed in the format, so it is not
-// mapped here and falls through to NORMAL (shown as numeric 2/2).
+// Common time is glyph 0x43 ('C') or 0x63 ('c'). Cut time has no confirmed glyph value yet,
+// so it falls through to NORMAL (numeric). See ENCORE_FORMAT.md §Time-signature glyph.
 TimeSigType encTimeSigGlyph2Type(quint8 glyph, Fraction ts)
 {
     if ((glyph == 0x43 || glyph == 0x63) && ts == Fraction(4, 4)) {
@@ -188,13 +183,9 @@ static int clefGlyphFamily(ClefType ct)
     }
 }
 
-// When Key is a negative octave (-12 or -24), return the matching octave-down clef in the same
-// glyph family (so the octave-shifted pitch displays at the written octave): instruments that
-// sound an octave lower (laud, bass guitar, tuba sounding 8vb) are conventionally written with
-// an 8vb clef. A positive octave (the instrument sounds higher) is NOT decorated with an 8va
-// clef: octave-up clefs are extremely rare, and Encore shows such instruments with a plain clef
-// and the octave handled as a playback transposition (see builders-parts.cpp). Other offsets and
-// families with no octave variant return the base clef unchanged.
+// A negative octave offset returns the matching octave-down clef in the same glyph family, so
+// instruments sounding 8vb are written with an 8vb clef. A positive offset keeps the plain clef
+// (octave-up clefs are rare; the octave is a playback transposition, see builders-parts.cpp).
 ClefType applyOctaveToClef(ClefType base, int keyOffsetSemitones)
 {
     if (keyOffsetSemitones >= 0 || clefGlyphFamily(base) == 0) {

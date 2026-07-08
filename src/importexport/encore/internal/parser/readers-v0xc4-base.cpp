@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Instrument metadata recovery for v0xC2/v0xC4: names, MIDI programs and key transpositions across
+// the large-TK, small-TK, compact and no-TK-block table layouts.
+
 #include "readers-v0xc4-base.h"
 
 #include <QDataStream>
@@ -114,15 +117,10 @@ static qint64 findTildeBlockOffset(QDataStream& ds)
 
 void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& ds)
 {
-    // NAME_BASE=202 is the name position of instrument 0 in every compact-table
-    // layout.  The step differs by layout:
-    //   • Large-TK / ~~~~-block files: step=2158 (one full TK block per instrument)
-    //   • No-~~~~-block compact files (e.g. tapada.enc): step=112 (one 112-byte entry)
-    //
-    // The compact fallback (COMPACT_NAME_BASE=314, step=112) handles ~~~~-block files
-    // where named instruments already have names from TK blocks; the fallback fills in
-    // the rest from the compact table.  For no-~~~~-block compact files the direct
-    // NAME_BASE+n*112 loop covers all 8 instruments in one pass.
+    // NAME_BASE=202 is the name position of instrument 0 in every compact-table layout; the step
+    // differs (2158 for large-TK/~~~~-block files, 112 for no-~~~~-block compact files). The
+    // COMPACT_NAME_BASE fallback fills names left unresolved by the primary probe.
+    // See ENCORE_FORMAT.md §Instrument block.
     static constexpr qint64 NAME_BASE = 202;
     static constexpr qint64 NAME_STEP = 2158;
     static constexpr qint64 COMPACT_NAME_BASE = 314;
@@ -151,10 +149,8 @@ void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& d
         return readEncodedStringRemaining(ds, remaining);
     };
 
-    // No-~~~~-block format: all instruments sit in a linear table.
-    // Two sub-layouts detected by firstBlockOff vs. the large-TK MIDI base (2278):
-    //   large-TK: step=2158 (file has no TK blocks but uses the large-TK name table)
-    //   compact:  step=112  (e.g. tapada.enc, older files without the large table)
+    // No-~~~~-block format: all instruments sit in a linear table. Detect large-TK (step 2158) vs
+    // compact (step 112) by comparing firstBlockOff against the large-TK MIDI base (2278).
     const bool noTkBlocks = instruments.empty()
                             || std::all_of(instruments.begin(), instruments.end(),
                                            [](const EncInstrument& i){ return i.contentFilePos < 0; });
@@ -275,7 +271,7 @@ static void readMidiProgramsNoTk(
                 }
             }
         } else if (tildeOff < 0) {
-            // No-~~~~-block compact format (e.g. tapada.enc): instrument entries at
+            // No-~~~~-block compact format: instrument entries at
             // entry_base=176, step=112, MIDI at entry+86.
             // NAME_BASE(202) = entry_base(176) + name_off(26), so
             // MIDI_BASE = 176 + 86 = 262 = NAME_BASE - 26 + 86.

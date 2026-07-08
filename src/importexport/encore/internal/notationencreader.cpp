@@ -19,6 +19,9 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
+// Collects import options from the configuration, runs importEncore, and maps errors to messages.
+
 #include "notationencreader.h"
 
 #include "importer/import.h"
@@ -44,9 +47,7 @@ muse::Ret NotationEncoreReader::read(MasterScore* score, const muse::io::path_t&
     opts.mergeVoices                          = encoreConfiguration()->mergeVoices();
     Err err = importEncore(score, path.toQString(), opts);
     if (err == Err::FileBadFormat) {
-        // Replace the generic "Bad format" text with a message that identifies why the file
-        // could not be read (encrypted container, unsupported/damaged Encore file, or not an
-        // Encore file at all) and how to recover.
+        // Give a specific reason instead of the generic "Bad format" text.
         return make_ret(err, encoreLoadErrorMessage(path.toQString()));
     }
     return make_ret(err, path);

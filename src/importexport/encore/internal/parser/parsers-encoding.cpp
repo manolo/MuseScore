@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Implements string decoding: probes the first bytes to pick UTF-16 LE or Latin-1, then reads.
+
 #include "parsers-encoding.h"
 
 namespace mu::iex::enc {
@@ -34,8 +36,8 @@ QString readEncodedStringRemaining(QDataStream& ds, int& remaining)
         return {};
     }
 
-    // Peek at the first one or two bytes to detect encoding (peek leaves the cursor in place
-    // and works on non-seekable devices, expressing intent better than read + seek-back).
+    // Peek at the first bytes to detect encoding; peek leaves the cursor in place and works
+    // on non-seekable devices.
     quint8 b0 = 0, b1 = 0;
     {
         char buf[2] = { 0, 0 };

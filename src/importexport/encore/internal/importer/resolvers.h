@@ -19,6 +19,11 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
+// Post-pass resolvers that attach deferred spanners and ornaments (slurs, hairpins, ornaments,
+// fingerings/bowings, ottavas) once every chord exists, plus shared track-validity and
+// tick-to-chord lookup helpers.
+
 #ifndef MU_IMPORTEXPORT_ENC_IMPORT_RESOLVERS_H
 #define MU_IMPORTEXPORT_ENC_IMPORT_RESOLVERS_H
 

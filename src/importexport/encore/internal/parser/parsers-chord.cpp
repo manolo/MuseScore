@@ -20,15 +20,15 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Read CHORD symbols and decode the numeric root/quality/bass encoding into a chord name.
+
 #include "elem-text.h"
 #include "parsers-encoding.h"
 
 namespace mu::iex::enc {
-// Chord quality suffixes indexed by toniko value (0-63).
-// This is Encore's own chord palette, in palette order, verified against the labels Encore
-// displays for a score carrying one chord per measure across the full toniko range.
-// Encore's typography is mapped to what the MuseScore chord parser expects: Encore's
-// augmented-fifth "+5" becomes "#5", and Encore's "sus2,sus4" drops the comma.
+// Chord quality suffixes indexed by toniko value (0-63): Encore's own chord palette in palette
+// order. Encore typography is mapped to what the MuseScore chord parser expects: augmented-fifth
+// "+5" becomes "#5", and "sus2,sus4" drops the comma. See ENCORE_FORMAT.md §CHORD symbol element.
 static const char* const kChordQuality[] = {
     "",            //  0: major (no suffix)
     "m",           //  1: minor
@@ -125,13 +125,11 @@ bool EncChordSym::read(QDataStream& ds)
     ds >> xoffset;
     ds.skipRawData(1);
     ds >> radiko >> baso;
-    // tipo bit 2 (0x04) means Encore draws a guitar frame (fretboard diagram) above the
-    // chord symbol; when clear only the chord text is shown.
+    // tipo bit 2 = draw a fretboard diagram above the symbol. See ENCORE_FORMAT.md §CHORD symbol element.
     hasFretDiagram = (tipo & 0x04) != 0;
     const bool hasText = (tipo & 1);
     if (hasText) {
-        // 36-byte slot; UTF-16 LE in modern files, Latin-1 in legacy scores.
-        teksto = readEncodedStringFixed(ds, 36);
+        teksto = readEncodedStringFixed(ds, 36);   // fixed 36-byte text slot
     }
     // No trailing skip: the element loop reseeks to the element end after read().
     return true;

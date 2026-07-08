@@ -19,6 +19,9 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
+// Interface for Encore import options: each user-facing toggle exposes a getter, setter and change channel.
+
 #pragma once
 
 #include "modularity/imoduleinterface.h"

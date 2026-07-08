@@ -87,13 +87,9 @@ static int encMeasDisplayCount(const EncMeasure& m, const EncMeasure* prev)
     return cnt;
 }
 
-// Number of times a repeat-end barline plays. Encore does not store an explicit "times
-// played" count; it encodes the pass count implicitly in the volta endings. A repeat with
-// endings "1.-3." then "4." must play four times so the last ending is reached. MuseScore
-// derives the pass count from the end-repeat barline's repeatCount(), so the count equals
-// the highest ending number among the volta brackets belonging to this repeat: the bitmask
-// on the end-repeat measure itself (the first ending) plus the ending measures that follow
-// it. With no alternate endings (a plain repeat) it falls back to the standard 2.
+// Number of times a repeat-end barline plays. Encore stores no explicit count; the pass count is
+// the highest volta ending number belonging to this repeat (bitmask on the end-repeat measure plus
+// the ending measures that follow it). A plain repeat with no endings falls back to 2.
 static int encRepeatPlayCount(const std::vector<EncMeasure>& measures, size_t endIdx)
 {
     quint8 bits = measures[endIdx].repeatAlternative;
@@ -293,7 +289,7 @@ void buildInitialSignatures(BuildCtx& ctx)
     }
 
     // Emit TimeSig elements at change points. Use identical() not operator==: Fraction(6,8)
-    // == Fraction(3,4) via cross-multiplication, so operator== would miss 6/8 ↔ 3/4 changes.
+    // == Fraction(3,4) via cross-multiplication, so operator== would miss 6/8 vs 3/4 changes.
     Fraction prevTs = ctx.nominalTimeSig;
     for (const Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
         Fraction mTs = m->timesig();

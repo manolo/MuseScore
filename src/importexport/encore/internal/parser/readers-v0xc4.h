@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Factories for the Encore 5.x (v0xC4) reader and its macOS SCO5 variant; classes live in the cpp.
+
 #ifndef MU_IMPORTEXPORT_ENC_PARSER_READER_V0XC4_H
 #define MU_IMPORTEXPORT_ENC_PARSER_READER_V0XC4_H
 
@@ -28,9 +30,8 @@
 
 namespace mu::iex::enc {
 
-// Factory helpers -- called from EncFormatReader::create().
-// Full class definitions are in reader-v0xc4.cpp. SCO5 is the macOS Encore 5 variant: same
-// binary format as v0xC4 (SCOW) but with no importable document margins.
+// SCO5 is the macOS Encore 5 variant: same binary format as v0xC4 (SCOW) but with no importable
+// document margins.
 std::unique_ptr<EncFormatReader> makeFormatReader_V0xC4();
 std::unique_ptr<EncFormatReader> makeFormatReader_SCO5();
 

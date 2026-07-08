@@ -20,14 +20,14 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Top-level Encore (.enc) import: read the file, build the score, and run whole-score fix-up passes.
+// Binary format reverse-engineered by Leon Vinken (Enc2MusicXML, GPL v3+) building on enc2ly by Felipe Castro.
+
 #include "ctx.h"
 #include "builders.h"
 #include "resolvers.h"
 #include "page-layout.h"
 #include "debug-dump.h"
-
-// Encore (.enc) file importer for MuseScore.
-// Binary format reverse-engineered by Leon Vinken (Enc2MusicXML, GPL v3+) building on enc2ly by Felipe Castro.
 
 #include "import.h"
 
@@ -112,15 +112,10 @@ void applyConcertPitch(Note* n, int semitone)
     n->setTpcFromPitch();
 }
 
-// TODO: format-agnostic candidate for promotion. This transform reads no Encore data; it is a
-// generic engraving fix-up (respell TPCs on transposing staves) that MusicXML/GuitarPro/MIDI
-// import could reuse. Consider moving it to engraving/editing or an importexport shared util.
-// score->spell() re-spells the whole score with a context-based heuristic that mishandles
-// transposing instruments: it can spell concert pitches with double-flats (e.g. a concert E in
-// A major rendered as a written double-flat) instead of the plain note the key wants. After
-// spell(), re-derive the TPC of notes on TRANSPOSING staves from the sounding pitch + concert key
-// + staff transposition (which honours the key); the pitch is unchanged. Non-transposing staves
-// keep spell()'s result, which is correct for them.
+// score->spell() re-spells the whole score with a context heuristic that can spell transposed
+// pitches with double-flats instead of the plain note the key wants. Re-derive the TPC of notes on
+// transposing staves from pitch + concert key + transposition (pitch unchanged); leave others as is.
+// TODO: format-agnostic, reads no Encore data; candidate to promote to a shared importexport util.
 static void respellTransposingStaves(MasterScore* score)
 {
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
@@ -151,8 +146,8 @@ static void respellTransposingStaves(MasterScore* score)
     }
 }
 
-// Map Encore score-size (1 to 4) to MuseScore Staff Properties → Scale (Pid::MAG).
-// 1=60%, 2=75%, 3=100%, 4=130%.  Global spatium is not changed.
+// Map Encore score-size (1 to 4) to MuseScore Staff Properties Scale (Pid::MAG): 1=60%, 2=75%,
+// 3=100%, 4=130%. Global spatium is not changed.
 static void applyStaffScale(MasterScore* score, const EncRoot& enc)
 {
     static const double kScaleBySize[4] = { 0.60, 0.75, 1.00, 1.30 };
@@ -167,16 +162,11 @@ static void applyStaffScale(MasterScore* score, const EncRoot& enc)
     }
 }
 
-// TODO: format-agnostic candidate for promotion. This transform reads no Encore data; it is a
-// generic engraving operation (implode non-overlapping voices) that other importers could reuse.
-// Consider moving it to engraving/editing or an importexport shared util.
-// When a staff splits its content across several voices that never sound at the
-// same time, collapse them back into voice 1. This is the engraving equivalent of
-// the manual "move notes to voice 1" + Tools > Implode workflow. A staff is treated
-// as collapsible only when ALL of its voices fit into voice 1 with no timing change:
-// two notes from different voices may share voice 1 only when they have the exact
-// same onset and duration (they become a chord); any other time overlap leaves the
-// whole staff untouched (all-or-nothing per staff), so the music is never altered.
+// Collapse a staff's voices back into voice 1 when they never sound at the same time (the
+// engraving equivalent of "move to voice 1" + Tools > Implode). All-or-nothing per staff:
+// a staff is collapsible only if every voice fits into voice 1 with no timing change (notes may
+// merge into a chord only at identical onset+duration), so the music is never altered.
+// TODO: format-agnostic, reads no Encore data; candidate to promote to a shared importexport util.
 static void mergeNonOverlappingVoices(MasterScore* score)
 {
     // Pass 1: find the staves that carry notes in more than voice 0 and whose voices
@@ -204,7 +194,7 @@ static void mergeNonOverlappingVoices(MasterScore* score)
             }
         }
         if (!hasUpperVoiceNotes) {
-            continue;   // already a single voice -- nothing to do
+            continue;   // already a single voice, nothing to do
         }
         // The distinct intervals (identical ones, i.e. chord candidates, are deduped
         // by the set) must not overlap. Sweep in start order: an interval that begins
@@ -292,12 +282,10 @@ static void mergeNonOverlappingVoices(MasterScore* score)
         }
     }
 
-    // Final pass: drop redundant upper-voice rests. An upper voice (index >= 1) that holds
-    // only rests in a measure is not a real second voice -- Encore leaves such stray rests
-    // behind, and after the collapse above voice 0 already fills the bar. They would show as
-    // a spurious extra voice (and can even inflate the measure's length), so remove them.
-    // A measure whose upper voice still carries a chord is a genuine overlapping voice and
-    // is left untouched.
+    // Final pass: drop redundant upper-voice rests. An upper voice (index >= 1) holding only rests
+    // in a measure is not a real second voice (voice 0 already fills the bar after the collapse);
+    // it would show as a spurious extra voice and can inflate the measure length. An upper voice
+    // still carrying a chord is a genuine overlapping voice and is left untouched.
     for (staff_idx_t si = 0; si < score->nstaves(); ++si) {
         const track_idx_t base = si * VOICES;
         std::vector<Rest*> staleRests;
@@ -337,9 +325,8 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     score->style().set(Sid::chordsXmlFile, true);
     score->chordList()->read(u"chords.xml");
 
-    // Enable multi-measure rest display only when the Encore file actually uses them.
-    // A file with no mrestCount > 1 REST elements should show individual whole rests,
-    // not collapsed multi-measure rests.
+    // Enable multi-measure rests only when the file uses them (any REST with mrestCount > 1);
+    // otherwise show individual whole rests.
     const bool hasMMRest = std::any_of(enc.measures.begin(), enc.measures.end(),
                                        [](const EncMeasure& m) {
         if (m.elements.empty()) {

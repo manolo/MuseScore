@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Umbrella header: pulls in every Encore parser element struct in one include.
+
 #ifndef MU_IMPORTEXPORT_ENC_PARSER_ELEMENTS_H
 #define MU_IMPORTEXPORT_ENC_PARSER_ELEMENTS_H
 

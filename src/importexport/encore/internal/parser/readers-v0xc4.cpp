@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Encore 5.x (v0xC4) reader and its SCO5 (macOS) variant: mostly base defaults, plus artic-byte
+// clearing for undersized notes and uniform page margins for SCO5.
+
 #include "readers-v0xc4.h"
 #include "readers-v0xc4-base.h"
 

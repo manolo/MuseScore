@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// String decoding for the Encore parser: UTF-16 LE vs Latin-1 auto-detection and readers.
+
 #pragma once
 
 #include <QDataStream>

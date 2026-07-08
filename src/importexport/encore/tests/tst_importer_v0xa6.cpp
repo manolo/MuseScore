@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// v0xA6 (Encore 2.x) format specifics: header size, note/tuplet offsets, duplicate-rest dedup, grace groups, compact lyrics and staff text.
+
 #include <gtest/gtest.h>
 
 #include <QByteArray>
@@ -68,8 +70,8 @@ protected:
     }
 };
 
-// End-to-end regression for the full v0xA6 fix chain: 4 instruments, Key bytes, pitch at byte +11,
-// tuplet at byte +7, duplicate REST collapse, triplet groups, no spurious glyphs.
+// End-to-end pipeline over 4 instruments: Key transposition, note/tuplet offsets, duplicate-rest
+// collapse, triplet groups and no spurious glyphs. See ENCORE_FORMAT.md §v0xA6 note (size 10, on-disk slot 20).
 TEST_F(Tst_ImporterV0xa6, v0xa6_boda_like_full_pipeline)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_boda_like.enc");
@@ -188,8 +190,8 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_boda_like_full_pipeline)
     delete score;
 }
 
-// Regression: v0xA6 NOTE stores the tuplet byte at offset +7 (not +13 as in v0xC4).
-// Without the override the 0x32 (3:2) marker is invisible; 6 triplet sixteenths collapse to 4 plain notes.
+// v0xA6 NOTE stores the tuplet byte at offset +7 (not +13 as in v0xC4); without the override the
+// 3:2 marker is lost and 6 triplet sixteenths collapse to 4 plain notes. See ENCORE_FORMAT.md §v0xA6 note (size 10, on-disk slot 20).
 TEST_F(Tst_ImporterV0xa6, v0xa6_triplet_byte_at_offset_7)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_triplet_byte_at_offset_7.enc");
@@ -230,8 +232,9 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_triplet_byte_at_offset_7)
     delete score;
 }
 
-// Regression: v0xA6 can store two byte-identical REST elements at the same tick; Encore renders only one.
-// Without dedupe the second REST advanced cumTick past the bar and spilled the next note into voice 1.
+// v0xA6 can store two byte-identical REST elements at the same tick (Encore renders one); without
+// dedupe the second REST advances cumTick past the bar and spills the next note into voice 1.
+// See ENCORE_IMPORTER.md §Voice overflow drop and duplicate-rest dedup.
 TEST_F(Tst_ImporterV0xa6, v0xa6_duplicate_rest_collapse)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_duplicate_rest_collapse.enc");
@@ -274,8 +277,8 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_duplicate_rest_collapse)
     delete score;
 }
 
-// Regression: v0xA6 header ends at 0xA6 (174 bytes), not 0xC2 (194). Old code skipped to 0xC2,
-// swallowing TK00 at 0xA6 so Key=-12 was never applied; pitch stayed at binary 60 instead of 48.
+// The v0xA6 header ends at 0xA6 (174 bytes), not 0xC2; skipping to 0xC2 swallows TK00 so Key=-12
+// is lost and pitch stays at 60 instead of 48. See ENCORE_FORMAT.md §Header.
 TEST_F(Tst_ImporterV0xa6, v0xa6_header_ends_at_0xa6)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_header_ends_at_0xa6.enc");
@@ -299,8 +302,8 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_header_ends_at_0xa6)
     delete score;
 }
 
-// Regression: two bugs in v0xA6 Key pipeline: (1) header skipped to 0xC2 shifting all TK metadata;
-// (2) Key byte at TK+42 (not PRG_BASE+n*PRG_STEP). Both fixed: Key=-12 lowers C4(60) to C3(48).
+// v0xA6 Key pipeline: correct header end and Key byte at TK+42 so Key=-12 lowers C4 (60) to C3 (48).
+// See ENCORE_FORMAT.md §MIDI program and Key by layout.
 TEST_F(Tst_ImporterV0xa6, v0xa6_key_transposition_octave_lower)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_key_transposition.enc");
@@ -323,8 +326,8 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_key_transposition_octave_lower)
     delete score;
 }
 
-// Regression: v0xA6 NOTE is 10 bytes but EncNote::read consumed 27, reading into the next slot's preamble
-// as articulation/fingering data, producing thousands of spurious glyphs. Fix: zero those fields when slot size < 27.
+// v0xA6 NOTE is 10 bytes; reading 27 would pull the next slot's preamble in as artic/fingering data
+// and emit thousands of spurious glyphs. See ENCORE_FORMAT.md §v0xA6 note (size 10, on-disk slot 20).
 TEST_F(Tst_ImporterV0xa6, v0xa6_no_spurious_articulation_glyphs)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_no_spurious_tremolo.enc");
@@ -374,8 +377,9 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_no_spurious_articulation_glyphs)
     delete score;
 }
 
-// Regression: after a grace note, regular notes at exact face-grid ticks triggered the gap snap (gap=stolenTicks),
-// inserting spurious rests. Fix: suppress snap when gap <= stolenTicks.
+// After a grace note, regular notes on the exact face grid used to trigger the gap snap and insert
+// spurious rests; the snap is suppressed when gap <= stolenTicks.
+// See ENCORE_IMPORTER.md §v0xA6 grace groups (inner graces and snap suppression).
 TEST_F(Tst_ImporterV0xa6, v0xa6_grace_ongrid_snap_suppressed)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_grace_ongrid_snap_suppressed.enc");
@@ -396,8 +400,7 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_grace_ongrid_snap_suppressed)
             continue;
         }
         if (el->isRest()) {
-            // A rest immediately after a chord (and not the last element)
-            // is suspicious -- it means the snap fired creating an inter-note gap.
+            // A rest between two chords means the snap fired and created an inter-note gap.
             if (prevWasChord && s->next(SegmentType::ChordRest)) {
                 hasSpuriousInterNoteRest = true;
             }
@@ -415,14 +418,13 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_grace_ongrid_snap_suppressed)
     delete score;
 }
 
-// Regression: inner grace (g1=0x10) shorter than the leader (g1=0x20) was treated as a regular note,
-// producing a spurious rest before the grace group and causing a SIGSEGV in GUI layout.
+// An inner grace (g1=0x10) shorter than the leader (g1=0x20) was read as a regular note, producing a
+// spurious pre-grace rest that crashed GUI layout. See ENCORE_IMPORTER.md §v0xA6 grace groups (inner graces and snap suppression).
 TEST_F(Tst_ImporterV0xa6, v0xa6_inner_grace_group)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_inner_grace_group.enc");
     ASSERT_NE(score, nullptr) << "Failed to load importer_v0xa6_inner_grace_group.enc";
 
-    // sanityCheck catches the corrupted structure that previously caused SIGSEGV.
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "sanityCheck failed (would crash in GUI): " << ret.text();
 
@@ -458,22 +460,20 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_inner_grace_group)
         }
         (void)prevWasChord;
     }
-    // No rest immediately before the grace group (= the crash-inducing structure).
     EXPECT_FALSE(hasSpuriousPreGraceRest)
         << "Rest found immediately before grace-note chord; "
         "this corrupted structure crashes the MuseScore GUI layout";
-    // Both leading (32nd) and inner (64th) graces must be recognised.
     EXPECT_EQ(graceCount, 2)
         << "expected 2 graces (32nd leader + 64th inner)";
-    // Regular notes: 8th at start and 8th at end.
     ASSERT_GE(regularTypes.size(), 2u);
     EXPECT_EQ(regularTypes.front(), DurationType::V_EIGHTH);
     EXPECT_EQ(regularTypes.back(), DurationType::V_EIGHTH);
     delete score;
 }
 
-// Regression: v0xA6 grace notes shift subsequent real notes forward, leaving the last note with realDuration < face.
-// calculateRealDurations detects the deficit and restores the face duration. Without fix: last 8th becomes 16th+rest.
+// v0xA6 grace notes shift real notes forward, leaving the last with realDuration < face; the deficit
+// is detected and the face duration restored so the last 8th does not become a 16th plus a rest.
+// See ENCORE_IMPORTER.md §v0xA6 grace note time-borrowing.
 TEST_F(Tst_ImporterV0xa6, v0xa6_grace_restores_face_value)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_grace_restores_face_value.enc");
@@ -518,9 +518,8 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_grace_restores_face_value)
     delete score;
 }
 
-// End-to-end: a real v0xA6 file whose measure carries a compact lyric syllable ("loco") and a
-// STAFFTEXT ornament pointing at TEXT entry 0 ("dolce") must import both. Before the compact-layout
-// fix the 2.x lyric and staff text were silently dropped.
+// A v0xA6 file with a compact lyric ("loco") and a STAFFTEXT ornament ("dolce") must import both;
+// the 2.x compact layout was previously dropped. See ENCORE_FORMAT.md §Lyric element.
 TEST_F(Tst_ImporterV0xa6, v0xa6_imports_lyrics_and_staff_text)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_lyrics_and_stafftext.enc");
@@ -557,11 +556,8 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_imports_lyrics_and_staff_text)
     delete score;
 }
 
-// v0xA6 stores LYRIC elements in a compact layout: after size(+3) and rawStaff(+4) comes a single
-// control byte(+5), then null-terminated text(+6) within the size*2 slot. The shared v0xC4/v0xC2
-// reader looks for text ~20 bytes in and bails on the tiny element, dropping every 2.x lyric.
-// This parser-level test feeds the exact element bytes for the syllable "lent" (size=6, rawStaff
-// 0x40, control 0x77) and asserts the compact path recovers the text.
+// Parser-level: the v0xA6 compact LYRIC path must recover text the shared v0xC4/v0xC2 reader misses
+// on a tiny element. Fixture feeds the raw bytes for "lent". See ENCORE_FORMAT.md §Lyric element.
 TEST_F(Tst_ImporterV0xa6, v0xa6_compact_lyric_parses_text)
 {
     QByteArray buf;
@@ -586,9 +582,8 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_compact_lyric_parses_text)
     EXPECT_EQ(lyr.text, QString("lent"));
 }
 
-// v0xA6 TEXT-block entries carry no per-entry header: the text starts at offset 0, not the +14 the
-// newer formats use. Reading at +14 leaves short v0xA6 entries empty. Verify a one-entry block whose
-// only entry is "Moderato" resolves when the format supplies textOffset 0.
+// Parser-level: v0xA6 TEXT-block entries have no per-entry header, so text starts at offset 0 (not
+// the +14 newer formats use). Fixture is a one-entry "Moderato" block. See ENCORE_FORMAT.md §TEXT block.
 TEST_F(Tst_ImporterV0xa6, v0xa6_text_block_entry_text_at_offset_0)
 {
     QByteArray buf;
@@ -609,9 +604,8 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_text_block_entry_text_at_offset_0)
     EXPECT_EQ(tb.entries[0], QString("Moderato"));
 }
 
-// v0xA6 STAFFTEXT ornaments are compact (size 15): the TEXT-entry index (tind) sits at a fixed +26
-// from the type/voice byte, not the size-based location the newer formats use. Verify the reader
-// picks tind from +26 when the format supplies that offset.
+// Parser-level: compact v0xA6 STAFFTEXT ornaments store the TEXT-entry index (tind) at a fixed +26
+// from the type/voice byte, not the size-based newer location. See ENCORE_FORMAT.md §TEXT block.
 TEST_F(Tst_ImporterV0xa6, v0xa6_stafftext_tind_at_offset_26)
 {
     QByteArray buf(30, 0);   // size*2 slot
@@ -629,11 +623,9 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_stafftext_tind_at_offset_26)
     EXPECT_EQ(orn.tind, 4);
 }
 
-// The v0xA6 compact STAFFTEXT ornament stores its vertical placement (Cartesian y, positive = above,
-// negative = below) at +6 from the type/voice byte, not at the v0xC4 offset (+10). Two staff texts
-// sit on one note: "cresc." with a positive y (above) and "espressivo" with a negative y (below).
-// Reading the placement at the v0xC4 offset yields 0 for both, so before the fix "espressivo" landed
-// above instead of below.
+// The v0xA6 compact STAFFTEXT ornament stores its vertical placement at +6 (not the v0xC4 +10);
+// reading +10 yields 0 so a below-staff text lands above. Fixture: "cresc." above, "espressivo" below.
+// See ENCORE_FORMAT.md §TEXT block.
 TEST_F(Tst_ImporterV0xa6, v0xa6_stafftext_placement_from_offset_6)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_stafftext_placement.enc");
@@ -667,10 +659,9 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_stafftext_placement_from_offset_6)
     delete score;
 }
 
-// Encore stores verse 2 (voice 1) with tick=0 on every syllable; its real position is the xoffset,
-// identical to verse 1. The importer must align verse 2 to the same notes as verse 1 rather than
-// collapsing every verse-2 syllable onto the first notes. Three notes carry verse 1 "A/B/C" and
-// verse 2 "X/Y/Z" at matching x-offsets; each note must end up with the aligned pair.
+// Encore stores every verse-2 syllable at tick=0, its real position being the xoffset (matching verse 1);
+// the importer must align verse 2 by xoffset instead of collapsing it onto the first notes.
+// Fixture: 3 notes, verse 1 "A/B/C" and verse 2 "X/Y/Z" at matching x-offsets.
 TEST_F(Tst_ImporterV0xa6, v0xa6_second_verse_aligns_by_xoffset)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_two_verse_alignment.enc");
@@ -708,10 +699,9 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_second_verse_aligns_by_xoffset)
     delete score;
 }
 
-// A final melisma word: two notes, one held syllable per verse, both sung on the first note. Encore
-// stores verse 1 at the melisma's END note (tick 360) and collapses verse 2 to tick 0; neither verse
-// spans the bar. Tick-based matching sends verse 1 "peace" to note 2, but its x-offset (59) nearly
-// equals verse 2 "born" (64), so both belong on note 1. Before the fix verse 1 landed on note 2.
+// A melisma word: one held syllable per verse, both on the first note. Encore stores verse 1 at the
+// melisma END note but its xoffset (59) nearly equals verse 2's (64), so xoffset alignment keeps both
+// on note 1 where tick-based matching would move verse 1 to note 2.
 TEST_F(Tst_ImporterV0xa6, v0xa6_melisma_word_aligns_both_verses_on_first_note)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_melisma_verse_alignment.enc");

@@ -186,14 +186,12 @@ static void recutCrossingCR(Measure* measure, track_idx_t tr, ChordRest* cr, con
     }
 }
 
-// "Remove extra notes" (Truncate). When the overflow is a trailing tuplet, the tuplet is
-// dissolved (members revert to plain face value) and the resulting notes are SHRUNK from the
-// right to keep as many of them as possible: each trailing note is halved (down to a quarter
-// of its value) and only removed if even a quarter still overflows; the process stops as soon
-// as the content fits. The last survivor is then dotted (up to 3 dots) to reach the barline
-// and any remainder is filled with an exact rest. A plain trailing note that crosses the
-// barline is recut to end exactly at it (as a tied chain) rather than dropped, so a note
-// stranded in a short bar keeps its value up to the barline.
+// "Remove extra notes" (Truncate). A trailing tuplet is dissolved and its notes shrunk from the
+// right to keep as many as possible: each trailing note is halved (down to a quarter of its value)
+// and removed only if even a quarter still overflows, stopping once the content fits. The last
+// survivor is then dotted (up to 3 dots) to reach the barline and the remainder is filled with an
+// exact rest. A plain trailing note that crosses the barline is recut to it (as a tied chain)
+// rather than dropped. See ENCORE_IMPORTER.md §Overfull measures.
 static void removeExtraNotes(Measure* measure, track_idx_t tr)
 {
     const Fraction mLen = measure->ticks();
@@ -201,10 +199,8 @@ static void removeExtraNotes(Measure* measure, track_idx_t tr)
 
     std::vector<ChordRest*> crs;
 
-    // 1. Resolve trailing PLAIN overflow from the right until the voice fits or a tuplet
-    //    surfaces. A note that starts within the bar but crosses it is recut to the barline
-    //    (keeping its value as a tied chain); a note that starts at/after the barline has no
-    //    room and is removed.
+    // 1. Resolve trailing plain overflow from the right until the voice fits or a tuplet surfaces:
+    //    a note crossing the barline is recut to it, a note starting at/after it is removed.
     while (true) {
         Fraction sum = collectVoice(measure, tr, crs);
         if (crs.empty() || sum <= mLen || crs.back()->tuplet()) {
@@ -511,7 +507,7 @@ static bool stretchOverfullVoice(Measure* measure, track_idx_t tr)
 // Post-pass entry point: resolve any overfull voice according to the overfill strategy.
 void fitOverfullMeasure(BuildCtx& ctx, Measure* measure)
 {
-    // IrregularMeasure extends the measure to hold all content (existing logic).
+    // IrregularMeasure extends the measure to hold all content.
     if (ctx.opts.overfillMeasureStrategy == OverfillStrategy::IrregularMeasure) {
         capMeasureLength(ctx, measure);
         return;

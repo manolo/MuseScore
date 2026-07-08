@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Read a MEAS block and derive note durations from MIDI tick gaps, with chord-column and
+// stale-tick reconciliation.
+
 #include "elem.h"
 
 #include "readers.h"
@@ -79,10 +82,9 @@ static std::unique_ptr<EncMeasureElem> createMeasureElement(
     }
 }
 
-// Phase 1: set realDuration from MIDI tick gaps (with optional grace time-borrowing).
-// boundaryTicks: sorted non-note ticks (CLEF, KEYCHANGE) that cap the gap even when no
-// note follows. Prevents a lonely quarter rest from being stretched to fill the whole measure
-// when a mid-measure clef change is the next event at that voice/staff.
+// Set realDuration from MIDI tick gaps (with optional grace time-borrowing). boundaryTicks are
+// non-note ticks (CLEF, KEYCHANGE) that cap the gap even when no note follows, so a rest before a
+// mid-measure clef change is not stretched to fill the whole measure.
 void computeElementDurations(
     std::vector<EncMeasureElem*>& elems,
     qint16 durTicks,
@@ -127,11 +129,9 @@ void computeElementDurations(
                 }
             }
         }
-        // A following GRACE note has no rhythmic footprint, so it must not extend (inflate) the
-        // current principal note's held duration. Cap the duration at the written face value so a
-        // note trailed by an ornament (e.g. a percussion beat followed by a grace flourish) stays
-        // its written value plus a rest, instead of being promoted to a dotted/longer note when the
-        // gap to the grace happens to match a dotted ratio.
+        // A following GRACE note has no rhythmic footprint, so it must not inflate the current
+        // principal note. Cap at the written face value, otherwise a note trailed by a grace whose
+        // gap happens to match a dotted ratio would be promoted to a dotted/longer note.
         if (enCur && enCur->graceType() == EncGraceType::NORMAL && j < elems.size()) {
             const EncNote* enNext = dynamic_cast<const EncNote*>(elems[j]);
             const qint16 faceTicks = faceValue2ticks(enCur->faceValue);
@@ -146,22 +146,16 @@ void computeElementDurations(
     }
 }
 
-// Encore records a chord's notes with staggered playback ticks (a per-chord "strum" / live-recording
-// drift), but every note in one chord shares the same notated horizontal column, stored in the note
-// xoffset byte. Collapse each run of consecutive notes that share the same nonzero xoffset and face
-// value to the run's earliest tick, so the duration and chord-grouping logic downstream sees them as
-// simultaneous chord members instead of splitting the chord into separate short notes.
-// elems is one (staff, voice) group already sorted by tick. A run is treated as one chord only when
-// the members stay within a small cluster window of the anchor: real chord members (including chords
-// inside a tuplet) drift by at most a few dozen ticks, while the shortest sequential subdivision is
-// farther apart. The window is capped at one notated duration so a short face value stays tight, and
-// at CHORD_STRUM_MAX_SPAN so a long face value never absorbs a genuine later note that happens to
-// reuse the column. Notes with a zero xoffset (no stored column) are left untouched.
-// See ENCORE_FORMAT.md §Chord column (xoffset).
+// Encore staggers a chord's playback ticks ("strum" drift), but all its notes share one notated
+// column in the xoffset byte. Collapse each run of consecutive notes with the same nonzero xoffset
+// and face value to the run's earliest tick, so downstream sees chord members instead of a split
+// chord. A run counts as one chord only within a small window of the anchor (capped at one notated
+// duration and at CHORD_STRUM_MAX_SPAN) so a long note never absorbs a genuine later note reusing
+// the column. Zero-xoffset notes are left untouched. See ENCORE_FORMAT.md §Chord column (xoffset).
 static void normalizeChordColumnTicks(std::vector<EncMeasureElem*>& elems)
 {
-    // Observed chord "strum" spans reach ~30 Encore ticks; the tightest sequential subdivision
-    // Encore emits stays well above this, so 48 cleanly separates a chord column from a run of notes.
+    // Observed strum spans reach ~30 ticks; the tightest sequential subdivision stays well above,
+    // so 48 cleanly separates a chord column from a run of notes.
     constexpr int CHORD_STRUM_MAX_SPAN = 48;
     size_t i = 0;
     while (i < elems.size()) {
@@ -306,9 +300,7 @@ bool EncMeasure::read(QDataStream& ds, const quint32 vs, const EncFormatReader& 
 
 void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, const EncFormatReader& fmt)
 {
-    // Collect per-staff boundary ticks from non-note elements (CLEF, KEYCHANGE).
-    // These cap the MIDI-gap duration of a preceding rest so it doesn't stretch to fill
-    // the whole measure when the next event is a clef or key change rather than a note.
+    // Collect per-staff boundary ticks from CLEF/KEYCHANGE elements (see computeElementDurations).
     std::map<int, std::vector<qint16> > boundaryByStaff;
     for (auto& elem : elements) {
         const EncElemType et = static_cast<EncElemType>(elem->type);
@@ -345,14 +337,11 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, const EncFor
     reconcileStaleNoteTicksByColumn();
 }
 
-// Encore lays notes out left-to-right, so a note's xoffset column identifies its beat and is
-// consistent across the staves of a system. A note edited in Encore can keep a stale MIDI
-// tick that no longer matches its column: it draws at the column's beat but the importer,
-// trusting the tick, places it later (e.g. a half note stored at tick 480 with the beat-1
-// xoffset imports as rest+note instead of note+rest). Snap such a note back to its column's
-// tick, keeping the realDuration already computed from its stored tick so its notated value
-// (and the trailing rest the gap becomes) are preserved. Runs after duration computation so
-// rdur is not recomputed from the corrected tick.
+// A note's xoffset column identifies its beat and is consistent across the staves of a system.
+// A note edited in Encore can keep a stale MIDI tick that no longer matches its column, so it
+// draws on the column's beat but the importer places it later. Snap such a note back to its
+// column's tick, keeping the realDuration already computed from its stored tick. Runs after
+// duration computation so rdur is not recomputed from the corrected tick.
 void EncMeasure::reconcileStaleNoteTicksByColumn()
 {
     // Column (xoffset) -> earliest tick a non-grace note occupies it at, across all staves.
@@ -390,12 +379,10 @@ void EncMeasure::reconcileStaleNoteTicksByColumn()
         }
         const qint16 target = it->second;
         // Reconcile only a note that is the EARLIEST in its own staff/voice: the stale-tick
-        // artifact is a whole voice drawn one column too far right, established as "too late"
-        // by the other staves' aligned columns. A note that already has an earlier voice-mate
-        // is part of a genuine sequence (its tick is meaningful relative to its neighbours,
-        // and same-xoffset neighbours are just a low-resolution/synthetic layout) -- leave it.
-        // Never merge two independent notes either: block when a DIFFERENT column already sits
-        // at the target tick on this staff/voice (same-column notes are chord siblings).
+        // artifact is a whole voice drawn one column too far right. A note with an earlier
+        // voice-mate is a genuine sequence, leave it. Also never merge two independent notes:
+        // block when a DIFFERENT column already occupies the target tick on this staff/voice
+        // (same-column notes are chord siblings).
         bool hasEarlierVoiceMate = false;
         bool occupied = false;
         for (auto& other : elements) {

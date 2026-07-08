@@ -19,6 +19,9 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
+// Wires the Encore module into the IoC: exports the configuration, registers the reader for "enc".
+
 #include "enc-module.h"
 
 #include "modularity/ioc.h"

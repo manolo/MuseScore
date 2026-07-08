@@ -19,6 +19,10 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
+// Top-level build pipeline entry points: create parts, create measures, set initial signatures,
+// then emit the note/rest/element content into the score.
+
 #ifndef MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H
 #define MU_IMPORTEXPORT_ENC_IMPORT_BUILDERS_H
 

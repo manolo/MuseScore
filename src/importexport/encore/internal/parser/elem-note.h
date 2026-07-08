@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Measure-element structs: the EncMeasureElem base plus note, rest, key/clef change,
+// MIDI CC and generic elements, with the flags parsing derives (grace, tie, tuplet).
+
 #pragma once
 
 #include <memory>
@@ -34,13 +37,10 @@ namespace mu::iex::enc {
 inline constexpr int CHORD_CLUSTER_THRESHOLD = 4;   // Encore ticks (~8ms at 120bpm)
 
 // faceValue byte accessors: low nibble = duration (1=whole..8=128th), high nibble = notehead type.
-inline quint8 fvLow(quint8 fv) { return fv & 0x0F; }             // duration nibble
-inline quint8 fvHigh(quint8 fv) { return static_cast<quint8>((fv >> 4) & 0x0F); } // notehead nibble
+inline quint8 fvLow(quint8 fv) { return fv & 0x0F; }
+inline quint8 fvHigh(quint8 fv) { return static_cast<quint8>((fv >> 4) & 0x0F); }
 
-// ---------------------------------------------------------------------------
-// Base class for all measure elements
-// ---------------------------------------------------------------------------
-
+// Base class for all measure elements.
 struct EncMeasureElem {
     quint16 tick  { 0 };
     quint8 type  { 0 };
@@ -60,9 +60,8 @@ struct EncMeasureElem {
 
     // Nonzero = tuplet member; sort tuplet notes first at their tick so they create the chord.
     virtual quint8 tupletByte() const { return 0; }
-    // Raw faceValue byte (low nibble = duration, high nibble = notehead); 0 for elements without one.
+    // Raw faceValue byte; 0 for elements without one.
     virtual quint8 faceValueByte() const { return 0; }
-    // True when the parser pre-marked this element as an implied-tuplet member.
     virtual bool impliedTupletMember() const { return false; }
 
     EncMeasureElem() = default;
@@ -98,12 +97,11 @@ struct EncNote : EncMeasureElem {
     // Set by postProcessElement() for formats where grace1 low nibble encodes tie-sender (v0xC2).
     bool isTieSender            { false };
     // Set by calculateRealDurations() Phase 4 for v0xC2: note belongs to an implied tuplet group
-    // (rdur/faceValue mismatch identifies the ratio). Used by computeImpliedTupletMembers so
-    // notes with incidental MIDI timing drift in other formats are never misidentified.
+    // (rdur/faceValue mismatch gives the ratio). Explicit flag so incidental MIDI timing drift
+    // in other formats is never misread as a tuplet.
     bool isImpliedTupletMember  { false };
-    // Set by fixDottedEighthPattern() (v0xC2): the note is the dotted-eighth in the
-    // dotted-eighth+sixteenth anomaly.  Forces dots=1 in the emitter without relying
-    // on the dotControl bit-0 fallback, which may spuriously fire on raw binary values.
+    // Set by fixDottedEighthPattern() (v0xC2): forces dots=1 for the dotted-eighth in the
+    // dotted-eighth+sixteenth anomaly, bypassing the unreliable dotControl bit-0 fallback.
     bool forceDotted            { false };
 
     using EncMeasureElem::EncMeasureElem;
@@ -128,10 +126,8 @@ struct EncRest : EncMeasureElem {
     quint8 faceValue  { 0 };
     quint8 tuplet     { 0 };
     quint8 dotControl { 0 };
-    // +15 (v0xC4 only): Encore multi-measure rest display count.
-    // When > 1 this single MEAS block represents that many consecutive empty display
-    // measures (Encore shows one rest symbol with this number above it).
-    // Only meaningful when the MEAS block contains exactly this one REST element.
+    // Multi-measure rest display count (v0xC4): > 1 means this one MEAS block spans that
+    // many empty measures. Only meaningful when it is the block's sole REST. See ENCORE_FORMAT.md §REST element.
     quint8 mrestCount { 1 };
     // Set by calculateRealDurations() Phase 4 for v0xC2 (same semantics as EncNote::isImpliedTupletMember).
     bool isImpliedTupletMember { false };
@@ -172,10 +168,8 @@ struct EncGenericElem : EncMeasureElem {
     bool read(QDataStream& ds) override;
 };
 
-// An inline MIDI Control Change event (EncElemType::MIDI_CC). Encore stores these for
-// playback only (sustain pedal, volume, modulation); they carry no notation. The importer
-// records the controller and value for the diagnostic log and otherwise drops the element.
-// Byte layout (ENCORE_FORMAT.md §MIDI control change (type 11)): d[10] controller, d[11] value.
+// Inline MIDI Control Change (EncElemType::MIDI_CC). Playback only, no notation: the importer
+// logs controller/value and drops it. See ENCORE_FORMAT.md §MIDI control change (type 11).
 struct EncMidiCc : EncMeasureElem {
     using EncMeasureElem::EncMeasureElem;
 

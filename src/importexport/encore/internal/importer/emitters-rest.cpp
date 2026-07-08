@@ -53,18 +53,17 @@ void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         return;
     }
     if (er->realDuration > 0 && er->realDuration < 15) {
-        // Drop ghost rests (MIDI recording artifacts), but trust face value when it
-        // indicates a real duration. When rdur was shortened by the next note's MIDI
-        // start (rdur < faceTicks), the face value is authoritative.
+        // A short rdur is a MIDI ghost rest unless the face value shows a real duration (rdur was
+        // shortened by the next note's MIDI start). 64th or smaller face value: drop; else keep.
         const int faceTicks = faceValue2ticks(er->faceValue);
         if (faceTicks <= 0 || faceTicks < 30) {
-            return;  // Face value is 64th or smaller: drop ghost rest.
+            return;
         }
-        // Face value is 32nd or longer: MIDI timing slop shortened rdur. Keep the rest.
     }
     DurationType dt = realDuration2DurationType(er->realDuration, er->faceValue);
     int dots = computeDotCount(er->dotControl, er->realDuration, er->faceValue);
-    // Cap rest duration to remaining space. Also cap when the current tuplet group is full (it's closed before this rest, making it plain).
+    // Cap rest duration to remaining space; a full tuplet group is closed before this rest, so it
+    // counts as plain and is capped too.
     {
         const auto& ttPre = ctx.scratch.tuplets[trackKey];
         if (!ttPre.inTuplet() || ttPre.groupFull()) {
@@ -134,14 +133,14 @@ void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
             }
         }
 
-        // Advance cumulative position; when capped, also update rest's ticks so actualTicks() matches ctx.scratch.cumTick advance (avoids sanityCheck overshoot).
+        // When capped, also update the rest's ticks so actualTicks() matches the cumTick advance
+        // (avoids sanityCheck overshoot).
         Fraction advance = tt.inTuplet()
                            ? TDuration(dt).fraction() * Fraction(tt.normalN, tt.actualN)
                            : dottedAdvance(dt, dots);
         // Mirror the note path (advanceCumulativeTick): never cut a tuplet member here (a tuplet is
-        // atomic; let it overshoot and resolve the whole tuplet in fitOverfullMeasure), and skip
-        // the cap entirely for IrregularMeasure so cumTick can exceed the measure length and
-        // capMeasureLength extends it.
+        // atomic, resolved whole in fitOverfullMeasure) and skip the cap for IrregularMeasure so
+        // capMeasureLength can extend the bar.
         Fraction remaining = measure->ticks() - ctx.scratch.cumTick[trackKey];
         if (advance > remaining && remaining > Fraction(0, 1)
             && ctx.opts.overfillMeasureStrategy != OverfillStrategy::IrregularMeasure

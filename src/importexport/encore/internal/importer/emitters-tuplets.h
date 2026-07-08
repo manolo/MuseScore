@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Tuplet detection and construction: the per-voice TupletTracker, nested-tuplet annotations, and
+// the pass that finds implied (v0xC2) and explicit tuplet group members in a measure.
+
 #ifndef MU_IMPORTEXPORT_ENC_IMPORT_TUPLETS_H
 #define MU_IMPORTEXPORT_ENC_IMPORT_TUPLETS_H
 

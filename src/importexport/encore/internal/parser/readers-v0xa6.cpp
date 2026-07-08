@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Encore 2.x (v0xA6) reader: note-layout fixups, rest dedup, inner-grace marking, TK MIDI/key/staff-key reads.
+
 #include "readers-v0xa6.h"
 
 #include <QDataStream>
@@ -181,11 +183,9 @@ void EncFormatReader_V0xA6::readKeyFromTKBlock(EncInstrument& instr,
 
 void EncFormatReader_V0xA6::readLineStaffKeys(EncLine& line, QDataStream& ds, qint64 lineContentStart) const
 {
-    // v0xA6: header.staffPerSystem reads 0 and the LINE staff entry layout differs (22 bytes,
-    // written key index at offset 14), so staffData stays empty. Parse the key out of each
-    // 22-byte entry directly so initial key signatures import. Entries begin 14 bytes into the
-    // content and carry a 0x0E 0xFC marker at offset 16, which bounds the run. staffData is
-    // intentionally left empty (v0xA6 staff routing uses TK blocks, not the LINE block).
+    // v0xA6 staffPerSystem reads 0 so staffData stays empty; parse the key out of each LINE staff
+    // entry directly so initial key signatures import. The 0x0E 0xFC marker bounds the run.
+    // See ENCORE_FORMAT.md §v0xA6 staff size and clef.
     QIODevice* dev = ds.device();
     const qint64 savedPos = dev->pos();
     const qint64 entriesStart = lineContentStart + 14;

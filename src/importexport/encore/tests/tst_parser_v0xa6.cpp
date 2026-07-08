@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// v0xA6 (Encore 2.x) importer: header size, note offsets, pitch/key encoding, tuplets, grace notes.
+
 #include <gtest/gtest.h>
 
 #include "engraving/dom/chord.h"
@@ -48,13 +50,9 @@ protected:
     }
 };
 
-// ===========================================================================
-// BUG FIX: v0xA6 (very old format), wrong element offset and pitch encoding
-// ===========================================================================
-
 TEST_F(Tst_ImporterV0xa6, very_old_format_v0xa6_sanity_check)
 {
-    // v0xA6: elemOffset must be 0x1A (not 0x3E); wrong offset drops all notes silently.
+    // Guards the v0xA6 element offset: 0x1A, not 0x3E; a wrong offset drops all notes silently.
     MasterScore* score = readEncoreScore("structure_v0xa6_basic.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_EQ(score->nmeasures(), 2);
@@ -90,10 +88,6 @@ TEST_F(Tst_ImporterV0xa6, very_old_format_v0xa6_pitch_encoding)
     EXPECT_EQ(pitches[3], 67) << "G4";
     delete score;
 }
-
-// ===========================================================================
-// Full regression tests for the v0xA6 format importer
-// ===========================================================================
 
 // End-to-end regression for the full v0xA6 fix chain: 4 instruments, Key bytes, pitch at byte +11,
 // tuplet at byte +7, duplicate REST collapse, triplet groups, no spurious glyphs.
@@ -249,10 +243,8 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_triplet_byte_at_offset_7)
     delete score;
 }
 
-// Regression: a v0xA6 NOTE with size 11 carries one articulation byte at +18 (0x20 = fermata).
-// The reader must still take the pitch from +11 (the +15 slot holds a decoy here) and must emit
-// the fermata. Before the fix both notes imported as MIDI 127 (G9) with no fermata, because the
-// size-11 case fell through to the v0xC4 base read (pitch at +15) and the articulation was zeroed.
+// A size-11 v0xA6 NOTE keeps pitch at +11 (the +15 slot is a decoy) and its +18 articulation
+// byte 0x20 emits a fermata; the size-11 case must not fall through to the v0xC4 base read.
 TEST_F(Tst_ImporterV0xa6, v0xa6_note_size11_fermata_pitch_and_glyph)
 {
     MasterScore* score = readEncoreScore("structure_v0xa6_fermata.enc");
@@ -372,10 +364,9 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_key_transposition_octave_lower)
     delete score;
 }
 
-// Regression: an octave Key shifts the pitch, so the importer must also add the matching
-// octave-decorated clef (like v0xC4 does via pickStaffClef) so the display stays at the
-// written octave. v0xA6 has no LINE clef data, so this came from the template default and the
-// compensation was missing -> notes showed an octave off. Key=-12 + G clef -> G8vb.
+// An octave Key must add a compensating octave-decorated clef so the display stays at the written
+// octave. v0xA6 has no LINE clef data (clef comes from the template default), so Key=-12 + G clef
+// yields G8vb; without the compensation the notes read an octave off.
 TEST_F(Tst_ImporterV0xa6, v0xa6_octave_key_adds_compensating_clef)
 {
     MasterScore* score = readEncoreScore("importer_v0xa6_key_transposition.enc");

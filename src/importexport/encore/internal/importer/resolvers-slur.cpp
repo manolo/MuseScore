@@ -41,7 +41,8 @@
 using namespace mu::engraving;
 
 namespace mu::iex::enc {
-// Find the actual chord track at tick: SLURSTART is parsed before the note, so ps.track may be stale after stream-overflow voice reassignment.
+// ps.track is captured before the note is emitted, so it may be stale after stream-overflow
+// voice reassignment; find the voice that actually carries a chord at tick.
 static track_idx_t resolveChordTrack(MasterScore* score, Fraction tick, int staffIdx, track_idx_t fallback)
 {
     Segment* seg = score->tick2segment(tick, false, SegmentType::ChordRest);
@@ -75,25 +76,24 @@ static void removeOrphanSlurs(MasterScore* score, const std::set<const Spanner*>
             if (explicitSlurs.count(spanner)) {
                 continue;
             }
-            // Grace start: computeStartElement() uses tick2segment(), which returns the regular chord,
-            // not the grace sub-chord. Skip it when start element was set explicitly.
+            // computeStartElement() would resolve to the regular chord, not the explicitly set
+            // grace sub-chord (tick2segment cannot see it), so skip the recompute for grace starts.
             const bool graceStart = spanner->startElement()
                                     && spanner->startElement()->isChord()
                                     && toChord(spanner->startElement())->isGrace();
             if (!graceStart) {
                 spanner->computeStartElement();
             }
-            // Grace-to-main (tick == tick2): computeEndElement() fails because no segment
-            // exists at the same tick through the spanner tick lookup. Grace-to-later works normally.
+            // Grace-to-main (tick == tick2): computeEndElement() would fail (no segment at the
+            // same tick via the spanner lookup), so skip it. Grace-to-later resolves normally.
             const bool graceToMain = graceStart
                                      && (spanner->tick() == spanner->tick2());
             if (!graceToMain) {
                 spanner->computeEndElement();
             }
-            // An overfull measure can leave the score with a degenerate segment layout in
-            // which a slur's start and end grips resolve to the same chord (a zero-length
-            // arc). Laying that out takes atan of a zero-length span and asserts on a NaN
-            // Bezier control point, so drop such a slur along with the orphans.
+            // An overfull measure can make a slur's start and end grips resolve to the same
+            // chord (zero-length arc); its layout takes atan of a zero span and asserts on a
+            // NaN Bezier control point, so drop it along with the orphans.
             if (!spanner->startElement() || !spanner->endElement()
                 || spanner->startElement() == spanner->endElement()) {
                 toRemove.push_back(spanner);
@@ -107,7 +107,7 @@ static void removeOrphanSlurs(MasterScore* score, const std::set<const Spanner*>
 
 static void createGraceToMainSlur(const PendingSlur& ps, MasterScore* score, Fraction startTick)
 {
-    // Zero span: SLURSTART at grace tick == parent cumTick. Build grace-to-main slur with explicit elements.
+    // Zero span (SLURSTART tick == parent chord tick): a grace note slurs to its own main note.
     Segment* gSeg = score->tick2segment(startTick, true, SegmentType::ChordRest);
     if (gSeg) {
         const track_idx_t graceTrack = resolveChordTrack(score, startTick, ps.staffIdx, ps.track);
@@ -124,7 +124,7 @@ static void createGraceToMainSlur(const PendingSlur& ps, MasterScore* score, Fra
                 gSlur->setTick2(startTick);
                 gSlur->setStartElement(graces.front());
                 gSlur->setEndElement(el);
-                // addSpanner(false): skip computeStartElement/computeEndElement so explicit grace element is preserved.
+                // false: keep the explicit grace endpoints instead of recomputing them.
                 score->addSpanner(gSlur, false);
             }
         }
@@ -139,8 +139,8 @@ static void createNormalSlur(const PendingSlur& ps, track_idx_t startTrack, trac
     slur->setTrack2(endTrack);
     slur->setTick(ps.startTick);
     slur->setTick2(endTick);
-    // If the chord at/after startTick has grace notes, SLURSTART was co-located with the grace in Encore; anchor to it.
-    // tick2rightSegment handles grace-note tick stealing (startTick may be slightly before cumTick).
+    // If the chord at/after startTick has grace notes, the SLURSTART belongs to the grace; anchor
+    // there. tick2rightSegment absorbs grace-note tick stealing (startTick can be just before it).
     {
         Segment* rSeg = score->tick2rightSegment(ps.startTick, false, SegmentType::ChordRest);
         if (rSeg) {
@@ -231,11 +231,6 @@ static Chord* firstChordOnStaffFrom(Measure* m, int staffIdx, const Fraction& fr
     return nullptr;
 }
 
-// Same-measure slur endpoint via the xoffset heuristic: find the note whose horizontal
-// position best matches first_note_xoff + pixelSpan, optionally extending one or two measures
-// past the start when the arc clearly does. Used when alMezuro is not a reliable measure count
-// (xoffsets reset at barlines). Returns the resolved end tick, or nullopt when it cannot place
-// the endpoint (the caller then tries the cross-measure-xoffset and last-chord fallbacks).
 // The xoffset of the slur's start note: scan the start measure for the NOTE at startEncTick on
 // this staff (any voice, since the slur ORN's encVoice is the arc position, not the note voice)
 // and return its xoffset. A grace note at that tick wins over a regular one (v0xC4 serializes the
@@ -332,21 +327,20 @@ static std::optional<Fraction> resolveSameMeasureHeuristic(
                                                        lineSlotByRawByte);
     if (firstNoteXoff >= 0) {
         const int pixelSpan = ps.slurXoffset2 - ps.slurXoffset;
-        // Tiny pixelSpan (0-2) with note before arc start: firstNoteXoff+pixelSpan ≈ 0 matches a decoy.
+        // Tiny pixelSpan (0-2) with note before arc start: firstNoteXoff+pixelSpan near 0 matches a decoy.
         // Use slurXoffset2 directly as the arc-end target instead.
         const bool usedTinyPixelSpan = (pixelSpan >= 0 && pixelSpan <= 2
                                         && firstNoteXoff < ps.slurXoffset);
-        // v0xC2 short slur: pixelSpan is the only origin-independent signal, and beyond
-        // "short vs long" it is unreliable, while the absolute slurXoffset2 lives in a
-        // stale ornament-coordinate origin (matching it over-extends, e.g. n1→n2 read as
-        // n1→n4). A tiny span means a note-to-next-note slur, so anchor the endpoint to
-        // the next note on the staff instead of the coordinate search.
+        // v0xC2 short slur: slurXoffset2 lives in a stale ornament-coordinate origin, so matching
+        // it over-extends the arc. pixelSpan is origin-independent but only distinguishes short
+        // from long, so a tiny span is treated as a note-to-next-note slur (anchored below).
         const bool v0c2ShortSlur = enc.fmt->slurXoffset2Stale()
                                    && (std::abs(pixelSpan) <= 2);
         const int targetEndXoff = usedTinyPixelSpan
                                   ? ps.slurXoffset2
                                   : firstNoteXoff + pixelSpan;
-        // Single pass: find best later-note endpoint + detect grace/regular co-location for grace-to-main shortcut.
+        // One pass: pick the best later-note endpoint and detect a grace/regular co-location
+        // at the start (the grace-to-main shortcut below).
         {
             int bestDist = std::numeric_limits<int>::max();
             int bestEncTick = -1;
@@ -396,7 +390,7 @@ static std::optional<Fraction> resolveSameMeasureHeuristic(
                     bestEncTick = static_cast<int>(em->tick);
                 }
             }
-            // Grace-to-main: grace + regular share startEncTick and regular is closest match → zero-span.
+            // Grace-to-main: grace + regular share startEncTick and regular is closest match: zero-span.
             // If a later note is closer, resolve as grace-to-later instead.
             // For a v0xC2 short slur the next-note rule sets bestDist=0, so the distance
             // comparison can never pick grace-to-main; a grace at the start is the strong
@@ -457,7 +451,7 @@ void resolveSlurs(BuildCtx& ctx)
     MasterScore* score = ctx.score;
     const EncRoot& enc = ctx.enc;
 
-    // Raw-staff-byte → LINE-slot lookup (shared with the emitter's staff/voice routing).
+    // Raw-staff-byte to LINE-slot lookup (shared with the emitter's staff/voice routing).
     std::array<int, 256> lineSlotByRawByte;
     buildLineSlotByRawByte(enc, lineSlotByRawByte);
 
@@ -465,18 +459,11 @@ void resolveSlurs(BuildCtx& ctx)
     // the recompute in removeOrphanSlurs.
     std::set<const Spanner*> explicitSlurs;
 
-    // v0xC2 files vary in whether element +16 is a real forward measure-count. Some (e.g.
-    // XEQUEABU) use it faithfully; others store noise there, mixing plausible small values
-    // with out-of-range sentinels (0xFE/0xFF) even though every slur is a within-bar arc.
-    // A count that points past the last measure cannot be a real span, so if any v0xC2 slur
-    // carries one, treat the whole file's +16 field as unreliable and resolve every slur by
-    // the xoffset heuristic instead of over-extending the plausible-looking counts.
-    //
-    // Some files store a per-staff CONSTANT at +16 (e.g. every slur on the top staff carries
-    // 13, every slur on the bottom staff 11) rather than a per-slur count. Those values are
-    // in range, so the past-the-end test above misses them, yet a real forward count varies
-    // from slur to slur: the same large value repeated across slurs that start in different
-    // measures is a constant field, not a span. Treat it as unreliable too.
+    // The v0xC2 slur measure-count (element +16) is unreliable: some files store noise or a
+    // per-staff constant there rather than a per-slur forward count. Two tells mark the whole
+    // file's field as junk, so every slur then resolves by the xoffset heuristic: (1) any count
+    // pointing past the last measure, and (2) the same multi-measure count repeated at different
+    // start measures (a real span varies per slur). See ENCORE_FORMAT.md §Slur.
     bool v0c2SlurCountUnreliable = false;
     if (enc.fmt->slurXoffset2Stale()) {
         const int measCount = static_cast<int>(ctx.measuresByIdx.size());
@@ -525,7 +512,7 @@ void resolveSlurs(BuildCtx& ctx)
         bool resolved = false;
 
         // v0xC2 reliable forward measure-count (element +16): Encore draws these as
-        // note-1→note-1 arcs between bar starts; xoffset2 is stale in this format, so anchor
+        // note-1-to-note-1 arcs between bar starts; xoffset2 is stale in this format, so anchor
         // explicitly to the downbeat chord of the target measure rather than guessing by
         // coordinate. v0xC4/SCO5 keep the xoffset2 heuristic (reliable there).
         // tick2segment is unreliable at bar boundaries (computeEndElement returns null there),

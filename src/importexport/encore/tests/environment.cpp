@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Test suite bootstrap: registers engraving modules and loads instrument templates for the Encore importer tests.
+
 #include "testing/environment.h"
 
 #include "draw/drawmodule.h"

@@ -79,18 +79,11 @@ static bool detectPtsPageSize(qint32 rightEdge, qint32 bottomEdge,
     return found;
 }
 
-// Try to identify the paper size from WINI screen-pixel coordinates.
-// pageWUnits = rightEdge + left, pageHUnits = bottomEdge + top.
-//
-// Two-pass approach:
-//   Pass 1, ISO A-series only (A0..A10).  All AN sizes share the 1:√2 aspect
-//   ratio, so for A-series WINI data the only ambiguity is WHICH AN size, and
-//   that is resolved by smallest |dpiW−dpiH|.  Checking A-series first prevents
-//   non-A formats (e.g. 12"×18") from incorrectly winning when their
-//   accidentally smaller delta would beat the correct AN with a unified scan.
-//   Pass 2, all remaining standard sizes, pick smallest delta.
-//
-// Returns false when no standard size matches within tolerance (custom page).
+// Identify the paper size from WINI screen-pixel coordinates (pageWUnits = rightEdge + left,
+// pageHUnits = bottomEdge + top) by matching the implied DPI ratio. Pass 1 tries the ISO A-series
+// first: all AN sizes share the 1:sqrt(2) ratio, so a non-A format with an accidentally smaller
+// delta must not win over the correct AN. Pass 2 tries every other standard size. Both keep the
+// candidate with the smallest abs(dpiW - dpiH). Returns false when nothing matches (custom page).
 static bool detectWiniPageSize(int pageWUnits, int pageHUnits,
                                double& outWidthIn, double& outHeightIn)
 {
@@ -218,12 +211,9 @@ static bool applyPagePrintSetup(MasterScore* score, const EncPrintSetup& pr)
     }
     score->style().set(Sid::pageWidth,  wIn);
     score->style().set(Sid::pageHeight, hIn);
-    // NOT IMPLEMENTED: dmScale (the score "Zoom" / notation-size percent the user sets in Encore)
-    // is parsed and logged but not applied. MuseScore has no global percentage scale; the closest
-    // equivalent is the page "Staff space" (spatium), expressed in inches/mm, not a percent. Applying
-    // dmScale would mean converting the percent into a spatium reduction factor and reconciling it
-    // with the per-staff size from applyStaffScale (Pid::MAG), which would otherwise compound. That
-    // mapping needs investigation, so for now the value is only surfaced in the debug log.
+    // TODO: dmScale (Encore's notation-size percent) is parsed and logged but not applied.
+    // MuseScore has no global percentage scale, and mapping it onto spatium would compound with
+    // the per-staff size from applyStaffScale (Pid::MAG); the reconciliation needs investigation.
     LOGD() << "  PREC: orientation=" << pr.orientation << " paperSize=" << pr.paperSize
            << " paper=" << pr.paperWidth << "x" << pr.paperLength << "(0.1mm)"
            << " scale(zoom)=" << pr.scale << "%"
@@ -232,9 +222,9 @@ static bool applyPagePrintSetup(MasterScore* score, const EncPrintSetup& pr)
     return true;
 }
 
-// Derive display size (1-4) for a given instrument index.
-// LINE staff entry byte +13 (0-indexed 0-3) holds per-instrument size in both 4.x and 5.x.
-// header.scoreSize (byte 0x52) is a global fallback for files without LINE data.
+// Display size (1-4) for an instrument: per-instrument staffSizeHint from the LINE staff entry,
+// falling back to the global header.scoreSize for files without LINE data.
+// See ENCORE_FORMAT.md §System block (LINE).
 int staffDisplaySize(const EncRoot& enc, int instrIdx)
 {
     if (!enc.lines.empty()) {
@@ -252,10 +242,10 @@ double winiUnitsPerInch(int rightEdge, int left, double pageWIn)
     if (pageWIn <= 0.0) {
         return 72.0;
     }
-    // (rightEdge + left) / pageWidth ≈ 72 means the WINI is in typographic points; a clearly
-    // larger value (~84) means screen pixels at the monitor DPI. Snap the near-72 case to exactly
-    // 72. The pixel estimate is exact only when left/right margins are symmetric; with asymmetric
-    // margins it is ~2% low.
+    // (rightEdge + left) / pageWidth near 72 means the WINI is in typographic points; a clearly
+    // larger value (about 84) means screen pixels at the monitor DPI. Snap the near-72 case to
+    // exactly 72. The pixel estimate is exact only when left/right margins are symmetric; with
+    // asymmetric margins it reads about 2% low.
     const double est = static_cast<double>(rightEdge + left) / pageWIn;
     return (est <= 76.0) ? 72.0 : est;
 }
@@ -265,24 +255,21 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps, bool pa
     if (!ps.hasData) {
         return;
     }
-    // WINI fields are nominally in typographic points (1/72 inch), but some
-    // Encore versions store them in screen pixels at the monitor's DPI (~84-85
-    // PPI on older hardware).  Symptom: rightEdge or bottomEdge exceeds the
-    // page dimensions in pts (e.g. rightEdge=672 > A4_width_pts=595).
-    //
-    // For pts format: detectPtsPageSize picks the smallest standard page that
-    // contains the printable area, which is locale-independent.
-    // For screen-pixel format: detectWiniPageSize matches via DPI ratio.
-    // Cap each margin to a fraction of the page so a misread WINI cannot produce an absurd
-    // margin, while still allowing legitimately large margins (2"+ are common on A3/landscape).
+    // WINI fields are nominally typographic points (1/72 inch), but some Encore versions store
+    // them in screen pixels at the monitor DPI (about 84-85 PPI on older hardware); the tell is
+    // rightEdge/bottomEdge exceeding the page size in pts (e.g. 672 > A4 width 595). The pts case
+    // recovers the page via detectPtsPageSize, the pixel case via detectWiniPageSize (DPI ratio).
+    // See ENCORE_FORMAT.md §WINI block.
+    // Cap each margin to a fraction of the page so a misread WINI cannot produce an absurd margin,
+    // while still allowing legitimately large margins (2"+ are common on A3/landscape).
     static constexpr double kMaxMarginFrac = 0.45;
 
     double pageHIn = score->style().styleD(Sid::pageHeight);
     double pageWIn = score->style().styleD(Sid::pageWidth);
 
-    // 1 pt tolerance mirrors detectPtsPageSize: metric page heights convert to
-    // fractional pts (A4 297mm = 841.89pt → stored as 842) so the integer
-    // WINI value can exceed floor(pageH*72) by 1 without being screen-pixels.
+    // 1 pt tolerance mirrors detectPtsPageSize: metric page heights convert to fractional pts
+    // (A4 297mm = 841.89pt, stored as 842) so the integer WINI value can exceed floor(pageH*72)
+    // by 1 without being screen-pixels.
     static constexpr double kPixelTol = 1.0;
     const bool screenPixelFmt = (ps.rightEdge > static_cast<qint32>(pageWIn * 72.0 + kPixelTol))
                                 || (ps.bottomEdge > static_cast<qint32>(pageHIn * 72.0 + kPixelTol));
@@ -354,10 +341,8 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps, bool pa
 }
 
 // Inclusive [firstBlock, lastBlock] MEAS-block range covered by line[li]. Prefer the stored
-// per-line measure count, but fall back to the gap to the next line's start (or to
-// totalBlocks for the last line) when it is absent (0). SCO5 (big-endian Encore 5) does not
-// surface measureCount, yet the line start indices are correct, so the start delta recovers
-// each system's length. lastBlock < firstBlock when the line spans nothing.
+// per-line measureCount; when it is absent (0, as in SCO5) fall back to the gap to the next
+// line's start, or to totalBlocks for the last line. lastBlock < firstBlock when it spans nothing.
 struct LineBlockSpan {
     int firstBlock;
     int lastBlock;
@@ -394,9 +379,8 @@ static void applySystemLocksFromLines(BuildCtx& ctx)
         }
 
         const int firstMsIdx = static_cast<int>(enc2ms[static_cast<size_t>(firstBlock)]);
-        // Last MuseScore measure = first of the last MEAS block's range, plus however
-        // many MuseScore measures that block produces (gap to next block, or to end).
-        // Last MS measure = first MS index of last block's range plus the block's span.
+        // Last MuseScore measure = first MS index of the last MEAS block's range plus that block's
+        // span (the gap to the next block, or to the end).
         const int nextBlockMs = (lastBlock + 1 < static_cast<int>(enc2ms.size()))
                                 ? static_cast<int>(enc2ms[static_cast<size_t>(lastBlock + 1)])
                                 : totalMeas;

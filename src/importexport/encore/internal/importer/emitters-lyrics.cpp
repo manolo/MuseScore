@@ -44,10 +44,8 @@ void enqueueLyric(BuildCtx& ctx, const EncLyric* el, track_idx_t track)
         if (!queue.empty()) {
             queue.back().hyphenAfter = true;
         } else {
-            // The preceding syllable was attached in an earlier measure (its queue was
-            // cleared at the barline). Promote it so the hyphen renders across the bar:
-            // a standalone word becomes the start of a hyphenated one (SINGLE -> BEGIN),
-            // and an ending syllable becomes a middle one (END -> MIDDLE).
+            // The preceding syllable was attached in an earlier measure; promote it so the
+            // hyphen renders across the bar (SINGLE -> BEGIN, END -> MIDDLE).
             auto it = ctx.scratch.lastAttachedLyric.find(track);
             if (it != ctx.scratch.lastAttachedLyric.end() && it->second) {
                 mu::engraving::Lyrics* prev = it->second;
@@ -74,21 +72,11 @@ void enqueueLyric(BuildCtx& ctx, const EncLyric* el, track_idx_t track)
     }
 }
 
-// Build a sorted list of Encore NOTE encTicks for each MuseScore staff, so the
-// segEncTick lookup uses the actual Encore tick of each note rather than a
-// conversion of the MuseScore cumTick.  The cumTick-to-encTick conversion is
-// unreliable because the note loop accumulates durations (not Encore ticks),
-// and the relationship is not proportional when durations don't align with
-// the Encore tick grid (e.g. v0xC4 6/8 with beatTicks=240, lyric offset=51
-// while the first note is at encTick=0).
-//
-// The note is routed to its MuseScore (staff, voice) with the SAME logic as the
-// note loop (routeElementStaffVoice).  This matters for grand staves: a note can
-// reach a lower staff either via staffWithin (raw-byte slot) or via the voice>=VOICES
-// case, and a lyric can reach that staff by a different mechanism.  Keying the tick
-// list by raw encStaff (instead of the routed staff) put the lyrics' notes on the
-// wrong staff and reversed the syllables.  encNoteTicksByStaff[msStaff] holds the
-// Encore ticks of the voice-0 notes that the note loop routed to that MuseScore staff.
+// Build the Encore NOTE ticks of each MuseScore staff's voice-0 notes, so lyric matching uses
+// the real Encore tick of each note rather than a cumTick-to-encTick conversion (unreliable: the
+// note loop accumulates durations, not Encore ticks, so the relationship is not proportional).
+// Notes are routed with the SAME logic as the note loop (routeElementStaffVoice); keying by raw
+// encStaff instead put grand-staff notes on the wrong staff and reversed the syllables.
 static std::map<int, std::vector<int> > buildEncNoteTicksByStaff(
     BuildCtx& ctx, const MeasEmitCtx& mc, const EncMeasure& encMeas)
 {
@@ -115,12 +103,9 @@ static std::map<int, std::vector<int> > buildEncNoteTicksByStaff(
     return encNoteTicksByStaff;
 }
 
-// Build a list of all ChordRest elements (chords and rests) on chordTrack with their enc ticks.
-// segEncTick is taken directly from the Encore NOTE elements in order (positional assignment):
-// the kth MuseScore chord corresponds to the kth Encore note tick. This is more accurate than
-// converting MuseScore cumTick to Encore ticks because the note loop accumulates durations
-// (not encTicks), so the relationship is not proportional when note durations don't align with
-// the Encore tick grid.
+// Pair each ChordRest on chordTrack with an Encore tick. The kth chord takes the kth Encore note
+// tick (positional assignment), which is more accurate than a cumTick conversion (see
+// buildEncNoteTicksByStaff); rests do not consume a note tick.
 static std::vector<std::pair<int, ChordRest*> > buildCrTickPairs(
     Measure* measure, const Fraction& measTick, const EncMeasure& encMeas,
     track_idx_t chordTrack, const std::vector<int>* noteTickList)
@@ -135,14 +120,10 @@ static std::vector<std::pair<int, ChordRest*> > buildCrTickPairs(
         }
         int segEncTick;
         ChordRest* cr = toChordRest(el);
-        // Only advance noteTickIdx for chords, not for rests. Otherwise rests
-        // consume encTick entries intended for notes, causing all subsequent notes
-        // to have incorrect encTick values and lyrics to mismatch.
         if (cr->isChord() && noteTickList && noteTickIdx < noteTickList->size()) {
             segEncTick = (*noteTickList)[noteTickIdx++];
         } else {
-            // Fallback for rests or when Encore note list is exhausted: estimate
-            // from the measure's beat grid.
+            // Rest, or note list exhausted: estimate from the measure's beat grid.
             const Fraction relTick = s->tick() - measTick;
             const int durTicks = encMeas.durTicks ? static_cast<int>(encMeas.durTicks) : kEncWholeTicks;
             segEncTick = (relTick.numerator() * durTicks)
@@ -189,10 +170,9 @@ static int findBestCr(const std::vector<std::pair<int, ChordRest*> >& pairs,
     return bestIdx;
 }
 
-// Attach queued lyrics from ctx.scratch.pendingLyrics to the nearest chord in the measure.
-// Uses a "lyrics-first" greedy assignment: for each syllable in tick order, claim
-// the nearest available note within the threshold, so later syllables cannot steal
-// the note from an earlier one.
+// Attach queued lyrics to the nearest chord in the measure. Greedy "lyrics-first" assignment:
+// each syllable in tick order claims the nearest available note within the threshold, so later
+// syllables cannot steal a note from an earlier one.
 void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
 {
     Measure* measure = mc.measure;
@@ -206,10 +186,9 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
     const int matchThreshold = beatTicksVal / 2;
 
     // Encore stores the second and later verses with tick=0 on every syllable; the real horizontal
-    // position lives only in the xoffset (kie), identical to the matching first-verse syllable.
-    // Build a per-staff xoffset->tick reference from the verses whose ticks are reliable (they span
-    // more than one value); a collapsed verse is then remapped by nearest xoffset below so all verses
-    // align on the same notes. Note xoffsets are not usable for this (absent/zero in v0xA6).
+    // position lives only in the xoffset (kie). Build a per-staff xoffset->tick reference from the
+    // verses whose ticks are reliable (they span more than one value); a collapsed verse is remapped
+    // by nearest xoffset below so all verses align on the same notes.
     std::map<int, std::vector<std::pair<int, int> > > xoffTickRefByStaff;   // staff -> [(xoffset, encTick)]
     for (const auto& [refTrack, refEntries] : ctx.scratch.pendingLyrics) {
         if (refEntries.size() < 2) {
@@ -231,12 +210,11 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
         }
     }
 
-    // Fallback for measures where NO verse has reliable (spanning) ticks. A final melisma word that
-    // is the only syllable in the bar is stored at the melisma's end note in one verse and collapsed
-    // to tick 0 in another, so tick-based matching splits the verses across different notes. Position
-    // purely by xoffset instead: syllables (across verses) whose xoffset nearly coincides are the same
-    // held word and must resolve to the same (earliest) note. Only staves absent from the spanning
-    // reference are touched, so measures with a normal multi-syllable verse are left unchanged.
+    // Fallback for measures where NO verse has reliable (spanning) ticks: a lone melisma word can be
+    // stored at its end note in one verse and at tick 0 in another, so tick matching would split the
+    // verses across notes. Position purely by xoffset: syllables whose xoffset nearly coincides are
+    // the same held word and resolve to the same (earliest) note. Only staves absent from the spanning
+    // reference are touched, so normal multi-syllable verses are left unchanged.
     {
         std::map<int, std::vector<std::pair<int, int> > > noSpanByStaff;   // staff -> [(xoffset, encTick)]
         for (const auto& [t, es] : ctx.scratch.pendingLyrics) {
@@ -249,8 +227,7 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
                 v.emplace_back(e.xoffset, e.encTick);
             }
         }
-        // xoffset units; adjacent notes differ by far more than this, matching cross-verse syllables
-        // differ by much less (see attachPendingLyrics reference building above).
+        // xoffset units; adjacent notes differ by far more, cross-verse syllables by much less.
         const int kieThreshold = 25;
         for (auto& [t, es] : ctx.scratch.pendingLyrics) {
             auto sit = noSpanByStaff.find(static_cast<int>(t) / VOICES);
@@ -271,8 +248,8 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
         if (entries.empty()) {
             continue;
         }
-        // Encore multi-verse: verse 1=voice 0, verse 2=voice 1.
-        // MuseScore anchors all verses to voice-0 chord via setVerse().
+        // Encore multi-verse maps to voice: verse 1=voice 0, verse 2=voice 1. MuseScore anchors
+        // all verses to the voice-0 chord via setVerse().
         const int lyStaffIdx = static_cast<int>(lyTrack) / VOICES;
         const int lyVerseNo = static_cast<int>(lyTrack) % VOICES;
         const track_idx_t chordTrack = static_cast<track_idx_t>(lyStaffIdx) * VOICES;
@@ -321,22 +298,17 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
 
         std::vector<bool> crConsumed(crTickPairs.size(), false);
         for (const auto& pl : entries) {
-            // First pass: nearest chord within the threshold, with two-tier preference:
-            // prefer notes at/before the lyric tick, then the closest by absolute distance.
-            // This prevents lyrics from matching a later note simply because it is
-            // absolutely closer (e.g., when lyric and note are not perfectly aligned).
+            // Pass 1: nearest chord within the threshold, preferring notes at/before the lyric
+            // tick so a slightly-misaligned lyric does not grab a later note just for proximity.
             int bestIdx = findBestCr(crTickPairs, crConsumed, pl.encTick,
                                      /*wantChord*/ true, matchThreshold, /*preferNotAfter*/ true);
-            // Fallback: attach to the nearest rest in the measure.
+            // Pass 2: nearest rest.
             if (bestIdx < 0) {
                 bestIdx = findBestCr(crTickPairs, crConsumed, pl.encTick,
                                      /*wantChord*/ false, INT_MAX, /*preferNotAfter*/ false);
             }
-            // Last resort: a sung syllable always belongs to a note. If nothing matched
-            // within the threshold and no rest was available, attach it to the nearest
-            // unconsumed chord at any distance rather than dropping it. This recovers
-            // continuation syllables (e.g. "fin-ger", "soft-ly") whose stored tick sits
-            // between notes, further than half a beat from the note they belong to.
+            // Pass 3: a sung syllable always belongs to a note, so rather than drop one whose
+            // stored tick sits far between notes, attach to the nearest chord at any distance.
             if (bestIdx < 0) {
                 bestIdx = findBestCr(crTickPairs, crConsumed, pl.encTick,
                                      /*wantChord*/ true, INT_MAX, /*preferNotAfter*/ false);

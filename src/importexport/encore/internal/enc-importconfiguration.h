@@ -19,6 +19,9 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
+// Settings-backed implementation of the Encore import configuration.
+
 #pragma once
 
 #include "../ienc-importconfiguration.h"

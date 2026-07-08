@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Unit tests for the rhythm math (face value / real duration / dots / implied tuplets), page-setup plist
+// parsing, and parser bounds helpers, exercised without loading a score.
+
 #include <gtest/gtest.h>
 
 #include "../internal/parser/ticks.h"
@@ -81,15 +84,11 @@ TEST(Tst_EncoreRhythm, realDurationToDurationType)
     EXPECT_EQ(realDuration2DurationType(720, 2), DurationType::V_HALF);
     EXPECT_EQ(realDuration2DurationType(360, 3), DurationType::V_QUARTER);
     EXPECT_EQ(realDuration2DurationType(180, 4), DurationType::V_EIGHTH);
-    // Multi-stream truncation: realDur < faceTicks → face value is authoritative.
-    // Encore records 3 MIDI streams per instrument in the same voice; gaps between
-    // overlapping streams are shorter than the written note value.
+    // Multi-stream truncation: realDur < faceTicks means overlapping MIDI streams, so face value wins.
     EXPECT_EQ(realDuration2DurationType(120, 3), DurationType::V_QUARTER);
     EXPECT_EQ(realDuration2DurationType(240, 2), DurationType::V_HALF);
     EXPECT_EQ(realDuration2DurationType(480, 1), DurationType::V_WHOLE);
-    // Triplet rdur values fall back to faceValue: a triplet 8th (rdur=80
-    // for fv=eighth=120) is still notated as an eighth, with the 3:2 ratio
-    // expressed via the tuplet wrapper rather than by upgrading the type.
+    // Triplet rdur falls back to face value; the 3:2 ratio is carried by the tuplet wrapper, not the type.
     EXPECT_EQ(realDuration2DurationType(160, 4), DurationType::V_EIGHTH);
     EXPECT_EQ(realDuration2DurationType(80, 4), DurationType::V_EIGHTH);
     EXPECT_EQ(realDuration2DurationType(80, 5), DurationType::V_16TH);
@@ -100,18 +99,12 @@ TEST(Tst_EncoreRhythm, realDurationToDurationType)
     // Unknown realDur also falls back to faceValue2DurationType.
     EXPECT_EQ(realDuration2DurationType(99, 4), DurationType::V_EIGHTH);
     EXPECT_EQ(realDuration2DurationType(31000, 3), DurationType::V_QUARTER);
-    // Inflated dotted ratios: when calculateRealDurations sets rdur to the
-    // gap-to-next-event spacing for a note that has no following event in
-    // its voice, rdur can land on a dotted-multiple of a LONGER face value.
-    // The face is authoritative in that case (rdur > faceTicks AND not a
-    // real dotted multiple of the face): a face=quarter note with rdur=720
-    // (chord-only voice with implicit trailing silence) stays a quarter,
-    // not a dotted half.
+    // Inflated rdur (gap-to-next-event spacing) that is not a real dotted multiple of the face stays
+    // the face value: a face=quarter with rdur=720 remains a quarter, not a dotted half.
     EXPECT_EQ(realDuration2DurationType(720, 3), DurationType::V_QUARTER);
     EXPECT_EQ(realDuration2DurationType(360, 4), DurationType::V_EIGHTH);
     EXPECT_EQ(realDuration2DurationType(180, 5), DurationType::V_16TH);
-    // But a face=quarter + rdur=360 IS a real dotted quarter (calcDots>0),
-    // so the dotted mapping still applies.
+    // But rdur=360 on a face=quarter IS a real dotted quarter (calcDots>0), so the dotted mapping applies.
     EXPECT_EQ(realDuration2DurationType(360, 3), DurationType::V_QUARTER);
 }
 
@@ -139,35 +132,23 @@ TEST(Tst_EncoreRhythm, dotCalculation)
     EXPECT_EQ(calcDotsSnap(180, 0), 0);
 }
 
-// computeDotCount: v0xC2 dotted-eighth scenario.
-// In v0xC2, the dotted-eighth has dotControl=0x60 (bit 0 = 0) and
-// realDuration=120 (plain-eighth gap).  Both paths return 0, so the dot is
-// missed.  calculateRealDurations fixes this by setting dotControl|=1 on
-// the eighth when the E→S@tick+120 pattern is detected.
+// The bit-0 dot fallback must fire only for genuine MIDI drift (rdur > faceTicks). When rdur <= faceTicks
+// computeDotCount returns 0 even with the bit set; the true v0xC2 dotted-eighth dot is forced elsewhere
+// (EncNote::forceDotted in emitters-note.cpp), not here.
 TEST(Tst_EncoreRhythm, computeDotCount_v0c2_dotted_eighth)
 {
-    // Pre-fix state: dotControl=0x60, rdur=120 (plain gap), fv=4 (eighth).
     EXPECT_EQ(computeDotCount(0x60, 120, 4, /*useBit0Fallback=*/ true), 0)
         << "v0xC2 dotted-eighth without fix: dotControl=0x60 yields 0 dots";
 
-    // Post-fix state: dotControl=0x61 (bit 0 set by fixDottedEighthPattern).
-    // The new guard: rdur=120 == faceTicks(8th)=120 → bit-0 fallback suppressed.
-    // The dot is now forced via EncNote::forceDotted in the emitter, NOT via computeDotCount.
     EXPECT_EQ(computeDotCount(0x61, 120, 4, /*useBit0Fallback=*/ true), 0)
         << "v0xC2 dotted-eighth: computeDotCount returns 0 when rdur==faceTicks; "
         "dot is forced by EncNote::forceDotted in emitters-note.cpp";
 
-    // Guard: bit-0 fallback must NOT fire when rdur <= faceTicks.
-    // rdur=60 == faceTicks(16th)=60 → rdur not > faceTicks → 0 dots (tapada plain 16th).
     EXPECT_EQ(computeDotCount(0x39, 60, 5, /*useBit0Fallback=*/ true), 0)
         << "Plain 16th with spurious dotControl bit0 must not be dotted (rdur==faceTicks)";
-    // rdur=60 < faceTicks(8th)=120 → rdur not > faceTicks → 0 dots (tapada plain 8th overlap).
     EXPECT_EQ(computeDotCount(0x39, 60, 4, /*useBit0Fallback=*/ true), 0)
         << "rdur < faceTicks: bit-0 must not force dot even when set";
 
-    // The bit-0 fallback fires for genuine MIDI drift (rdur > faceTicks).
-    // dotControl=0x01, rdur=160 (drifted dotted-8th, faceTicks=120), fv=4.
-    // calcDots/calcDotsSnap return 0 (drift too large); rdur>faceTicks → bit-0 fires → 1.
     EXPECT_EQ(computeDotCount(0x01, 160, 4, /*useBit0Fallback=*/ true), 1)
         << "Genuine drift (rdur=160 > faceTicks=120): bit0 fires → 1 dot";
 }
@@ -201,36 +182,23 @@ TEST(Tst_EncoreRhythm, impliedTuplets)
     EXPECT_EQ(normalNotes, 0);
 }
 
-// calcDots and calcDotsSnap must not return non-zero when the theoretical
-// dotted value is non-integer (fractional ticks).  Integer division truncates
-// (base * n) / d, making the truncated result accidentally equal to some real
-// rdur even though no valid dotted duration of that face value exists.
-//
-// Concrete case from Salome_port_5.enc compás 19: a live-recorded 16th note
-// (fv=5, base=60) has realDuration=112 from the tick-diff to the next event.
-// 60 * 15 / 8 = 900 / 8 = 112 (C++ integer division; true value = 112.5).
-// calcDotsSnap falsely returned 3, making the note a triple-dotted 16th.
+// A dotted value that is fractional in ticks (integer division truncates base*n/d) must not be
+// mistaken for a real dotted duration: e.g. a 16th's triple-dot = 60*15/8 = 112.5 truncates to 112,
+// which used to be misread as a triple-dotted 16th.
 TEST(Tst_EncoreRhythm, dotCalculation_noFalsePositiveForFractionalDottedValues)
 {
-    // 16th (base=60): triple-dotted = 60*15/8 = 112.5 → truncated to 112.
-    // rdur=112 must NOT be 3 dots.
     EXPECT_EQ(calcDots(112, 5), 0);
     EXPECT_EQ(calcDotsSnap(112, 5), 0);
     EXPECT_EQ(calcDotsSnap(111, 5), 0);
     EXPECT_EQ(calcDotsSnap(113, 5), 0);
 
-    // 32nd (base=30): double-dotted = 30*7/4 = 52.5 → truncated to 52.
-    // rdur=52 must NOT be 2 dots.
     EXPECT_EQ(calcDots(52, 6), 0);
     EXPECT_EQ(calcDotsSnap(52, 6), 0);
 
-    // 32nd (base=30): triple-dotted = 30*15/8 = 56.25 → truncated to 56.
-    // rdur=56 must NOT be 3 dots.
     EXPECT_EQ(calcDots(56, 6), 0);
     EXPECT_EQ(calcDotsSnap(56, 6), 0);
 
-    // Valid integer-valued dotted durations must still work.
-    // 16th dotted (90) and double-dotted (105) are exact integers.
+    // Exact-integer dotted durations must still resolve.
     EXPECT_EQ(calcDots(90, 5), 1);
     EXPECT_EQ(calcDotsSnap(90, 5), 1);
     EXPECT_EQ(calcDots(105, 5), 2);
@@ -241,10 +209,8 @@ TEST(Tst_EncoreRhythm, dotCalculation_noFalsePositiveForFractionalDottedValues)
     EXPECT_EQ(calcDotsSnap(226, 4), 3);
 }
 
-// encWholeNoteTicks: Encore stores element ticks on a fixed 960-per-whole grid, so the
-// derived "ticks per whole note" must come out 960 for every meter (the old
-// beatTicks x timeSigDen form was wrong for compound meters). A measure without a usable
-// time signature falls back to the kEncWholeTicks constant.
+// Encore ticks are on a fixed 960-per-whole grid, so ticks-per-whole must be 960 for every meter
+// including compound (the old beatTicks x timeSigDen form was wrong). No usable meter -> kEncWholeTicks.
 TEST(Tst_EncoreRhythm, wholeNoteTicks)
 {
     auto wnt = [](int durTicks, int num, int den) {
@@ -278,11 +244,8 @@ TEST(Tst_EncoreRhythm, dottedAdvance)
     EXPECT_EQ(dottedAdvance(DurationType::V_QUARTER, 1), Fraction(3, 8));
 }
 
-// ===========================================================================
-// SCO5 (macOS Encore 5) stores the PREC page setup as an NSPrintInfo XML plist,
-// not a Windows DEVMODE. parsePrecPlist must extract orientation, paper size and
-// notation scale from it (margins are not present in this block).
-// ===========================================================================
+// SCO5 (macOS Encore 5) stores the PREC page setup as an NSPrintInfo XML plist, not a Windows DEVMODE;
+// parsePrecPlist extracts orientation, paper size and scale (no margins). See ENCORE_FORMAT.md §PREC block.
 TEST(Tst_EncorePrecPlist, letter_portrait_scale_120)
 {
     const QByteArray plist

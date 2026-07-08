@@ -40,8 +40,7 @@
 using namespace mu::engraving;
 
 namespace mu::iex::enc {
-// Scan `m` for the first chord on preferTrack, falling back to fallbackTrack.
-// Sets *outTrack to the track used; returns nullptr if neither is found.
+// First chord in m on preferTrack, else on fallbackTrack; *outTrack reports which was used.
 static Chord* findFirstChordInMeasure(Measure* m, track_idx_t preferTrack,
                                       track_idx_t fallbackTrack,
                                       track_idx_t* outTrack)
@@ -83,12 +82,9 @@ static Chord* findFirstChordInMeasure(Measure* m, track_idx_t preferTrack,
     return nullptr;
 }
 
-// Pre-check: a note on the ORN's own staff at the ORN's raw Encore tick names the beat the mark
-// sits on directly. The raw enc tick is an explicit per-ORN value and a far more reliable anchor
-// than the xoffset heuristic: ornXoffset and note xoffset use different horizontal origins (in real
-// files the offset between them is a per-file constant, not zero), so an xoffset-proximity test
-// misfires and snaps a first-beat mark onto a later note. Correction is only useful when the ORN's
-// own staff has no note at its raw tick (the beat is empty, so the stored tick can't be trusted).
+// True when the ORN's own staff has a note at its raw Encore tick. That tick is an explicit,
+// reliable anchor, whereas the xoffset heuristic misfires because ornXoffset and note xoffset use
+// different origins; so xoffset correction is only worthwhile when no note sits on the raw tick.
 static bool bowingHasNoteAtRawTick(const PendingBowing& pb, const BuildCtx& ctx)
 {
     const int staffIdx = static_cast<int>(pb.track / VOICES);
@@ -154,18 +150,15 @@ static void correctBowingTickFromXoffset(
     const BuildCtx& ctx,
     bool multiAtRawTick)
 {
-    // When xoffset == 0 the ornament has no visual displacement data, it is
-    // already tagged at its correct note tick, so no correction is needed.
+    // xoffset == 0 means no visual displacement: the mark is already at its correct note tick.
     if (pb.ornXoffset == 0) {
         return;
     }
-    // Trust the raw tick when a note sits on the ORN's own beat, but not when several
-    // marks share that beat with distinct xoffsets: Encore stores a run of articulations
-    // (e.g. an accent on every note of the closing bar) all at the downbeat tick and
-    // spreads them only by xoffset. Trusting the raw tick would then stack them all on
-    // the first chord; fall through to xoffset placement so each lands on its own note.
+    // Trust the raw tick when a note sits on the ORN's beat, unless several marks share that beat
+    // with distinct xoffsets: Encore stores such a run all at the downbeat and spreads it only by
+    // xoffset, so fall through to xoffset placement to land each on its own note.
     if (!multiAtRawTick && bowingHasNoteAtRawTick(pb, ctx)) {
-        return;  // a note exists at the ORN's own beat: trust the raw tick
+        return;
     }
     if (std::optional<Fraction> t = bowingTickFromMatchingOrn(pb, allBowings)) {
         pb.tick = *t;

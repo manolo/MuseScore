@@ -20,7 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Encore (.enc) file importer for MuseScore.
+// Public entry point of the Encore (.enc) importer: parse a file into a MasterScore, plus the
+// helper that turns a rejected file into a user-facing error message.
+//
 // The binary format was reverse-engineered by Leon Vinken (Enc2MusicXML project,
 // https://github.com/lvinken/Enc2MusicXML, GPL v3+) building on enc2ly by Felipe Castro.
 // This importer is based on that work.

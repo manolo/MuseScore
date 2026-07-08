@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Staff scale (MAG) import: score size header field, Encore 4.x LINE per-staff hint, and the v0xA6 global size.
+
 #include <gtest/gtest.h>
 
 #include "engraving/dom/masterscore.h"
@@ -61,8 +63,8 @@ TEST_F(Tst_StaffSize, score_size3_sets_staff_scale_100pct)
     delete score;
 }
 
-// Encore 4.x (version=775): staff size comes from LINE staff entry byte[13], NOT header 0x52.
-// 0x52=8 (unrelated field) would give wrong scale if used; byte[13]=1 -> Size=2 -> 75%.
+// Encore 4.x staff size comes from the LINE staff entry byte, not the unrelated header field.
+// See ENCORE_FORMAT.md §System block (LINE). Regression guard: byte[13]=1 -> Size=2 -> 75%.
 TEST_F(Tst_StaffSize, enc4x_line_staff_size_hint_size2_sets_75pct)
 {
     MasterScore* score = readEncoreScore("importer_enc4x_line_size2_70pct.enc");
@@ -74,7 +76,7 @@ TEST_F(Tst_StaffSize, enc4x_line_staff_size_hint_size2_sets_75pct)
     delete score;
 }
 
-// Encore 4.x: byte[13]=2 -> Size=3 -> 100%.  0x52=8 must NOT override the LINE-derived size.
+// Encore 4.x: byte[13]=2 -> Size=3 -> 100%. The header field must not override the LINE-derived size.
 TEST_F(Tst_StaffSize, enc4x_line_staff_size_hint_size3_sets_100pct)
 {
     MasterScore* score = readEncoreScore("importer_enc4x_line_size3_75pct.enc");
@@ -86,9 +88,8 @@ TEST_F(Tst_StaffSize, enc4x_line_staff_size_hint_size3_sets_100pct)
     delete score;
 }
 
-// v0xA6 stores the global staff size at header byte 0x8D, NOT 0x52 (an unrelated field there,
-// so the importer used to fall back to the default Size4/130%). staff_size=1 must yield 60%
-// for every staff.
+// v0xA6 has a single global staff size applied to every staff. See ENCORE_FORMAT.md §v0xA6 staff size and clef.
+// Regression guard: size=1 must yield 60% (importer previously fell back to the default 130%).
 TEST_F(Tst_StaffSize, v0xa6_global_staff_size_from_header_0x8d)
 {
     MasterScore* score = readEncoreScore("structure_v0xa6_score_size.enc");

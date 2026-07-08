@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Encore importer end-to-end tests: load .enc fixtures and assert notes, ties, tuplets, grace/cue notes,
+// dynamics, hairpins, slurs, articulations, clefs, transposition, text, chords, voltas and error messages.
+
 #include <gtest/gtest.h>
 
 #include <cmath>
@@ -187,10 +190,8 @@ TEST_F(Tst_Importer, grace_with_beamed_eighths_no_layout_crash)
     delete score;
 }
 
-// grace1 & 0x30 == 0x30 is the small bit (0x20) plus the beamed-grace-group bit (0x10), so with the
-// slash marker (grace2 0x04) these are acciaccatura graces, not ordinary notes. The fixture is four
-// such quarter graces with no principal chord to ornament, so they are a dangling group; instead of
-// being discarded they are re-placed as small cue notes (normal-type chords, not grace) that survive.
+// Dangling acciaccatura graces (no principal chord to ornament) survive as small cue notes rather
+// than being discarded. Fixture: four such quarter graces. See ENCORE_FORMAT.md for grace1/grace2 bits.
 TEST_F(Tst_Importer, grace1_0x30_dangling_graces_become_cue_notes)
 {
     MasterScore* score = readEncoreScore("importer_grace1_0x30_normal_notes.enc");
@@ -350,11 +351,8 @@ TEST_F(Tst_Importer, cue_mute_flag_and_sounding_cue)
     delete score;
 }
 
-// FIX: the grace path applied articulations to a still-detached grace chord, where it could
-// only create plain Articulations. A trill byte therefore produced a plain Articulation
-// (isOrnament()==false) instead of an Ornament. Articulations are now applied after the grace
-// is attached, sharing the main note path, so ornaments/fermatas/dedup work on grace notes.
-// Fixture: a normal note + an acciaccatura grace carrying artic byte 0x04 (ornamentTrill).
+// An articulation byte on a grace note must become an Ornament, not a plain Articulation (the grace
+// must share the main-note path). Fixture: normal note + acciaccatura grace with artic byte 0x04 (trill).
 TEST_F(Tst_Importer, grace_articulation_becomes_ornament)
 {
     MasterScore* score = readEncoreScore("grace_ornament.enc");
@@ -1518,11 +1516,8 @@ TEST_F(Tst_Importer, isolated_explicit_tuplet_caps_chord_ticks)
     delete score;
 }
 
-// Regression: note-level path-A cap deleted a chord that belonged to an inner (nested) tuplet.
-// Old code called tt.currentTuplet->remove(chord), the outer tuplet, which does not contain the
-// chord, logging "cannot find element" and leaving a dangling pointer in the inner tuplet's
-// m_currentElements.  The next innerTuplet->add() call iterated over that dangling pointer → SIGSEGV.
-// Fix: use chord->tuplet() (the actual owning tuplet) rather than tt.currentTuplet.
+// Regression: the note-level cap must remove a capped chord from its actual owning tuplet, not the
+// outer currentTuplet, or a nested tuplet is left with a dangling pointer that crashes on next add().
 TEST_F(Tst_Importer, inner_tuplet_note_level_cap_no_crash)
 {
     MasterScore* score = readEncoreScore("importer_inner_tuplet_note_level_cap.enc");
@@ -1678,10 +1673,9 @@ TEST_F(Tst_Importer, orchestra_sanity_check)
 
 TEST_F(Tst_Importer, title_frame_created)
 {
-    // kordorkestro has title "String Orchestra w/Piano"
+    // kordorkestro has a title, so the score must start with a title VBox.
     MasterScore* score = readEncoreScore("kordorkestro.enc");
     ASSERT_NE(score, nullptr);
-    // Title frame should be the first element
     MeasureBase* first = score->first();
     ASSERT_NE(first, nullptr);
     EXPECT_TRUE(first->isVBox()) << "Score with title should start with a VBox frame";
@@ -1809,7 +1803,6 @@ TEST_F(Tst_Importer, multiple_voices_loaded)
         Measure* m = toMeasure(mb);
         for (Segment* s = m->first(SegmentType::ChordRest);
              s; s = s->next(SegmentType::ChordRest)) {
-            // Check voice 1 (track 1 = staff 0, voice 1)
             if (s->element(1) && s->element(1)->isChordRest()) {
                 foundVoice1 = true;
                 break;
@@ -1979,13 +1972,8 @@ TEST_F(Tst_Importer, encore_symbols_full_coverage)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: articulationUp=0x20 on the last note of a tuplet group is Encore's
-// "tuplet bracket placement above" flag, not a fermata. The importer must not
-// create a Fermata element when the note has tuplet != 0.
-// Real-world case: Paloteos de Moncalvillo (4/4 + 7/8), where every triplet's
-// last note had articulationUp=0x20, producing spurious fermatas on all measures.
-// ===========================================================================
+// articulationUp=0x20 on a tuplet's last note is Encore's "bracket placement above" flag, not a
+// fermata; a Fermata must only be created when tuplet == 0. Fixture mixes a plain note and a triplet.
 TEST_F(Tst_Importer, v0c4_fermata_suppressed_on_tuplet_last_note)
 {
     MasterScore* score = readEncoreScore("ornaments_fermata_not_in_tuplet.enc");
@@ -2070,13 +2058,8 @@ TEST_F(Tst_Importer, key_transposition_non_octave_oboe)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: tremolo ORN on the tied-from note of a quarter->eighth tie.
-// The ORN's cumTick position falls on or past the eighth (tie-continuation),
-// so the "last chord" fallback resolves to the eighth. The importer must
-// check tieBack() on the resolved chord and walk back to the tie-start chord.
-// Real-world case: Alborada de Mayo, measure 1, percussion staff.
-// ===========================================================================
+// A tremolo ORN whose tick lands on the tie-continuation eighth must walk back via tieBack() to the
+// tie-start quarter, so the tremolo attaches to the note that started the tie, not the continuation.
 TEST_F(Tst_Importer, v0c4_tremolo_orn_on_tied_from_note)
 {
     MasterScore* score = readEncoreScore("ornaments_tremolo_orn_tied_from.enc");
@@ -2215,29 +2198,19 @@ TEST_F(Tst_Importer, sintetico_all_features_imports_cleanly)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: mixed-duration explicit tuplet bracket {Q,E} in a 3:2 group
-// was not closing correctly. faceSum(Q+E)=3/8 never reached the old
-// threshold 3Q=3/4, pulling subsequent notes into the same bracket and
-// causing a measure overrun (Incomplete measure error).
-//
-// Fix: close a group when faceSum/actualN is a valid standard TDuration.
-// {Q,E}/3 = E, valid → closes after 2 notes. Next {Q,Q,Q}/3 = Q, valid → 3.
-//   Q (tied) + (Q+E)*2/3 + (Q+Q+Q)*2/3 = Q + Q + 2Q = 4Q = 4/4 exact
-// ===========================================================================
+// A mixed-duration explicit tuplet bracket must close when faceSum/actualN is a valid TDuration,
+// so {Q,E} and {Q,Q,Q} form two separate 3:2 brackets instead of one over-long group that overruns.
 TEST_F(Tst_Importer, v0c4_mixed_duration_tuplet_bracket_closes_correctly)
 {
     MasterScore* score = readEncoreScore("ornaments_tuplet_mixed_baseLen.enc");
     ASSERT_NE(score, nullptr) << "Failed to load ornaments_tuplet_mixed_baseLen.enc";
 
-    // No measure corruption, the sanityCheck must pass
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "Measure is corrupt (overrun): " << ret.text();
 
     Measure* m1 = score->firstMeasure();
     ASSERT_NE(m1, nullptr);
 
-    // Count tuplet groups in measure 1
     std::set<Tuplet*> tuplets;
     int noteCount = 0;
     for (Segment* s = m1->first(SegmentType::ChordRest); s;
@@ -2253,21 +2226,14 @@ TEST_F(Tst_Importer, v0c4_mixed_duration_tuplet_bracket_closes_correctly)
         }
     }
 
-    // 6 notes: 1 plain Q + 2 in bracket1 + 3 in bracket2
-    EXPECT_EQ(noteCount, 6);
-    // Exactly 2 separate tuplet brackets
+    EXPECT_EQ(noteCount, 6);   // 1 plain Q + {Q,E} + {Q,Q,Q}
     EXPECT_EQ(tuplets.size(), 2u)
         << "Must form 2 tuplet brackets: {Q,E} and {Q,Q,Q}, not one big group";
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: 4:3 quadruplet (tup=0x43) was not recognized; notes appeared
-// as plain, with wrong advance (Q instead of E per slot). The fix adds
-// 4:3 to getExplicit() and derives note duration from rdur x (actualN/normalN)
-// so beat-relative face values (e.g. fv=Q meaning one eighth in 8/8) map to
-// the correct MuseScore duration and advance.
-// ===========================================================================
+// A 4:3 quadruplet (tup=0x43) must be recognized and its note duration derived from rdur scaled by
+// actualN/normalN, so the four notes share one 4:3 bracket with the correct per-slot advance.
 TEST_F(Tst_Importer, v0c4_4to3_quadruplet_correct_advance)
 {
     MasterScore* score = readEncoreScore("tuplet_4to3_quadruplet.enc");
@@ -2278,7 +2244,6 @@ TEST_F(Tst_Importer, v0c4_4to3_quadruplet_correct_advance)
     Measure* m = score->firstMeasure();
     ASSERT_NE(m, nullptr);
 
-    // Collect chords from measure 1
     std::vector<Chord*> chords;
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* e = s->element(0);
@@ -2288,25 +2253,17 @@ TEST_F(Tst_Importer, v0c4_4to3_quadruplet_correct_advance)
     }
     ASSERT_EQ(chords.size(), 4u) << "Must have 4 chords in the 4:3 quadruplet";
 
-    // All 4 chords must be in the same 4:3 tuplet
     for (int i = 0; i < 4; ++i) {
         ASSERT_NE(chords[i]->tuplet(), nullptr) << "Chord " << i << " must be in a 4:3 tuplet";
         EXPECT_EQ(chords[i]->tuplet(), chords[0]->tuplet()) << "All 4 in same bracket";
     }
-    // Ratio must be 4:3
     EXPECT_EQ(chords[0]->tuplet()->ratio(), Fraction(4, 3)) << "Ratio must be 4:3";
-    // Actual advance per note: E * (3/4) = 3/32 of whole note
     EXPECT_EQ(chords[0]->actualTicks(), Fraction(3, 32)) << "E in 4:3 = E*(3/4) = 3/32";
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: dotted rests were not recognised because dotControl (a bitmask flag)
-// was passed as a tick count to calcDots, always yielding 0 dots. The fix adds
-// a calcDotsSnap(realDuration) fallback matching the note handler. Without the
-// fix a dotted-quarter rest in 7/8 became a plain quarter rest, leaving a
-// gap eighth rest AFTER the notes instead of BEFORE them.
-// ===========================================================================
+// A dotted rest must be recognized via a calcDotsSnap(realDuration) fallback; otherwise a
+// dotted-quarter rest in 7/8 collapses to a plain quarter and the gap rest lands after the notes.
 TEST_F(Tst_Importer, v0c4_dotted_rest_correct_duration)
 {
     MasterScore* score = readEncoreScore("rest_dotted_before_notes.enc");
@@ -2318,29 +2275,21 @@ TEST_F(Tst_Importer, v0c4_dotted_rest_correct_duration)
     ASSERT_NE(m, nullptr);
     EXPECT_EQ(m->timesig(), Fraction(7, 8));
 
-    // First ChordRest in measure must be a dotted-quarter REST (not a plain quarter).
-    // Without the fix the plain quarter rest (240 ticks) leaves a 120-tick gap
-    // filled by a phantom eighth rest that is placed AFTER the notes.
+    // First ChordRest must be a dotted-quarter rest, not a plain quarter leaving a trailing gap.
     Segment* first = m->first(SegmentType::ChordRest);
     ASSERT_NE(first, nullptr);
     EngravingItem* el = first->element(0);
     ASSERT_NE(el, nullptr);
     ASSERT_TRUE(el->isRest()) << "First element must be a rest";
     Rest* rest = toRest(el);
-    // Dotted quarter = Q + E = 3/8 of measure duration
     EXPECT_EQ(rest->durationType().type(), DurationType::V_QUARTER) << "Base type: quarter";
     EXPECT_EQ(rest->dots(), 1) << "Must have 1 dot (dotted-quarter rest)";
-    // Actual ticks: dotted-quarter = 3/8 of whole note
     EXPECT_EQ(rest->ticks(), Fraction(3, 8)) << "Dotted-quarter rest spans 3/8";
     delete score;
 }
 
-// Percussion file: two WINI/TITL/PREC blocks, large ghost MEAS blocks embedded in binary data.
-// ===========================================================================
-// BUG FIX: Dotted note not recognised when MIDI timing drift makes rdur
-//          > 1 tick off from the theoretical dotted value. dotControl bit 0
-//          (Encore's "dotted" flag) now overrides when calcDotsSnap returns 0.
-// ===========================================================================
+// dotControl bit 0 (Encore's "dotted" flag) must force a dot when MIDI timing drift makes rdur miss
+// the theoretical dotted value and calcDotsSnap returns 0.
 TEST_F(Tst_Importer, v0c4_dotted_note_dotctrl_bit0_drift)
 {
     MasterScore* score = readEncoreScore("notes_dotted_ctrl_bit0_drift.enc");
@@ -2486,13 +2435,8 @@ TEST_F(Tst_Importer, numeric_chord_with_bass_note)
     delete score;
 }
 
-// ===========================================================================
-// Regression guard: 2/2 with the CORRECT beatTicks=480 still imports all
-// notes correctly after wholeTicks was changed from beatTicks*timeSigDen
-// to the constant 960.  beatTicks=480 gives 480*2=960=960, so the old
-// formula was coincidentally correct; this test ensures the fix does not
-// break properly-encoded 2/2 files.
-// ===========================================================================
+// Guard that the wholeTicks=960 fix does not break a correctly-encoded 2/2 file (beatTicks=480,
+// where the old beatTicks*timeSigDen formula was coincidentally also 960).
 TEST_F(Tst_Importer, v0c4_2_2_beatticks480_correct_encoding_still_works)
 {
     MasterScore* score = readEncoreScore("importer_2_2_beatticks480_correct.enc");
@@ -2522,20 +2466,8 @@ TEST_F(Tst_Importer, v0c4_2_2_beatticks480_correct_encoding_still_works)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: 2/2 with non-standard beatTicks=240 causes gap-snap to fire at
-// the wrong positions.  The formula wholeTicks = beatTicks * timeSigDen
-// gives 240 * 2 = 480 instead of 960.  A note at Encore tick=360 maps to
-// encTickFrac = 360/480 = 3/4, which exceeds cumTick = 3/8 after rest+Q,
-// so gap-snap fires and jumps cumTick to 3/4.  All following notes in the
-// second half of the measure are dropped.
-// Fix: use wholeTicks = 960 (Encore always uses 960 ticks per whole note).
-//
-// Fixture (2/2, beatTicks=240, durTicks=960):
-//   REST@0(8th), Q@120(60), 8th@360(62)*, 8th@480(64), 8th@600(65),
-//   8th@720(67), 8th@840(69)   (* false-snap target without fix)
-// All 7 elements must appear at correct tick positions.
-// ===========================================================================
+// Encore always uses 960 ticks per whole note; a non-standard beatTicks=240 in 2/2 must not make
+// gap-snap fire (with beatTicks*timeSigDen it would drop the second-half notes). Fixture: rest + Q + 5 eighths.
 TEST_F(Tst_Importer, v0c4_2_2_beatticks240_gap_snap_no_false_fire)
 {
     MasterScore* score = readEncoreScore("importer_2_2_beatticks240_gap_snap.enc");
@@ -2544,7 +2476,6 @@ TEST_F(Tst_Importer, v0c4_2_2_beatticks240_gap_snap_no_false_fire)
     Measure* m0 = score->firstMeasure();
     ASSERT_NE(m0, nullptr);
 
-    // Collect non-gap ChordRest elements.
     std::vector<std::pair<Fraction, bool> > elements;  // (tick, isRest)
     for (Segment* s = m0->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
@@ -2561,21 +2492,18 @@ TEST_F(Tst_Importer, v0c4_2_2_beatticks240_gap_snap_no_false_fire)
         << "Measure must contain exactly 7 elements (rest + Q + 5 eighths); "
         "gap-snap with wrong wholeTicks drops notes 3-7";
 
-    // tick 0: 8th rest
     EXPECT_EQ(elements[0].first, Fraction(0, 1));
     EXPECT_TRUE(elements[0].second) << "element 0 must be a rest";
 
-    // tick 1/8: quarter note
     EXPECT_EQ(elements[1].first, Fraction(1, 8));
     EXPECT_FALSE(elements[1].second) << "element 1 must be a chord (Q)";
 
-    // tick 3/8: first 8th note after Q, the false-snap target
+    // Element 2 is the false-snap target: with the wrong wholeTicks it would jump from 3/8 to 3/4.
     EXPECT_EQ(elements[2].first, Fraction(3, 8))
         << "element 2 must be at 3/8 (tick 360); "
         "false gap-snap would place it at 3/4 (tick 720)";
     EXPECT_FALSE(elements[2].second) << "element 2 must be a chord, not a rest";
 
-    // ticks 4/8 through 7/8: remaining 8th notes
     EXPECT_EQ(elements[3].first, Fraction(4, 8));
     EXPECT_EQ(elements[4].first, Fraction(5, 8));
     EXPECT_EQ(elements[5].first, Fraction(6, 8));

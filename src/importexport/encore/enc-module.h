@@ -19,6 +19,9 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
+// Module setup for the Encore importer: registers the import configuration and the .enc reader.
+
 #ifndef MU_IMPORTEXPORT_ENC_MODULE_H
 #define MU_IMPORTEXPORT_ENC_MODULE_H
 

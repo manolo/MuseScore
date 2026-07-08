@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Encore 3.x/4.x (v0xC2) reader: pitch/tuplet slot swap, tie-sender flag, dotted-eighth and
+// implied-tuplet fixups, and the two TEMPO/slur layout quirks that diverge from v0xC4.
+
 #include "readers-v0xc2.h"
 #include "readers-v0xc4-base.h"
 
@@ -29,17 +32,11 @@
 #include "ticks.h"
 
 namespace mu::iex::enc {
-// v0xC2: Encore places the sixteenth of a dotted-eighth+sixteenth group at tick+120
-// (the undotted gap), not tick+180. Fix: detect eighth(rdur=120) + sixteenth(rdur=60,
-// tick+120) and set forceDotted.
-//
-// Guard: the fix must only fire when the measure is SHORT by exactly 60t (the amount
-// the dotted-eighth anomaly steals).  Without this guard the fix produces false
-// positives on any genuine 8th+16th sequence inside a full measure (e.g. tapada.enc
-// m40 staff 2: face sum=360t in a 480t measure is short by 120t, not 60t → no fix).
+// v0xC2 stores the eighth of a dotted-eighth+sixteenth group as plain (rdur 120) instead of dotted
+// (180), placing the sixteenth at tick+120. Force the dot only when the measure is short by exactly
+// 60t (the amount the anomaly steals), otherwise a genuine 8th+16th would get a spurious dot.
 static void fixDottedEighthPattern(std::vector<EncMeasureElem*>& elems, qint16 durTicks)
 {
-    // Pre-compute face-value sum to decide whether the measure needs correction.
     int faceSum = 0;
     for (const EncMeasureElem* e : elems) {
         quint8 fv = 0;
@@ -50,10 +47,6 @@ static void fixDottedEighthPattern(std::vector<EncMeasureElem*>& elems, qint16 d
         }
         faceSum += faceValue2ticks(fv);
     }
-    // The dotted-8th anomaly: one 8th is stored as plain (120t) instead of
-    // dotted (180t), making the measure exactly 60t short.
-    // If the deficit is not 60t, the measure is already correct or has a
-    // different issue, don't apply the dotted fix.
     if (faceSum + 60 != static_cast<int>(durTicks)) {
         return;
     }
@@ -171,35 +164,25 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
             if (orn->tipo == static_cast<quint8>(EncOrnamentType::UPBOW)) {
                 orn->tipo = static_cast<quint8>(EncOrnamentType::ACCENT);
             }
-            // v0xC2: the spanning measure-count lives at element +16 (altMezuro), not +18
-            // (alMezuro, which is garbage in this format). For slurs this is the reliable
-            // forward measure span: 0 means the slur stays within its measure, N>0 means it
-            // ends N bars later. Marking the count valid (even when 0) lets the post-pass
-            // anchor a cross-bar slur to the target measure's downbeat, and keeps a within-bar
-            // slur from being over-extended into later measures by the coordinate heuristic
-            // (xoffset2 is unreliable in this format).
+            // v0xC2 keeps the reliable forward slur span at +16 (altMezuro), not +18 (garbage here):
+            // 0 = within measure, N = ends N bars later. Marking it valid lets the post-pass anchor
+            // by measure count instead of the unreliable xoffset2 coordinate. See ENCORE_FORMAT.md §Slur.
             if (orn->tipo == static_cast<quint8>(EncOrnamentType::SLURSTART)) {
                 orn->alMezuro = orn->altMezuro;
                 orn->alMezuroValid = true;
             } else {
                 orn->alMezuroValid = false;
             }
-            // v0xC2 has two TEMPO layouts. Older files store the BPM directly at element +28
-            // (read into `noto`), with a constant unrelated byte (observed 0x34 = 52) in the
-            // +30 slot that carries the BPM in v0xC4. Newer Encore 4.x files instead use the
-            // v0xC4 layout: a beat-unit code at +28 (e.g. 0x02 = quarter) and the real BPM at
-            // +30. Tell them apart by whether +28 holds a valid beat-unit code (low 7 bits in
-            // 0..6): if so, keep the BPM already read from +30 and the unit in `noto`;
-            // otherwise the +28 byte IS the BPM, so move it across (e.g. 80 instead of 52).
+            // v0xC2 has two TEMPO layouts. New (v0xC4-style): beat-unit code at +28, BPM at +30.
+            // Old: BPM at +28 (read into noto) with a constant in the +30 slot. Discriminate by
+            // whether +28 holds a valid beat-unit code (low 7 bits 0..6). See ENCORE_FORMAT.md §Ornament subtypes.
             if (orn->tipo == static_cast<quint8>(EncOrnamentType::TEMPO)) {
                 const quint8 beatUnitCode = orn->noto & 0x7F;
                 const bool validBeatUnit = (orn->noto != 0) && (beatUnitCode <= 6);
                 if (!validBeatUnit) {
-                    orn->tempo = orn->noto;   // older layout: element +28 IS the BPM (+30 is a constant 0x34)
-                    // The older layout still records the per-mark beat unit, two bytes before the BPM
-                    // at element +26 (same 0-indexed note encoding as the v0xC4 `noto`: 0=whole, 2=quarter,
-                    // 3=eighth, ...). Recover it so the mark shows the unit the composer chose (e.g.
-                    // eighth=240 in 6/8) instead of defaulting to the compound-meter dotted quarter.
+                    orn->tempo = orn->noto;   // old layout: +28 is the BPM
+                    // Old layout keeps the per-mark beat unit at +26; recover it so the mark shows
+                    // the composer's unit instead of the compound-meter dotted-quarter default.
                     orn->noto = 0;
                     const qint64 save = ds.device()->pos();
                     if (ds.device()->seek(rawElemStart + 26)) {
@@ -219,18 +202,10 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
         if (!en) {
             return false;
         }
-        // v0xC2: MIDI pitch usually occupies the tuplet slot (+13) with semiTonePitch
-        // (+15) empty; swap it across. But some Encore 4.x files store the pitch directly
-        // in semiTonePitch, in which case the tuplet slot holds a genuine tuplet ratio
-        // (e.g. 0x32 = 3:2) that must be preserved, not mistaken for the pitch.
-        //
-        // The discriminator is whether +15 holds a plausible MIDI pitch, not merely
-        // whether it is non-zero: some Encore 3.x/4.x files leave a small stray flag
-        // (observed 1 or 3) in the semiTonePitch slot of sub-variant A notes. Treating
-        // that flag as the pitch imported the note as MIDI 1 (C#-1), several octaves too
-        // low, and collapsed chords whose members all carried it. A value below C0 cannot
-        // be a real note, so the pitch still comes from +13 in that case. See
-        // ENCORE_FORMAT.md §Note element.
+        // v0xC2 usually keeps the MIDI pitch in the tuplet slot (+13) with +15 empty; swap it
+        // across. Some files instead store a real pitch at +15 and a genuine tuplet ratio at +13.
+        // Discriminate by whether +15 is a plausible pitch (>= C0), not merely nonzero: a stray
+        // small flag there must not be read as MIDI 1. See ENCORE_FORMAT.md §Note element.
         static constexpr quint8 kMinPlausiblePitch = 12; // C0; below this is not a MIDI note
         if (en->tuplet > 0 && en->semiTonePitch < kMinPlausiblePitch) {
             en->semiTonePitch = en->tuplet;

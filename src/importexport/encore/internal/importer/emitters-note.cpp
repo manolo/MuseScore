@@ -46,10 +46,9 @@
 namespace mu::iex::enc {
 using namespace mu::engraving;
 
-// The tuplet ratio and resolved MuseScore duration for one note, produced once by
-// resolveNoteDuration and threaded through attachChordToTuplet/advanceCumulativeTick.
-// dt/dots are in/out: attach may shrink them for an isolated-explicit fill, advance reads
-// the final values. dtFace is the pre-cap duration used for the isolated-explicit fill check.
+// Tuplet ratio and resolved duration for one note, threaded through resolveNoteDuration,
+// attachChordToTuplet and advanceCumulativeTick. dt/dots are in/out (attach may shrink them
+// for an isolated-explicit fill); dtFace is the pre-cap duration for that fill check.
 struct TupletDecision {
     int actualN { 0 };
     int normalN { 0 };
@@ -58,7 +57,7 @@ struct TupletDecision {
     DurationType dtFace { DurationType::V_INVALID };
 };
 
-// Returns true if the note is a short MIDI artifact that should be skipped.
+// A short realDuration (< 15) is usually a MIDI tie-continuation artifact, not a real note.
 static bool isMidiArtifact(const EncNote* en,
                            const NoteElemCtx& ec,
                            const MeasEmitCtx& mc,
@@ -91,7 +90,7 @@ static bool isMidiArtifact(const EncNote* en,
     return false;
 }
 
-// Returns true if this note is a cascade-filtered tie-receiver and should be skipped.
+// The tie-receiver of an already-filtered artifact (grace1 low nibble == 2) must be filtered too.
 static bool isCascadeFilteredTieReceiver(const EncNote* en,
                                          const NoteElemCtx& ec,
                                          std::set<std::tuple<int, int, int> >& filteredSenders)
@@ -107,7 +106,6 @@ static bool isCascadeFilteredTieReceiver(const EncNote* en,
     return false;
 }
 
-// Attaches any pending grace notes for trackKey to chord.
 static void attachPendingGracesToChord(BuildCtx& ctx,
                                        const std::pair<int, int>& trackKey,
                                        Chord* chord,
@@ -124,11 +122,9 @@ static void attachPendingGracesToChord(BuildCtx& ctx,
         }
     }
     pg.clear();
-    // DO NOT erase ctx.scratch.graceStolenTicks yet: the snap guard
-    // for the NEXT regular note needs to read it.
+    // Do not erase graceStolenTicks yet: the snap guard for the next regular note reads it.
 }
 
-// Creates Fingering/string-number elements from articulationUp/articulationDown bytes.
 static void applyFingeringsFromArtic(const NoteElemCtx& ec,
                                      Note* note,
                                      const EncNote* en)
@@ -153,7 +149,6 @@ static void applyFingeringsFromArtic(const NoteElemCtx& ec,
     }
 }
 
-// Completes a pending tie from a previous note to this note.
 static void completePendingTie(BuildCtx& ctx,
                                const NoteElemCtx& ec,
                                const EncNote* en,
@@ -163,16 +158,10 @@ static void completePendingTie(BuildCtx& ctx,
     auto it = ctx.scratch.pendingTieNote.find(tieKey);
     if (it != ctx.scratch.pendingTieNote.end()) {
         Note* startNote = it->second;
-        // A real Encore tie connects a note to the next note in its own voice; a
-        // rest may sit between them but another note may not. The .enc format has
-        // no SLURSTOP, so the receiver is found by matching (staff, voice, pitch)
-        // against later notes -- which would otherwise let a spurious tie-start
-        // jump across many measures to the next same-pitch note (the cross-bar
-        // "ligaduras" the user saw). Notes are emitted in tick order, so by the
-        // time the receiver is reached every chord between it and the tie-start is
-        // already in the score: walk forward from the tie-start and require the
-        // receiver to be the first chord found on that track. Intervening chords
-        // (any pitch) void the tie; rests are skipped.
+        // The format has no tie-end, so a tie-start is matched to a later note by (staff, voice,
+        // pitch); accept only when the receiver is the first chord after the start on that track
+        // (intervening chords void the tie, rests are skipped), else it jumps across measures to
+        // the next same-pitch note. See ENCORE_IMPORTER.md §TIE element handling.
         bool consecutive = true;
         Chord* startChord = startNote->chord();
         if (startChord && startChord->segment() && note->chord()) {
@@ -198,7 +187,6 @@ static void completePendingTie(BuildCtx& ctx,
     }
 }
 
-// Registers this note as a tie-start if applicable.
 static void registerTieStartIfApplicable(BuildCtx& ctx,
                                          const NoteElemCtx& ec,
                                          const MeasEmitCtx& mc,
@@ -228,7 +216,7 @@ static DurationType resolveBeatRelativeFaceValue(
     if (static_cast<int>(en->realDuration) != expectedBeatAdv) {
         return DurationType::V_INVALID;
     }
-    // Beat-relative fv (e.g. 8/8 where fv=Q means one beat): derive written note from rdur × ratio.
+    // Beat-relative fv (e.g. 8/8 where fv=Q means one beat): derive written note from rdur x ratio.
     const int faceTicks = (static_cast<int>(en->realDuration) * preACheck
                            + preNCheck / 2) / preNCheck;
     // Choose fv to avoid the "realDur < faceValue2ticks(fv)" fallback in realDuration2DurationType.
@@ -400,8 +388,8 @@ static bool advanceCumulativeTick(
     auto& tt = ctx.scratch.tuplets[trackKey];
     auto& innerTtAdv = ctx.scratch.innerTuplets[trackKey];
 
-    // Doubly-nested advance: apply both inner and outer ratios so cumTick over the inner group equals one outer slot.
-    // Without this, 3 inner 16ths at 1/24 each = 1/8 > 1/12 (one 3:2 outer slot).
+    // Doubly-nested advance: apply both inner and outer ratios so cumTick over the inner group
+    // equals one outer slot (3 inner 16ths would otherwise sum to 1/8 > the 1/12 outer slot).
     Fraction advance;
     if (isInnerMember) {
         // Apply inner ratio AND outer ratio. Use saved NI ratios when innerLast has already closed the group.
@@ -448,13 +436,9 @@ static bool advanceCumulativeTick(
         }
     }
 
-    // No in-emission cap for a plain (non-tuplet) note that overruns the barline: let cumTick
-    // exceed the measure and resolve the overflow in the post-pass (fitOverfullMeasure). This is
-    // what IrregularMeasure already relied on; Truncate and StretchLastNote now do the same so a
-    // stranded note keeps its full value and is recut there to a tied chain that reaches the
-    // barline exactly (e.g. a dotted half in a 5/8 bar becomes a half tied to an eighth) rather
-    // than being collapsed to a single smaller figure with a trailing rest. Tuplet members are
-    // likewise never cut here (a tuplet is atomic; the post-pass dissolves it whole).
+    // A plain note may overrun the barline here on purpose; the overfull post-pass
+    // (fitOverfullMeasure) recuts it into a tied chain. A tuplet is atomic, so its members are
+    // likewise never cut here.
     ctx.scratch.cumTick[trackKey] += advance;
     if (tt.inTuplet()) {
         tt.placedTicks += advance;
@@ -492,7 +476,7 @@ static bool resolveNoteDuration(
     const EncMeasureElem* e = ec.e;
     const auto& trackKey = ec.trackKey;
 
-    // Undo prevMidiTick change and return false to skip this note (MIDI artifact or residual).
+    // Skip this note (MIDI artifact or zero-tick residual), rolling back prevMidiTick.
     auto bailOut = [&]() -> bool {
         if (savedPrevMidiTick >= 0) {
             ctx.scratch.prevMidiTick[trackKey] = savedPrevMidiTick;
@@ -585,20 +569,16 @@ static bool resolveNoteDuration(
                 if (capped.fraction().numerator() == 0) {
                     return bailOut();
                 }
-                // Otherwise keep the note's full value and let it overrun the barline; the
-                // post-pass (fitOverfullMeasure) recuts the crossing note to a tied chain that
-                // ends exactly at the barline, for both Truncate and StretchLastNote. Collapsing
-                // to a single figure here would strand the sub-figure remainder as a rest.
+                // Otherwise keep the note's full value and let it overrun; fitOverfullMeasure
+                // recuts it into a tied chain (collapsing here would strand the remainder as a rest).
             }
         }
     }
     return true;
 }
 
-// Fix the note as "fixed" so layoutDrumset() cannot override its headGroup.
-// All non-normal noteheads must be fixed; otherwise a later note sharing the
-// same pitch will update the shared drumset entry and layout will overwrite
-// the earlier note's headGroup with the new entry value.
+// Mark the note fixed so layoutDrumset() cannot override its headGroup: a later note on the same
+// pitch updates the shared drumset entry, which would otherwise overwrite this note's headGroup.
 static void fixNoteHeadImmune(Note* note, const EncNote* en, Drumset* ds)
 {
     const int drumLine = (ds && ds->isValid(note->pitch()))
@@ -683,12 +663,10 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
             ds->drum(note->pitch()).notehead = nhg;
             note->setHeadGroup(nhg);
         }
-        // All non-normal noteheads must be fixed so layoutDrumset() cannot later
-        // override the headGroup when a different note shares the same pitch.
         if (nibble != 0) {
             fixNoteHeadImmune(note, en, ds);
         }
-        // nibble=9: "sin_cabeza" (no notehead), make note invisible.
+        // nibble 9 = sin_cabeza (no notehead): make the note invisible.
         if (nibble == 9) {
             note->setVisible(false);
         }
@@ -717,13 +695,11 @@ void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         return;
     }
 
-    // Skip MIDI tie-continuation artifacts (realDuration < 15) unless tie-start or chord extension.
-    // Use pre-computed isChordExt: after prevMidiTick update delta=0 and would falsely bypass.
+    // Pass pre-computed isChordExt: after the prevMidiTick update delta==0 would falsely bypass.
     if (isMidiArtifact(en, ec, mc, filteredTieSenderPitches, savedPrevMidiTick, isChordExt)) {
         return;
     }
 
-    // Cascade-filter: tie-receiver of a filtered artifact is also filtered.
     if (isCascadeFilteredTieReceiver(en, ec, filteredTieSenderPitches)) {
         return;
     }
@@ -731,7 +707,6 @@ void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
     TupletDecision dec;
     dec.actualN = en->actualNotes();
     dec.normalN = en->normalNotes();
-    // Use uniform-fill override ratio when present.
     {
         auto orit = mc.overrideGroupRatios.find(e);
         if (orit != mc.overrideGroupRatios.end()) {
@@ -766,21 +741,19 @@ void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         }
     }
 
-    // Insert at END to preserve ascending-tick order (default graceIndex=0 prepends, reversing the group).
     attachPendingGracesToChord(ctx, trackKey, chord, mc);
 
     const int concertPitch = en->semiTonePitch + ctx.staffPitchOffset[staffIdx];
     if (chord->findNote(concertPitch)) {
-        // Suppress duplicate pitch: Encore encodes the same pitch twice in some v0xC2 files (two NOTE elements, grace1=0) and for chord-extension copies (grace1 bit 0x40).
+        // Some files encode the same pitch twice (duplicate NOTE or chord-extension copy); drop it.
         return;
     }
     Note* note = Factory::createNote(chord);
     applyConcertPitch(note, concertPitch);
     chord->add(note);
 
-    // A small note reaching the normal note path is an Encore cue note (a full-value note drawn
-    // small): graces never reach here. Draw it small. The mute flag (grace2 0x01) is honored below
-    // for every note, so a cue muted in Encore is silent and an un-muted cue plays.
+    // A small note reaching this normal path is a cue note (full value, drawn small); graces never
+    // reach here. See ENCORE_IMPORTER.md §Grace and cue notes.
     if (en->isSmall()) {
         note->setSmall(true);
     }
@@ -790,16 +763,9 @@ void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
     }
 
     configureNoteHeadForDrumset(note, en);
-
-    // Fingerings 1..5 (0x0D..0x11) and open-string 0x46 are packed in the artic byte.
     applyFingeringsFromArtic(ec, note, en);
-
-    // Complete pending tie from same (staffIdx, voice, pitch).
     completePendingTie(ctx, ec, en, note);
-
     applyNoteArticulations(ctx, note, chord, en, track, mc);
-
-    // Register tie-start (TIE element or grace1 low==1 for chord members outside the ±3-tick window).
     registerTieStartIfApplicable(ctx, ec, mc, en, note);
 }
 } // namespace mu::iex::enc

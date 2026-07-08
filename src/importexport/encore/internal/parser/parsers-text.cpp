@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Read the file header (version/counts/score size) and the indexed TEXT block for staff text.
+
 #include "elem.h"
 #include "readers.h"
 
@@ -116,21 +118,14 @@ bool EncTextBlock::read(QDataStream& ds, quint32 varSize, int textOffset, bool h
             break;
         }
         consumed += entrySize;
-        // Payload text starts at a format-supplied offset. Formats with the rich-text run header
-        // store the text after a variable-length header: a uint16 run count, a flags word, a
-        // run-offset table (run count * uint32), then a 6-byte descriptor. The fixed textOffset
-        // (14) is only the single-run case (4 + 1*4 + 6); a multi-run comment pushes the text
-        // further, so derive the offset from the run count. See ENCORE_FORMAT.md §TEXT block.
+        // Payload text starts at a format-supplied offset; the rich-text run header pushes it
+        // further and its length must be derived, not fixed. See ENCORE_FORMAT.md §TEXT block.
         int effTextOffset = textOffset;
         if (hasRunHeader && entrySize >= 4) {
-            // The rich-text header carries two independent counts: a run-offset table count at +0
-            // (each table entry is a uint32) and a formatting-descriptor count at +2 (each
-            // descriptor is 6 bytes). The text starts after both: 4 + tableCount*4 + descCount*6.
-            // Older code treated +2 as a fixed flags word and assumed a single 6-byte descriptor;
-            // that matches only when the descriptor count is 1. Entries with two descriptors then
-            // read 6 bytes too early, landing inside a descriptor, and the encoding probe there
-            // sees a byte followed by 0x00 and decodes the Latin-1 text as byte-swapped UTF-16
-            // (CJK gibberish). Deriving both counts fixes such multi-descriptor staff texts.
+            // The header carries two independent counts: a run-offset table count at +0 (uint32
+            // entries) and a formatting-descriptor count at +2 (6-byte descriptors); text starts
+            // after both, at 4 + tableCount*4 + descCount*6. Assuming a single descriptor reads too
+            // early on multi-descriptor entries and misdecodes the text as byte-swapped UTF-16.
             const int tableCount = static_cast<quint8>(payload[0])
                                    | (static_cast<quint8>(payload[1]) << 8);
             const int descCount  = static_cast<quint8>(payload[2])
@@ -149,10 +144,8 @@ bool EncTextBlock::read(QDataStream& ds, quint32 varSize, int textOffset, bool h
             const quint8 b0 = static_cast<quint8>(payload[effTextOffset]);
             const quint8 b1 = static_cast<quint8>(payload[effTextOffset + 1]);
             const bool isUtf16 = (b0 >= 0x20 && b0 < 0x7F && b1 == 0x00);
-            // Decode the whole text region from effTextOffset, then post-process. Multi-line
-            // comments separate lines with U+0004 and terminate the string with a
-            // U+0000 null. The previous code stopped at the first U+0004, truncating
-            // every line but the first; see ENCORE_FORMAT.md §TEXT block.
+            // Decode the whole text region, then post-process: multi-line comments separate lines
+            // with U+0004 and terminate with a U+0000 null. See ENCORE_FORMAT.md §TEXT block.
             const int textBytes = entrySize - effTextOffset;
             if (textBytes > 0) {
                 if (isUtf16) {

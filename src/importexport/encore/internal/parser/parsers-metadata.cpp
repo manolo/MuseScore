@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Read the metadata blocks: TK instrument names, LINE per-staff layout/clef/key, and TITL text.
+
 #include "elem.h"
 
 #include <algorithm>
@@ -34,12 +36,9 @@ namespace mu::iex::enc {
 
 bool EncInstrument::read(QDataStream& ds, quint32 vs, bool probeEncoding)
 {
-    // The block-size field frames the container (magic + size + content) and is stored
-    // little-endian even in SCO5 files, whose stream is otherwise big-endian for the
-    // payload. Read big-endian, "70 00 00 00" (size 112) would decode to 0x70000000 and
-    // mask to 0, so the name-scan loop below never runs and every instrument name is lost
-    // except the first (which readInstrumentMeta later recovers by position). Undo the
-    // big-endian read so the low 16 bits hold the size in both byte orders.
+    // The block-size field is little-endian even in SCO5 files, whose payload is otherwise
+    // big-endian; undo the big-endian read so the low 16 bits hold the size in both byte orders.
+    // A big-endian read would mask to 0, skip the name-scan loop, and lose every instrument name.
     const quint32 sizeField = (ds.byteOrder() == QDataStream::BigEndian) ? qbswap(vs) : vs;
     offset = sizeField & 0xFFFF;
     // Encoding probe overrides charSize(); see ENCORE_FORMAT.md §Encoding probe.
@@ -58,9 +57,8 @@ bool EncInstrument::read(QDataStream& ds, quint32 vs, bool probeEncoding)
     int nread = 8;
     QChar ch;
     bool done = false;
-    // Bound the name scan by the block's declared content length (offset) and the stream
-    // status. Without this a file whose name field has no terminating NUL (and a non-EOF
-    // device) would spin forever; a truncated one would fabricate zeroed characters.
+    // Bound the name scan by the block's declared content length and stream status: without it an
+    // unterminated name field would spin forever and a truncated one would fabricate zeroed chars.
     const int nameLimit = static_cast<int>(offset);
     while (!done && nread < nameLimit && ds.status() == QDataStream::Ok) {
         if (cs == EncCharSize::ONE_BYTE) {
@@ -92,10 +90,9 @@ bool EncInstrument::read(QDataStream& ds, quint32 vs, bool probeEncoding)
 
 bool EncLineStaffData::read(QDataStream& ds)
 {
-    // Bytes 0-12: visual layout data (Y-coordinates for staff lines, etc.)
-    // Byte 13: staff display size, 0-indexed (0=60%, 1=70%, 2=75%, 3=100%).
-    ds.skipRawData(13);
-    ds >> staffSizeHint;
+    // 30-byte staff entry; byte offsets and field meanings in ENCORE_FORMAT.md §LINE staff entry (30 bytes).
+    ds.skipRawData(13);                         // bytes 0-12: visual layout
+    ds >> staffSizeHint;                        // byte 13: display size (0=60% .. 3=100%)
     qint8 ct;
     ds >> ct;                                   // byte 14: clef type
     clef = static_cast<EncClefType>(ct);
@@ -106,7 +103,7 @@ bool EncLineStaffData::read(QDataStream& ds)
     (void)skip0;
     (void)skip1;
     quint8 st;
-    ds >> st;                                   // byte 20: staff type (MELODY/TAB/RHYTHM)
+    ds >> st;                                   // byte 20: staff type
     staffType = static_cast<EncStaffType>(st);
     ds >> instrStaffIdx;                        // byte 21
     ds.skipRawData(8);                          // bytes 22-29
@@ -149,9 +146,8 @@ bool EncLine::read(QDataStream& ds, quint32 vs, int staffPerSystem)
 // Title block
 // ---------------------------------------------------------------------------
 
-// Read 30-byte prefix + text payload of one TITL line.
-// Alignment at prefix+14: 0x02=right, 0x04=left, 0x06=center; 0x00=LEFT.
-// Fixed text-field width of one TITL line: 66 bytes in Latin-1, 1026 bytes in UTF-16 LE.
+// Read 30-byte prefix + text payload of one TITL line; layout in ENCORE_FORMAT.md §TITL block.
+// Alignment lives at prefix+14; the text field is a fixed width per encoding.
 static constexpr int kTitlTextBytesOneByte = 66;
 static constexpr int kTitlTextBytesTwoByte = 1026;
 
@@ -223,11 +219,9 @@ QString readTextItem(QDataStream& ds, EncCharSize cs, qint64 blockEnd)
 
 bool EncTitle::read(QDataStream& ds, quint32 vs, EncCharSize cs)
 {
-    // Detect encoding from varsize alone (not from TK-derived cs):
-    //   ONE_BYTE  layout: 2 + 20×96   + 504 =  2 426
-    //   TWO_BYTES layout: 2 + 20×1056 + 120 = 21 242
-    // Values differ by 10×, so varsize resolves unambiguously.
-    // Encore 5.0.2 can write UTF-16 in TITL even when TK offset ≤ 250.
+    // Detect encoding from varsize alone, not from TK-derived cs: the ONE_BYTE and TWO_BYTES
+    // block layouts differ by ~10x, so varsize resolves it unambiguously. Needed because Encore
+    // 5.0.2 can write UTF-16 in TITL even when the TK offset says one-byte.
     if (vs >= 10000) {
         cs = EncCharSize::TWO_BYTES;
     } else if (vs > 0 && vs < 5000) {

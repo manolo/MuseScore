@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// EncMeasure: one parsed measure (time signature, tempo, barlines, repeats) and its
+// element list, with the API to read it and resolve real note durations.
+
 #pragma once
 
 #include <QString>
@@ -60,7 +63,7 @@ struct EncMeasure {
 
     bool read(QDataStream& ds, const quint32 vs, const struct EncFormatReader& fmt);
     void calculateRealDurations(bool hasGraceTimeBorrowing, const struct EncFormatReader& fmt);
-    // Snap a note with a stale MIDI tick back to its xoffset column's tick (see impl).
+    // Snap a note whose MIDI tick drifted back to the tick of its xoffset column.
     void reconcileStaleNoteTicksByColumn();
 };
 

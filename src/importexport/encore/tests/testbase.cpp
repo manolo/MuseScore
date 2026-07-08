@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// MTest fixture implementation: import an .enc file into a MasterScore, save it, and diff against expected output.
+
 #include "testbase.h"
 
 #include <QProcess>

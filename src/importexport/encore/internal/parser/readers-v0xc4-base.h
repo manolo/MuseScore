@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Base reader shared by v0xC2 and v0xC4: element block offset and instrument metadata reads.
+
 #pragma once
 
 #include "readers.h"

@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Top-level document structs: EncRoot and its parts (instruments, system lines, title,
+// header, text, page/print setup) plus the free functions that parse and stitch them.
+
 #pragma once
 
 #include <memory>
@@ -159,7 +162,7 @@ struct EncHeader {
 };
 
 // ---------------------------------------------------------------------------
-// EncRoot - top-level container
+// EncRoot: top-level container
 // ---------------------------------------------------------------------------
 
 bool isInstrumentMagic(const QString& magic);

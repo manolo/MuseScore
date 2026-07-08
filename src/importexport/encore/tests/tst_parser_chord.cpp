@@ -20,9 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Unit tests for EncChordSym::chordName().
-// These tests exercise the numeric chord decoding logic in isolation
-// (no score, no .enc file loading) by constructing EncChordSym directly.
+// Unit tests for the numeric chord decoding in EncChordSym::chordName() and EncMidiCc::read(),
+// exercised in isolation by building the parser structs directly. See ENCORE_FORMAT.md §CHORD symbol element.
 
 #include <gtest/gtest.h>
 
@@ -53,13 +52,10 @@ static EncChordSym makeText(const QString& teksto)
     return cs;
 }
 
-// ---------------------------------------------------------------------------
-// Root note encoding (radiko lower nibble = note name 0-6, upper nibble = acc)
-// ---------------------------------------------------------------------------
+// Root note encoding (radiko).
 
 TEST(Tst_EncChordSym, all_natural_roots)
 {
-    // Lower nibble 0-6 maps to C D E F G A B with no accidental (upper nibble 0).
     EXPECT_EQ(makeNumeric(0, 0x00).chordName(), "C");
     EXPECT_EQ(makeNumeric(0, 0x01).chordName(), "D");
     EXPECT_EQ(makeNumeric(0, 0x02).chordName(), "E");
@@ -71,7 +67,6 @@ TEST(Tst_EncChordSym, all_natural_roots)
 
 TEST(Tst_EncChordSym, sharp_roots)
 {
-    // Upper nibble 0x10 = sharp (#).
     EXPECT_EQ(makeNumeric(0, 0x10).chordName(), "C#");
     EXPECT_EQ(makeNumeric(0, 0x14).chordName(), "G#");
     EXPECT_EQ(makeNumeric(0, 0x15).chordName(), "A#");
@@ -79,7 +74,6 @@ TEST(Tst_EncChordSym, sharp_roots)
 
 TEST(Tst_EncChordSym, flat_roots)
 {
-    // Upper nibble 0x20 = flat (b).
     EXPECT_EQ(makeNumeric(0, 0x21).chordName(), "Db");
     EXPECT_EQ(makeNumeric(0, 0x22).chordName(), "Eb");
     EXPECT_EQ(makeNumeric(0, 0x26).chordName(), "Bb");
@@ -87,15 +81,12 @@ TEST(Tst_EncChordSym, flat_roots)
 
 TEST(Tst_EncChordSym, invalid_root_returns_empty)
 {
-    // Lower nibble > 6 has no note name; chordName() must return empty.
     EXPECT_TRUE(makeNumeric(0, 0x07).chordName().isEmpty()) << "radiko=7 has no note name";
     EXPECT_TRUE(makeNumeric(0, 0x0F).chordName().isEmpty()) << "radiko=0x0F has no note name";
     EXPECT_TRUE(makeNumeric(0, 0x17).chordName().isEmpty()) << "sharp + invalid nibble";
 }
 
-// ---------------------------------------------------------------------------
-// Chord quality (toniko index into kChordQuality[])
-// ---------------------------------------------------------------------------
+// Chord quality (toniko index into kChordQuality[]).
 
 TEST(Tst_EncChordSym, major_no_suffix)
 {
@@ -127,7 +118,6 @@ TEST(Tst_EncChordSym, diminished7_index4)
 
 TEST(Tst_EncChordSym, dominant7_index24)
 {
-    // Dominant 7 lives at toniko=24.
     EXPECT_EQ(makeNumeric(24, 0x03).chordName(), "F7");
 }
 
@@ -174,34 +164,28 @@ TEST(Tst_EncChordSym, out_of_range_toniko_treated_as_major)
     EXPECT_EQ(makeNumeric(64, 0x00).chordName(), "C");
 }
 
-// ---------------------------------------------------------------------------
-// Bass note (tipo bit 1 = bass present, baso same encoding as radiko)
-// ---------------------------------------------------------------------------
+// Bass note (tipo bit 1 = bass present, baso same encoding as radiko).
 
 TEST(Tst_EncChordSym, slash_chord_with_bass)
 {
-    // tipo=2 (bit 1): bass note present. C major over G.
     EncChordSym cs = makeNumeric(0, 0x00, 0x04, 0x02);
     EXPECT_EQ(cs.chordName(), "C/G");
 }
 
 TEST(Tst_EncChordSym, slash_chord_minor_with_flat_bass)
 {
-    // Am over E.
     EncChordSym cs = makeNumeric(1, 0x05, 0x02, 0x02);
     EXPECT_EQ(cs.chordName(), "Am/E");
 }
 
 TEST(Tst_EncChordSym, bass_ignored_when_tipo_bit1_clear)
 {
-    // baso is set but tipo bit 1 is 0: bass must not appear.
+    // baso is set but tipo bit 1 is clear: bass must not appear.
     EncChordSym cs = makeNumeric(0, 0x00, 0x04, 0x00);
     EXPECT_EQ(cs.chordName(), "C");
 }
 
-// ---------------------------------------------------------------------------
-// Text mode: tipo bit 0 set -> teksto is returned verbatim
-// ---------------------------------------------------------------------------
+// Text mode (tipo bit 0 set): teksto is returned verbatim.
 
 TEST(Tst_EncChordSym, text_mode_returns_teksto)
 {
@@ -229,11 +213,9 @@ TEST(Tst_EncChordSym, empty_teksto_falls_through_to_numeric)
     EXPECT_EQ(cs.chordName(), "Am");
 }
 
-// ---------------------------------------------------------------------------
-// EncMidiCc: inline MIDI Control Change events (EncElemType::MIDI_CC, type 0xB).
-// read() is entered at d[3] (the caller has already consumed tick + typeVoice),
-// so the buffer below starts at the size byte. See ENCORE_FORMAT.md §MIDI control change (type 11).
-// ---------------------------------------------------------------------------
+// EncMidiCc inline MIDI Control Change events. read() is entered at d[3] (caller already consumed
+// tick + typeVoice), so the hand-built buffer starts at the size byte.
+// See ENCORE_FORMAT.md §MIDI control change (type 11).
 TEST(Tst_EncMidiCc, decodes_controller_and_value)
 {
     QByteArray bytes;
@@ -250,8 +232,8 @@ TEST(Tst_EncMidiCc, decodes_controller_and_value)
     cc.read(ds);
 
     EXPECT_EQ(cc.size, 12);
-    EXPECT_EQ(cc.controller, 64);   // sustain
-    EXPECT_EQ(cc.value, 127);       // on
+    EXPECT_EQ(cc.controller, 64);
+    EXPECT_EQ(cc.value, 127);
 }
 
 TEST(Tst_EncMidiCc, short_element_leaves_controller_value_zero)

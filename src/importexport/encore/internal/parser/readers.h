@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// EncFormatReader interface plus shared block-skip and duration-resolution helpers used by all format readers.
+
 #ifndef MU_IMPORTEXPORT_ENC_PARSER_READER_H
 #define MU_IMPORTEXPORT_ENC_PARSER_READER_H
 
@@ -37,23 +39,16 @@ struct EncInstrument;
 struct EncRoot;
 struct EncLine;
 
-// Skip a file-supplied block size, clamped to the bytes actually remaining on the device.
-// The size comes from an untrusted file: a value larger than INT_MAX would wrap negative when
-// passed to QDataStream::skipRawData(int) (silently skipping nothing and desyncing the stream),
-// and any value past EOF must not seek beyond the device. Returns false when the requested size
-// is negative or exceeds what remains, so the caller can stop reading further blocks.
+// Skip an untrusted file-supplied block size. Returns false (so the caller stops) when the size is
+// negative or past EOF; chunks the skip because skipRawData takes int and a >INT_MAX size wraps.
 bool skipBlock(QDataStream& ds, qint64 size);
 
-// Skip from the current cursor to the end of a block whose start position and declared length
-// are both known. blockStartPos is the device position of the block's first payload byte and
-// declaredLen its untrusted varSize; this advances to (blockStartPos + declaredLen), clamped to
-// the device. Returns false when the cursor is already at/past the computed end (nothing to skip)
-// or the end lies past EOF, mirroring skipBlock so callers can stop reading further blocks.
+// Skip from the cursor to (blockStartPos + declaredLen), where declaredLen is an untrusted varSize.
+// Returns false when the cursor is already at/past that end or the end lies past EOF.
 bool skipToBlockEnd(QDataStream& ds, qint64 blockStartPos, qint64 declaredLen);
 
-// The device position just past a MEAS block's element stream: measStart + varsize + elemBlockOffset,
-// clamped to the device size so an untrusted/oversized varsize can never push the element loop past
-// EOF. Pure so it can be unit-tested with synthetic sizes.
+// Device position just past a MEAS element stream, clamped to deviceSize so an oversized varsize
+// cannot push the element loop past EOF. Pure so it can be unit-tested with synthetic sizes.
 qint64 clampMeasureEnd(qint64 measStart, quint32 varsize, qint64 elemBlockOffset, qint64 deviceSize);
 
 // Phase 1 of duration resolution: set each element's realDuration from the gap to the next event

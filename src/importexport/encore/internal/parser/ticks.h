@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Tick model for the Encore parser: face value to ticks and implied-tuplet detection, engraving-free.
+
 #ifndef MU_IMPORTEXPORT_ENC_PARSER_TICKS_H
 #define MU_IMPORTEXPORT_ENC_PARSER_TICKS_H
 

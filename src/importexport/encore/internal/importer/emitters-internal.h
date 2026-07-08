@@ -20,6 +20,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Internal interface shared across the emitters-*.cpp files: the per-measure and per-element
+// context structs, element handlers (note/rest/ornament/chord symbol), staff/voice routing,
+// measure gap-fill and overfull-fit helpers, lyrics and tempo emission.
+
 #ifndef MU_IEX_ENCORE_NOTELOOP_INTERNAL_H
 #define MU_IEX_ENCORE_NOTELOOP_INTERNAL_H
 

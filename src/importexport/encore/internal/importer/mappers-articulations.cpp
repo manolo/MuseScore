@@ -60,8 +60,7 @@ std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
     case 0x20:
     case 0x21: return { SymId::fermataAbove };
     // Combined-articulation bytes come in (below, above) pairs, one pair per glyph.
-    // Verified in Encore 5 against "Accidentals Marks and others" m11-m16. Placement
-    // is taken from the note articulation slot; subtype() normalises Below->Above.
+    // Placement is taken from the note articulation slot; subtype() normalises Below->Above.
     case 0x22:                                                // tenuto + accent (below)
     case 0x23: return { SymId::articTenutoAccentAbove };      // tenuto + accent (above)
     case 0x24:                                                // tenuto + staccato (portato, below)

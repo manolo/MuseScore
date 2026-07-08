@@ -36,12 +36,9 @@
 #include "engraving/dom/tempotext.h"
 
 namespace mu::iex::enc {
-// Decode the tempo mark's beat unit from the ORN `noto` field. The low 7 bits hold a
-// 0-indexed note value (0=whole, 1=half, 2=quarter, 3=eighth, ...) and the high bit
-// (0x80) marks a dotted unit; e.g. 0x82 is a dotted quarter, 0x02 a plain quarter.
-// Returns the beat duration in display ticks (quarter=240), or 0 when `noto` is unset
-// or unrecognised (older formats store unrelated bytes here) so the caller can fall
-// back to the meter heuristic.
+// Decode the tempo mark's beat unit from the ORN `noto` field into display ticks (quarter=240).
+// Returns 0 when `noto` is unset or unrecognised (older formats store unrelated bytes here) so
+// the caller can fall back to the meter heuristic. See ENCORE_FORMAT.md §Ornament element.
 int notoToBeatTicks(quint8 noto)
 {
     if (noto == 0) {
@@ -137,12 +134,10 @@ void applyMeasureBpmMarks(BuildCtx& ctx)
             }
         }
         if (!hasExisting) {
-            // The header BPM is always a quarter-note BPM. Choose the DISPLAY beat unit:
-            // prefer the explicit unit stored on this measure's ORN tempo mark (`noto`),
-            // so a quarter=198 mark in a 6/8 stays "quarter=198" instead of being rewritten
-            // as the compound default "dotted-quarter=132". When no ORN unit is present, fall
-            // back to the meter heuristic (compound meters display in dotted quarters; old
-            // fixtures store beatTicks=240 even for 6/8, so keep the timesig fallback too).
+            // The header BPM is a quarter-note BPM. Choose the display beat unit: prefer the
+            // explicit unit on this measure's ORN tempo mark (`noto`) so a quarter=198 mark in 6/8
+            // stays "quarter=198" rather than the compound default "dotted-quarter=132"; otherwise
+            // fall back to the meter heuristic (compound meters display in dotted quarters).
             int displayBeatTicks = 0;
             for (const auto& el : enc.measures[mi].elements) {
                 const EncOrnament* orn = dynamic_cast<const EncOrnament*>(el.get());

@@ -37,19 +37,14 @@
 #include "engraving/dom/tuplet.h"
 
 namespace mu::iex::enc {
-// Resize `measure` to `newLen` and propagate the change. Shrinking or extending a measure
-// moves the absolute tick of everything that follows it, so the following measures shift by
-// the signed delta and so does every pending element that caches an absolute tick. Only
-// pending hairpins used to be shifted; pending slurs, ornaments, markers and the rest carry
-// absolute ticks too and were silently corrupted by a measure resize. Forward ticks at or
-// after the measure's content boundary shift; ticks inside the kept content never move.
+// Resize `measure` to `newLen` and shift every following measure and every pending element that
+// caches an absolute tick (all carry absolute ticks and would otherwise be corrupted by the resize).
+// Forward ticks at or after the measure's content boundary shift; ticks inside the kept content never
+// move.
 static void resizeMeasureAndShift(BuildCtx& ctx, Measure* measure, Fraction newLen)
 {
-    // Store the actual measure duration in lowest terms. Summing triplet content (1/24, 1/12, ...)
-    // leaves the raw fraction unreduced (e.g. 99/96 or 21/24), which is the same duration but a
-    // disproportionate-looking time signature; reduce it to its canonical form (33/32, 7/8) so an
-    // irregular measure reads as a sensible value. reduced() does not change the duration, only its
-    // numerator/denominator, so the shift arithmetic below is unaffected.
+    // Reduce to lowest terms so an irregular measure reads as a sensible time signature (99/96 -> 33/32);
+    // reduced() does not change the duration, so the shift arithmetic below is unaffected.
     newLen = newLen.reduced();
     const Fraction oldLen = measure->ticks();
     const Fraction delta = newLen - oldLen;
@@ -57,10 +52,9 @@ static void resizeMeasureAndShift(BuildCtx& ctx, Measure* measure, Fraction newL
         return;
     }
     const Fraction measTick = measure->tick();
-    // Content boundary: positions before it are inside the kept part of the measure and never
-    // move; positions at/after it belong to following measures and shift by delta. Shrinking
-    // removes the [newEnd, oldEnd) span, so a tick exactly at the new end stays put (strict >);
-    // extending inserts space at the old end, so a tick there is the next downbeat and moves (>=).
+    // Shrinking removes the [newEnd, oldEnd) span, so a tick exactly at the new end stays put
+    // (strict >); extending inserts space at the old end, so a tick there is the next downbeat
+    // and moves (>=).
     const bool shrinking = delta < Fraction(0, 1);
     const Fraction boundary = measTick + std::min(oldLen, newLen);
 
@@ -125,11 +119,9 @@ static void resizeMeasureAndShift(BuildCtx& ctx, Measure* measure, Fraction newL
 }
 
 // Fill a gap of length `len` at absolute tick `fillTick` in `track` with rests of exact rhythmic
-// value, split per the measure's time signature (as Measure::fillGap does), instead of one
-// whole-measure rest. A V_MEASURE-typed rest renders as a centered whole rest whatever its actual
-// duration, which is wrong for a partial gap; a rhythmic split shows the correct values (and is
-// what a visible filler should look like). `makeGap` marks the rests as invisible gap rests.
-// No-op if the first segment is already occupied.
+// value, split per the measure's time signature, instead of one whole-measure rest (a V_MEASURE
+// rest renders as a centered whole rest regardless of its actual duration, wrong for a partial
+// gap). `makeGap` marks the rests invisible. No-op if the first segment is already occupied.
 static void addGapRests(Measure* measure, const Fraction& fillTick, const Fraction& len,
                         track_idx_t track, bool makeGap)
 {
@@ -153,9 +145,8 @@ static void addGapRests(Measure* measure, const Fraction& fillTick, const Fracti
     }
 }
 
-// Case B pickup adjustment: if measure 0 has the same timesig as measure 1 but
-// the note loop placed less content than the full measure, shorten it to the
-// actual cumTick. Update all subsequent measures' tick positions accordingly.
+// Pickup adjustment: if measure 0 has the same timesig as the full nominal length but the note
+// loop placed less content, shorten it to the actual cumTick (and shift following measures).
 void adjustPickupMeasure(BuildCtx& ctx, Measure* measure, int measIdx)
 {
     if (!ctx.opts.firstMeasureIsPickup) {
@@ -211,12 +202,9 @@ void fillTrailingGaps(BuildCtx& ctx, Measure* measure, Fraction measTick)
     }
 
     if (irregular) {
-        // Shrink the measure to the longest staff's content, but ONLY when every staff is
-        // genuinely short. A staff with no content is a whole-bar rest = the full nominal
-        // length, so it is the longest staff and the bar is not short: leave the measure at
-        // its nominal length (the short staves are filled to it by checkMeasure). Measuring
-        // only the note-bearing staves used to shrink such bars and shift every following
-        // measure, corrupting them.
+        // Shrink to the longest staff's content, but ONLY when every staff is genuinely short.
+        // A staff with no content is a whole-bar rest = the full nominal length, so the bar is
+        // not short and must stay nominal (short staves are filled to it by checkMeasure).
         Fraction maxPos { 0, 1 };
         bool anyStaffSilent = false;
         for (int si = 0; si < ctx.totalStaves && !anyStaffSilent; ++si) {
@@ -239,12 +227,12 @@ void fillTrailingGaps(BuildCtx& ctx, Measure* measure, Fraction measTick)
     }
 }
 
-// Maximum measure-length correction: 1/24 of a whole note (≈ one 32nd-note triplet).
+// Maximum measure-length correction: 1/24 of a whole note (about one 32nd-note triplet).
 // Corrections larger than this indicate genuine notation errors, not rounding noise.
 static const Fraction kFillMaxDelta(1, 24);
 
-// Fix over/undershoots up to kFillMaxDelta from non-standard gaps (cascade fills).
-// Overshoot: remove smallest gap rests. Undershoot: add V_MEASURE gap rest.
+// Fix over/undershoots up to kFillMaxDelta: overshoot removes smallest gap rests, undershoot
+// adds exact-valued gap rests.
 void correctMeasureLength(BuildCtx& ctx, Measure* measure)
 {
     const bool makeGap = (ctx.opts.underfillMeasureStrategy != UnderfillStrategy::VisibleRests);
@@ -378,11 +366,10 @@ void capMeasureLength(BuildCtx& ctx, Measure* measure)
 
 void handleDanglingGraces(BuildCtx& ctx)
 {
-    // Grace chords that never found a principal chord (e.g. a percussion ruff in the final bar, with
-    // no following downbeat to ornament). Rather than dropping them, re-place them as small AUDIBLE
-    // cue notes ("con ejecucion") in the spare cue voice of their own bar, flush to the barline, so
-    // the figure and its timing survive. Their written figures are placed consecutively; the rest of
-    // the cue voice is filled with invisible gap rests.
+    // Grace chords that never found a principal chord (no following downbeat to ornament). Rather
+    // than dropping them, re-place them as small audible cue notes in the spare cue voice of their
+    // own bar, flush to the barline, so the figure and its timing survive. The rest of the cue
+    // voice is filled with invisible gap rests.
     for (auto& [key, vec] : ctx.scratch.pendingGraces) {
         const int staffIdx = key.first;
         const track_idx_t track = static_cast<track_idx_t>(staffIdx * static_cast<int>(VOICES) + kCueVoice);
@@ -423,7 +410,7 @@ void handleDanglingGraces(BuildCtx& ctx)
                     n->setTpc1(sn->tpc1());
                     n->setTpc2(sn->tpc2());
                     n->setSmall(true);
-                    n->setPlay(!g->en->isMuted());   // honor the Encore mute flag
+                    n->setPlay(!g->en->isMuted());
                     c->add(n);
                 }
                 seg->add(c);

@@ -20,7 +20,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Rendering decisions derived from raw Encore ticks (see durations.h).
+// Resolve Encore face value and MIDI ticks into MuseScore duration types, dot counts and tuplet ratios.
 
 #include "durations.h"
 
@@ -54,7 +54,6 @@ static bool inflatedDottedPromotion(qint16 realDur, quint8 fv)
     return faceTicks > 0 && realDur > faceTicks && calcDots(realDur, fv) == 0;
 }
 
-// Maps the actual MIDI duration to the best MuseScore DurationType.
 DurationType realDuration2DurationType(qint16 realDur, quint8 fv)
 {
     if (realDur <= 0) {
@@ -65,9 +64,8 @@ DurationType realDuration2DurationType(qint16 realDur, quint8 fv)
     if (faceTicks > 0 && realDur < faceTicks) {
         return faceValue2DurationType(fv);
     }
-    // When rdur exceeds faceTicks but is NOT a dotted augmentation of faceValue, the excess is a
-    // trailing gap to the next event (rest or next note held at its original position after a
-    // duration change). Trust the written face value. calcDots == 0 identifies this case.
+    // rdur above faceTicks but not a dotted augmentation is a trailing gap to the next event;
+    // trust the written face value.
     if (inflatedDottedPromotion(realDur, fv)) {
         return faceValue2DurationType(fv);
     }
@@ -96,10 +94,8 @@ int calcDots(qint16 realDur, quint8 fv)
     if (base <= 0 || realDur <= 0 || realDur == base) {
         return 0;
     }
-    // Guard: skip if the dotted value is non-integer (base not divisible by
-    // the denominator).  Integer division would truncate e.g. 112.5 → 112,
-    // creating a false match for a note whose rdur happens to equal that
-    // truncated value (seen with 16th notes where 60*15/8=112 ≠ 112.5).
+    // Only match when the dotted value is integral: truncated division (e.g. 112.5 to 112) would
+    // falsely match a note whose rdur equals the truncated value, so the divisibility check gates it.
     if ((base * 3) % 2 == 0 && realDur == (base * 3) / 2) {
         return 1;
     }
@@ -161,14 +157,8 @@ int computeDotCount(quint8 dotControl, qint16 realDuration, quint8 faceValue, bo
             return dBySnap;
         }
         if (useBit0Fallback && (dotControl & 1)) {
-            // Guard: only force a dot when rdur > faceTicks.
-            // A dotted note has a longer MIDI duration than the plain face value, so
-            // rdur must exceed faceTicks for the bit-0 flag to be a plausible dotted
-            // indicator.  When rdur <= faceTicks the note is plain (exact match) or
-            // shorter than the face value (multi-stream overlap / timing slop); bit 0
-            // in dotControl may then be a spurious layout flag rather than a dotted
-            // indicator (observed in v0xC2 files such as tapada.enc).
-            // The dotted-eighth anomaly in v0xC2 is handled via EncNote::forceDotted.
+            // A dotted note lasts longer than its face value, so only force a dot when rdur >
+            // faceTicks; otherwise the bit-0 flag is a spurious layout bit, not a dot indicator.
             const int faceTicks = faceValue2ticks(faceValue);
             if (faceTicks > 0 && realDuration > faceTicks) {
                 return 1;
@@ -184,15 +174,12 @@ bool isStandardExplicitTuplet(int actualN, int normalN)
     if (actualN < 2 || normalN < 1) {
         return false;
     }
-    // normalN must yield a TDuration-aligned fraction (normalN x baseLen). normalN=5,10,15,20 give
-    // 5/(2^k), not representable; 10/15/20 are rejected outright (the few valid 5:x and 9:5 ratios
-    // are whitelisted below), while 7 is safe (double-dotted).
+    // normalN of 10/15/20 gives a fraction not representable as a TDuration; reject them.
     if (normalN == 10 || normalN == 15 || normalN == 20) {
         return false;
     }
-    // Whitelisted ratios whose normalN is NOT in {4,6,8} (those are covered by the blanket rule
-    // below). With normalN in {1,2,3,5,7} only these specific pairs are TDuration-aligned:
-    //   3:2, 4:3 (common); 2:1/2:3 (duplets); 5:2/5:3; 6:7; 9:5; 4:1/4:2 (observed).
+    // TDuration-aligned ratios whose normalN is in {1,2,3,5,7} (normalN in {4,6,8} is handled by
+    // the blanket rule below).
     static const std::pair<int, int> kStandardRatios[] = {
         { 3, 2 }, { 4, 3 }, { 2, 1 }, { 2, 3 }, { 5, 2 }, { 5, 3 }, { 6, 7 }, { 9, 5 }, { 4, 1 }, { 4, 2 },
     };
@@ -201,9 +188,7 @@ bool isStandardExplicitTuplet(int actualN, int normalN)
             return true;
         }
     }
-    // Blanket rule: normalN in {4,6,8} always yields a standard TDuration for 2..64-tuplets. This
-    // does NOT subsume the whitelist above, which uses normalN in {1,2,3,5,7}. Covers e.g. 5:4/6:4,
-    // 2:4, 5:6/5:8, 6:8, 7:4/7:6/7:8, 8:4/8:6, 9:4/9:6/9:8, 10:6/10:8.
+    // normalN in {4,6,8} always yields a standard TDuration for 2..64-tuplets.
     if ((normalN == 4 || normalN == 6 || normalN == 8)
         && actualN >= 2 && actualN <= 64) {
         return true;

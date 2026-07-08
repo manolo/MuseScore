@@ -35,7 +35,7 @@
 using namespace mu::engraving;
 
 namespace mu::iex::enc {
-// Returns adjusted endTick via xoffset2 snap; returns currentEndTick unchanged if no snap applies.
+// Snap the hairpin end to the note/rest nearest xoffset2, else return currentEndTick unchanged.
 // targetMeasTick is the MuseScore start tick of enc measure ph.endMeasIdx.
 static Fraction resolveHairpinEndByXoffset(
     const PendingHairpin& ph,
@@ -92,10 +92,9 @@ void resolveHairpins(BuildCtx& ctx)
     MasterScore* score = ctx.score;
     const EncRoot& enc = ctx.enc;
 
-    // Pre-pass: detect same-measure CRESC+DIM swell pairs on the same track.
-    // For each pair, split the measure at its midpoint so both hairpins cover
-    // equal halves, xoffset2 pixel coordinates do not map linearly to ticks when
-    // the measure has empty beats, so a midpoint split better matches Encore's visual.
+    // Pre-pass: detect same-measure CRESC+DIM swell pairs on the same track and split the measure
+    // at its midpoint so each hairpin covers a half. xoffset2 pixels do not map linearly to ticks
+    // when the measure has empty beats, so a midpoint split better matches Encore's visual.
     const size_t n = ctx.pendingHairpins.size();
     std::vector<Fraction> startOverride(n, Fraction(-1, 1)); // -1 = no override
     std::vector<Fraction> endOverride(n, Fraction(-1, 1));
@@ -119,7 +118,7 @@ void resolveHairpins(BuildCtx& ctx)
             }
             const Measure* m2 = score->tick2measure(ph2.startTick);
             if (m2 != m1) {
-                continue;  // different measures → not a same-measure swell pair
+                continue;  // different measures: not a same-measure swell pair
             }
             // Both CRESC and DIM start in the same measure: split at midpoint.
             const Fraction midTick = m1->tick() + m1->ticks() / 2;

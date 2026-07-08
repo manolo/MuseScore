@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Factory for the Encore 3.x/4.x (v0xC2) format reader; the class itself lives in readers-v0xc2.cpp.
+
 #pragma once
 
 #include <memory>

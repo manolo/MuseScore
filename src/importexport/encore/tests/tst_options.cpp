@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// EncImportOptions behavior: page layout/breaks, tempo semantics, under/overfill strategies, staff size, voice merging.
+
 #include <gtest/gtest.h>
 
 #include "engraving/compat/scoreaccess.h"
@@ -77,7 +79,7 @@ TEST_F(Tst_Options, importPageLayout_false_keeps_ms_default_top_margin)
 
 TEST_F(Tst_Options, importPageLayout_true_overrides_default_top_margin)
 {
-    // bazo_top_100 encodes top margin = 100 pt; this must differ from any reasonable default.
+    // bazo_top_100 encodes a top margin of 100 pt, which must differ from any reasonable default.
     MasterScore* ref = compat::ScoreAccess::createMasterScoreWithBaseStyle(nullptr);
     const double defaultTop = ref->style().styleD(Sid::pageOddTopMargin);
     delete ref;
@@ -204,7 +206,6 @@ TEST_F(Tst_Options, importTempoTextSemantic_true_promotes_italian_term_to_tempot
 // VisibleRests: no gap rests should be present.
 TEST_F(Tst_Options, underfill_default_creates_gap_rests)
 {
-    // structure_pickup_casea_sparse has sparse voices, producing gap rests by default.
     MasterScore* score = readEncoreScore("structure_pickup_casea_sparse.enc");
     ASSERT_NE(score, nullptr);
 
@@ -316,11 +317,9 @@ TEST_F(Tst_Options, firstMeasure_not_pickup_keeps_full_nominal_duration)
     delete score;
 }
 
-// Regression: when firstMeasureIsPickup=false and underfillMeasureStrategy=IrregularMeasure,
-// buildMeasures advanced currentTick by ts.ticks() (the explicit pickup duration) while
-// setting measure->ticks(nominalTimeSig).  The mismatch made IrregularMeasure shift all
-// subsequent measures by the wrong delta, placing volta brackets mid-measure instead of at
-// barlines.  File: Case A pickup (ts[0]=2/4, nominal=4/4), volta on MEAS[2] and MEAS[3].
+// Regression: firstMeasureIsPickup=false + IrregularMeasure once advanced the tick by the pickup duration while
+// setting the nominal time signature, shifting every later measure and placing volta brackets mid-measure.
+// Fixture: Case A pickup (ts[0]=2/4, nominal=4/4) with voltas on MEAS[2] and MEAS[3].
 static Volta* findVolta(MasterScore* score, const String& label)
 {
     for (auto& kv : score->spanner()) {
@@ -534,11 +533,8 @@ TEST_F(Tst_Options, underfill_irregular_measure_passes_sanity_check)
     delete score;
 }
 
-// A bar where only one staff has (sparse) notes and another staff is silent must NOT be
-// shrunk by IrregularMeasure: the silent staff is a whole-bar rest, so the longest staff is
-// the full bar. The bug measured only the note-bearing staff, shrank the whole bar, shifted
-// every following measure and corrupted them. Guards both the no-shrink decision and that the
-// following full bars survive intact.
+// A bar where one staff has sparse notes and another is silent must not be shrunk by IrregularMeasure: the silent
+// staff is a whole-bar rest, so the longest staff is the full bar. Guards the no-shrink decision and that later bars survive.
 TEST_F(Tst_Options, underfill_irregular_does_not_shrink_bar_with_silent_staff)
 {
     EncImportOptions opts;
@@ -599,11 +595,8 @@ TEST_F(Tst_Options, overfill_stretch_last_note_does_not_crash)
 
 TEST_F(Tst_Options, stretch_compresses_tuplet_keeps_all_notes)
 {
-    // notes_capped_tuplet_note.enc: 4/4 with 3 plain quarters + a 3:2 quarter triplet
-    // that overflows. "Stretch last notes" preserves ALL three triplet notes by
-    // compressing the tuplet bracket from a half (480) down to a quarter (240): the
-    // members become eighths in a 3:2 group filling the last beat. The tuplet stays
-    // intact (3 members) and the measure remains a standard 4/4.
+    // 4/4 with 3 quarters + an overflowing 3:2 quarter triplet. StretchLastNote compresses the tuplet bracket from a
+    // half to a quarter (members become 3:2 eighths in the last beat), keeping all 3 members in a standard 4/4 bar.
     EncImportOptions opts;
     opts.overfillMeasureStrategy = OverfillStrategy::StretchLastNote;
     MasterScore* score = readEncoreScoreWithOpts("notes_capped_tuplet_note.enc", opts);
@@ -631,10 +624,8 @@ TEST_F(Tst_Options, stretch_compresses_tuplet_keeps_all_notes)
 
 TEST_F(Tst_Options, stretch_falls_back_to_irregular_for_tiny_bracket)
 {
-    // notes_stretch_irregular_fallback.enc: 3 plain quarters + a 3:2 HALF-note triplet
-    // (natural bracket = a whole note). Only a quarter of space is left, so the largest
-    // bracket that fits is < half the natural span: Stretch declines to compress and
-    // falls back to IrregularMeasure, extending the bar and keeping all three members.
+    // 3 quarters + a 3:2 half-note triplet (natural bracket = a whole note) with only a quarter of space left. The
+    // largest bracket that fits is < half the natural span, so Stretch declines to compress and falls back to Irregular.
     EncImportOptions opts;
     opts.overfillMeasureStrategy = OverfillStrategy::StretchLastNote;
     MasterScore* score = readEncoreScoreWithOpts("notes_stretch_irregular_fallback.enc", opts);
@@ -656,11 +647,8 @@ TEST_F(Tst_Options, stretch_falls_back_to_irregular_for_tiny_bracket)
 
 TEST_F(Tst_Options, stretch_robs_preceding_rest_to_fit_overflow)
 {
-    // notes_stretch_rob_rest.enc: a 4/4 bar filled by quarter + quarter-rest + quarter + quarter-rest,
-    // then a 3-sixteenth flourish that arrives after the voice is already full. StretchLastNote keeps
-    // the flourish (rather than dropping it at the voice-full guard) and its tier 1 reclaims the
-    // preceding rests so all three sixteenths survive in a standard 4/4 bar. Without the fix the
-    // flourish is dropped and only the two quarters remain.
+    // A 4/4 bar of quarter + quarter-rest + quarter + quarter-rest, then a 3-sixteenth flourish arriving after the
+    // voice is full. StretchLastNote tier 1 reclaims the preceding rests so all three sixteenths survive in a 4/4 bar.
     EncImportOptions opts;
     opts.overfillMeasureStrategy = OverfillStrategy::StretchLastNote;
     MasterScore* score = readEncoreScoreWithOpts("notes_stretch_rob_rest.enc", opts);
@@ -780,11 +768,8 @@ TEST_F(Tst_Options, template_brackets_cleared_no_spurious_brace)
 
 TEST_F(Tst_Options, overfill_irregular_crossing_note_keeps_full_duration)
 {
-    // options_overfill_irregular_facevalue.enc: 4/4, single staff, Q + H + H.
-    // The third note (H) starts at cumTick 3/4: only 1/4 remains before the barline.
-    // Without Fix C (resolveNoteDuration + advanceCumulativeTick cap bypass in
-    // emitters-note.cpp), that 1/4 remaining space would demote it to V_QUARTER.
-    // IrregularMeasure must bypass the cap and preserve V_HALF, extending to 5/4.
+    // 4/4 single staff, Q + H + H. The third H starts at cumTick 3/4 with only 1/4 left, so IrregularMeasure must
+    // bypass the note-duration cap and preserve V_HALF, extending the bar to 5/4.
     EncImportOptions opts;
     opts.overfillMeasureStrategy = OverfillStrategy::IrregularMeasure;
     MasterScore* score = readEncoreScoreWithOpts("options_overfill_irregular_facevalue.enc", opts);
@@ -809,13 +794,8 @@ TEST_F(Tst_Options, overfill_irregular_crossing_note_keeps_full_duration)
 
 TEST_F(Tst_Options, overfill_irregular_measure_extends_measure_ticks)
 {
-    // options_overfill_irregular_facevalue.enc: 4/4 measure with Q+H+H.
-    // Note 3 (tick=720, fv=half) has realDuration=240 (gap to durTicks=960) but
-    // faceValue=half, so realDuration2DurationType returns V_HALF.  With the default
-    // Truncate strategy both capping points in emitters-note.cpp shrink it to a
-    // quarter, keeping voiceSum=1/1 and leaving the measure at 4/4.  With
-    // IrregularMeasure the caps must be skipped, cumTick reaches 5/4, and
-    // capMeasureLength extends the measure so ticks() > timesig().
+    // Same Q+H+H fixture: under IrregularMeasure the note-duration caps must be skipped so cumTick reaches 5/4 and
+    // capMeasureLength extends the measure past the time signature.
     EncImportOptions opts;
     opts.overfillMeasureStrategy = OverfillStrategy::IrregularMeasure;
     MasterScore* score = readEncoreScoreWithOpts("options_overfill_irregular_facevalue.enc", opts);
@@ -831,11 +811,8 @@ TEST_F(Tst_Options, overfill_irregular_measure_extends_measure_ticks)
 
 TEST_F(Tst_Options, overfill_irregular_measure_length_is_reduced)
 {
-    // structure_v0c4_irregular_len_reduced.enc: a 2/4 bar overfilled with eighth-note triplets.
-    // Under IrregularMeasure the bar is extended to hold the content (here 7/8). Summing triplet
-    // ticks (denominator 24) leaves the raw fraction unreduced (21/24), which is the same duration
-    // as 7/8 but a disproportionate-looking time signature (the real-world 99/96 and 21/24 came
-    // from this). The stored actual duration must be in lowest terms.
+    // A 2/4 bar overfilled with eighth-note triplets extends to 7/8. Summing triplet ticks (denominator 24) leaves
+    // the raw fraction 21/24, so the stored actual duration must be reduced to lowest terms.
     EncImportOptions opts;
     opts.overfillMeasureStrategy = OverfillStrategy::IrregularMeasure;
     MasterScore* score = readEncoreScoreWithOpts("structure_v0c4_irregular_len_reduced.enc", opts);
@@ -853,12 +830,8 @@ TEST_F(Tst_Options, overfill_irregular_measure_length_is_reduced)
 
 TEST_F(Tst_Options, overfill_irregular_measure_extends_past_exact_boundary)
 {
-    // options_overfill_irregular_emitdrop.enc: 4/4 measure with Q+DH+Q+Q.
-    // After Q+DH, cumTick = exactly measure->ticks() (4/4).  Without the fix,
-    // emitters.cpp drops notes 3 and 4 at the "cumTick >= measure->ticks()" guard
-    // before they ever reach the per-note caps in emitters-note.cpp.
-    // With IrregularMeasure the guard must be bypassed so capMeasureLength
-    // can extend the measure to 6/4 and all four notes are preserved.
+    // 4/4 with Q+DH+Q+Q: after Q+DH, cumTick is exactly the measure length, so the overflow guard would drop notes 3
+    // and 4 before the per-note caps. IrregularMeasure must bypass the guard so the bar extends to 6/4 and all 4 survive.
     EncImportOptions opts;
     opts.overfillMeasureStrategy = OverfillStrategy::IrregularMeasure;
     MasterScore* score = readEncoreScoreWithOpts("options_overfill_irregular_emitdrop.enc", opts);
@@ -866,10 +839,9 @@ TEST_F(Tst_Options, overfill_irregular_measure_extends_past_exact_boundary)
     Measure* m = score->firstMeasure();
     ASSERT_NE(m, nullptr);
 
-    // Count Chord elements in voice 0 to diagnose how many notes were emitted
     int chordCount = 0;
     for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
-        EngravingItem* el = seg->element(0);  // track 0 = staff 0 voice 0
+        EngravingItem* el = seg->element(0);
         if (el && el->isChord()) {
             ++chordCount;
         }
@@ -883,10 +855,8 @@ TEST_F(Tst_Options, overfill_irregular_measure_extends_past_exact_boundary)
 
 TEST_F(Tst_Options, overfill_irregular_measure_fills_short_staves)
 {
-    // options_overfill_irregular_twostaves.enc: 2 staves in 4/4.
-    // Staff 0: Q+DH+Q+Q (extends to 6/4). Staff 1: Q+Q+Q (only 3/4).
-    // After IrregularMeasure extends the measure to 6/4, staff 1 must be
-    // filled with a visible rest so that sanityCheck finds no incomplete measures.
+    // 2 staves in 4/4: staff 0 (Q+DH+Q+Q) extends to 6/4, staff 1 (Q+Q+Q) is only 3/4 and must be padded with a
+    // visible rest so sanityCheck finds no incomplete measures.
     EncImportOptions opts;
     opts.overfillMeasureStrategy = OverfillStrategy::IrregularMeasure;
     MasterScore* score = readEncoreScoreWithOpts("options_overfill_irregular_twostaves.enc", opts);
@@ -903,9 +873,7 @@ TEST_F(Tst_Options, overfill_irregular_measure_fills_short_staves)
 
 TEST_F(Tst_Options, overfill_irregular_single_staff_sanity_check)
 {
-    // Same fixture (single staff Q+H+H in 4/4). End-to-end test for Fix C + Fix D:
-    // after the measure extends to 5/4 the single staff must be complete
-    // (voice 0 sums to the extended measure length), so sanityCheck must pass.
+    // Single-staff Q+H+H in 4/4: after the measure extends to 5/4 voice 0 must fill it, so sanityCheck passes.
     EncImportOptions opts;
     opts.overfillMeasureStrategy = OverfillStrategy::IrregularMeasure;
     MasterScore* score = readEncoreScoreWithOpts("options_overfill_irregular_facevalue.enc", opts);
@@ -918,10 +886,8 @@ TEST_F(Tst_Options, overfill_irregular_single_staff_sanity_check)
 
 TEST_F(Tst_Options, overfill_truncate_caps_crossing_note)
 {
-    // Negative regression guard for Fix C: Truncate mode must still cap the
-    // note that crosses the barline. Same fixture (Q+H+H in 4/4), default strategy.
-    // The third note has only 1/4 of space left, so it must NOT be V_HALF,
-    // and the measure must stay at 4/4.
+    // Negative guard: default Truncate mode must still cap the barline-crossing note. Same Q+H+H fixture; the third
+    // note has only 1/4 left, so it must not be V_HALF and the bar stays 4/4.
     MasterScore* score = readEncoreScore("options_overfill_irregular_facevalue.enc");
     ASSERT_NE(score, nullptr);
     Measure* m = score->firstMeasure();
@@ -944,10 +910,8 @@ TEST_F(Tst_Options, overfill_truncate_caps_crossing_note)
 
 TEST_F(Tst_Options, overfill_truncate_drops_notes_at_barline)
 {
-    // Negative regression guard for Fix B: Truncate mode must drop notes whose
-    // cumTick reaches the barline. options_overfill_irregular_emitdrop.enc: Q+DH+Q+Q.
-    // After Q+DH, cumTick = exactly 4/4. Notes 3 and 4 must be dropped by the
-    // overflow guard, leaving fewer than 4 chords, and the measure stays 4/4.
+    // Negative guard: Truncate mode must drop notes whose cumTick reaches the barline. Q+DH+Q+Q fills 4/4 after Q+DH,
+    // so notes 3 and 4 are dropped and the bar stays 4/4.
     MasterScore* score = readEncoreScore("options_overfill_irregular_emitdrop.enc");
     ASSERT_NE(score, nullptr);
     Measure* m = score->firstMeasure();
@@ -1000,8 +964,7 @@ static int voicesWithChords(MasterScore* score, staff_idx_t staffIdx)
 
 TEST_F(Tst_Options, mergeVoices_default_off_keeps_separate_voices)
 {
-    // struct fallback used by tests has mergeVoices = false, so the two
-    // non-overlapping voices are left as the importer split them.
+    // The test-default options have mergeVoices=false, so the two non-overlapping voices stay separate.
     MasterScore* score = readEncoreScore("importer_merge_voices_non_overlapping.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_EQ(voicesWithChords(score, 0), 2)
@@ -1033,12 +996,8 @@ TEST_F(Tst_Options, mergeVoices_keeps_overlapping_voices)
     delete score;
 }
 
-// Regression: a single-chord tremolo sits on the voice-1 note that mergeVoices moves
-// into voice 0 (importer_merge_voices_tremolo: voice 0 quarter on beat 1, voice 1
-// quarter on beat 2 carrying a per-note R16 tremolo). The voice-change path rebuilds
-// the destination chord from scratch and carried over articulations, lyrics and slurs
-// but never the tremolo, so the source chord (and its tremolo) was removed and the
-// tremolo vanished. Enabling mergeVoices must not drop the tremolo.
+// Regression: the voice-change path rebuilds the destination chord and once dropped a single-chord tremolo on the
+// moved note (it carried over articulations, lyrics and slurs but not the tremolo). mergeVoices must keep it.
 TEST_F(Tst_Options, mergeVoices_preserves_single_chord_tremolo)
 {
     EncImportOptions opts;
@@ -1065,10 +1024,8 @@ TEST_F(Tst_Options, mergeVoices_preserves_single_chord_tremolo)
     delete score;
 }
 
-// Regression: an upper voice that holds only rests over a bar that voice 0 already fills is
-// not a real second voice. With "combine non-overlapping voices" on, such stray rests must
-// be removed; the importer used to leave them (the staff has no upper-voice notes, so it was
-// not even a merge candidate), showing a spurious empty second voice.
+// Regression: an upper voice holding only rests over a bar voice 0 already fills is not a real second voice; with
+// mergeVoices on, those stray rests must be removed instead of showing a spurious empty second voice.
 TEST_F(Tst_Options, v0c4_merge_removes_stray_upper_voice_rests)
 {
     mu::iex::enc::EncImportOptions opts;
@@ -1091,11 +1048,8 @@ TEST_F(Tst_Options, v0c4_merge_removes_stray_upper_voice_rests)
     delete score;
 }
 
-// Regression: Encore's "voice 4" is a silent-voice placeholder that routing folds into
-// voice 0. A whole-measure rest stored there (face value an eighth, but spanning the bar)
-// used to be emitted as a leading eighth rest in voice 0, shifting the real notes right and
-// inflating an otherwise-4/4 bar to 9/8. The importer must drop the voice-4 rest when the
-// staff already carries real notes.
+// Regression: Encore's "voice 4" is a silent-voice placeholder folded into voice 0. A whole-measure rest stored there
+// must be dropped when the staff already carries notes, else it inflates a 4/4 bar to 9/8. See ENCORE_FORMAT.md ### Voice field.
 TEST_F(Tst_Options, v0c4_voice4_rest_dropped_when_staff_has_notes)
 {
     mu::iex::enc::EncImportOptions opts;
@@ -1110,11 +1064,8 @@ TEST_F(Tst_Options, v0c4_voice4_rest_dropped_when_staff_has_notes)
     delete score;
 }
 
-// Regression: Encore lays notes out left-to-right, so a note's xoffset column identifies its
-// beat consistently across a system. A note edited in Encore can keep a stale MIDI tick that
-// no longer matches its column -- it draws at the column's beat but imports one beat late. Here
-// a half note drawn in the beat-1 column (xoff 8) but stored at tick 480 (beat 3) must import
-// as note (beat 1) + rest (beat 3), not rest + note.
+// Regression: an edited note can keep a stale MIDI tick that no longer matches its xoffset column, importing one beat
+// late. A half note in the beat-1 column but stored at tick 480 must import as note (beat 1) + rest. See ENCORE_FORMAT.md ## Chord column (xoffset).
 TEST_F(Tst_Options, v0c4_stale_note_tick_snaps_to_xoffset_column)
 {
     MasterScore* score = readEncoreScore("structure_stale_tick_by_column.enc");
@@ -1140,15 +1091,9 @@ TEST_F(Tst_Options, v0c4_stale_note_tick_snaps_to_xoffset_column)
 
 TEST_F(Tst_Options, overfull_note_recut_to_tied_chain)
 {
-    // structure_overfill_recut_tie.enc is a minimized, anonymized 5/8 score whose third staff
-    // holds a lone dotted-half note (6/8) in the first few bars, i.e. it overruns the 5/8 barline
-    // by an eighth. Under "Remove extra notes" (Truncate) and "Stretch last notes" the note must
-    // be recut to a chain of tied figures that ends exactly at the barline (a half tied to an
-    // eighth = 5/8), preserving its sounding value up to the barline.
-    //
-    // Before the fix the note was collapsed to a single half figure during emission and the
-    // leftover eighth became a REST (an eighth of sounding value was lost). The regressive check
-    // is that the second element in the bar is a tied chord, not a rest.
+    // A 5/8 bar whose third staff holds a lone dotted-half note overruns the barline by an eighth. Under Truncate and
+    // StretchLastNote the note must be recut to tied figures ending at the barline (half tied to eighth = 5/8),
+    // preserving its sounding value; the leftover eighth must be a tied chord, not a rest.
     for (OverfillStrategy strat : { OverfillStrategy::Truncate, OverfillStrategy::StretchLastNote }) {
         EncImportOptions opts;
         opts.overfillMeasureStrategy = strat;
@@ -1160,8 +1105,7 @@ TEST_F(Tst_Options, overfull_note_recut_to_tied_chain)
         ASSERT_NE(m, nullptr);
         EXPECT_EQ(m->ticks(), Fraction(5, 8)) << "Truncate/Stretch keep the nominal 5/8 bar";
 
-        // Third staff (index 2), voice 0: the overrunning dotted half.
-        const track_idx_t tr = 2 * VOICES;
+        const track_idx_t tr = 2 * VOICES;   // third staff, voice 0: the overrunning dotted half
         std::vector<ChordRest*> crs;
         for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
             EngravingItem* e = s->element(tr);
@@ -1171,14 +1115,12 @@ TEST_F(Tst_Options, overfull_note_recut_to_tied_chain)
         }
         ASSERT_EQ(crs.size(), 2u) << "recut note becomes exactly two tied chords, no trailing rest";
 
-        // First figure: a half chord tied forward.
         ASSERT_TRUE(crs[0]->isChord());
         EXPECT_EQ(crs[0]->actualTicks(), Fraction(1, 2));
         Chord* first = toChord(crs[0]);
         ASSERT_EQ(first->notes().size(), 1u);
         EXPECT_NE(first->notes()[0]->tieFor(), nullptr) << "first figure must tie into the leftover";
 
-        // Second figure: an eighth chord tied back, same pitch, NOT a rest (the bug left a rest).
         ASSERT_TRUE(crs[1]->isChord()) << "leftover must be a tied note, not a rest";
         EXPECT_EQ(crs[1]->actualTicks(), Fraction(1, 8));
         Chord* second = toChord(crs[1]);

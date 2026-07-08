@@ -53,10 +53,9 @@ static void getExplicit(const std::vector<const EncMeasureElem*>& grp,
     }
 }
 
-// Implied tuplet ratio from realDuration vs faceValue.
-// Only fires when the first element of the chord group was pre-marked by the parser
-// (calculateRealDurations Phase 3b), so v0xC4 notes with incidental MIDI drift are
-// never misidentified as implied triplets here.
+// Implied tuplet ratio from realDuration vs faceValue. Only fires when the first element was
+// pre-marked by the parser (calculateRealDurations Phase 3b), so v0xC4 notes with incidental
+// MIDI drift are never misidentified as implied triplets.
 static void getImplied(const std::vector<const EncMeasureElem*>& grp,
                        int& outActual, int& outNormal)
 {
@@ -444,8 +443,9 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     int a2 = 0, n2 = 0;
                     getExplicit(chords[i], a2, n2);
                     if (a2 != actualN || n2 != normalN) {
-                        // Sandwich heuristic: include a note with missing tup byte when bracketed by matching
-                        // ratios and at the expected advance tick (v0xC4 live-recorded files occasionally omit the byte).
+                        // Sandwich heuristic: include a note with a missing tup byte when bracketed
+                        // by matching ratios and at the expected advance tick (v0xC4 live recording
+                        // occasionally omits the byte).
                         bool includeOrphan = false;
                         if (faceSum > Fraction(0, 1) && i + 1 < n
                             && !chords[i].empty() && !chords[i - 1].empty()) {

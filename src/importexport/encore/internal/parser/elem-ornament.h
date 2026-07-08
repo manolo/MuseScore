@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// EncOrnament: articulations, dynamics, spanners (slur/wedge/ottava), trills, tempo and
+// staff text, sharing one element struct whose fields vary by ornament type and format.
+
 #pragma once
 
 #include "elem-note.h"

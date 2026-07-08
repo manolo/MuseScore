@@ -20,12 +20,14 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Read ORNAMENT elements (slurs, wedges, staff text, etc.): geometry, spanning measure counts, tind.
+
 #include "elem-ornament.h"
 
 namespace mu::iex::enc {
 bool EncOrnament::read(QDataStream& ds)
 {
-    const qint64 elemPos = ds.device()->pos();   // first byte after the type/voice byte
+    const qint64 elemPos = ds.device()->pos();   // first byte after the type/voice byte; see ENCORE_FORMAT.md §Ornament subtypes
     EncMeasureElem::read(ds);
     ds >> tipo;
     ds.skipRawData(4);
@@ -52,10 +54,8 @@ bool EncOrnament::read(QDataStream& ds)
     } else {
         tind = tempo;
     }
-    // Formats that store tind at a fixed offset from the type/voice byte (the compact v0xA6
-    // ornament) override the size-based read above. Only STAFFTEXT carries a tind, and the offset
-    // was measured for that subtype's slot; scope the seek to it and to the device so an unrelated
-    // ornament near EOF cannot desync the stream. elemPos points just past the type/voice byte.
+    // Compact v0xA6 STAFFTEXT stores tind at a fixed offset from the type/voice byte instead;
+    // scope the seek to STAFFTEXT and to the device so an unrelated ornament near EOF cannot desync.
     if (tindOffset >= 0 && ornType() == EncOrnamentType::STAFFTEXT) {
         const qint64 tindPos = elemPos - 1 + tindOffset;
         if (tindPos >= 0 && tindPos < ds.device()->size()) {
@@ -63,8 +63,8 @@ bool EncOrnament::read(QDataStream& ds)
             ds >> tind;
         }
     }
-    // The compact v0xA6 STAFFTEXT ornament stores its placement y at a fixed offset from the
-    // type/voice byte too, so the inline read above landed on an unrelated byte. Same scoping as tind.
+    // Same story for the placement y of compact v0xA6 STAFFTEXT: fixed offset, so the inline read
+    // above landed on an unrelated byte. Same scoping as tind.
     if (yoffOffset >= 0 && ornType() == EncOrnamentType::STAFFTEXT) {
         const qint64 yoffPos = elemPos - 1 + yoffOffset;
         if (yoffPos >= 0 && yoffPos + 1 < ds.device()->size()) {

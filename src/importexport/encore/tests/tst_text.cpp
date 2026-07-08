@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Text import: lyric decoding/syllabification/attachment, staff text and tempo marks, titles/headers/footers.
+
 #include <gtest/gtest.h>
 
 #include "engraving/dom/arpeggio.h"
@@ -63,17 +65,8 @@ protected:
     void SetUp() override { setRootDir(ENC_DIR); }
 };
 
-// ===========================================================================
-// FIX: Encore "-" LYRIC elements are hyphen continuation markers; filter them out and tag adjacent
-// syllables with LyricsSyllabic. LaMorenaDeMiCopla m18 "JU - LIO RO -" reproduced the off-by-one shift.
-// ===========================================================================
-// ===========================================================================
-// FIX: a syllable whose stored tick falls between notes (beyond the half-beat
-// match window) with no rest available was dropped. A sung syllable always
-// belongs to a note, so it must attach to the nearest chord instead.
-// Fixture: notes at ticks 0/120/480 (no rests), lyric "ge" at tick 279 → must
-// land on the nearest note, the one at tick 120 (pitch 62).
-// ===========================================================================
+// A sung syllable whose stored tick falls between notes (beyond the match window) with no rest available must attach
+// to the nearest chord, not be dropped. Fixture: notes at ticks 0/120/480, lyric "ge" at tick 279 lands on tick 120 (pitch 62).
 TEST_F(Tst_Text, lyrics_offgrid_syllable_attaches_to_nearest_chord)
 {
     MasterScore* score = readEncoreScore("text_lyrics_offgrid_nearest_chord.enc");
@@ -106,14 +99,8 @@ TEST_F(Tst_Text, lyrics_offgrid_syllable_attaches_to_nearest_chord)
     delete score;
 }
 
-// ===========================================================================
-// FIX: a hyphenated word split across a barline kept the hyphen only when the "-"
-// shared a measure with its first syllable. When "sof" ends one measure and "-"
-// opens the next, the first syllable (already attached) was never promoted, so the
-// connecting hyphen disappeared. The "-" must promote the previous measure's last
-// syllable: SINGLE -> BEGIN.
-// Fixture: m1 note "sof", m2 "-" then note "tly". Expect sof=BEGIN, tly=END.
-// ===========================================================================
+// A hyphenated word split across a barline must keep its hyphen: a "-" opening a measure must promote the previous
+// measure's last syllable SINGLE -> BEGIN. Fixture: m1 "sof", m2 "-" then "tly"; expect sof=BEGIN, tly=END.
 TEST_F(Tst_Text, lyrics_hyphen_renders_across_barline)
 {
     MasterScore* score = readEncoreScore("text_lyrics_hyphen_across_barline.enc");
@@ -253,13 +240,8 @@ TEST_F(Tst_Text, lyrics_variable_length_with_empty_placeholder)
     delete score;
 }
 
-// Regression: when lyric encTick is slightly after the note encTick (visual offset),
-// the lyric must still attach to the correct note.  The old segEncTick formula
-// (relTick × encTicksPerQuarter × 4) mapped each note to half its actual Encore tick,
-// causing lyrics offset by +50 ticks to miss the correct note.
-// File: text_lyrics.enc with lyric ticks offset by +50 (do→50, re→290, mi→530, fa→770).
-// beatTicks=240, threshold=120; all deltas ≤ 50 → all match. Previous formula:
-// segEncTick(tick=240) = 120, |290-120|=170 > 120 → re unmatched.
+// Regression: a lyric encTick slightly after its note (visual offset) must still attach to the correct note. The
+// segEncTick formula must map each note to its actual Encore tick, else lyrics offset by +50 ticks miss their note.
 TEST_F(Tst_Text, lyrics_offset_ticks_still_attach_correctly)
 {
     MasterScore* score = readEncoreScore("text_lyrics_6_8_offset_ticks.enc");
@@ -319,10 +301,8 @@ TEST_F(Tst_Text, lyrics_attached_to_chords)
     delete score;
 }
 
-// ===========================================================================
-// FIX: EncLyric::read() detects per-element encoding; some v0xC4 files store lyrics as Latin-1 (one byte/char).
-// Reading as UTF-16 LE produced spurious CJK code units.
-// ===========================================================================
+// Some v0xC4 files store lyrics as Latin-1 (one byte/char); reading them as UTF-16 LE produces spurious CJK units.
+// See ENCORE_FORMAT.md ## Encoding probe.
 TEST_F(Tst_Text, lyrics_latin1_text_decoded_as_one_byte_per_char)
 {
     MasterScore* score = readEncoreScore("text_lyrics_latin1.enc");
@@ -352,26 +332,16 @@ TEST_F(Tst_Text, lyrics_latin1_text_decoded_as_one_byte_per_char)
     delete score;
 }
 
-// ===========================================================================
-// FIX: lyrics on a grand-staff bottom staff were matched against the wrong staff's
-// notes and reversed. The bottom-staff notes reach MuseScore staff 1 via the
-// voice>=VOICES (case A) routing, and the lyric routes there too; but the note-tick
-// collection was keyed by RAW encStaff, so it grabbed a second instrument's notes
-// (raw staffIdx 1) instead. With the wrong ticks the syllables matched no chord and
-// fell back to rests in reverse ("ve Sal"). Collecting notes by their ROUTED staff
-// fixes the order and the anchors.
-// Fixture: 2 instruments x 2 staves. Bottom staff of instr 0 has quarter notes
-// (pitch 55, 57) at ticks 480/720 via voice 4; instr 1 treble (raw staffIdx 1) has
-// notes at 0/240. Lyrics "Sal-ve" (voice 4) belong to the bottom staff.
-// Expected: MuseScore staff 1 shows Sal (begin) on pitch 55 then ve (end) on 57.
-// ===========================================================================
+// Lyrics on a grand-staff bottom staff must be matched against the notes on their routed staff, not the raw encStaff:
+// keying by raw staff grabbed another instrument's ticks so syllables fell back to rests in reverse ("ve Sal").
+// Fixture: 2 instruments x 2 staves; bottom staff of instr 0 has notes (pitch 55, 57) via voice 4, lyrics "Sal-ve".
+// See ENCORE_IMPORTER.md ## Lyric attachment.
 TEST_F(Tst_Text, lyrics_grandstaff_match_routed_staff_notes)
 {
     MasterScore* score = readEncoreScore("text_lyrics_grandstaff_routed_notes.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_TRUE(score->sanityCheck());
 
-    // Collect (pitch, syllable, syllabic) for lyrics on MuseScore staff 1 (track 4 = staff 1, voice 0).
     struct Hit {
         int pitch;
         String text;
@@ -404,10 +374,8 @@ TEST_F(Tst_Text, lyrics_grandstaff_match_routed_staff_notes)
     delete score;
 }
 
-// ===========================================================================
-// FIX: STAFFTEXT matching Italian tempo terms is promoted to TempoText.
-// Relative markings ("a tempo") get TempoText without absolute BPS; non-tempo strings stay StaffText.
-// ===========================================================================
+// STAFFTEXT matching Italian tempo terms is promoted to TempoText; relative markings ("a tempo") get no absolute BPS,
+// and non-tempo strings stay StaffText. See ENCORE_IMPORTER.md ## STAFFTEXT placement and tempo promotion.
 TEST_F(Tst_Text, staff_text_promoted_to_tempo_for_italian_terms)
 {
     MasterScore* score = readEncoreScore("text_stafftext_tempo_promotion.enc");
@@ -454,10 +422,8 @@ TEST_F(Tst_Text, staff_text_promoted_to_tempo_sets_tempo_map)
     delete score;
 }
 
-// ===========================================================================
-// FIX: TITL multi-line slots of the same category join with \n; headers/footers stack by alignment byte.
-// Also: Encore #P/#D/#T tokens are rewritten to MuseScore macros $P/$D/$m.
-// ===========================================================================
+// TITL multi-line slots of the same category join with newlines; headers/footers stack by alignment byte.
+// See ENCORE_FORMAT.md ## TITL block.
 TEST_F(Tst_Text, multi_slot_text_joined_with_newlines)
 {
     MasterScore* score = readEncoreScore("text_multi_slot_stacked_text.enc");
@@ -482,10 +448,8 @@ TEST_F(Tst_Text, multi_slot_text_joined_with_newlines)
     delete score;
 }
 
-// ===========================================================================
-// FIX: some files write the TITL block twice. EncTitle::read() clears slot vectors on each pass
-// so the second block replaces the first instead of doubling composer/header/footer lines.
-// ===========================================================================
+// Some files write the TITL block twice; the reader clears slot vectors each pass so the second block replaces the
+// first instead of doubling composer/header/footer lines.
 TEST_F(Tst_Text, duplicate_titl_block_does_not_double_lines)
 {
     MasterScore* score = readEncoreScore("text_duplicate_titl_block.enc");
@@ -493,18 +457,14 @@ TEST_F(Tst_Text, duplicate_titl_block_does_not_double_lines)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    // The fixture writes the same TITL block twice; the composer must
-    // appear exactly once.
     EXPECT_EQ(score->metaTag(u"composer"), u"Sole Composer")
         << "second TITL block must replace the first instead of appending";
     EXPECT_EQ(score->metaTag(u"workTitle"), u"Duped TITL");
     delete score;
 }
 
-// ===========================================================================
-// FIX: MEAS header BPM at offset 0 was read but never used, forcing 120 bpm on all imports.
-// Post-pass emits TempoText for the first measure and each BPM change, and calls Score::setTempo.
-// ===========================================================================
+// The MEAS header BPM must drive the tempo: emit a TempoText for the first measure and each BPM change and set the
+// tempo map. See ENCORE_IMPORTER.md ## Per-measure tempo (MEAS header BPM).
 TEST_F(Tst_Text, measure_header_bpm_drives_initial_tempo_and_changes)
 {
     MasterScore* score = readEncoreScore("text_tempo_changes.enc");
@@ -512,7 +472,6 @@ TEST_F(Tst_Text, measure_header_bpm_drives_initial_tempo_and_changes)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    // Collect every TempoText in the score with its host measure index.
     struct Found {
         int measureIdx;
         double bps;
@@ -559,10 +518,8 @@ TEST_F(Tst_Text, measure_header_bpm_drives_initial_tempo_and_changes)
     delete score;
 }
 
-// ===========================================================================
-// FIX: ORN TEMPO byte is beat-unit BPM, not quarter-note BPM. Compound meters (6/8, 9/8, 12/8) beat = dotted quarter;
-// multiply by 3/2. 6/8 TEMPO=80 → BPS=2.0 (120 qBPM); old code gave 80/60=1.333 (♩.=53).
-// ===========================================================================
+// In compound meters the beat is a dotted quarter, so a 6/8 TEMPO=80 means BPS=2.0 (120 quarter-BPM), not 80/60.
+// See ENCORE_IMPORTER.md ### ORN TEMPO subtype 0x32.
 TEST_F(Tst_Text, orn_tempo_compound_meter_dotted_quarter_bpm)
 {
     MasterScore* score = readEncoreScore("text_tempo_orn_compound_68.enc");
@@ -595,17 +552,9 @@ TEST_F(Tst_Text, orn_tempo_compound_meter_dotted_quarter_bpm)
     delete score;
 }
 
-// ===========================================================================
-// FIX: an ORN TEMPO is anchored in Encore to a note's tick but drawn (via a
-// smaller xoffset) over the earlier downbeat rest. The importer placed the
-// TempoText on the later note instead of the downbeat; it must snap the mark to
-// the chord-rest whose xoffset matches its drawn position, like dynamics do.
-// Fixture: 5/8 (beatTicks=120). Dotted-quarter REST at tick 0 (xoff 0), quarter
-// NOTE at tick 360 (xoff 67). ORN TEMPO=63 at tick 360 with xoffset=48 (left of
-// the note) belongs to the downbeat rest.
-// Expected: one TempoText at the measure downbeat (rtick 0), value quarter=63.
-// Before the fix it sat on the note at tick 360 (rtick 3/8).
-// ===========================================================================
+// An ORN TEMPO anchored to a note's tick but drawn (smaller xoffset) over an earlier downbeat rest must snap to the
+// chord-rest whose xoffset matches its drawn position, like dynamics. Fixture: 5/8, rest at tick 0 (xoff 0), note at
+// tick 360 (xoff 67), ORN TEMPO=63 at tick 360 with xoffset=48 belongs to the downbeat rest.
 TEST_F(Tst_Text, orn_tempo_snaps_to_downbeat_by_xoffset)
 {
     MasterScore* score = readEncoreScore("text_tempo_orn_xoffset_downbeat.enc");
@@ -640,14 +589,8 @@ TEST_F(Tst_Text, orn_tempo_snaps_to_downbeat_by_xoffset)
     delete score;
 }
 
-// ===========================================================================
-// FIX: the tempo mark's beat unit comes from the ORN `noto` byte, not a guess from
-// the meter. A "quarter = 198" mark in a 6/8 (noto=2, a plain quarter) must stay
-// quarter=198, not be rewritten as the compound default dotted-quarter=132. Here the
-// ORN value equals the header BPM, so the ORN is suppressed and the header path
-// renders the mark; it must still pick up the explicit quarter unit from noto.
-// Both forms are the same speed (198 quarter/min = 132 dotted-quarter/min = 3.3 BPS).
-// ===========================================================================
+// The tempo mark's beat unit comes from the ORN `noto` byte, not the meter: a noto=2 (quarter) mark in 6/8 must stay
+// quarter=198, not the compound default dotted-quarter=132 (same speed). The header path must still read noto.
 TEST_F(Tst_Text, tempo_beat_unit_from_noto_overrides_compound_meter)
 {
     MasterScore* score = readEncoreScore("text_tempo_orn_explicit_quarter_unit.enc");
@@ -677,13 +620,8 @@ TEST_F(Tst_Text, tempo_beat_unit_from_noto_overrides_compound_meter)
     delete score;
 }
 
-// ===========================================================================
-// FIX: v0xC2 (Encore 3.x/4.x) stores a tempo mark's BPM at ORN element +28, not at
-// +30 like v0xC4 (+30 holds a constant 52 here). Reading +30 imported "negra = 80"
-// as "negra = 52". The v0xC2 reader moves +28 into the tempo value.
-// Fixture: 4/4 v0xC2, header bpm=80, ORN TEMPO with BPM=80 at +28 and 52 at +30.
-// Expected: TempoText quarter=80, BPS=80/60; not quarter=52.
-// ===========================================================================
+// v0xC2 stores a tempo mark's BPM at ORN +28, not +30 like v0xC4. Fixture: v0xC2, ORN TEMPO with BPM=80 at +28 and a
+// constant 52 at +30; reading +30 would import "negra = 52". See ENCORE_FORMAT.md ## Ornament element.
 TEST_F(Tst_Text, tempo_orn_v0c2_reads_bpm_from_offset_28)
 {
     MasterScore* score = readEncoreScore("text_tempo_orn_v0c2_bpm_offset.enc");
@@ -712,15 +650,9 @@ TEST_F(Tst_Text, tempo_orn_v0c2_reads_bpm_from_offset_28)
     delete score;
 }
 
-// ===========================================================================
-// FIX: some v0xC2 (Encore 4.x) files store the tempo mark the v0xC4 way: a small
-// beat-unit code at ORN +28 (noto, e.g. 0x02 = quarter) and the real BPM at +30.
-// The earlier v0xC2 rule moved +28 into the tempo unconditionally, so a quarter=158
-// mark imported as quarter=2 (the beat-unit code). The reader keeps the +30 BPM when
-// +28 is a valid beat-unit code, and only moves +28 across when it is not.
-// Fixture: 4/4 v0xC2, header bpm=0, ORN TEMPO with noto=0x02 at +28 and BPM=158 at +30.
-// Expected: TempoText quarter=158, BPS=158/60; not quarter=2.
-// ===========================================================================
+// Some v0xC2 files store the tempo the v0xC4 way: a beat-unit code (noto) at +28 and the real BPM at +30. The reader
+// must keep the +30 BPM when +28 is a valid beat-unit code, else a quarter=158 mark imports as quarter=2.
+// Fixture: v0xC2, ORN TEMPO with noto=0x02 at +28 and BPM=158 at +30.
 TEST_F(Tst_Text, tempo_orn_v0c2_keeps_bpm_at_offset_30_when_28_is_beat_unit)
 {
     MasterScore* score = readEncoreScore("text_tempo_orn_v0c2_v0c4_layout.enc");
@@ -749,14 +681,8 @@ TEST_F(Tst_Text, tempo_orn_v0c2_keeps_bpm_at_offset_30_when_28_is_beat_unit)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: MEAS-header and ORN tempo texts used a raw Unicode note symbol
-// (U+2669 "♩") in their xmlText.  TempoText::updateTempo() matches against
-// TempoPattern strings that use <sym>metNoteQuarterUp</sym>, so the Unicode
-// form never matched and editing the displayed BPM had no effect on playback.
-// Fix: tempoXmlText() now emits <sym> tags; all numeric BPM TempoTexts also
-// get followText=true so MuseScore keeps the tempo map in sync on edit.
-// ===========================================================================
+// Tempo texts must emit <sym> tags (not a raw Unicode note) so TempoText::updateTempo() matches the TempoPattern, and
+// numeric BPM texts get followText=true so edits keep the tempo map in sync.
 TEST_F(Tst_Text, tempo_text_uses_sym_tags_and_follow_text_enabled)
 {
     MasterScore* score = readEncoreScore("ornaments_tempo_sym_followtext.enc");
@@ -828,10 +754,8 @@ TEST_F(Tst_Text, header_footer_tokens_translated_to_mscore_macros)
     delete score;
 }
 
-// ===========================================================================
-// FIX: STAFFTEXT 0x1E (ORN tind byte +32) indexes into the TEXT block for the display string.
-// Importer reads TEXT block entries and creates StaffText via the tind-derived index.
-// ===========================================================================
+// STAFFTEXT resolves its display string by indexing into the TEXT block via the ORN tind byte.
+// See ENCORE_FORMAT.md ## TEXT block.
 
 TEST_F(Tst_Text, staff_text_resolved_via_text_block)
 {
@@ -860,14 +784,9 @@ TEST_F(Tst_Text, staff_text_resolved_via_text_block)
     delete score;
 }
 
-// ===========================================================================
-// BUG: a TEXT-block entry with Encore's rich-text run header stores the text after
-// a variable-length header (run count + flags + run-offset table + descriptor). The
-// importer assumed the single-run offset 14, so a comment with more than one
-// formatting run (the fixture uses 3) resolved to garbage/empty and no StaffText was
-// created. The offset must be derived from the run count. Fixture: one STAFFTEXT
-// referencing a 3-run entry whose text is "TAN TRAN" (offset 22, not 14).
-// ===========================================================================
+// A TEXT-block entry's text offset must be derived from its rich-text run count, not a fixed single-run offset, so a
+// multi-run entry resolves instead of reading garbage. Fixture: a 3-run entry with text "TAN TRAN" (offset 22, not 14).
+// See ENCORE_FORMAT.md ## TEXT block.
 TEST_F(Tst_Text, staff_text_multirun_header)
 {
     MasterScore* score = readEncoreScore("text_staff_text_multirun.enc");
@@ -895,15 +814,9 @@ TEST_F(Tst_Text, staff_text_multirun_header)
     delete score;
 }
 
-// ===========================================================================
-// BUG: a rich-text TEXT entry can carry more than one formatting descriptor
-// (the descriptor count at header +2, not a fixed 1). The importer assumed a
-// single 6-byte descriptor, so a two-descriptor entry read its text 6 bytes too
-// early, landing inside a descriptor; the encoding probe there saw a byte + 0x00
-// and decoded the Latin-1 label as byte-swapped UTF-16 (CJK gibberish). Fixture:
-// a STAFFTEXT whose entry has run count 2 and descriptor count 2, Latin-1 text
-// "Cajas y Tambores" at offset 4 + 2*4 + 2*6 = 24.
-// ===========================================================================
+// A rich-text TEXT entry can carry more than one formatting descriptor (count at header +2), so the text offset must
+// account for it, else the read lands inside a descriptor and decodes as CJK gibberish. Fixture: run count 2,
+// descriptor count 2, Latin-1 text "Cajas y Tambores" at offset 4 + 2*4 + 2*6 = 24.
 TEST_F(Tst_Text, staff_text_two_descriptors_header)
 {
     MasterScore* score = readEncoreScore("text_staff_text_two_descriptors.enc");
@@ -931,9 +844,7 @@ TEST_F(Tst_Text, staff_text_two_descriptors_header)
     delete score;
 }
 
-// ===========================================================================
-// FEATURE: STAFFTEXT placement from ORN yoffset: positive keeps ABOVE; negative (Cartesian below staff) maps to BELOW.
-// ===========================================================================
+// STAFFTEXT placement derives from the ORN yoffset: positive keeps ABOVE, negative (Cartesian below staff) maps to BELOW.
 TEST_F(Tst_Text, staff_text_placement_from_yoffset)
 {
     MasterScore* score = readEncoreScore("text_staff_text_placement.enc");
@@ -964,17 +875,11 @@ TEST_F(Tst_Text, staff_text_placement_from_yoffset)
     delete score;
 }
 
-// ===========================================================================
-// UNIT: tempoXmlText(), pure-function tests, no score needed.
-// Verifies that the note symbol is always emitted as a <sym> tag (not raw
-// Unicode), that beatTicks=360 (dotted quarter) uses the dotted-quarter variant,
-// and that beatTicks=240 (quarter) uses the plain quarter.
-// displayBpm is always the beat-unit BPM as displayed; no conversion happens inside.
-// ===========================================================================
+// Pure-function tests for tempoXmlText(): the note symbol is always a <sym> tag, beatTicks selects the note value,
+// and displayBpm is passed through unchanged (the caller does any BPM conversion).
 TEST(Tst_TempoXmlText, simple_meter_quarter_sym)
 {
     using namespace mu::iex::enc;
-    // beatTicks=240 (quarter beat): quarter sym
     EXPECT_EQ(tempoXmlText(120, 240),
               String(u"<sym>metNoteQuarterUp</sym> = 120"));
     EXPECT_EQ(tempoXmlText(80, 240),
@@ -986,11 +891,9 @@ TEST(Tst_TempoXmlText, simple_meter_quarter_sym)
 TEST(Tst_TempoXmlText, dotted_quarter_beat_sym)
 {
     using namespace mu::iex::enc;
-    // beatTicks=360 (dotted-quarter beat): dotted-quarter sym; displayBpm is already the beat-unit value.
-    // (For MEAS BPM the caller converts QPM to displayBpm via bpm*2/3 before calling tempoXmlText.)
+    // beatTicks=360 selects the dotted-quarter sym; the caller converts QPM to the beat-unit displayBpm beforehand.
     EXPECT_EQ(tempoXmlText(80, 360),
               String(u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = 80"));
-    // beatTicks=360 for 3/8 (dotted-quarter beat, previously incorrectly treated as quarter)
     EXPECT_EQ(tempoXmlText(80, 360),
               String(u"<sym>metNoteQuarterUp</sym><sym>space</sym><sym>metAugmentationDot</sym> = 80"));
 }
@@ -998,8 +901,7 @@ TEST(Tst_TempoXmlText, dotted_quarter_beat_sym)
 TEST(Tst_TempoXmlText, beat_ticks_select_the_note_symbol)
 {
     using namespace mu::iex::enc;
-    // beatTicks is the beat duration in display ticks (quarter=240) and selects the note
-    // symbol: 120=eighth, 480=half, plus the dotted variants (base x 3/2).
+    // beatTicks (display ticks) selects the note symbol: 120=eighth, 240=quarter, 480=half, plus dotted variants (x 3/2).
     EXPECT_EQ(tempoXmlText(156, 120),
               String(u"<sym>metNote8thUp</sym> = 156"));
     EXPECT_EQ(tempoXmlText(120, 240),
@@ -1013,21 +915,11 @@ TEST(Tst_TempoXmlText, beat_ticks_select_the_note_symbol)
               String(u"<sym>metNoteQuarterUp</sym> = 80"));
 }
 
-// ===========================================================================
-// Regression: ORN TEMPO with eighth-note beat (beatTicks=120) was suppressed when
-// it disagreed with the MEAS header BPM, even though the two are in different units
-// (ORN in eighth/min, MEAS in quarter/min).  The comparison is meaningless for
-// non-quarter beats; the ORN must be used.
-// File: 5/8, MEAS bpm=160 (quarter/min), ORN TEMPO=63 (eighth/min, "corchea=63").
-// Expected: TempoText "♪ = 63" with BPS = 63 × 0.5 / 60 = 0.525, NOT suppressed.
-// ===========================================================================
-
+// Regression: an ORN TEMPO must not be suppressed just because it disagrees with the MEAS header BPM when the beat is
+// non-quarter (the comparison is unit-mismatched). The ORN tempo field always stores quarter-note BPM.
 TEST_F(Tst_Text, orn_tempo_5_8_not_suppressed_and_uses_quarter_bpm)
 {
-    // text_orn_tempo_eighth_beat_not_suppressed.enc: 5/8, MEAS bpm=160,
-    // ORN TEMPO=63, no subsequent measure with bpm=63.
-    // The ORN tempo field always stores quarter-note BPM even when beatTicks=120 (5/8).
-    // The ORN is genuine (not misplaced) → must create TempoText ♩=63, BPS=63/60.
+    // 5/8, MEAS bpm=160, ORN TEMPO=63, no later measure with bpm=63, so the genuine ORN must create TempoText quarter=63.
     MasterScore* score = readEncoreScore("text_orn_tempo_eighth_beat_not_suppressed.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1057,13 +949,8 @@ TEST_F(Tst_Text, orn_tempo_5_8_not_suppressed_and_uses_quarter_bpm)
     delete score;
 }
 
-// ===========================================================================
-// FIX: 3/8 pieces with beatTicks=360 (dotted-quarter beat) played at 2/3 speed.
-// Old compound check: `numerator > 3` excluded 3/8 (numerator=3). Fix: also
-// check beatTicks==360 from the MEAS header so 3/8 files get the 1.5x BPS
-// adjustment the same as 6/8.
-// Expected: ORN TEMPO=80 in 3/8 (beatTicks=360) → BPS = 80*1.5/60 = 2.0.
-// ===========================================================================
+// 3/8 files with beatTicks=360 must get the compound 1.5x BPS adjustment like 6/8: the compound check must also test
+// beatTicks==360, not only numerator > 3 (which excludes 3/8). ORN TEMPO=80 in 3/8 gives BPS=2.0.
 TEST_F(Tst_Text, orn_tempo_3_8_dotted_quarter_bps_correct)
 {
     MasterScore* score = readEncoreScore("text_orn_tempo_3_8_dotted_quarter.enc");
@@ -1097,20 +984,11 @@ TEST_F(Tst_Text, orn_tempo_3_8_dotted_quarter_bps_correct)
     delete score;
 }
 
-// ===========================================================================
-// FIX: When ORN TEMPO is placed at a later tick (first NOTE, not first REST),
-// the MEAS-header BPM guard only checked the segment at measTick (the rest
-// segment). It missed the ORN TEMPO, creating two conflicting tempo marks.
-// Fix: widen guard to scan all segments in the measure.
-// Expected: only ONE TempoText, from ORN TEMPO=63 (not the MEAS BPM=160).
-// ===========================================================================
+// When an ORN TEMPO sits at a later tick than the measure start, the MEAS-header BPM guard must scan all segments in
+// the measure, else it misses the ORN and creates two conflicting marks.
 TEST_F(Tst_Text, orn_tempo_wins_over_meas_bpm_when_not_misplaced)
 {
-    // text_meas_bpm_suppressed_by_orn_tempo_later_tick.enc: 4/4, MEAS bpm=160,
-    // quarter REST at tick=0, ORN TEMPO=63 at tick=240, no subsequent measure with bpm=63.
-    // The ORN is NOT a misplaced ornament (no subsequent measure has the matching bpm),
-    // so it is the genuine score tempo marking and takes precedence over the MEAS header.
-    // Expected: ONE TempoText from the ORN = ♩=63, BPS=63/60.
+    // 4/4, MEAS bpm=160, ORN TEMPO=63 at tick 240, no later measure with bpm=63, so the genuine ORN wins: one TempoText quarter=63.
     MasterScore* score = readEncoreScore("text_meas_bpm_suppressed_by_orn_tempo_later_tick.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1170,20 +1048,11 @@ TEST_F(Tst_Text, orn_tempo_suppressed_when_semantic_disabled)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: ORN TEMPO misplaced one system before its intended measure
-// ===========================================================================
-
+// An ORN TEMPO whose BPM conflicts with its own measure's header BPM is a misplaced ornament and must be suppressed,
+// so the header-BPM loop can place the tempo at the intended later measure.
 TEST_F(Tst_Text, orn_tempo_mismatch_with_header_bpm_suppressed)
 {
-    // text_orn_tempo_mismatch_suppressed.enc: 2 content measures.
-    // M1: header BPM=249, ORN TEMPO=80 (BPM conflicts with header → misplaced ornament).
-    // M2: header BPM=80, no ORN TEMPO.
-    //
-    // Without fix: ORN TEMPO at M1 creates TempoText BPM=80 at M1 (wrong position),
-    //   and the !hasExisting guard in the header-BPM loop blocks M2's correct TempoText.
-    // With fix: ORN TEMPO suppressed because 80 != encMeas.bpm=249; header-BPM loop
-    //   creates TempoText BPM=80 at M2.
+    // M1: header BPM=249, ORN TEMPO=80 (conflicts, misplaced). M2: header BPM=80. Expect TempoText BPM=80 at M2, not M1.
     MasterScore* score = readEncoreScore("text_orn_tempo_mismatch_suppressed.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1208,7 +1077,6 @@ TEST_F(Tst_Text, orn_tempo_mismatch_with_header_bpm_suppressed)
         }
     }
 
-    // No TempoText at measure 1 (tick=0) with BPM=80, the misplaced ornament must be suppressed
     for (const auto& t : found) {
         if (t.tick == Fraction(0, 1)) {
             EXPECT_FALSE(std::abs(t.bps - 80.0 / 60.0) < 1e-4)
@@ -1216,7 +1084,6 @@ TEST_F(Tst_Text, orn_tempo_mismatch_with_header_bpm_suppressed)
         }
     }
 
-    // TempoText BPM=80 must appear somewhere after tick=0 (at measure 2)
     bool foundM2 = false;
     for (const auto& t : found) {
         if (t.tick > Fraction(0, 1) && std::abs(t.bps - 80.0 / 60.0) < 1e-4) {
@@ -1297,21 +1164,9 @@ TEST_F(Tst_Text, orn_tempo_equal_to_header_placed_at_measure_start)
     delete score;
 }
 
-// ===========================================================================
-// FIX: v0xC2 lyric text was read at element offset +20 instead of +18, dropping
-// the first two bytes of every syllable (e.g. "ver"→"r", "dad"→"d", "Es"→"").
-// Root cause: the 9-byte skip after the kie field should be 7 bytes for v0xC2.
-// Fix: EncFormatReader_V0xC4::lyricTextGapAfterKie() returns 7 when !m_hasMetaTables.
-//
-// FIX: lyric matching used a note-first greedy algorithm that let later syllables
-// steal the nearest note before earlier ones could claim it. Switched to lyrics-first.
-//
-// FIX: segEncTick formula used encTicksPerQuarter = beatTicks regardless of meter.
-// For compound meters (6/8, 9/8) beatTicks represents a dotted-quarter beat (= 1.5
-// quarter notes), so encTicksPerQuarter must be beatTicks * 2/3.
-// Test file: J-RONDA.ENC (v0xC2, 6/8, "Jota de ronda" - Spanish folk tune).
-// Before fixes: 24 garbled single-char fragments. After: 56 complete syllables.
-// ===========================================================================
+// Three fixes exercised by the v0xC2 lyric tests below: (1) v0xC2 lyric text starts at the +18 offset (7-byte skip
+// after kie, not 9), (2) lyric matching is lyrics-first so later syllables cannot steal an earlier one's note, and
+// (3) segEncTick uses encTicksPerQuarter = beatTicks*2/3 for compound meters. See ENCORE_FORMAT.md ## Lyric element.
 
 static std::vector<String> collectAllLyrics(MasterScore* score)
 {
@@ -1338,9 +1193,8 @@ static std::vector<String> collectAllLyrics(MasterScore* score)
 
 TEST_F(Tst_Text, lyrics_v0xc2_text_offset_full_words)
 {
-    // lyrics_v0c2_compound_meter.enc: v0xC2 6/8, 3 measures × 6 eighth notes = 18 notes,
-    // each with a lyric. Syllables: "La","ro","sol","es","mi","do" (each >=2 chars).
-    // Wrong +20 offset would decode each as a single char ("L","r","s","e","m","d").
+    // v0xC2 6/8, 18 notes each with a >=2-char syllable ("La","ro","sol","es","mi","do"); the wrong +20 offset would
+    // decode each as a single char.
     MasterScore* score = readEncoreScore("lyrics_v0c2_compound_meter.enc");
     ASSERT_NE(score, nullptr);
     muse::Ret ret = score->sanityCheck();
@@ -1370,10 +1224,8 @@ TEST_F(Tst_Text, lyrics_v0xc2_text_offset_full_words)
 
 TEST_F(Tst_Text, lyrics_compound_meter_all_syllables_matched)
 {
-    // lyrics_v0c2_compound_meter.enc: v0xC2 6/8 (beatTicks=360), 3 measures.
-    // In 6/8 the segEncTick formula must use encTicksPerQuarter = beatTicks*2/3 = 240.
-    // Using 360 inflates note positions, placing beat-2 syllables out of range.
-    // Each of the 6 syllables appears 3 times (once per measure).
+    // v0xC2 6/8 (beatTicks=360): segEncTick must use encTicksPerQuarter = beatTicks*2/3 = 240, else beat-2 syllables
+    // fall out of range. Each of the 6 syllables appears once per measure.
     MasterScore* score = readEncoreScore("lyrics_v0c2_compound_meter.enc");
     ASSERT_NE(score, nullptr);
 
@@ -1402,21 +1254,9 @@ TEST_F(Tst_Text, lyrics_compound_meter_all_syllables_matched)
 
 TEST_F(Tst_Text, lyrics_rest_does_not_shift_note_assignment)
 {
-    // Regression test for two bugs in attachPendingLyrics (emitters-lyrics.cpp):
-    //
-    // Bug 1: REST elements consumed noteTickList entries, shifting all note encTick
-    // assignments. Without fix: REST at tick 0 gets encTick=120 (first NOTE's tick),
-    // NOTE@120 gets encTick=240 (second NOTE's tick), and LYRIC@140 matches the
-    // wrong note.
-    //
-    // Bug 2: Lyric proximity matching used pure absolute distance, leading to
-    // incorrect matches when a lyric tick is closer to a later note than the correct
-    // one. Correct behavior: prefer notes where note_tick <= lyric_tick (lyric
-    // comes after note start).
-    //
-    // Fixture: v0xC2 6/8, 1 measure with REST@0, NOTE@120, NOTE@240, LYRIC@140.
-    // Expected: LYRIC "ma" attached to NOTE@120 (correct note, within threshold).
-    // Before fix: LYRIC would match NOTE@240 or be unmatched.
+    // Regression for two lyric-attachment bugs: (1) RESTs must not consume note-tick entries and shift note encTicks,
+    // and (2) proximity matching must prefer notes where note_tick <= lyric_tick, not pure absolute distance.
+    // Fixture: v0xC2 6/8 with REST@0, NOTE@120, NOTE@240, LYRIC@140; "ma" must attach to NOTE@120.
     MasterScore* score = readEncoreScore("lyrics_rest_does_not_shift_notes.enc");
     ASSERT_NE(score, nullptr);
 
@@ -1434,8 +1274,7 @@ TEST_F(Tst_Text, empty_second_titl_block_preserves_first_block_data)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    // The fixture has TITL1 = {title="Multi TITL First", author="Real Author"};
-    // TITL2 is completely empty. The first block's data must survive.
+    // The first TITL block has data and the second is empty; the first block's data must survive.
     EXPECT_EQ(score->metaTag(u"workTitle"), u"Multi TITL First")
         << "empty second TITL block must not overwrite the title from the first block";
     EXPECT_EQ(score->metaTag(u"composer"), u"Real Author")

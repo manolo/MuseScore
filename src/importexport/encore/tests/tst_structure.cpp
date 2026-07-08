@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Score structure: measure/time/key signatures, page layout and margins, jumps and markers,
+// system and page breaks, pickup measures, format-specific pitch decoding and malformed-input safety.
+
 #include <gtest/gtest.h>
 
 #include <QByteArray>
@@ -226,10 +229,8 @@ TEST_F(Tst_Structure, key_sig_no_invalid_large_values)
     delete score;
 }
 
-// FIX: v0xA6 (MusicTime / Encore 2.x-3.x) stores the written key signature at offset 14 of
-// each 22-byte LINE staff entry, not where v0xC2/C4 keep it; its header staffPerSystem also
-// reads 0, so the generic parse leaves staffData empty and the key was lost (imported as the
-// wrong key / no signature). keyIndex 10 = A major; every staff must import as 3 sharps.
+// v0xA6 keeps the key at the LINE staff entry, not where v0xC2/C4 do; staffPerSystem reads 0 so
+// the generic parse left staffData empty and lost it. See ENCORE_FORMAT.md §LINE staff entry (30 bytes).
 TEST_F(Tst_Structure, key_sig_v0xa6_from_line_entry)
 {
     MasterScore* score = readEncoreScore("structure_v0xa6_key_signature.enc");
@@ -244,12 +245,8 @@ TEST_F(Tst_Structure, key_sig_v0xa6_from_line_entry)
     delete score;
 }
 
-// ===========================================================================
-// BUG: a no-WINI file whose PREC sets a landscape page kept MuseScore's default
-// printable width (sized for portrait), so the extra landscape width became a
-// lopsided right margin (~4" vs ~0.6" elsewhere). The importer must recompute the
-// printable width so the right margin equals the left.
-// ===========================================================================
+// A no-WINI landscape PREC page must recompute the printable width so the right margin equals
+// the left, instead of dumping the extra landscape width into a lopsided right margin.
 TEST_F(Tst_Structure, page_margins_no_wini_landscape_right_matches_left)
 {
     MasterScore* score = readEncoreScore("structure_prec_landscape_no_wini.enc");
@@ -267,10 +264,8 @@ TEST_F(Tst_Structure, page_margins_no_wini_landscape_right_matches_left)
     delete score;
 }
 
-// ===========================================================================
-// FIX: KEYCHANGE tipo=0 (C major modulation) must be emitted; previous guard silently dropped it.
-// ===========================================================================
-
+// A KEYCHANGE to C major (tipo=0) must still emit a key signature; an earlier guard dropped it.
+// See ENCORE_FORMAT.md §KEYCHANGE element.
 TEST_F(Tst_Structure, keychange_to_c_major_emitted)
 {
     MasterScore* score = readEncoreScore("structure_keychange_to_c.enc");
@@ -291,13 +286,12 @@ TEST_F(Tst_Structure, keychange_to_c_major_emitted)
         }
     }
     // Initial key sig (m0 G major) + tipo=0 modulation sig (m1); both must be present.
+    // Initial key sig (m0 G major) + tipo=0 modulation sig (m1); both must be present.
     EXPECT_GE(keySigCount, 2);
     delete score;
 }
 
-// ===========================================================================
-// FEATURE: All ten Encore navigation options (Segno/Coda/ToCoda/Fine + 6 DC/DS variants) survive import.
-// ===========================================================================
+// All ten Encore navigation options (Segno/Coda/ToCoda/Fine plus 6 DC/DS variants) survive import.
 TEST_F(Tst_Structure, all_encore_navigation_options)
 {
     MasterScore* score = readEncoreScore("structure_jump_marks_all.enc");
@@ -331,15 +325,12 @@ TEST_F(Tst_Structure, all_encore_navigation_options)
             }
         }
     }
-    // Segno comes from ORN 0xA2 AND coda byte 0x88; both add a Marker.
+    // Markers come from ORN subtypes and MEAS coda bytes. See ENCORE_FORMAT.md §Ornament subtypes
+    // and §Repeat-mark ladder (low byte of `0x1A`).
     EXPECT_GE(segnoMarkers, 1) << "ORN 0xA2 must produce a Segno Marker";
-    // Coda from ORN 0xA6 + byte 0x89; byte 0x85 produces TOCODA instead.
     EXPECT_GE(codaMarkers, 1) << "ORN 0xA6 must produce a Coda Marker";
-    // "To Coda" comes from ORN 0xA5 AND coda byte 0x85 (CODA1).
     EXPECT_GE(toCodaMarkers, 1) << "ORN 0xA5 must produce a TOCODA Marker";
-    // Fine comes from coda byte 0x86.
     EXPECT_EQ(fineMarkers, 1) << "coda byte 0x86 must produce a FINE Marker";
-    // Every Jump variant must appear at least once.
     const std::set<JumpType> expectedJumps = {
         JumpType::DC, JumpType::DS,
         JumpType::DC_AL_FINE, JumpType::DS_AL_FINE,
@@ -352,9 +343,8 @@ TEST_F(Tst_Structure, all_encore_navigation_options)
     delete score;
 }
 
-// ===========================================================================
-// FIX: Jump marks from MEAS coda byte at offset 0x1A (low byte); To Coda from ORN tipo=0xA5.
-// ===========================================================================
+// Jump marks from the MEAS coda byte and To Coda from an ORN subtype land on the expected
+// measures. See ENCORE_FORMAT.md §Repeat-mark ladder (low byte of `0x1A`).
 TEST_F(Tst_Structure, jump_marks_dc_ds_tocoda)
 {
     MasterScore* score = readEncoreScore("structure_jump_marks.enc");
@@ -377,7 +367,6 @@ TEST_F(Tst_Structure, jump_marks_dc_ds_tocoda)
             }
         }
     }
-    // Marker (TOCODA) lands on m1; Jumps land on m2 and m3.
     ASSERT_EQ(seen.size(), 3u);
     EXPECT_EQ(seen[0].first, 1);
     EXPECT_TRUE(seen[0].second.contains(u"Coda"))
@@ -391,10 +380,8 @@ TEST_F(Tst_Structure, jump_marks_dc_ds_tocoda)
     delete score;
 }
 
-// ===========================================================================
-// FEATURE: Section markers (Segno / Coda) from ORN tipos 0xA2 / 0xA6 and
-// DOTTED end barline (barTypeEnd=0x08).
-// ===========================================================================
+// Section markers (Segno / Coda) from ORN subtypes and a DOTTED end barline. See
+// ENCORE_FORMAT.md §Ornament subtypes and §Barline types.
 TEST_F(Tst_Structure, section_markers_and_dotted_barline)
 {
     MasterScore* score = readEncoreScore("structure_section_markers.enc");
@@ -436,13 +423,10 @@ TEST_F(Tst_Structure, section_markers_and_dotted_barline)
     delete score;
 }
 
-// ===========================================================================
-// FIX: v0xC2 (old Encore format), MIDI pitch stored at byte +13 (tuplet field), not semiTonePitch.
-// ===========================================================================
-
+// v0xC2 stores the MIDI pitch in the tuplet field, not semiTonePitch; the importer swaps it.
+// See ENCORE_FORMAT.md §v0xC2 note (size 22 or 24).
 TEST_F(Tst_Structure, old_format_v0c2_correct_pitches)
 {
-    // v0xC2: MIDI pitch at byte +13 (tuplet-field); needsPitchFix swaps it to semiTonePitch.
     MasterScore* score = readEncoreScore("structure_v0c2_pitches.enc");
     ASSERT_NE(score, nullptr);
 
@@ -474,7 +458,7 @@ TEST_F(Tst_Structure, old_format_v0c2_correct_pitches)
 
 TEST_F(Tst_Structure, old_format_v0c2_triplets_detected)
 {
-    // v0xC2: 6 eighth notes at 80-tick spacing (2/3 of an eighth) → detectImpliedTuplet returns 3:2.
+    // v0xC2 eighths at 80-tick spacing (2/3 of an eighth) imply a 3:2 triplet.
     MasterScore* score = readEncoreScore("structure_v0c2_triplets.enc");
     ASSERT_NE(score, nullptr);
 
@@ -497,13 +481,10 @@ TEST_F(Tst_Structure, old_format_v0c2_triplets_detected)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: v0xA6 (very old format), wrong element offset and pitch encoding
-// ===========================================================================
-
+// v0xA6 element offset and pitch encoding differ from later formats; a wrong offset silently
+// drops every note. See ENCORE_FORMAT.md §v0xA6 note (size 10, on-disk slot 20).
 TEST_F(Tst_Structure, very_old_format_v0xa6_sanity_check)
 {
-    // v0xA6: elemOffset must be 0x1A (not 0x3E); wrong offset drops all notes silently.
     MasterScore* score = readEncoreScore("structure_v0xa6_basic.enc");
     ASSERT_NE(score, nullptr);
     EXPECT_EQ(score->nmeasures(), 2);
@@ -512,9 +493,9 @@ TEST_F(Tst_Structure, very_old_format_v0xa6_sanity_check)
     delete score;
 }
 
+// See ENCORE_FORMAT.md §v0xA6 note (size 10, on-disk slot 20).
 TEST_F(Tst_Structure, very_old_format_v0xa6_pitch_encoding)
 {
-    // v0xA6: MIDI pitch is absolute value at elemStart+11 (not byte +9 with signed offset).
     MasterScore* score = readEncoreScore("structure_v0xa6_basic.enc");
     ASSERT_NE(score, nullptr);
 
@@ -576,13 +557,8 @@ TEST_F(Tst_Structure, intermediate_time_sig_7_8)
     delete score;
 }
 
-// ===========================================================================
-// BUG FIX: 6/8 → 3/4 (and 3/4 → 6/8) time signature changes were silently
-// swallowed because buildInitialSignatures used Fraction::operator== to detect
-// changes, and 6/8 == 3/4 by cross-multiplication (6×4 == 3×8 = 24).
-// Fix: use Fraction::identical() which compares numerator/denominator directly.
-// Fixture: 2 measures 6/8, then 3 measures 3/4, then 2 measures 6/8.
-// ===========================================================================
+// A 6/8 <-> 3/4 change must not be swallowed by an operator== that treats 6/8 and 3/4 as equal
+// (6x4 == 3x8); detection compares numerator/denominator directly via Fraction::identical().
 TEST_F(Tst_Structure, time_sig_change_6_8_to_3_4_and_back)
 {
     MasterScore* score = readEncoreScore("timesig_change_6_8_to_3_4.enc");
@@ -592,7 +568,6 @@ TEST_F(Tst_Structure, time_sig_change_6_8_to_3_4_and_back)
     ASSERT_NE(m0, nullptr);
     EXPECT_TRUE(m0->timesig().identical(Fraction(6, 8))) << "M0 should be 6/8";
 
-    // Measure 2: 6/8 → 3/4. Must have a visible TimeSig element.
     Measure* m2 = measureAt(score, 2);
     ASSERT_NE(m2, nullptr);
     EXPECT_TRUE(m2->timesig().identical(Fraction(3, 4))) << "M2 should be 3/4";
@@ -611,7 +586,6 @@ TEST_F(Tst_Structure, time_sig_change_6_8_to_3_4_and_back)
         EXPECT_TRUE(found) << "TimeSig at M2 must carry 3/4, not be merged silently with 6/8";
     }
 
-    // Measure 5: 3/4 → 6/8. Must have a visible TimeSig element.
     Measure* m5 = measureAt(score, 5);
     ASSERT_NE(m5, nullptr);
     EXPECT_TRUE(m5->timesig().identical(Fraction(6, 8))) << "M5 should be 6/8";
@@ -633,9 +607,8 @@ TEST_F(Tst_Structure, time_sig_change_6_8_to_3_4_and_back)
     delete score;
 }
 
-// Page size from the PREC (DEVMODE) block. dmPaperSize is a direct enum, so it is the primary
-// page-size source for all formats (v0xA6/v0xC2 have no WINI, and many v0xC4 files lack it).
-// Unicode DEVMODE variant (32-WCHAR device name): dmPaperSize=1 (Letter).
+// The PREC (DEVMODE) dmPaperSize enum is the primary page-size source for all formats. Unicode
+// DEVMODE variant (32-WCHAR device name), Letter. See ENCORE_FORMAT.md §PREC block.
 TEST_F(Tst_Structure, page_size_from_prec_letter_unicode)
 {
     MasterScore* score = readEncoreScore("structure_prec_page_letter.enc");
@@ -647,7 +620,7 @@ TEST_F(Tst_Structure, page_size_from_prec_letter_unicode)
     delete score;
 }
 
-// ANSI DEVMODE variant (32-byte device name): dmPaperSize=8 (A3 = 297x420mm).
+// ANSI DEVMODE variant (32-byte device name), A3. See ENCORE_FORMAT.md §PREC block.
 TEST_F(Tst_Structure, page_size_from_prec_ansi_a3)
 {
     MasterScore* score = readEncoreScore("structure_prec_page_a3.enc");
@@ -659,11 +632,9 @@ TEST_F(Tst_Structure, page_size_from_prec_ansi_a3)
     delete score;
 }
 
-// Large WINI margins (A3, screen-pixel format ~84 dpi): top=176/left=209 px ≈ 2.1"/2.5".
-// These must survive import; previously every margin was clamped to a tiny 0.6" maximum, which
-// destroyed legitimate large margins. The px→inch conversion uses an estimated dpi, so the values
-// are approximate (exact only for symmetric margins); the key invariant is that they are NOT
-// clamped away.
+// Large WINI margins (A3, screen-pixel format) must survive import instead of being clamped to a
+// tiny maximum. The px-to-inch conversion uses an estimated dpi, so values are approximate; the
+// invariant is only that they are not clamped away. See ENCORE_FORMAT.md §WINI block.
 TEST_F(Tst_Structure, page_margins_wini_large_not_clamped)
 {
     MasterScore* score = readEncoreScore("structure_wini_large_margins_a3.enc");
@@ -677,12 +648,7 @@ TEST_F(Tst_Structure, page_margins_wini_large_not_clamped)
     delete score;
 }
 
-// ===========================================================================
-// BUG regression: Fraction(2,2)==Fraction(4,4) via cross-multiplication
-// (2x4 == 4x2 = 8), so the 2/2 -> 4/4 change was silently swallowed by the
-// same buildInitialSignatures bug as 6/8 -> 3/4.
-// Fixture: 2 measures 2/2, then 2 measures 4/4, then 2 measures 2/2.
-// ===========================================================================
+// Companion to the 6/8 <-> 3/4 case: 2/2 <-> 4/4 (2x4 == 4x2) must not be swallowed either.
 TEST_F(Tst_Structure, time_sig_change_2_2_to_4_4_and_back)
 {
     MasterScore* score = readEncoreScore("timesig_change_2_2_to_4_4.enc");
@@ -725,10 +691,8 @@ TEST_F(Tst_Structure, time_sig_change_2_2_to_4_4_and_back)
     delete score;
 }
 
-// ===========================================================================
-// FEATURE: LINE block data becomes SystemLocks, each Encore system is locked so the
-// layout engine keeps its measures together regardless of spatium.
-// ===========================================================================
+// LINE block data becomes SystemLocks so the layout engine keeps each Encore system's measures
+// together regardless of spatium. See ENCORE_FORMAT.md §System block (LINE).
 TEST_F(Tst_Structure, system_breaks_from_line_data)
 {
     MasterScore* score = readEncoreScore("structure_system_break.enc");
@@ -736,13 +700,11 @@ TEST_F(Tst_Structure, system_breaks_from_line_data)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << ret.text();
 
-    // Measure 2 is the last measure of the first Encore system → end of a SystemLock.
     Measure* m2 = measureAt(score, 2);
     ASSERT_NE(m2, nullptr);
     EXPECT_TRUE(m2->isEndOfSystemLock())
         << "measure 2 (end of system 0) must be the end of a SystemLock";
 
-    // Measure 0 is the start of the first system → start of a SystemLock.
     Measure* m0 = measureAt(score, 0);
     ASSERT_NE(m0, nullptr);
     EXPECT_TRUE(m0->isStartOfSystemLock())
@@ -751,13 +713,9 @@ TEST_F(Tst_Structure, system_breaks_from_line_data)
     delete score;
 }
 
-// ===========================================================================
-// FIX: SCO5 (big-endian Encore 5) does not surface the per-line measureCount
-// (the byte reads 0), but the line start indices are correct. The importer must
-// derive each system's span from the start deltas so line breaks still apply.
-// Fixture: same 6 measures / 2 systems as structure_system_break.enc but with
-// every LINE measureCount byte zeroed; system 0 must still lock measures 0..2.
-// ===========================================================================
+// SCO5 reads the per-line measureCount as 0, so each system's span must be derived from the line
+// start deltas for system locks to apply. Fixture zeroes every measureCount byte; system 0 must
+// still lock measures 0..2. See ENCORE_FORMAT.md §System block (LINE).
 TEST_F(Tst_Structure, system_breaks_from_line_start_deltas_when_count_zero)
 {
     MasterScore* score = readEncoreScore("structure_system_break_mcount_zero.enc");
@@ -776,15 +734,9 @@ TEST_F(Tst_Structure, system_breaks_from_line_start_deltas_when_count_zero)
     delete score;
 }
 
-// ===========================================================================
-// FIX: page-break detection must use the same start-delta fallback as the
-// system-lock pass. SCO5 (big-endian Encore 5) reports measureCount 0, so the
-// old "lastBlock = firstBlock + measureCount - 1" left lastBlock < firstBlock
-// and silently dropped every page break. The line span must be recovered from
-// the start deltas, the same way system locks already do.
-// Fixture: same 6 measures / 2 systems as structure_page_break.enc but with
-// every LINE measureCount byte zeroed; the page break after system 0 must remain.
-// ===========================================================================
+// Page-break detection must use the same start-delta fallback as system locks: with SCO5
+// measureCount 0, the line span is recovered from start deltas so the page break survives.
+// See ENCORE_FORMAT.md §System block (LINE).
 TEST_F(Tst_Structure, page_break_from_line_start_deltas_when_count_zero)
 {
     MasterScore* score = readEncoreScore("structure_page_break_mcount_zero.enc");
@@ -806,12 +758,8 @@ TEST_F(Tst_Structure, page_break_from_line_start_deltas_when_count_zero)
     delete score;
 }
 
-// ===========================================================================
-// SCO5 (big-endian macOS Encore 5): page size + orientation come from the PREC
-// macOS plist (Letter portrait here); document margins are not stored anywhere
-// importable, so the importer applies a clean, symmetric 0.25" margin (better UX
-// than edge-to-edge 0 or the A4-tuned default, which is asymmetric on Letter).
-// ===========================================================================
+// SCO5 gets page size and orientation from the PREC macOS plist; margins are not stored, so the
+// importer applies a symmetric 0.25" margin. See ENCORE_FORMAT.md §PREC block.
 TEST_F(Tst_Structure, sco5_macos_page_letter_default_margins)
 {
     MasterScore* score = readEncoreScore("structure_sco5_macos.enc");
@@ -829,9 +777,7 @@ TEST_F(Tst_Structure, sco5_macos_page_letter_default_margins)
     delete score;
 }
 
-// ===========================================================================
-// FEATURE: SystemLocks lock each Encore system to exactly enc.lines[i].measureCount measures.
-// ===========================================================================
+// SystemLocks lock each Encore system to exactly enc.lines[i].measureCount measures.
 TEST_F(Tst_Structure, fit_spatium_first_system_measure_count)
 {
     MasterScore* score = readEncoreScore("text_tempo_orn_compound_68.enc");
@@ -888,12 +834,9 @@ TEST_F(Tst_Structure, fit_spatium_multiple_systems_measure_count)
     delete score;
 }
 
-// ===========================================================================
-// WINI block / page margin tests
-// ===========================================================================
+// WINI block page-margin tests. See ENCORE_FORMAT.md §WINI block.
 
-// File with no WINI block must leave MuseScore default margins intact.
-// text_tempo_orn_compound_68.enc has no WINI block.
+// A file with no WINI block keeps MuseScore default margins.
 TEST_F(Tst_Structure, page_margins_no_wini_uses_defaults)
 {
     MasterScore* score = readEncoreScore("text_tempo_orn_compound_68.enc");
@@ -909,8 +852,7 @@ TEST_F(Tst_Structure, page_margins_no_wini_uses_defaults)
     delete score;
 }
 
-// File with standard A4 WINI (top=18, left=18, bEdge=824, rEdge=577).
-// bazo.enc in the test fixtures has exactly this block.
+// Standard A4 WINI: margins and printable width derived from the WINI edges.
 TEST_F(Tst_Structure, page_margins_wini_standard_a4)
 {
     MasterScore* score = readEncoreScore("bazo.enc");
@@ -929,8 +871,7 @@ TEST_F(Tst_Structure, page_margins_wini_standard_a4)
     delete score;
 }
 
-// File with custom left margin (left=7 pts, ~0.097 in).
-// bazo_left_100.enc: top=18 left=7 bEdge=824 rEdge=577.
+// Custom left margin (left=7 pts) survives and drives the printable width.
 TEST_F(Tst_Structure, page_margins_wini_custom_left)
 {
     MasterScore* score = readEncoreScore("bazo_left_100.enc");
@@ -945,9 +886,7 @@ TEST_F(Tst_Structure, page_margins_wini_custom_left)
     delete score;
 }
 
-// Verify bottom margin is correctly derived from bottomEdge.
-// bazo.enc: top=18 left=18 bEdge=824 rEdge=577 on A4 (842 pts high).
-// bottomMargin = (842 - 824) / 72 = 18 / 72 = 0.25"
+// Bottom margin is derived from bottomEdge and page height: (842 - 824) / 72 = 0.25".
 TEST_F(Tst_Structure, page_margins_wini_bottom_margin_derived)
 {
     MasterScore* score = readEncoreScore("bazo.enc");
@@ -961,23 +900,14 @@ TEST_F(Tst_Structure, page_margins_wini_bottom_margin_derived)
     delete score;
 }
 
-// ===========================================================================
-// FIX: WINI screen-pixel format, coordinates in monitor pixels (~84-85 PPI)
-// rather than typographic points (1/72").  Symptom: rightEdge=672 exceeds
-// A4_width_pts=595, causing the old code to clamp the right margin to ~0.03"
-// and the bottom margin to 0 (both wrong).  The fix detects the screen-pixel
-// format (rightEdge > pageWidth_pts), identifies the paper format (A4) via a
-// two-pass QPageSize scan, and computes symmetric margins (~0.33" = 8.4mm).
-// ===========================================================================
+// WINI screen-pixel variant stores coordinates in monitor pixels, not points, so rightEdge can
+// exceed the point-based page width. The importer detects this (rightEdge > pageWidth_pts),
+// recovers the paper format (A4) and computes symmetric margins. See ENCORE_FORMAT.md §WINI block.
 TEST_F(Tst_Structure, page_margins_wini_screen_pixel_a4_detected)
 {
-    // structure_wini_screen_pixel_a4.enc: bazo.enc with WINI patched to
-    // screen-pixel coordinates: top=28, left=28, bEdge=962, rEdge=672.
-    // Expected: A4 page (8.2677" x 11.6929"), all margins ~0.331" (8.4mm).
     MasterScore* score = readEncoreScore("structure_wini_screen_pixel_a4.enc");
     ASSERT_NE(score, nullptr);
 
-    // Page dimensions must be detected as A4.
     const double kA4W = 210.0 / 25.4;   // 8.2677"
     const double kA4H = 297.0 / 25.4;   // 11.6929"
     EXPECT_NEAR(score->style().styleD(Sid::pageWidth),  kA4W, 0.01)
@@ -985,15 +915,12 @@ TEST_F(Tst_Structure, page_margins_wini_screen_pixel_a4_detected)
     EXPECT_NEAR(score->style().styleD(Sid::pageHeight), kA4H, 0.01)
         << "Screen-pixel WINI: page must be detected as A4 height";
 
-    // Margins must be symmetric at ~0.331" = 28 / 84.67 DPI.
-    // (Old code: L=T=0.389", R=0.030", B=0.10", all wrong.)
-    const double kExpectedM = 28.0 / (700.0 / kA4W);   // ≈ 0.331"
+    const double kExpectedM = 28.0 / (700.0 / kA4W);   // ~0.331" = 28 px at the recovered dpi
     EXPECT_NEAR(score->style().styleD(Sid::pageOddLeftMargin),  kExpectedM, 0.005)
         << "Screen-pixel WINI: left margin must be ~0.33\"";
     EXPECT_NEAR(score->style().styleD(Sid::pageEvenLeftMargin), kExpectedM, 0.005);
     EXPECT_NEAR(score->style().styleD(Sid::pageOddTopMargin),   kExpectedM, 0.005)
         << "Screen-pixel WINI: top margin must be ~0.33\"";
-    // Right margin: symmetric (pageWidth - left - printableWidth ≈ kExpectedM).
     const double printW = score->style().styleD(Sid::pagePrintableWidth);
     const double rightM = kA4W - kExpectedM - printW;
     EXPECT_NEAR(rightM, kExpectedM, 0.01)
@@ -1002,10 +929,8 @@ TEST_F(Tst_Structure, page_margins_wini_screen_pixel_a4_detected)
     delete score;
 }
 
-// Pickup (anacrusis) first measure: timeSig[0]=1/4, timeSig[1]=4/4.
-// The importer should produce a shortened first measure (actual ticks=1/4)
-// that displays the nominal 4/4 time signature. The pickup note is at
-// offset 0 within the short measure, and m1 starts right after at tick=1/4.
+// Pickup (anacrusis) first measure: an explicit short timeSig[0] produces a shortened first
+// measure (actual ticks 1/4) that still displays the nominal 4/4, with m1 starting at tick 1/4.
 TEST_F(Tst_Structure, pickup_measure_shortened)
 {
     MasterScore* score = readEncoreScore("structure_pickup_measure.enc");
@@ -1020,7 +945,6 @@ TEST_F(Tst_Structure, pickup_measure_shortened)
     EXPECT_EQ(m0->ticks(), Fraction(1, 4)) << "Pickup m0 must be shortened to the pickup duration";
     EXPECT_EQ(m1->tick(), Fraction(1, 4)) << "m1 must start immediately after the shortened m0";
 
-    // The pickup note must be at offset 0 within the short measure.
     Fraction noteOffset { -1, 1 };
     for (Segment* s = m0->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         EngravingItem* el = s->element(0);
@@ -1034,9 +958,8 @@ TEST_F(Tst_Structure, pickup_measure_shortened)
     delete score;
 }
 
-// Case B (pure cumTick): same timeSig=4/4, 8 32nd notes from tick=0.
-// No gap-snap (notes at exact cumTick positions). cumTick = 8/32 = 1/4.
-// Measure 0 must be shortened to 1/4 based purely on cumTick, no barline needed.
+// Case B pickup (no explicit short timeSig): measure 0 is shortened purely from its content
+// (cumTick 1/4) even though the nominal signature is 4/4.
 TEST_F(Tst_Structure, pickup_caseb_reduces_to_max_content)
 {
     MasterScore* score = readEncoreScore("structure_pickup_caseb_reduces.enc");
@@ -1054,8 +977,7 @@ TEST_F(Tst_Structure, pickup_caseb_reduces_to_max_content)
     delete score;
 }
 
-// Case B: whole note (fv=1) at tick=0 fills the measure completely.
-// cumTick = 1 = measure->ticks() -> NOT less than -> no shortening.
+// Case B guard: content that fills the measure completely (cumTick == ticks) must not shorten it.
 TEST_F(Tst_Structure, pickup_caseb_no_reduce_when_full_content)
 {
     MasterScore* score = readEncoreScore("structure_pickup_caseb_no_reduce_full.enc");
@@ -1069,11 +991,8 @@ TEST_F(Tst_Structure, pickup_caseb_no_reduce_when_full_content)
     delete score;
 }
 
-// Regression: Case A pickup (timeSig[0]=2/4, timeSig[1]=4/4) whose note-loop
-// content is less than the short ts (cumTick=3/8 < ticks=2/4). The Case B
-// shortening guard must fire (timesig=4/4 != ticks=2/4) and leave measure 0
-// at 2/4. Without the guard, Case B would double-shorten to 3/8 and shift all
-// subsequent measures by an extra 1/8.
+// Regression: a Case A pickup (explicit short 2/4) whose content is even shorter must not be
+// double-shortened by Case B; the guard keeps measure 0 at its explicit 2/4.
 TEST_F(Tst_Structure, pickup_casea_guard_prevents_double_shortening)
 {
     MasterScore* score = readEncoreScore("structure_pickup_casea_sparse.enc");
@@ -1091,11 +1010,8 @@ TEST_F(Tst_Structure, pickup_casea_guard_prevents_double_shortening)
     delete score;
 }
 
-// Regression: Case B pickup (4/4 with cumTick=1/4, shortens by delta=3/4) plus a
-// WEDGESTART hairpin spanning from measure 0 into measure 1. Without the maxEndTick
-// fix, the hairpin search boundary would be 3/4 too large (stale absolute tick from
-// before the Case B shift), potentially resolving the endpoint in the wrong measure.
-// Test verifies: (a) at least one hairpin exists, (b) it ends within measure 1.
+// Regression: after a Case B pickup shifts later ticks, a hairpin spanning into measure 1 must
+// use the post-shift search boundary so its endpoint resolves in the right measure.
 TEST_F(Tst_Structure, pickup_caseb_hairpin_maxendtick_not_stale)
 {
     MasterScore* score = readEncoreScore("structure_pickup_caseb_hairpin.enc");
@@ -1123,10 +1039,8 @@ TEST_F(Tst_Structure, pickup_caseb_hairpin_maxendtick_not_stale)
     delete score;
 }
 
-// v0xC2 4/4 with timeSigGlyph=0x63 ('c' = common time "C" symbol in Encore).
-// Regression: the initial TimeSig must have TimeSigType::FOUR_FOUR, not NORMAL.
-// Without the fix the glyph byte was ignored and all v0xC2 4/4 scores displayed
-// numeric "4/4" even when the original had the "C" symbol.
+// v0xC2 4/4 with the common-time glyph must import as TimeSigType::FOUR_FOUR (C symbol), not the
+// numeric NORMAL type. See ENCORE_FORMAT.md §Time-signature glyph.
 TEST_F(Tst_Structure, timesig_v0c2_common_time_glyph_preserved)
 {
     MasterScore* score = readEncoreScore("notes_v0c2_common_time_glyph.enc");
@@ -1152,8 +1066,8 @@ TEST_F(Tst_Structure, timesig_v0c2_common_time_glyph_preserved)
     delete score;
 }
 
-// Same as above but for glyph=0x43 ('C', uppercase ASCII), the variant produced by
-// older Encore versions (e.g. Encore 3.x/4.x files vs. 5.x files with 0x63).
+// As above for the uppercase-C glyph variant produced by older Encore versions.
+// See ENCORE_FORMAT.md §Time-signature glyph.
 TEST_F(Tst_Structure, timesig_v0c2_common_time_glyph_uppercase_preserved)
 {
     MasterScore* score = readEncoreScore("notes_v0c2_common_time_glyph_uc.enc");
@@ -1179,10 +1093,10 @@ TEST_F(Tst_Structure, timesig_v0c2_common_time_glyph_uppercase_preserved)
     delete score;
 }
 
+// A mid-measure CLEF anchors to the following note in the stream, not to its own stored tick.
+// See ENCORE_FORMAT.md §CLEF element.
 TEST_F(Tst_Structure, mid_measure_clef_change_imported)
 {
-    // The CLEF carries tick 180 but the next note in the stream is at tick 240 (beat 2);
-    // the clef must land before that note at Fraction(1,4), never at its own 3/16 tick.
     MasterScore* score = readEncoreScore("structure_clef_change_mid_measure.enc");
     ASSERT_NE(score, nullptr);
 
@@ -1211,6 +1125,8 @@ TEST_F(Tst_Structure, mid_measure_clef_change_imported)
     delete score;
 }
 
+// A trailing (cautionary) CLEF takes effect on the downbeat of the next measure.
+// See ENCORE_FORMAT.md §CLEF element.
 TEST_F(Tst_Structure, trailing_clef_change_moves_to_next_measure)
 {
     MasterScore* score = readEncoreScore("structure_clef_trailing_cautionary.enc");
@@ -1246,15 +1162,11 @@ TEST_F(Tst_Structure, trailing_clef_change_moves_to_next_measure)
     delete score;
 }
 
+// The v0xC2 pitch-swap must only fire when semiTonePitch is empty: for a genuine triplet the
+// tuplet slot holds the ratio, and swapping it into the pitch would lose both. See
+// ENCORE_FORMAT.md §v0xC2 note (size 22 or 24).
 TEST_F(Tst_Structure, old_format_v0c2_triplet_pitch_in_semitone)
 {
-    // Some Encore 4.x files store the MIDI pitch directly in semiTonePitch (+15)
-    // rather than the tuplet slot (+13). For a genuine triplet, +13 holds the real
-    // tuplet ratio (0x32 = 3:2). The pitch-swap heuristic used to fire whenever the
-    // tuplet slot was non-zero, copying the ratio byte (0x32 = 50) into the pitch and
-    // importing every triplet note as MIDI 50 with the ratio lost. The swap must only
-    // happen when semiTonePitch is empty.
-    // Fixture: 2/4 bar, triplet C4/E4/G4 (eighths) then a C5 quarter.
     MasterScore* score = readEncoreScore("structure_v0c2_triplet_pitch_in_semitone.enc");
     ASSERT_NE(score, nullptr);
 
@@ -1289,16 +1201,11 @@ TEST_F(Tst_Structure, old_format_v0c2_triplet_pitch_in_semitone)
     delete score;
 }
 
+// A small stray flag in the v0xC2 semiTonePitch slot is not a pitch: treating any non-zero value
+// there as the pitch imported notes several octaves too low and collapsed chords. The slot counts
+// only when it holds a plausible MIDI value. See ENCORE_FORMAT.md §v0xC2 note (size 22 or 24).
 TEST_F(Tst_Structure, old_format_v0c2_spurious_semitone_flag_uses_pitch_at_13)
 {
-    // v0xC2 sub-variant A: the MIDI pitch lives at +13, with the semiTonePitch slot
-    // (+15) normally empty. Some Encore 3.x/4.x files leave a small stray flag there
-    // (observed 1 or 3) that is NOT a pitch. The old discriminator treated any non-zero
-    // +15 as "pitch is at +15", so these notes imported as MIDI 1 (C#-1), several octaves
-    // too low; a chord whose members all carried the flag collapsed to a single note once
-    // they shared pitch 1. The pitch must be read from +13; +15 is a pitch only when it
-    // holds a plausible MIDI value.
-    // Fixture: 4/4 bar, chord C4/E4/G4 (quarter) at tick 0 with +15 == 1, then C5 with +15 == 3.
     MasterScore* score = readEncoreScore("structure_v0c2_spurious_semitone_flag.enc");
     ASSERT_NE(score, nullptr);
 
@@ -1346,7 +1253,6 @@ TEST_F(Tst_Structure, page_margins_wini_zero_margins)
     MasterScore* score = readEncoreScore("ornaments_fingering_grandstaff.enc");
     ASSERT_NE(score, nullptr);
 
-    // WINI has all-zero margins: all four margins should be 0.
     EXPECT_NEAR(score->style().styleD(Sid::pageOddTopMargin),    0.0, 0.005);
     EXPECT_NEAR(score->style().styleD(Sid::pageEvenTopMargin),   0.0, 0.005);
     EXPECT_NEAR(score->style().styleD(Sid::pageOddLeftMargin),   0.0, 0.005);
@@ -1359,14 +1265,10 @@ TEST_F(Tst_Structure, page_margins_wini_zero_margins)
     delete score;
 }
 
-// ---------------------------------------------------------------------------
-// Malformed-input robustness (crash safety on untrusted .enc files)
-// ---------------------------------------------------------------------------
-// A .enc file is untrusted binary input and must never crash, hang, or read out of bounds.
-// These tests derive corrupt variants from a good fixture at run time and assert the importer
-// returns a bounded result (a valid score or a clean null) rather than crashing or spinning.
-// On a debug build the engraving asserts fire on any bad track / out-of-range access, so
-// "the import ran to completion" is itself the assertion.
+// Malformed-input robustness: a .enc file is untrusted binary and must never crash, hang, or read
+// out of bounds. These tests derive corrupt variants from a good fixture at run time and assert
+// the importer returns a bounded result (a valid score or a clean null). On a debug build the
+// engraving asserts fire on any out-of-range access, so "the import ran to completion" is the check.
 
 static QByteArray readFixtureBytes(const QString& name)
 {
@@ -1451,20 +1353,9 @@ TEST_F(Tst_Structure, malformed_truncated_at_byte_boundaries_does_not_crash)
     setRootDir(ENC_DIR);
 }
 
-// ===========================================================================
-// FIX: chord members recorded with staggered playback ticks but sharing one
-// notated column (note xoffset) must collapse into a single chord.
-//
-// Encore stores a chord's notes with a small per-chord tick "strum" (live-recording
-// drift). A tick-gap chord-grouping threshold splits a chord whose members step by
-// the threshold amount (here 8 ticks between members 2 and 3 of chord 1), producing
-// extra short notes that also break the bar's rhythm. Because every note of a chord
-// shares its notated horizontal column (xoffset), the parser collapses same-column
-// runs onto the anchor tick so they form one chord.
-//
-// Fixture notes_chord_strum_xoffset.enc: 3/4 bar, eight B3 D4 G4 B4 chords
-// (59/62/67/71), durations eighth,16th,16th,eighth,16th,16th,eighth,eighth.
-// ===========================================================================
+// Chord members recorded with staggered playback ticks (live-recording strum) but sharing one
+// notated column must collapse into a single chord, or a tick-gap split would spawn extra short
+// notes and break the bar. See ENCORE_FORMAT.md §Chord column (xoffset).
 TEST_F(Tst_Structure, chord_strum_xoffset_collapses_to_single_chord)
 {
     MasterScore* score = readEncoreScore("notes_chord_strum_xoffset.enc");
@@ -1508,17 +1399,9 @@ TEST_F(Tst_Structure, chord_strum_xoffset_collapses_to_single_chord)
     delete score;
 }
 
-// ===========================================================================
-// FIX (inverse of the chord-column collapse): two notes recorded a few ticks
-// apart but in different notated columns (xoffset) must stay separate events,
-// not be merged into one chord by the near-simultaneous chord-extension rule.
-// This is what keeps tightly played tuplet members (e.g. two triplet positions
-// only 5 ticks apart) as distinct notes so the tuplet stays complete.
-//
-// Fixture notes_diff_column_no_merge.enc: eighth [60] at tick 0 (xoffset 10) and
-// eighth [64] at tick 5 (xoffset 40), then a quarter [67]. The 5-tick gap is
-// inside the chord window but the columns differ, so the eighths must not merge.
-// ===========================================================================
+// Inverse of the chord-column collapse: two notes a few ticks apart but in different notated
+// columns must stay separate events, not merge via the near-simultaneous chord-extension rule.
+// This keeps tightly played tuplet members distinct. See ENCORE_FORMAT.md §Chord column (xoffset).
 TEST_F(Tst_Structure, diff_column_notes_do_not_merge)
 {
     MasterScore* score = readEncoreScore("notes_diff_column_no_merge.enc");
@@ -1547,14 +1430,9 @@ TEST_F(Tst_Structure, diff_column_notes_do_not_merge)
     delete score;
 }
 
-// ===========================================================================
-// FIX (faithful reproduction of the real staff-6 corruption): a 3:2 triplet whose
-// second and third positions were live-played only 5 ticks apart, in different
-// columns, must keep all three members as separate notes. Dropping the column
-// check merges positions 2 and 3 into one two-note chord, leaving a 2-member
-// triplet: this test then fails on the member count (and each member must be a
-// single note). Counting members (not pitches) is what makes the merge visible.
-// ===========================================================================
+// A 3:2 triplet whose positions 2 and 3 were live-played only 5 ticks apart in different columns
+// must keep all three members separate; merging them by dropping the column check leaves a
+// 2-member triplet. Member count (not pitches) is what makes the merge visible.
 TEST_F(Tst_Structure, tuplet_diff_column_keeps_all_members)
 {
     MasterScore* score = readEncoreScore("notes_tuplet_diff_column_keeps_members.enc");
@@ -1574,8 +1452,6 @@ TEST_F(Tst_Structure, tuplet_diff_column_keeps_all_members)
     ASSERT_NE(tuplet, nullptr) << "Expected a tuplet on staff 0";
     EXPECT_EQ(tuplet->ratio(), Fraction(3, 2)) << "Expected a 3:2 triplet";
 
-    // Count note-bearing members. Merging positions 2 and 3 would give 2 members
-    // (one of them a two-note chord [64,67]) instead of the three single notes.
     std::vector<int> memberPitches;
     int noteMembers = 0;
     for (DurationElement* de : tuplet->elements()) {
@@ -1596,10 +1472,8 @@ TEST_F(Tst_Structure, tuplet_diff_column_keeps_all_members)
     delete score;
 }
 
-// Regression: a double barline between two measures is stored by Encore as the SECOND
-// measure's start barline (byte 0x0C = DOUBLEL), not the first measure's end barline.
-// The importer handled only end barlines, so the divider was dropped. It must map a
-// special start barline onto the previous measure's end barline.
+// A double barline between two measures is stored as the second measure's START barline, so it
+// must map onto the previous measure's end barline. See ENCORE_FORMAT.md §Barline types.
 TEST_F(Tst_Structure, v0c4_start_double_barline_maps_to_previous_end)
 {
     MasterScore* score = readEncoreScore("structure_start_double_barline.enc");
@@ -1611,10 +1485,8 @@ TEST_F(Tst_Structure, v0c4_start_double_barline_maps_to_previous_end)
     delete score;
 }
 
-// A voice that carries a real note can also carry a redundant placeholder REST stored at the SAME
-// tick (Encore writes a rest slot for the voice even where the note sits). The non-tuplet rest must
-// be dropped so the note keeps beat 1; with the bug the rest was emitted first and pushed the note
-// off the beat, overflowing the bar. Fixture: 2/4, voice 0 = eighth rest @0 + quarter @0 + quarter.
+// A redundant placeholder REST stored at the same tick as a real note must be dropped so the note
+// keeps its beat instead of being pushed off it and overflowing the bar. See ENCORE_FORMAT.md §Voice field.
 TEST_F(Tst_Structure, coincident_placeholder_rest_dropped_note_keeps_beat)
 {
     MasterScore* score = readEncoreScore("structure_rest_coincident_with_note.enc");

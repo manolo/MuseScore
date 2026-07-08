@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Enumerations for Encore binary field values: format version, clef/staff/element/barline
+// kinds, repeat marks, ornaments, accidentals, grace and text-alignment codes.
+
 #pragma once
 
 #include <QtGlobal>

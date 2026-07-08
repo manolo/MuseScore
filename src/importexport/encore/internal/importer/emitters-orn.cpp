@@ -53,14 +53,13 @@ static void handleDynamicOrnament(BuildCtx& /*ctx*/, MeasEmitCtx& mc,
     int msVoice = ec.msVoice;
     track_idx_t& track = ec.track;
 
-    // Size-16 ORN: only the tipo byte is reliable.
     // yoffset > 0 means the user dragged it onto the staff above; reroute to staffIdx-1.
     if (eo->yoffset > 0 && staffIdx > 0) {
         staffIdx -= 1;
         track = static_cast<track_idx_t>(staffIdx * VOICES + msVoice);
     }
     const DynamicType dt = encOrnType2DynamicType(eo->ornType());
-    // Use enc tick as the base: cumTick for voice=0 may be 0 when notes are in other voices.
+    // Use the enc tick as base: voice-0 cumTick may be 0 when notes live in other voices.
     const Fraction dynBase = measTick + Fraction(static_cast<int>(e->tick), kEncWholeTicks);
     Fraction placeTick = snapStartTickByXoffset(dynBase, encMeas, staffIdx,
                                                 static_cast<int>(eo->xoffset), measTick);
@@ -73,11 +72,9 @@ static void handleDynamicOrnament(BuildCtx& /*ctx*/, MeasEmitCtx& mc,
     if (!seg) {
         seg = measure->getSegment(SegmentType::ChordRest, measTick);
     }
-    // A ChordRest carries at most one dynamic per track. Encore can stack two dynamic ORNs on
-    // the same beat: an identical pair (e.g. two MF ORNs) or a contradictory one where the score
-    // view and a part view each hold a different dynamic (e.g. ff plus fff, differing only in
-    // y-placement). Either way Encore renders one; keep the first emitted and drop any later
-    // dynamic already present on this track in the segment, regardless of type.
+    // A ChordRest carries at most one dynamic per track, but Encore can stack two dynamic ORNs on
+    // one beat (a duplicate pair, or a score-view/part-view pair differing only in placement).
+    // Encore renders one; keep the first emitted and drop any later dynamic on this track/segment.
     bool dupDyn = false;
     for (EngravingItem* ann : seg->annotations()) {
         if (ann && ann->isDynamic() && ann->track() == track) {
@@ -108,7 +105,6 @@ static void handleStaffTextOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
     const Fraction elemTick = ec.elemTick;
     const track_idx_t track = ec.track;
 
-    // Text content lives in enc.textBlock.entries[eo->tind].
     const int textIdx = static_cast<int>(eo->tind);
     if (textIdx < 0
         || textIdx >= static_cast<int>(enc.textBlock.entries.size())) {
@@ -177,36 +173,27 @@ static void handleTempoOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
         if (!ctx.opts.importTempoTextSemantic) {
             return;
         }
-        // Detect beat unit from beatTicks so we can compare units correctly and set BPS/display.
-        // Use nominal timesig so a pickup measure inherits the main sig's classification.
+        // Use nominal timesig so a pickup measure inherits the main sig's beat classification.
         const bool cmpd = isCompoundBeat(encMeas.beatTicks, measure->timesig());
-        // The MEAS header BPM is the authoritative tempo position: applyMeasureBpmMarks places a
-        // TempoText at the measure START (a real ChordRest segment that registers in the tempo map).
-        // The ORN TEMPO is only a visual mark whose stored tick is often off (Encore puts it at the
-        // end of a measure, or a full system before the actual change). Suppress the ORN and let the
-        // header place the tempo whenever a header BPM equals the ORN tempo:
-        //   - same measure (eo->tempo == encMeas.bpm): the ORN is redundant with this measure's
-        //     header, e.g. an initial "♩=230" Encore stores at the end of measure 1 instead of its
-        //     start. Without this, the ORN's end-of-measure segment fails to set the playback tempo
-        //     (stays at the default) and also blocks the header from placing it at the start.
-        //   - a later measure: a misplaced ornament stored before the measure that actually changes.
-        // Keep the ORN only when NO header BPM matches it (a genuine standalone mark).
+        // The MEAS header BPM is the authoritative tempo position (applyMeasureBpmMarks places a
+        // TempoText at the measure start, which registers in the tempo map). The ORN TEMPO is only
+        // a visual mark whose stored tick is often off (end of a measure, or a system early). So
+        // suppress the ORN whenever a header BPM equals it, and keep the ORN only when NO header
+        // BPM matches (a genuine standalone mark).
         if (static_cast<quint16>(eo->tempo) == encMeas.bpm) {
-            return;  // Redundant: this measure's header BPM places it at the measure start
+            return;  // redundant with this measure's header
         }
         {
             for (size_t mi = mc.measIdx + 1; mi < enc.measures.size(); ++mi) {
                 if (enc.measures[mi].bpm == static_cast<quint16>(eo->tempo)) {
-                    return;  // Misplaced ornament: the header BPM at mi will place it
+                    return;  // misplaced: a later measure's header BPM will place it
                 }
             }
-            // Not misplaced: the ORN is the genuine score marking; fall through to use it.
         }
 
-        // Encore anchors a tempo mark to a note's tick but draws the glyph at an xoffset that
-        // may sit to the LEFT of that note, over an earlier downbeat rest. Snap to the chord-rest
-        // whose xoffset matches the drawn position (same logic as dynamics), so the tempo lands on
-        // the rest it visually governs rather than the later note.
+        // Encore anchors the mark to a note's tick but may draw the glyph left of it, over an
+        // earlier downbeat rest. Snap to the chord-rest whose xoffset matches the drawn position
+        // so the tempo lands on the rest it visually governs.
         Fraction placeTick = snapStartTickByXoffset(elemTick, encMeas, ec.staffIdx,
                                                     static_cast<int>(eo->xoffset), measTick);
         Segment* seg = measure->getSegment(SegmentType::ChordRest, placeTick);
@@ -243,11 +230,9 @@ static void handleWedgeStart(BuildCtx& ctx, const MeasEmitCtx& mc,
     const int measIdx = mc.measIdx;
     const EncMeasureElem* e = ec.e;
 
-    // On grand-staff instruments (staffWithin > 0), ec.elemTick is cumTick-based and may be
-    // wrong because the WEDGESTART ORN (always voice=0) uses a different trackKey than the
-    // actual notes (which may be in voice=1+).  Compute the tick directly from the raw Encore
-    // element tick so hairpins in the second half of a grand-staff measure get the right start.
-    // For single-staff instruments (staffWithin == 0) cumTick is correct; use ec.elemTick.
+    // On grand staves (staffWithin > 0) the cumTick-based elemTick is wrong: the WEDGESTART ORN
+    // is always voice=0 but the notes may be voice=1+, a different trackKey. Compute the tick from
+    // the raw Encore element tick instead. Single-staff (staffWithin == 0) cumTick is correct.
     const int wholeTicks2 = (e->staffWithin > 0) ? encWholeNoteTicks(encMeas) : 0;
     const Fraction rawElemTick = (wholeTicks2 > 0)
                                  ? measTick + Fraction(static_cast<int>(e->tick), wholeTicks2).reduced()
@@ -270,11 +255,9 @@ static void handleWedgeStart(BuildCtx& ctx, const MeasEmitCtx& mc,
         = ((eo->speguleco & 0x01) == 0)
           ? HairpinType::CRESC_HAIRPIN
           : HairpinType::DIM_HAIRPIN;
-    // On grand-staff instruments (staffWithin > 0), WEDGESTART ORNs use Encore voice=0 but the
-    // actual notes may be in a different Encore voice (e.g. voice=1).  Find the voice used by
-    // the first note on the same sub-staff so the hairpin ends up on the same MuseScore track
-    // as the notes it spans, otherwise it lands on the measure-rest-only voice 0 and cannot
-    // be positioned at its true start tick.
+    // On grand staves (staffWithin > 0) the WEDGESTART ORN is voice=0 but the notes may be a
+    // different Encore voice. Find the voice of the first note on the same sub-staff so the hairpin
+    // lands on the track it spans, not the measure-rest-only voice 0 (which cannot be positioned).
     track_idx_t resolvedTrack = track;
     int resolvedEncVoice = voice;
     if (e->staffWithin > 0) {
@@ -358,10 +341,9 @@ static void handleTrillOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
                 pt.tick = elemTick;
             }
         } else {
-            // No note sits on the ORN's own tick: the cumTick-based elemTick can overshoot to
-            // a later note (Encore stores the trill slightly past its note). Anchor from the raw
-            // Encore tick and snap to the note it visually sits on, so a "TR" between two notes
-            // lands on the preceding one rather than the following.
+            // No note on the ORN's own tick: elemTick can overshoot to a later note. Anchor from
+            // the raw Encore tick and snap to the note it visually sits on, so a "TR" between two
+            // notes lands on the preceding one.
             const int wt = encWholeNoteTicks(encMeas);
             const Fraction rawTick = measTick
                                      + Fraction(static_cast<int>(e->tick), wt).reduced();
@@ -441,8 +423,7 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
 
     const EncOrnament* eo = static_cast<const EncOrnament*>(e);
 
-    // Helper: register a bowing/articulation ORN in pendingBowings.
-    // The three repeated lines (cm, bowTick, push_back) are identical across 8 cases.
+    // Register a bowing/articulation ORN in pendingBowings.
     auto pushBowing = [&](SymId sid) {
         const bool cm = !noteTicks.count(static_cast<int>(e->tick));
         const Fraction bt = measTick + Fraction(static_cast<int>(e->tick), kEncWholeTicks);
@@ -464,7 +445,7 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
             endIdx = measIdx;
         }
         PendingSlur ps;
-        // Use raw eo->tick (not elemTick): elemTick is cumTick-based and wrong when voice 0 is empty.
+        // Use raw eo->tick: elemTick is cumTick-based and wrong when voice 0 is empty.
         {
             const int wt = encWholeNoteTicks(encMeas);
             ps.startTick = measTick

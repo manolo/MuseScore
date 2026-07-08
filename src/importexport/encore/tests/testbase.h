@@ -20,6 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Shared test fixture for the Encore importer suite: load .enc scores (with or without options) and compare saved output.
+
 #ifndef MU_IEX_ENCORE_TESTBASE_H
 #define MU_IEX_ENCORE_TESTBASE_H
 

@@ -20,6 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Shared importer state: the BuildCtx threaded through every phase, the deferred "pending" element
+// structs drained in the post-pass, and the emit-phase scratch tables.
+
 #ifndef MU_IMPORTEXPORT_ENC_IMPORT_CTX_H
 #define MU_IMPORTEXPORT_ENC_IMPORT_CTX_H
 
@@ -50,11 +53,9 @@
 using namespace mu::engraving;
 
 namespace mu::iex::enc {
-// Build the reverse map from a raw staff byte ((staffWithin<<6)|instrIdx, identical to
-// instrStaffIdx in the LINE block) to its LINE slot index; -1 = no staff with that byte.
-// Needed for multi-instrument files where an earlier instrument has more than one staff
-// (e.g. piano+organ: organ instrIdx=1 but LINE slot 2). Shared by the staff/voice routing
-// in the emitter and the slur resolver.
+// Reverse map from a raw staff byte (instrStaffIdx in the LINE block) to its LINE slot index;
+// -1 = no staff with that byte. Needed when an earlier instrument owns more than one staff, so the
+// raw byte no longer equals the slot index. Shared by the emitter routing and the slur resolver.
 inline void buildLineSlotByRawByte(const EncRoot& enc, std::array<int, 256>& out)
 {
     out.fill(-1);
@@ -67,9 +68,8 @@ inline void buildLineSlotByRawByte(const EncRoot& enc, std::array<int, 256>& out
     }
 }
 
-// LINE staff-data entry for the given running staff index, or nullptr when the file has no
-// LINE block or the index is out of range. Centralizes the "lines non-empty + index in range"
-// guard repeated by the part/staff routing.
+// LINE staff-data entry for the given running staff index, or nullptr when absent/out of range.
+// Centralizes the "lines non-empty + index in range" guard used by the part/staff routing.
 inline const EncLineStaffData* lineStaffDataAt(const EncRoot& enc, int idx)
 {
     if (enc.lines.empty() || idx < 0
@@ -263,17 +263,15 @@ struct BuildCtx
     // Volta being coalesced: equal-bitmask runs collapse into one Volta.
     Volta* activeVolta { nullptr };
     quint8 activeVoltaBits { 0 };
-    // Accumulated bitmask of all volta brackets already emitted in the current repeat block.
-    // Used to suppress endings that were already labelled in an earlier bracket (e.g. "1.-3."
-    // followed by a bitmask of {2,4} → only show "4." for the second bracket, not "2, 4.").
+    // Bitmask of all volta endings already labelled in earlier brackets of the current repeat
+    // block; suppresses re-labelling them (e.g. after "1.-3." a {2,4} bracket shows only "4.").
     quint8 usedVoltaBits { 0 };
 
     // Per-measure / per-run emitter scratch, grouped so builders and resolvers don't touch it:
     // only the emitters (emitMeasures and its helpers) use ctx.emit.*. Lives for the emit phase.
     struct EmitState {
-        // Elements dropped by routeElementStaffVoice because they reference a staff index the
-        // score does not have (mostly orphan data from staves deleted in Encore, not shown there)
-        // or an out-of-range voice. Counted here and reported once, instead of one log line each.
+        // Elements routeElementStaffVoice dropped for referencing a missing staff (mostly orphan
+        // data from staves deleted in Encore) or an out-of-range voice. Counted, reported once.
         // mutable: routeElementStaffVoice takes a const BuildCtx& and otherwise only reads.
         mutable std::map<int, int> droppedByMissingStaff {};   // staff index -> count
         mutable int droppedByBadVoice { 0 };
@@ -300,15 +298,15 @@ struct BuildCtx
         // Encore voices route to the same MuseScore voice.
         std::map<std::pair<int, int>, int> prevRestTick {};
 
-        // Grace chords held detached; attached to the next normal chord. The source EncNote is
-        // kept so articulations/ornaments/fermatas are applied once the grace has a real segment
-        // (a detached grace only sees the dummy segment, where fermatas cannot anchor).
+        // Grace chords held detached, attached to the next normal chord. The source EncNote is kept
+        // so articulations/fermatas are applied once the grace has a real segment (fermatas cannot
+        // anchor to the dummy segment of a detached grace).
         std::map<std::pair<int, int>, std::vector<PendingGrace> > pendingGraces {};
         // Ticks borrowed by grace notes; suppresses spurious gap-snap rests after a grace group.
         std::map<std::pair<int, int>, int> graceStolenTicks {};
-        // The most recent grace chord created for a track and the enc tick it sits at. Encore stores
-        // each chord member as its own note at the same tick; a same-tick grace member merges into
-        // this chord instead of spawning a separate grace. Covers both before- and after-graces.
+        // Most recent grace chord per track and its enc tick. Encore stores each chord member as a
+        // note at the same tick, so a same-tick grace member merges here instead of spawning a new
+        // grace. Covers both before- and after-graces.
         std::map<std::pair<int, int>, mu::engraving::Chord*> lastGraceChord {};
         std::map<std::pair<int, int>, int> lastGraceTick {};
 

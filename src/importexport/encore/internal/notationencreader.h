@@ -19,6 +19,9 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
+// INotationReader for .enc files: adapts the reader interface to the Encore importer.
+
 #ifndef MU_IMPORTEXPORT_NOTATIONENCOREREADER_H
 #define MU_IMPORTEXPORT_NOTATIONENCOREREADER_H
 

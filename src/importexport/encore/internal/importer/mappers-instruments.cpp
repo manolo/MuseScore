@@ -97,9 +97,8 @@ static constexpr int kScoreShortExact    = 1;  // shortName == needle
 static constexpr int kScoreMidiMatch     = 6;  // MIDI program matches
 static constexpr int kScoreCommonGenre   = 1;  // "common" genre tag
 
-// Find best non-drumset template by name+MIDI score (trackName exact +4, contain +2; MIDI +6; "common" +1).
-// With encKeySemitones filter, prefers transposition-compatible match; falls back to best name+MIDI
-// match when no compatible match exists (e.g. encKey=0 and no C-pitched variant for this MIDI program).
+// Find best non-drumset template by name+MIDI score (weights above). With the encKeySemitones filter,
+// prefers a transposition-compatible match; falls back to best name+MIDI match when none is compatible.
 const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, int encMidiProgram,
                                                        int encKeySemitones, bool* outExactName,
                                                        bool* outUniqueName)
@@ -114,7 +113,6 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
         return nullptr;
     }
 
-    // Names < 4 chars (e.g. SATB labels "S","A","T","B") match too broadly; skip.
     if (encName.trimmed().size() < static_cast<qsizetype>(kMinInstrNameLen)) {
         return nullptr;
     }
@@ -128,10 +126,8 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
             needles << n;
         }
     };
-    // Add a needle plus its singular stem(s). Romance plurals add "s" (vowel + s:
-    // "bandurrias" -> "bandurria") or "es" (consonant + es: "laudes" -> "laud"); we add both
-    // candidate stems and let template matching pick the one that exists. Language-agnostic,
-    // no per-instrument data: a stem that matches no template is simply never scored.
+    // Add a needle plus its Romance singular stems (-s and -es); template matching picks the one
+    // that exists, so a stem matching no template is simply never scored. Language-agnostic.
     auto addNeedleWithStems = [&](const QString& s) {
         addNeedle(s);
         const QString n = normalizeForCompare(s);
@@ -236,15 +232,11 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
             }
         }
     }
-    // Last resort: when neither exact nor substring matched any template, try an edit-distance
-    // (Levenshtein) match for spelling typos and close inflections (e.g. "Clarynet" -> "Clarinet",
-    // "Guitarra" -> "Guitar"). Only sufficiently long words count (>= 75% similar, <= 2 edits,
-    // both words >= 5 chars). This catches typos and near roots but NOT distant cross-language
-    // roots (e.g. "Gitarre"/"Chitarra" are too far from "Guitar"), which would need a synonym table.
-    // A fuzzy hit to a single close template (e.g. "acordeon" -> only "accordion") is as
-    // distinctive as a unique substring match, so it is reported as unique below and the MIDI
-    // program will not override it. A fuzzy hit shared by several near templates (e.g. "corneta"
-    // near cornet/cornett/eb-cornet) stays non-unique and still defers to MIDI.
+    // Last resort when neither exact nor substring matched: an edit-distance (Levenshtein) match
+    // for typos and close inflections (>= 75% similar, <= 2 edits, both words >= 5 chars). Catches
+    // near roots but not distant cross-language roots. A fuzzy hit unique to one template is as
+    // distinctive as a unique substring (reported unique below so MIDI won't override); a shared
+    // fuzzy hit stays non-unique and defers to MIDI.
     bool fuzzyUnique = false;
     if (!best) {
         static const QRegularExpression fuzzyWordSplit(QStringLiteral("[^\\p{L}\\p{N}]+"));
@@ -305,17 +297,14 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
 
     const InstrumentTemplate* result = useCompatible ? bestCompatible : best;
 
-    // A fuzzy match that was the only template above the similarity threshold is as
-    // distinctive as a unique substring match (the fuzzy path only runs when no exact/contains
-    // match exists, so result == best here).
+    // A fuzzy match unique above the similarity threshold is as distinctive as a unique substring.
     if (outUniqueName && fuzzyUnique && result == best) {
         *outUniqueName = true;
     }
 
-    // A contains-only name match is "weak" in general, but a needle that no other template's
-    // name contains (e.g. "dulzaina" -> only "Castilian Dulzaina") identifies the instrument as
-    // confidently as an exact match. Report that so callers do not let the MIDI program override
-    // it. Ambiguous needles ("bajo" hits many templates) stay weak and still defer to MIDI.
+    // A contains-only match is weak in general, but a needle matched by exactly one template is
+    // as confident as an exact match; report it so callers do not let MIDI override it. Ambiguous
+    // needles that hit many templates stay weak and still defer to MIDI.
     if (outUniqueName && result) {
         auto needleMatches = [](const QString& needle, const InstrumentTemplate* it) {
             const QString nt = normalizeForCompare(it->trackName.toQString());
@@ -505,11 +494,8 @@ const InstrumentTemplate* findTemplateByMidiFamily(int encMidiProgram0indexed)
     if (encMidiProgram0indexed < 0) {
         return nullptr;
     }
-    // General MIDI groups its 128 programs into 16 families of 8 (Piano, Chromatic
-    // Percussion, Organ, Guitar, Bass, Strings, Ensemble, Brass, Reed, Pipe, two Synth
-    // Lead/Pad ranges, Effects, Ethnic, Percussive, Sound Effects). When no template has the
-    // exact program as its primary sound (e.g. Pizzicato/Tremolo Strings, Muted Trumpet,
-    // Synth Bass, Voice Oohs), fall back to the closest template within the same family so the
+    // General MIDI groups its 128 programs into 16 families of 8. When no template has the exact
+    // program as its primary sound, fall back to the nearest template within the same family so the
     // part keeps its instrument category instead of collapsing to Grand Piano.
     const int family = encMidiProgram0indexed / 8;
     const int familyFirst = family * 8;
