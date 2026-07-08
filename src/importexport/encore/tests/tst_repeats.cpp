@@ -170,7 +170,7 @@ TEST_F(Tst_Repeats, v0c4_volta_repeat_playcount_from_endings)
 
     EXPECT_EQ(endRepeat->repeatCount(), 4)
         << "end-repeat barline must play 4 times (highest ending is '4.'); the default "
-           "of 2 stops before the 4th ending (got " << endRepeat->repeatCount() << ")";
+        "of 2 stops before the 4th ending (got " << endRepeat->repeatCount() << ")";
 
     const int repeatStartTick = endRepeat->tick().ticks() - endRepeat->ticks().ticks();
     const int fourthEndingTick = fourthEnding->tick().ticks();
@@ -226,7 +226,7 @@ TEST_F(Tst_Repeats, v0c4_volta_repeat_skips_first_ending_on_replay)
     }
     EXPECT_EQ(firstEndingPlays, 1)
         << "1st ending must play once and be skipped on the repeat; a stale cached "
-           "repeat list replays it on every pass (got " << firstEndingPlays << " plays)";
+        "repeat list replays it on every pass (got " << firstEndingPlays << " plays)";
     delete score;
 }
 

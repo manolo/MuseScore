@@ -918,7 +918,7 @@ TEST_F(Tst_Options, template_brackets_cleared_no_spurious_brace)
     for (staff_idx_t si = 0; si < score->nstaves(); ++si) {
         Staff* st = score->staff(si);
         ASSERT_NE(st, nullptr);
-        const size_t span = st->bracketSpan(0);
+        const size_t span = score->bracketSpan(si, 0);
         if (span > 1) {
             EXPECT_LE(si + span, score->nstaves())
                 << "Bracket on staff " << si << " spans " << span
@@ -1137,5 +1137,3 @@ TEST_F(Tst_Options, overfull_note_recut_to_tied_chain)
         delete score;
     }
 }
-
-

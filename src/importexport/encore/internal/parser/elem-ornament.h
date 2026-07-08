@@ -28,7 +28,6 @@
 #include "elem-note.h"
 
 namespace mu::iex::enc {
-
 struct EncOrnament : EncMeasureElem {
     // Field names follow the Encore binary format notation used throughout the spec
     quint8 tipo      { 0 };
@@ -55,5 +54,4 @@ struct EncOrnament : EncMeasureElem {
 
     bool read(QDataStream& ds) override;
 };
-
 } // namespace mu::iex::enc

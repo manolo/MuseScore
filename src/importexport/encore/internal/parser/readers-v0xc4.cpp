@@ -31,7 +31,6 @@
 #include "elem.h"
 
 namespace mu::iex::enc {
-
 // Encore 5.x (v0xC4) format reader.
 // All defaults inherited from EncFormatReader_V0xC4Base are correct for v0xC4.
 // The only v0xC4-specific post-processing is zeroing articulation bytes when
@@ -73,5 +72,4 @@ std::unique_ptr<EncFormatReader> makeFormatReader_SCO5()
 {
     return std::make_unique<EncFormatReader_SCO5>();
 }
-
 } // namespace mu::iex::enc

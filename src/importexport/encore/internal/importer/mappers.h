@@ -88,8 +88,8 @@ constexpr int ENC_KEY_NO_FILTER = 0x7FFFFFFF;
 // "distinctive" needle, i.e. a word no other template's name contains (e.g. "Dulzaina" hits only
 // "Castilian Dulzaina"). Such a contains-match is as trustworthy as an exact match.
 const mu::engraving::InstrumentTemplate* findEncoreInstrumentTemplate(
-    const QString& encName, int encMidiProgram = -1, int encKeySemitones = ENC_KEY_NO_FILTER,
-    bool* outExactName = nullptr, bool* outUniqueName = nullptr);
+    const QString& encName, int encMidiProgram = -1, int encKeySemitones = ENC_KEY_NO_FILTER, bool* outExactName = nullptr,
+    bool* outUniqueName = nullptr);
 
 // Same as findEncoreInstrumentTemplate but restricted to useDrumset templates.
 const mu::engraving::InstrumentTemplate* findDrumsetTemplate(const QString& encName);
