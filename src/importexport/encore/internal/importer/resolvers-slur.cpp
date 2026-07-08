@@ -438,7 +438,7 @@ void resolveSlurs(BuildCtx& ctx)
     bool v0c2SlurCountUnreliable = false;
     if (enc.fmt->slurXoffset2Stale()) {
         const int measCount = static_cast<int>(ctx.measuresByIdx.size());
-        std::map<int, std::set<int>> startMeasuresByCount;   // alMezuro value -> distinct start measures
+        std::map<int, std::set<int> > startMeasuresByCount;   // alMezuro value -> distinct start measures
         for (const PendingSlur& ps : ctx.pendingSlurs) {
             if (!ps.alMezuroValid || ps.alMezuro <= 0) {
                 continue;

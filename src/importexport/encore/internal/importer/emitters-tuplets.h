@@ -86,9 +86,8 @@ bool fitsTDuration(const mu::engraving::Fraction& f);
 //   uniform-fill detection (e.g. 15 equal notes → [15:8] instead of the tup-byte ratio [9:5]).
 std::set<const EncMeasureElem*> computeImpliedTupletMembers(
     const MeasureElemRefVec& sortedElems, const EncMeasure& encMeas, int totalStaves,
-    std::set<const EncMeasureElem*>* partialEndGroup = nullptr,
-    std::vector<NestedTupletInfo>* nestedInfos = nullptr,
-    std::map<const EncMeasureElem*, std::pair<int,int>>* overrideRatios = nullptr);
+    std::set<const EncMeasureElem*>* partialEndGroup = nullptr, std::vector<NestedTupletInfo>* nestedInfos = nullptr,
+    std::map<const EncMeasureElem*, std::pair<int, int> >* overrideRatios = nullptr);
 } // namespace mu::iex::enc
 
 #endif // MU_IMPORTEXPORT_ENC_IMPORT_TUPLETS_H

@@ -61,7 +61,6 @@ static const QString ENC_DIR(QString(iex_encore_tests_DATA_ROOT) + "/data/");
 
 using namespace mu::engraving;
 
-
 static Measure* measureAt(MasterScore* score, int n)
 {
     int idx = 0;
@@ -469,7 +468,6 @@ TEST_F(Tst_NotesTies, sf_tiestart_not_filtered_by_rdur)
     }
     delete score;
 }
-
 
 #ifndef ENC_SANITY_TEST_TIES
 #define ENC_SANITY_TEST_TIES(testName, fileName) \

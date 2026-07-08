@@ -28,7 +28,6 @@
 #include <QtGlobal>
 
 namespace mu::iex::enc {
-
 // Encore's internal tick resolution: 960 ticks per whole note (= 240 per quarter).
 // This is fixed for all format versions and all time signatures.
 inline constexpr int kEncWholeTicks = 960;
