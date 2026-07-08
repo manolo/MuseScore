@@ -59,7 +59,6 @@ static const QString ENC_DIR(QString(iex_encore_tests_DATA_ROOT) + "/data/");
 
 using namespace mu::engraving;
 
-
 static Measure* measureAt(MasterScore* score, int n)
 {
     int idx = 0;
@@ -471,4 +470,3 @@ TEST_F(Tst_NotesTies, tie_direction_04_forward_creates_tie)
     EXPECT_EQ(tieCount, 1) << "expected one forward tie from the +5=0x04 (arcX1<arcX2) TIE element";
     delete score;
 }
-

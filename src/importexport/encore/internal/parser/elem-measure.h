@@ -31,7 +31,6 @@
 #include "elem-enums.h"  // EncBarlineType, EncRepeatType
 
 namespace mu::iex::enc {
-
 struct EncFormatReader;   // defined in reader.h
 
 struct EncMeasure {
@@ -65,5 +64,4 @@ struct EncMeasure {
     // Snap a note whose MIDI tick drifted back to the tick of its xoffset column.
     void reconcileStaleNoteTicksByColumn();
 };
-
 } // namespace mu::iex::enc

@@ -29,12 +29,10 @@
 #include "readers.h"
 
 namespace mu::iex::enc {
-
 // SCO5 is the macOS Encore 5 variant: same binary format as v0xC4 (SCOW) but with no importable
 // document margins.
 std::unique_ptr<EncFormatReader> makeFormatReader_V0xC4();
 std::unique_ptr<EncFormatReader> makeFormatReader_SCO5();
-
 } // namespace mu::iex::enc
 
 #endif // MU_IMPORTEXPORT_ENC_PARSER_READER_V0XC4_H

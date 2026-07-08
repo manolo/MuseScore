@@ -590,9 +590,12 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_text_block_entry_text_at_offset_0)
     auto u16 = [&](int v) { buf.append(char(v & 0xff)); buf.append(char((v >> 8) & 0xff)); };
     u16(0);              // sync
     u16(1);              // count = 1 entry
-    u16(0); u16(0);      // contentSize (4 bytes, unused)
+    u16(0);
+    u16(0);              // contentSize (4 bytes, unused)
     u16(10);             // entrySize = 10
-    buf.append("Moderato"); buf.append(char(0)); buf.append(char(0));   // text + NUL + pad = 10 bytes
+    buf.append("Moderato");
+    buf.append(char(0));
+    buf.append(char(0));                                                // text + NUL + pad = 10 bytes
 
     QDataStream ds(buf);
     ds.setByteOrder(QDataStream::LittleEndian);

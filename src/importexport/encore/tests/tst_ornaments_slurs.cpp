@@ -179,7 +179,7 @@ TEST_F(Tst_OrnamentsSlurs, multiinstr_slur_endpoint_on_second_note_not_last_chor
     ASSERT_NE(score, nullptr);
     EXPECT_EQ(score->nstaves(), 4);
 
-    std::map<int, int> expectedEndPitch = { {0, 64}, {1, 52}, {2, 71}, {3, 59} };
+    std::map<int, int> expectedEndPitch = { { 0, 64 }, { 1, 52 }, { 2, 71 }, { 3, 59 } };
     std::map<int, bool> staffSeen;
 
     for (auto& [tick, sp] : score->spannerMap().map()) {
@@ -276,7 +276,7 @@ TEST_F(Tst_OrnamentsSlurs, v0xc2_multiinstr_slur_endpoint_on_note2_not_decoy)
     ASSERT_NE(score, nullptr);
     EXPECT_EQ(score->nstaves(), 4);
 
-    const std::map<int, int> expectedPitch = { {0, 60}, {1, 52}, {2, 71}, {3, 59} };
+    const std::map<int, int> expectedPitch = { { 0, 60 }, { 1, 52 }, { 2, 71 }, { 3, 59 } };
     std::map<int, bool> staffSeen;
 
     for (auto& [tick, sp] : score->spannerMap().map()) {
@@ -664,7 +664,7 @@ TEST_F(Tst_OrnamentsSlurs, v0c2_unreliable_slur_count_stays_in_measure)
     EXPECT_EQ(total, 2) << "both slurs must import";
     EXPECT_EQ(crossMeasure, 0)
         << "a plausible-looking count must not extend a slur past its bar when the file's "
-           "+16 field is unreliable";
+        "+16 field is unreliable";
     delete score;
 }
 
@@ -693,6 +693,6 @@ TEST_F(Tst_OrnamentsSlurs, v0c2_constant_slur_count_stays_in_measure)
     EXPECT_EQ(total, 2) << "both slurs must import";
     EXPECT_EQ(crossMeasure, 0)
         << "a constant +16 value repeated across start measures must not extend the slurs "
-           "into an 11-measure phantom span";
+        "into an 11-measure phantom span";
     delete score;
 }

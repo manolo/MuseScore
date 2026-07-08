@@ -515,7 +515,7 @@ TEST_F(Tst_Instruments, tk_empty_name_is_authoritative_not_recovered)
         << "File declares 2 instruments; both must appear as parts";
     EXPECT_EQ(score->parts()[1]->longName(), String(u"Part 2"))
         << "An empty name on a real TK block is authoritative; instrument 1 "
-           "must fall back to 'Part 2', not recover garbage from the formula offset";
+        "must fall back to 'Part 2', not recover garbage from the formula offset";
     delete score;
 }
 

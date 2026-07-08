@@ -135,7 +135,11 @@ static void recutCrossingCR(Measure* measure, track_idx_t tr, ChordRest* cr, con
     const bool isChord = cr->isChord();
 
     // Snapshot the chord's pitches/spellings so the tied chain reproduces them.
-    struct NoteSpec { int pitch; int tpc1; int tpc2; };
+    struct NoteSpec {
+        int pitch;
+        int tpc1;
+        int tpc2;
+    };
     std::vector<NoteSpec> notes;
     if (isChord) {
         for (Note* n : toChord(cr)->notes()) {
