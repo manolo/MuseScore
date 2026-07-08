@@ -217,6 +217,34 @@ static void processSegmentOverrides(
     }
 }
 
+// Sandwich heuristic: a note whose tup byte is missing/mismatched still belongs to the current
+// bracket when the NEXT note matches the ratio, the orphan's face value equals baseLen, and it sits
+// at the expected advance tick after the previous member (v0xC4 live recording occasionally drops
+// the byte). i must be inside an open group (faceSum > 0) with a valid previous and next chord.
+static bool isSandwichOrphan(
+    const std::vector<std::vector<const EncMeasureElem*> >& chords, int i, int n,
+    int actualN, int normalN, Fraction baseLen, Fraction faceSum)
+{
+    if (!(faceSum > Fraction(0, 1) && i + 1 < n
+          && !chords[i].empty() && !chords[i - 1].empty())) {
+        return false;
+    }
+    int a3 = 0, n3 = 0;
+    getExplicit(chords[i + 1], a3, n3);
+    const Fraction fvOrphan = getFaceValue(chords[i]);
+    if (a3 != actualN || n3 != normalN || fvOrphan != baseLen) {
+        return false;
+    }
+    // Orphan must land at the expected advance tick after the previous member.
+    const int advNum = baseLen.numerator() * normalN;
+    const int advDen = baseLen.denominator() * actualN;
+    const int advTicks = (advNum * kEncWholeTicks + advDen / 2) / advDen;
+    const int tol = std::max(4, advTicks / 4);
+    const int lastTick   = static_cast<int>(chords[i - 1][0]->tick);
+    const int orphanTick = static_cast<int>(chords[i][0]->tick);
+    return std::abs(orphanTick - lastTick - advTicks) <= tol;
+}
+
 // Implied (v0xC2): require exactly actualN consecutive matching groups.
 static void processImpliedTupletGroup(
     int& i, int actualN, int normalN,
@@ -443,31 +471,10 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     int a2 = 0, n2 = 0;
                     getExplicit(chords[i], a2, n2);
                     if (a2 != actualN || n2 != normalN) {
-                        // Sandwich heuristic: include a note with a missing tup byte when bracketed
-                        // by matching ratios and at the expected advance tick (v0xC4 live recording
-                        // occasionally omits the byte).
-                        bool includeOrphan = false;
-                        if (faceSum > Fraction(0, 1) && i + 1 < n
-                            && !chords[i].empty() && !chords[i - 1].empty()) {
-                            int a3 = 0, n3 = 0;
-                            getExplicit(chords[i + 1], a3, n3);
-                            const Fraction fvOrphan = getFaceValue(chords[i]);
-                            if (a3 == actualN && n3 == normalN && fvOrphan == baseLen) {
-                                // Check that the orphan is at the expected advance tick.
-                                const int advNum = baseLen.numerator() * normalN;
-                                const int advDen = baseLen.denominator() * actualN;
-                                const int advTicks = (advNum * kEncWholeTicks + advDen / 2) / advDen;
-                                const int tol = std::max(4, advTicks / 4);
-                                const int lastTick   = static_cast<int>(chords[i - 1][0]->tick);
-                                const int orphanTick = static_cast<int>(chords[i][0]->tick);
-                                if (std::abs(orphanTick - lastTick - advTicks) <= tol) {
-                                    includeOrphan = true;
-                                    a2 = actualN;
-                                    n2 = normalN;
-                                }
-                            }
-                        }
-                        if (!includeOrphan) {
+                        if (isSandwichOrphan(chords, i, n, actualN, normalN, baseLen, faceSum)) {
+                            a2 = actualN;
+                            n2 = normalN;
+                        } else {
                             break;
                         }
                     }
