@@ -25,6 +25,9 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cctype>
+
 #include <QByteArray>
 #include <QFile>
 #include <QTemporaryDir>
@@ -1346,6 +1349,109 @@ TEST_F(Tst_Structure, malformed_truncated_at_byte_boundaries_does_not_crash)
         QFile f(tmp.path() + "/" + name);
         ASSERT_TRUE(f.open(QIODevice::WriteOnly));
         f.write(cut);
+        f.close();
+        delete readEncoreScore(name);
+    }
+
+    setRootDir(ENC_DIR);
+}
+
+// A grand-staff WEDGESTART on the bass sub-staff, paired with a note whose voice nibble is far
+// above VOICES, made the wedge resolver derive an out-of-range hairpin track. Before the validTrack
+// guard the Hairpin was created at a track beyond ntracks() and crashed at layout. The import must
+// drop that hairpin, produce no out-of-range spanner, and lay out cleanly.
+TEST_F(Tst_Structure, grandstaff_wedge_out_of_range_voice_does_not_crash)
+{
+    MasterScore* score = readEncoreScore("structure_grandstaff_wedge_out_of_range_voice.enc");
+    ASSERT_NE(score, nullptr);
+
+    const size_t ntracks = score->ntracks();
+    for (const auto& pair : score->spanner()) {
+        const Spanner* sp = pair.second;
+        ASSERT_NE(sp, nullptr);
+        EXPECT_LT(sp->track(), ntracks) << "spanner track out of range";
+        EXPECT_LT(sp->track2(), ntracks) << "spanner track2 out of range";
+    }
+
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "out-of-range-wedge score should pass sanityCheck: " << ret.text();
+}
+
+// Hostile but structurally complete fixtures: a zero tuplet nibble (zero-term ratio), an out-of-range
+// staff index, an out-of-range voice nibble, and a zero-size element (advance-by-one guard). Each must
+// import without crashing and produce a score that passes sanityCheck (garbage is dropped, not emitted).
+TEST_F(Tst_Structure, hostile_fixtures_import_and_pass_sanity_check)
+{
+    static const char* kHostileFixtures[] = {
+        "structure_grandstaff_wedge_out_of_range_voice.enc",
+        "structure_hostile_zero_tuplet_nibble.enc",
+        "structure_hostile_out_of_range_staff.enc",
+        "structure_hostile_out_of_range_voice.enc",
+        "structure_hostile_zero_size_element.enc",
+    };
+    for (const char* name : kHostileFixtures) {
+        MasterScore* score = readEncoreScore(name);
+        ASSERT_NE(score, nullptr) << "hostile fixture should import to a bounded score: " << name;
+        muse::Ret ret = score->sanityCheck();
+        EXPECT_TRUE(ret) << name << " should pass sanityCheck: " << ret.text();
+        delete score;
+    }
+}
+
+TEST_F(Tst_Structure, malformed_truncated_at_block_boundaries_does_not_crash)
+{
+    // Cut a known-good file a few bytes past each 4-char block magic (SCOW/TK00/PAGE/LINE/MEAS/PREC/
+    // TITL/TEXT/WINI/...), so a truncation lands inside every block type's header or size field. Each
+    // prefix must import (null or bounded score) without crashing.
+    const QByteArray good = readFixtureBytes("bando.enc");
+    ASSERT_GT(good.size(), 0);
+
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    setRootDir(tmp.path());
+
+    int caseIdx = 0;
+    for (int i = 0; i + 4 <= good.size(); ++i) {
+        const char c0 = good[i], c1 = good[i + 1], c2 = good[i + 2], c3 = good[i + 3];
+        const bool looksLikeMagic = std::isupper(static_cast<unsigned char>(c0))
+                                    && (std::isupper(static_cast<unsigned char>(c1)) || std::isdigit(static_cast<unsigned char>(c1)))
+                                    && (std::isupper(static_cast<unsigned char>(c2)) || std::isdigit(static_cast<unsigned char>(c2)))
+                                    && (std::isupper(static_cast<unsigned char>(c3)) || std::isdigit(static_cast<unsigned char>(c3)));
+        if (!looksLikeMagic) {
+            continue;
+        }
+        // Truncate a few bytes into the block: inside the size field (magic + 0..8 bytes).
+        for (int extra : { 2, 6 }) {
+            const int len = std::min(i + 4 + extra, static_cast<int>(good.size()));
+            const QString name = QString("trunc_block_%1.enc").arg(caseIdx++);
+            QFile f(tmp.path() + "/" + name);
+            ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+            f.write(good.left(len));
+            f.close();
+            delete readEncoreScore(name);
+        }
+    }
+
+    setRootDir(ENC_DIR);
+}
+
+TEST_F(Tst_Structure, malformed_v0xa6_truncation_does_not_crash)
+{
+    // v0xA6 (Encore 2.x) uses fixed-offset absolute seeks; a prefix cut must exercise those bounds
+    // checks. Every truncation must import (null or bounded score) without crashing.
+    const QByteArray good = readFixtureBytes("structure_v0xa6_basic.enc");
+    ASSERT_GT(good.size(), 0);
+
+    QTemporaryDir tmp;
+    ASSERT_TRUE(tmp.isValid());
+    setRootDir(tmp.path());
+
+    // Dense in the header/absolute-seek region (first 512 bytes), coarse thereafter to keep runtime low.
+    for (int len = 0; len <= good.size(); len += (len < 512 ? 8 : 256)) {
+        const QString name = QString("trunc_a6_%1.enc").arg(len);
+        QFile f(tmp.path() + "/" + name);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+        f.write(good.left(len));
         f.close();
         delete readEncoreScore(name);
     }

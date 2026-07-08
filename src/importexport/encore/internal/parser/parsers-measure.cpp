@@ -87,7 +87,7 @@ static std::unique_ptr<EncMeasureElem> createMeasureElement(
 // mid-measure clef change is not stretched to fill the whole measure.
 void computeElementDurations(
     std::vector<EncMeasureElem*>& elems,
-    qint16 durTicks,
+    int durTicks,
     bool hasGraceTimeBorrowing,
     const std::vector<qint16>& boundaryTicks)
 {

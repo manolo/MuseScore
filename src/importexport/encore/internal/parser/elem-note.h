@@ -82,10 +82,13 @@ struct EncNote : EncMeasureElem {
     quint8 tuplet          { 0 };
     quint8 dotControl      { 0 };
     quint8 semiTonePitch   { 0 };
+    // Parsed for format completeness and as a read-order cursor, not consumed by any emitter: Encore's
+    // playback (as-performed) duration; the importer takes rhythm from faceValue. Removing it shifts
+    // every subsequent field read in EncNote::read, so keep it (or an equivalent byte skip).
     quint16 playbackDurTicks{ 0 };
-    // Parsed for format completeness; not consumed by any emitter. velocity is Encore's per-note
-    // MIDI velocity and alterationGlyph its explicit-accidental glyph selector; MuseScore derives
-    // both from the score model (dynamics / key + pitch) instead.
+    // Parsed for format completeness and as read-order cursors, not consumed by any emitter: velocity
+    // is Encore's per-note MIDI velocity and alterationGlyph its explicit-accidental glyph selector;
+    // MuseScore derives both from the score model. Removing either shifts subsequent field reads.
     quint8 velocity        { 0 };
     quint8 options         { 0 };
     quint8 alterationGlyph { 0 };

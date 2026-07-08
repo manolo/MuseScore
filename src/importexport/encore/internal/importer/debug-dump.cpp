@@ -95,8 +95,7 @@ void logEncRootInfo(const EncRoot& enc)
                << "  midi=" << ins.midiProgram
                << "  staves=" << ins.nstaves
                << "  key=" << ins.keyTransposeSemitones
-               << "  size=" << sz << "(" << kSizeLabel[sz - 1] << ")"
-               << (ins.showStaff ? "" : "  hidden");
+               << "  size=" << sz << "(" << kSizeLabel[sz - 1] << ")";
     }
 
     LOGD() << "---- Systems ----";

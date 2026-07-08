@@ -35,7 +35,6 @@ namespace mu::iex::enc {
 struct EncFormatReader;   // defined in reader.h
 
 struct EncMeasure {
-    QString m_id;
     quint32 varsize           { 0 };
     quint16 bpm               { 0 };
     quint8 timeSigGlyph      { 0 };

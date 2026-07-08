@@ -10305,6 +10305,68 @@ def gen_v0c4_singlestaff_voice4_second_voice():
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
 
+def _orn16_raw(tick, voice, raw_staff, tipo):
+    """16-byte ORN element with unmasked raw_staff byte (bit6 for grand-staff ORN routing)."""
+    d = bytearray(16)
+    struct.pack_into('<H', d, 0, tick)
+    d[2] = (5 << 4) | (voice & 0xF); d[3] = 16
+    d[4] = raw_staff & 0xFF; d[5] = tipo
+    return bytes(d)
+
+
+def gen_v0c4_grandstaff_wedge_out_of_range_voice():
+    """Grand-staff WEDGESTART on the bass sub-staff (staffWithin=1) plus a NOTE on that sub-staff
+    whose voice nibble (15) is far above VOICES. The wedge resolver derives the hairpin track from
+    the raw note voice (staffIdx*VOICES + (voice - staffWithin*VOICES/2)), so without a validTrack
+    guard it created a Hairpin at a track well beyond ntracks and crashed at layout. The importer
+    must drop that hairpin and lay out cleanly."""
+    hdr, lb = _gs_header_line(1)
+    e  = _orn16_raw(0, 0, 0x40, tipo=0x1D)   # WEDGESTART on bass sub-staff (staffWithin=1)
+    e += _nraw(0, 15, 0x40, fv=1, pitch=48)  # C3 whole note, out-of-range voice nibble 15
+    e += end_marker()
+    return bytes(hdr) + lb + meas_block(meas_hdr(4, 4), e) + SKELETON_POST
+
+
+def gen_v0c4_hostile_zero_tuplet_nibble():
+    """Notes whose tuplet byte has a zero nibble (0x30 = actualNotes 3, normalNotes 0), which would
+    make a tuplet ratio with a zero term. The importer must not divide by zero nor emit a bad tuplet,
+    and the measure must still pass sanityCheck."""
+    e  = note_v0c4(  0, 0, 0, fv=3, pitch=60, tuplet=0x30)
+    e += note_v0c4(160, 0, 0, fv=3, pitch=62, tuplet=0x30)
+    e += note_v0c4(320, 0, 0, fv=3, pitch=64, tuplet=0x30)
+    e += note_v0c4(480, 0, 0, fv=3, pitch=65)
+    e += note_v0c4(960, 0, 0, fv=1, pitch=67)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+def gen_v0c4_hostile_out_of_range_staff():
+    """A note carrying staffIdx=63 on a single-staff score. Routing must drop it rather than index
+    the staff vector out of bounds; the rest of the measure imports cleanly."""
+    e  = note_v0c4(  0, 0, 63, fv=3, pitch=60)   # staffIdx 63, far past the only staff
+    e += note_v0c4(  0, 0,  0, fv=1, pitch=62)   # a valid whole note on staff 0
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+def gen_v0c4_hostile_out_of_range_voice():
+    """A note whose voice nibble (15) is far above VOICES on a single-staff score. Routing must drop
+    it rather than build an out-of-range track."""
+    e  = note_v0c4(  0, 15, 0, fv=3, pitch=60)   # voice 15, out of range
+    e += note_v0c4(  0,  0, 0, fv=1, pitch=62)   # a valid whole note on voice 0
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+def gen_v0c4_hostile_zero_size_element():
+    """A note element whose size byte (element +3) is zero. The parser must advance by a single byte
+    to avoid an infinite loop and still terminate on the measure boundary."""
+    n = bytearray(note_v0c4(0, 0, 0, fv=3, pitch=60))
+    n[3] = 0   # zero the element size byte
+    e  = bytes(n) + note_v0c4(480, 0, 0, fv=3, pitch=62) + end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
 if __name__=='__main__':
     print("Generating synthetic Encore test files (using bazo.enc skeleton):")
     write("structure_v0c2_pitches.enc",       gen_v0c2_pitches())
@@ -10401,6 +10463,11 @@ if __name__=='__main__':
     write("structure_rest_coincident_with_note.enc", gen_v0c4_rest_coincident_with_note())
     write("notes_grandstaff_high_voice_own_staff.enc", gen_v0c4_grandstaff_high_voice_own_staff())
     write("notes_singlestaff_voice4_second_voice.enc", gen_v0c4_singlestaff_voice4_second_voice())
+    write("structure_grandstaff_wedge_out_of_range_voice.enc", gen_v0c4_grandstaff_wedge_out_of_range_voice(), layout=False)
+    write("structure_hostile_zero_tuplet_nibble.enc", gen_v0c4_hostile_zero_tuplet_nibble(), layout=False)
+    write("structure_hostile_out_of_range_staff.enc", gen_v0c4_hostile_out_of_range_staff(), layout=False)
+    write("structure_hostile_out_of_range_voice.enc", gen_v0c4_hostile_out_of_range_voice(), layout=False)
+    write("structure_hostile_zero_size_element.enc", gen_v0c4_hostile_zero_size_element(), layout=False)
     write("tempo_v0c2_eighth_beat_unit.enc",      gen_v0c2_tempo_eighth_beat_unit(), layout=False)
     write("instruments_instrument_count_padding.enc", gen_v0c4_instrument_count_padding())
     write("instruments_name_recovery.enc",             gen_v0c4_name_recovery())

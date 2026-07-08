@@ -48,7 +48,6 @@ struct EncInstrument {
     qint64 contentFilePos { -1 };   // byte offset of TK content start (after 8-byte header); -1 for compact
     int nstaves   { 0 };
     int midiProgram { 0 };   // 1-indexed GM program (0 = not configured)
-    bool showStaff { true }; // false = hidden in score (Encore "Show" flag)
     // Signed chromatic offset from Encore's Staff Sheet "Key" field.
     // 0=written, -12=octave lower, +12=octave higher. v0xC4 only.
     qint8 keyTransposeSemitones { 0 };
@@ -147,6 +146,8 @@ struct EncHeader {
     QString magic;
     quint8 chuMagio       { 0 };
     quint16 chuVersio      { 0 };
+    // Parsed for format completeness and as read-order cursors, not consumed by the importer:
+    // reserved header words after the version. Removing them shifts every subsequent header read.
     quint16 nekon1         { 0 };
     quint16 fiksa1         { 0 };
     qint16 lineCount      { 0 };

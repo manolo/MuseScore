@@ -268,7 +268,7 @@ struct BuildCtx
     quint8 usedVoltaBits { 0 };
 
     // Per-measure / per-run emitter scratch, grouped so builders and resolvers don't touch it:
-    // only the emitters (emitMeasures and its helpers) use ctx.emit.*. Lives for the emit phase.
+    // only the emitters (emitMeasures and its helpers) use ctx.scratch.*. Lives for the emit phase.
     struct EmitState {
         // Elements routeElementStaffVoice dropped for referencing a missing staff (mostly orphan
         // data from staves deleted in Encore) or an out-of-range voice. Counted, reported once.

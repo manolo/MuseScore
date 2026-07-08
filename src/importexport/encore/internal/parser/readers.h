@@ -56,7 +56,7 @@ qint64 clampMeasureEnd(qint64 measStart, quint32 varsize, qint64 elemBlockOffset
 // boundaryTicks (mid-measure CLEF/KEYCHANGE) and applying v0xA6 grace time-borrowing when enabled.
 // Declared here so the decision core can be unit-tested with synthetic element lists.
 void computeElementDurations(std::vector<EncMeasureElem*>& elems,
-                             qint16 durTicks,
+                             int durTicks,
                              bool hasGraceTimeBorrowing,
                              const std::vector<qint16>& boundaryTicks = {});
 

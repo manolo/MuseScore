@@ -229,15 +229,6 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
         fixDottedEighthPattern(elems, durTicks);
         markImpliedTupletMembers(elems);
     }
-
-    // v0xC2 has no TK-based MIDI/key tables; the base helpers no-op gracefully when
-    // contentFilePos==-1, so delegating to the base is safe and avoids duplication.
-    bool readInstrumentMeta(std::vector<EncInstrument>& instruments,
-                            QDataStream& ds,
-                            const EncRoot& file) const override
-    {
-        return EncFormatReader_V0xC4Base::readInstrumentMeta(instruments, ds, file);
-    }
 };
 
 std::unique_ptr<EncFormatReader> makeFormatReader_V0xC2()

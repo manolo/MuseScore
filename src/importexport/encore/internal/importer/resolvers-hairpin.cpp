@@ -55,14 +55,11 @@ static Fraction resolveHairpinEndByXoffset(
     int anyPositiveXoff = -1;   // sentinel: any note/rest with xoff > 0 exists
     for (const auto& elem : endEncMeas.elements) {
         const EncMeasureElem* em = elem.get();
-        int xoff = 0;
-        if (em->type == static_cast<quint8>(EncElemType::NOTE)) {
-            xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
-        } else if (em->type == static_cast<quint8>(EncElemType::REST)) {
-            xoff = static_cast<int>(static_cast<const EncRest*>(em)->xoffset);
-        } else {
+        if (em->type != static_cast<quint8>(EncElemType::NOTE)
+            && em->type != static_cast<quint8>(EncElemType::REST)) {
             continue;
         }
+        const int xoff = static_cast<int>(em->xoffset);
         if (em->staffIdx != ph.staffIdx) {
             continue;
         }
@@ -177,6 +174,11 @@ void resolveHairpins(BuildCtx& ctx)
         }
 
         if (endTick <= startTick) {
+            continue;
+        }
+        // ph.track is derived from a raw grand-staff voice byte; skip a hairpin whose track is out
+        // of range rather than hand an out-of-bounds track to the engraving DOM (matches ottava).
+        if (!validTrack(score, ph.track)) {
             continue;
         }
         Hairpin* hp = Factory::createHairpin(score->dummy()->segment());

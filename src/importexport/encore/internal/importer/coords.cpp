@@ -61,9 +61,7 @@ Fraction snapStartTickByXoffset(Fraction defaultTick, const EncMeasure& encMeas,
             || static_cast<int>(em->tick) != defaultEncTick) {
             continue;
         }
-        defaultCrXoff = (em->type == static_cast<quint8>(EncElemType::NOTE))
-                        ? static_cast<int>(static_cast<const EncNote*>(em)->xoffset)
-                        : static_cast<int>(static_cast<const EncRest*>(em)->xoffset);
+        defaultCrXoff = static_cast<int>(em->xoffset);
         break;
     }
     // Glyph sits at or after its own note: trust the tick.
@@ -83,9 +81,7 @@ Fraction snapStartTickByXoffset(Fraction defaultTick, const EncMeasure& encMeas,
             || static_cast<int>(em->tick) >= defaultEncTick) {
             continue;
         }
-        const int xoff = (em->type == static_cast<quint8>(EncElemType::NOTE))
-                         ? static_cast<int>(static_cast<const EncNote*>(em)->xoffset)
-                         : static_cast<int>(static_cast<const EncRest*>(em)->xoffset);
+        const int xoff = static_cast<int>(em->xoffset);
         if (xoff <= ornXoffset && static_cast<int>(em->tick) > bestTick) {
             bestTick = static_cast<int>(em->tick);
         }

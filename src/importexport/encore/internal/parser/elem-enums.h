@@ -183,13 +183,6 @@ enum class EncOrnamentType : quint8 {
     TREMOLO_32B            = 0xEF
 };
 
-enum class EncAccidentalType : quint8 {
-    NONE    = 0,
-    SHARP   = 1,
-    FLAT    = 2,
-    NATURAL = 3
-};
-
 enum class EncGraceType : char {
     NORMAL        = 0,
     ACCIACCATURA  = 1,

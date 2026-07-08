@@ -173,7 +173,7 @@ static std::optional<Fraction> resolveCrossMeasureXoffset(
         if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
             continue;
         }
-        const int xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
+        const int xoff = static_cast<int>(em->xoffset);
         const int dist = std::abs(xoff - ps.slurXoffset2);
         if (dist <= bestDist) {
             bestDist = dist;
@@ -289,7 +289,7 @@ static std::optional<Fraction> extendSlurToLaterMeasures(
             if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
                 continue;
             }
-            const int xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
+            const int xoff = static_cast<int>(em->xoffset);
             const int dist = std::abs(xoff - targetEndXoff);
             if (dist < bestDist) {
                 bestDist = dist;
@@ -355,7 +355,7 @@ static std::optional<Fraction> resolveSameMeasureHeuristic(
                 if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
                     continue;
                 }
-                const int xoff = static_cast<int>(static_cast<const EncNote*>(em)->xoffset);
+                const int xoff = static_cast<int>(em->xoffset);
                 if (xoff > maxXoffInMeas) {
                     maxXoffInMeas = xoff;
                 }
