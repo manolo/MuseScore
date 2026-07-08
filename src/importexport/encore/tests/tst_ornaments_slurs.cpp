@@ -722,8 +722,6 @@ TEST_F(Tst_OrnamentsSlurs, v0c4_ottava_two_spanners)
     delete score;
 }
 
-
-
 // Regression: when any slur's +16 measure-count points past the last measure, the whole file's field is
 // unreliable, so every slur (even plausible-looking counts) must resolve inside its own bar.
 TEST_F(Tst_OrnamentsSlurs, v0c2_unreliable_slur_count_stays_in_measure)
@@ -748,7 +746,7 @@ TEST_F(Tst_OrnamentsSlurs, v0c2_unreliable_slur_count_stays_in_measure)
     EXPECT_EQ(total, 2) << "both slurs must import";
     EXPECT_EQ(crossMeasure, 0)
         << "a plausible-looking count must not extend a slur past its bar when the file's "
-           "+16 field is unreliable";
+        "+16 field is unreliable";
     delete score;
 }
 
@@ -777,6 +775,6 @@ TEST_F(Tst_OrnamentsSlurs, v0c2_constant_slur_count_stays_in_measure)
     EXPECT_EQ(total, 2) << "both slurs must import";
     EXPECT_EQ(crossMeasure, 0)
         << "a constant +16 value repeated across start measures must not extend the slurs "
-           "into an 11-measure phantom span";
+        "into an 11-measure phantom span";
     delete score;
 }

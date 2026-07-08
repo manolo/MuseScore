@@ -55,9 +55,7 @@ qint64 clampMeasureEnd(qint64 measStart, quint32 varsize, qint64 elemBlockOffset
 // (skipping same-tick chord members and near-simultaneous cluster notes), capping the gap at any
 // boundaryTicks (mid-measure CLEF/KEYCHANGE) and applying v0xA6 grace time-borrowing when enabled.
 // Declared here so the decision core can be unit-tested with synthetic element lists.
-void computeElementDurations(std::vector<EncMeasureElem*>& elems,
-                             int durTicks,
-                             bool hasGraceTimeBorrowing,
+void computeElementDurations(std::vector<EncMeasureElem*>& elems, int durTicks, bool hasGraceTimeBorrowing,
                              const std::vector<qint16>& boundaryTicks = {});
 
 // EncFormatReader: per-format binary parsing strategy. Register a new version in EncFormatReader::create().

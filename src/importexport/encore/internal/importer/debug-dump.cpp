@@ -159,10 +159,14 @@ void logEncRootInfo(const EncRoot& enc)
                 switch (static_cast<EncElemType>(ep->type)) {
                 case EncElemType::MIDI_CC:
                     switch (static_cast<const EncMidiCc*>(ep.get())->controller) {
-                    case 64: ++ccSustain; break;
-                    case 7:  ++ccVolume;  break;
-                    case 1:  ++ccMod;     break;
-                    default: ++ccOther;   break;
+                    case 64: ++ccSustain;
+                        break;
+                    case 7:  ++ccVolume;
+                        break;
+                    case 1:  ++ccMod;
+                        break;
+                    default: ++ccOther;
+                        break;
                     }
                     break;
                 case EncElemType::UNKNOWN1:
