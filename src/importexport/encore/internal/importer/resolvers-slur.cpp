@@ -46,17 +46,8 @@ namespace mu::iex::enc {
 static track_idx_t resolveChordTrack(MasterScore* score, Fraction tick, int staffIdx, track_idx_t fallback)
 {
     Segment* seg = score->tick2segment(tick, false, SegmentType::ChordRest);
-    if (!seg) {
-        return fallback;
-    }
-    for (int v = 0; v < static_cast<int>(VOICES); ++v) {
-        track_idx_t t = static_cast<track_idx_t>(staffIdx * VOICES + v);
-        EngravingItem* el = seg->element(t);
-        if (el && el->isChord()) {
-            return t;
-        }
-    }
-    return fallback;
+    track_idx_t t = fallback;
+    return firstChordVoiceAt(score, seg, staffIdx, t) ? t : fallback;
 }
 
 static int getLineSlot(const EncMeasureElem* em, const std::array<int, 256>& lineSlotByRawByte)
@@ -165,21 +156,15 @@ static std::optional<Fraction> resolveCrossMeasureXoffset(
     const int wholeTicks = encWholeNoteTicks(endEncMeas);
     int bestDist = std::numeric_limits<int>::max();
     int bestEncTick = -1;
-    for (const auto& elem : endEncMeas.elements) {
-        const EncMeasureElem* em = elem.get();
-        if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
-            continue;
-        }
-        if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
-            continue;
-        }
-        const int xoff = static_cast<int>(em->xoffset);
+    forEachStaffNoteXoff(endEncMeas, ps.staffIdx, /*includeRests*/ false, &lineSlotByRawByte,
+                         [&](const EncMeasureElem* em, int xoff) {
         const int dist = std::abs(xoff - ps.slurXoffset2);
         if (dist <= bestDist) {
             bestDist = dist;
             bestEncTick = static_cast<int>(em->tick);
         }
-    }
+        return true;
+    });
     if (bestEncTick >= 0 && wholeTicks > 0) {
         const Fraction candidate = endMeas->tick() + Fraction(bestEncTick, wholeTicks).reduced();
         if (candidate > ps.startTick) {
@@ -213,19 +198,15 @@ static std::optional<Fraction> resolveLastChordInMeasure(const PendingSlur& ps, 
 // First chord at or after `from` on any voice of the staff within the measure.
 // Sets outTrack to the voice that carries it. Returns nullptr if none.
 // Iterates ChordRest segments directly because tick2segment is unreliable at bar boundaries.
-static Chord* firstChordOnStaffFrom(Measure* m, int staffIdx, const Fraction& from, track_idx_t& outTrack)
+static Chord* firstChordOnStaffFrom(const Score* score, Measure* m, int staffIdx,
+                                    const Fraction& from, track_idx_t& outTrack)
 {
     for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
         if (s->tick() < from) {
             continue;
         }
-        for (int v = 0; v < static_cast<int>(VOICES); ++v) {
-            track_idx_t t = static_cast<track_idx_t>(staffIdx * VOICES + v);
-            EngravingItem* el = s->element(t);
-            if (el && el->isChord()) {
-                outTrack = t;
-                return toChord(el);
-            }
+        if (Chord* c = firstChordVoiceAt(score, s, staffIdx, outTrack)) {
+            return c;
         }
     }
     return nullptr;
@@ -240,27 +221,23 @@ static int findSlurStartNoteXoffset(const EncMeasure& startEncMeas, int staffIdx
                                     const std::array<int, 256>& lineSlotByRawByte)
 {
     int firstNoteXoff = -1;
-    for (const auto& elem : startEncMeas.elements) {
-        const EncMeasureElem* em = elem.get();
-        if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
-            continue;
-        }
-        if (getLineSlot(em, lineSlotByRawByte) != staffIdx) {
-            continue;
-        }
+    int graceXoff = -1;
+    forEachStaffNoteXoff(startEncMeas, staffIdx, /*includeRests*/ false, &lineSlotByRawByte,
+                         [&](const EncMeasureElem* em, int xoff) {
         if (static_cast<int>(em->tick) != startEncTick) {
-            continue;
+            return true;
         }
         const EncNote* en = static_cast<const EncNote*>(em);
-        const int xoff = static_cast<int>(en->xoffset);
         if (en->graceType() != EncGraceType::NORMAL) {
-            return xoff;   // grace wins; stop searching
+            graceXoff = xoff;   // grace wins; stop searching
+            return false;
         }
         if (firstNoteXoff < 0) {
             firstNoteXoff = xoff;   // regular: tentative, keep searching
         }
-    }
-    return firstNoteXoff;
+        return true;
+    });
+    return (graceXoff >= 0) ? graceXoff : firstNoteXoff;
 }
 
 // Cross-measure endpoint search: when alMezuro is unreliable and the arc clearly runs past the
@@ -281,22 +258,16 @@ static std::optional<Fraction> extendSlurToLaterMeasures(
         const EncMeasure& nextEncMeas = enc.measures[nextMIdx];
         const int nextWt = encWholeNoteTicks(nextEncMeas);
         Measure* nextMs = ctx.measuresByIdx[nextMIdx];
-        for (const auto& elem : nextEncMeas.elements) {
-            const EncMeasureElem* em = elem.get();
-            if (em->type != static_cast<quint8>(EncElemType::NOTE)) {
-                continue;
-            }
-            if (getLineSlot(em, lineSlotByRawByte) != ps.staffIdx) {
-                continue;
-            }
-            const int xoff = static_cast<int>(em->xoffset);
+        forEachStaffNoteXoff(nextEncMeas, ps.staffIdx, /*includeRests*/ false, &lineSlotByRawByte,
+                             [&](const EncMeasureElem* em, int xoff) {
             const int dist = std::abs(xoff - targetEndXoff);
             if (dist < bestDist) {
                 bestDist = dist;
                 const Fraction endRel(static_cast<int>(em->tick), nextWt);
                 result = nextMs->tick() + endRel.reduced();
             }
-        }
+            return true;
+        });
         if (bestDist == 0) {
             break;
         }
@@ -523,8 +494,8 @@ void resolveSlurs(BuildCtx& ctx)
             && ps.startMeasIdx < static_cast<int>(ctx.measuresByIdx.size())) {
             Measure* startMeas = ctx.measuresByIdx[ps.startMeasIdx];
             track_idx_t st = 0, et = 0;
-            Chord* sc = firstChordOnStaffFrom(startMeas, ps.staffIdx, ps.startTick, st);
-            Chord* ec = firstChordOnStaffFrom(endMeas, ps.staffIdx, endMeas->tick(), et);
+            Chord* sc = firstChordOnStaffFrom(score, startMeas, ps.staffIdx, ps.startTick, st);
+            Chord* ec = firstChordOnStaffFrom(score, endMeas, ps.staffIdx, endMeas->tick(), et);
             if (sc && ec && ec->tick() > sc->tick()) {
                 Slur* slur = Factory::createSlur(score->dummy());
                 slur->setTrack(st);

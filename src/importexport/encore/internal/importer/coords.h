@@ -24,10 +24,43 @@
 
 #pragma once
 
+#include <array>
+
 #include "engraving/types/fraction.h"
 
+#include "../parser/elem.h"
+
 namespace mu::iex::enc {
-struct EncMeasure;
+
+// Visit each NOTE (and, when includeRests is set, REST) element of `meas` that sits on `staffIdx`,
+// invoking fn(em, xoff) in stream order. When lineSlotByRawByte is non-null the staff test uses the
+// LINE-slot remap (grand-staff routed notes); otherwise it uses the raw em->staffIdx. fn returns
+// false to stop the scan early. All comparison and tie-break logic stays in the caller's fn, so the
+// visitor owns only the shared iterate / type-gate / staff-match skeleton.
+template<typename Fn>
+inline void forEachStaffNoteXoff(const EncMeasure& meas, int staffIdx, bool includeRests,
+                                 const std::array<int, 256>* lineSlotByRawByte, Fn fn)
+{
+    for (const auto& elem : meas.elements) {
+        const EncMeasureElem* em = elem.get();
+        const bool isNote = em->type == static_cast<quint8>(EncElemType::NOTE);
+        const bool isRest = em->type == static_cast<quint8>(EncElemType::REST);
+        if (!isNote && !(includeRests && isRest)) {
+            continue;
+        }
+        int slot = static_cast<int>(em->staffIdx);
+        if (lineSlotByRawByte) {
+            const int mapped = (*lineSlotByRawByte)[static_cast<unsigned char>(em->rawStaffByte())];
+            slot = (mapped >= 0) ? mapped : static_cast<int>(em->staffIdx);
+        }
+        if (slot != staffIdx) {
+            continue;
+        }
+        if (!fn(em, static_cast<int>(em->xoffset))) {
+            break;
+        }
+    }
+}
 
 // Ticks per whole note for a measure. Re-derived from the time signature (not beatTicks, which is
 // wrong for compound meters), falling back to the fixed 960 grid. Single source of truth for the

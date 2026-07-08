@@ -73,6 +73,33 @@ inline mu::engraving::Chord* findChordAt(mu::engraving::MasterScore* score,
     }
     return toChord(el);
 }
+
+// First chord on any voice of `staffIdx` within segment `seg`, scanning voices 0..VOICES-1 in order.
+// Sets outTrack to the carrying voice's track and returns the chord, or nullptr if seg is null or
+// holds no chord on that staff. validTrack is folded in so an out-of-range staff yields nullptr
+// instead of an out-of-bounds element() access.
+inline mu::engraving::Chord* firstChordVoiceAt(const mu::engraving::Score* score,
+                                               const mu::engraving::Segment* seg, int staffIdx,
+                                               mu::engraving::track_idx_t& outTrack)
+{
+    using namespace mu::engraving;
+    if (!seg) {
+        return nullptr;
+    }
+    const track_idx_t base = static_cast<track_idx_t>(staffIdx) * VOICES;
+    for (track_idx_t v = 0; v < VOICES; ++v) {
+        const track_idx_t t = base + v;
+        if (!validTrack(score, t)) {
+            break;
+        }
+        EngravingItem* el = seg->element(t);
+        if (el && el->isChord()) {
+            outTrack = t;
+            return toChord(el);
+        }
+    }
+    return nullptr;
+}
 } // namespace mu::iex::enc
 
 #endif // MU_IMPORTEXPORT_ENC_IMPORT_RESOLVERS_H

@@ -210,29 +210,10 @@ static void applyPendingBowings(BuildCtx& ctx, MasterScore* score)
                 Segment* seg = m->findSegment(SegmentType::ChordRest, pb.tick);
                 if (seg) {
                     // ORN is always voice 0; scan all voices of own staff before sibling.
-                    const track_idx_t staffBase = (pb.track / VOICES) * VOICES;
-                    for (track_idx_t v = 0; v < VOICES && !c; ++v) {
-                        if (!validTrack(score, staffBase + v)) {
-                            break;
-                        }
-                        EngravingItem* el = seg->element(staffBase + v);
-                        if (el && el->isChord()) {
-                            c = toChord(el);
-                            useTrack = staffBase + v;
-                        }
-                    }
+                    const int ownStaff = static_cast<int>(pb.track / VOICES);
+                    c = firstChordVoiceAt(score, seg, ownStaff, useTrack);
                     if (!c) {
-                        const track_idx_t sibBase = staffBase + VOICES;
-                        for (track_idx_t v = 0; v < VOICES && !c; ++v) {
-                            if (!validTrack(score, sibBase + v)) {
-                                break;
-                            }
-                            EngravingItem* el = seg->element(sibBase + v);
-                            if (el && el->isChord()) {
-                                c = toChord(el);
-                                useTrack = sibBase + v;
-                            }
-                        }
+                        c = firstChordVoiceAt(score, seg, ownStaff + 1, useTrack);
                     }
                 }
             }

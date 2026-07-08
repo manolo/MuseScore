@@ -51,19 +51,14 @@ Fraction snapStartTickByXoffset(Fraction defaultTick, const EncMeasure& encMeas,
 
     // xoffset of the note/rest at the element's own tick (any voice on the staff).
     int defaultCrXoff = -1;
-    for (const auto& elem : encMeas.elements) {
-        const EncMeasureElem* em = elem.get();
-        if (em->type != static_cast<quint8>(EncElemType::NOTE)
-            && em->type != static_cast<quint8>(EncElemType::REST)) {
-            continue;
+    forEachStaffNoteXoff(encMeas, staffIdx, /*includeRests*/ true, /*lineSlotByRawByte*/ nullptr,
+                         [&](const EncMeasureElem* em, int xoff) {
+        if (static_cast<int>(em->tick) != defaultEncTick) {
+            return true;
         }
-        if (static_cast<int>(em->staffIdx) != staffIdx
-            || static_cast<int>(em->tick) != defaultEncTick) {
-            continue;
-        }
-        defaultCrXoff = static_cast<int>(em->xoffset);
-        break;
-    }
+        defaultCrXoff = xoff;
+        return false;   // first match at that tick wins
+    });
     // Glyph sits at or after its own note: trust the tick.
     if (defaultCrXoff >= 0 && ornXoffset >= defaultCrXoff) {
         return defaultTick;
@@ -71,21 +66,16 @@ Fraction snapStartTickByXoffset(Fraction defaultTick, const EncMeasure& encMeas,
     // Glyph drawn left of the note: snap back to the latest preceding chord/rest whose
     // xoffset is <= the glyph xoffset. Also covers elements stored at durTicks (no CR there).
     int bestTick = -1;
-    for (const auto& elem : encMeas.elements) {
-        const EncMeasureElem* em = elem.get();
-        if (em->type != static_cast<quint8>(EncElemType::NOTE)
-            && em->type != static_cast<quint8>(EncElemType::REST)) {
-            continue;
+    forEachStaffNoteXoff(encMeas, staffIdx, /*includeRests*/ true, /*lineSlotByRawByte*/ nullptr,
+                         [&](const EncMeasureElem* em, int xoff) {
+        if (static_cast<int>(em->tick) >= defaultEncTick) {
+            return true;
         }
-        if (static_cast<int>(em->staffIdx) != staffIdx
-            || static_cast<int>(em->tick) >= defaultEncTick) {
-            continue;
-        }
-        const int xoff = static_cast<int>(em->xoffset);
         if (xoff <= ornXoffset && static_cast<int>(em->tick) > bestTick) {
             bestTick = static_cast<int>(em->tick);
         }
-    }
+        return true;
+    });
     if (bestTick < 0) {
         return defaultTick;
     }

@@ -53,25 +53,18 @@ static Fraction resolveHairpinEndByXoffset(
     int bestEncTick     = -1;
     int bestXoff        = -1;
     int anyPositiveXoff = -1;   // sentinel: any note/rest with xoff > 0 exists
-    for (const auto& elem : endEncMeas.elements) {
-        const EncMeasureElem* em = elem.get();
-        if (em->type != static_cast<quint8>(EncElemType::NOTE)
-            && em->type != static_cast<quint8>(EncElemType::REST)) {
-            continue;
-        }
-        const int xoff = static_cast<int>(em->xoffset);
-        if (em->staffIdx != ph.staffIdx) {
-            continue;
-        }
+    forEachStaffNoteXoff(endEncMeas, ph.staffIdx, /*includeRests*/ true, /*lineSlotByRawByte*/ nullptr,
+                         [&](const EncMeasureElem* em, int xoff) {
         if (xoff <= 0) {
-            continue;
+            return true;
         }
         anyPositiveXoff = xoff;
         if (xoff <= xoff2 && xoff > bestXoff) {
             bestXoff    = xoff;
             bestEncTick = static_cast<int>(em->tick);
         }
-    }
+        return true;
+    });
     if (bestEncTick >= 0) {
         // Snap end to the note/rest whose xoffset best matches xoff2.
         Fraction snapEnd = targetMeasTick + Fraction(bestEncTick, wholeTicks).reduced();
