@@ -42,8 +42,9 @@ int encWholeNoteTicks(const EncMeasure& measure);
 // differs from the note `xoffset` origin by a per-file constant (it is NOT zero). So a
 // raw xoffset value cannot be compared directly against note xoffsets. Two patterns
 // recur across the importer and live here so dynamics, tempo marks, hairpins, trills and
-// slurs all resolve positions the same way. See ENCORE_FORMAT.md "Coordinate-based
-// anchoring of ornaments and spanners".
+// slurs all resolve positions the same way. See ENCORE_IMPORTER.md "Coordinate-based
+// anchoring of ornaments and spanners"; the xoffset column itself is ENCORE_FORMAT.md
+// §Chord column (xoffset).
 // ---------------------------------------------------------------------------
 
 // START anchor. Trusts the element's own tick (`defaultTick`); only when the glyph is

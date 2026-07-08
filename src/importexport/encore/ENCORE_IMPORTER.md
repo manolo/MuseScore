@@ -818,7 +818,7 @@ Example: `teksto="Am"` → `Am`.
 | Field    | Meaning                                                                            |
 |----------|------------------------------------------------------------------------------------|
 | `radiko` | Root: low nibble = name (0=C..6=B), high nibble = accidental (0=♮, 0x10=#, 0x20=b) |
-| `toniko` | Chord quality index 0-62 into `kChordQuality[]` (see ENCORE_FORMAT.md §CHORD)      |
+| `toniko` | Chord quality index 0-63 into `kChordQuality[]` (see ENCORE_FORMAT.md §CHORD symbol element) |
 | `baso`   | Slash bass note, same encoding as `radiko`; active when `tipo & 0x02`              |
 
 `EncChordSym::chordName()` constructs the string `root + quality [+ "/" + bass]` and passes it to `setHarmony()`.
@@ -1484,3 +1484,101 @@ Exercised by `Tst_Options.firstMeasure_not_pickup_irregular_volta_at_barline`.
 ### Pending lyric fix (not an option)
 
 `attachPendingLyrics()` now falls back to attaching unmatched lyrics to the nearest `Rest` in the measure instead of discarding them silently.
+
+## Anacrusis / pickup detection
+
+Encore does not flag a pickup measure; the importer infers it from the first measure. Two cases:
+
+- **Case A, explicit short time signature.** When measure 0's time signature differs from measure
+  1's, Encore stored a shorter signature for the pickup. Display measure 0 with its own signature,
+  but its actual duration is its `durTicks`, and every later measure starts at `durTicks[measure 0]`.
+- **Case B, implicit underflow.** When the two signatures match but the placed content of measure 0
+  (the largest filled tick across all voices/staves) is `0 < placed < durTicks`, shrink measure 0
+  to `placed`, shift all later measures back by `delta = durTicks - placed`, and reduce any
+  forward-looking spanner endpoint (hairpin, slur) that pointed past the new end of measure 0 by the
+  same `delta`.
+
+Guard: do not apply Case B when Case A already set a shorter `durTicks` for measure 0 (that would
+double-reduce). When `firstMeasureIsPickup` is false the whole inference is bypassed.
+
+## Measure completeness (fill and overflow tolerance)
+
+A measure is valid with fewer ticks than `durTicks` in any voice; Encore does not require every
+voice to be full. After reading a voice, a `placedTicks < durTicks` gap is filled with implicit
+rests (visible or hidden by context; see "Implicit-silence gap snap"). A `placedTicks > durTicks`
+overflow is resolved by `fitOverfullMeasure` per `overfillMeasureStrategy` (see "Overfull
+measures"), after a small tolerance of `durTicks / 24` (40 ticks in 4/4) that absorbs rounding
+without triggering correction.
+
+## Voice overflow drop and duplicate-rest dedup
+
+- **Overflow drop.** Once a voice reaches `placedTicks == durTicks`, additional elements arriving
+  with the same voice byte are dropped, never promoted to the next voice. Encore stores multiple
+  MIDI recording passes in one voice byte; only the first fill is valid notation.
+- **Voice byte to output voice.** Encore voices 0-3 map to MuseScore voices 0-3 on the same staff
+  (voice 2 becomes voice 0 of the next staff on a grand-staff instrument); voices 5-7 collapse to
+  voice 0 of their own staff. Voice 4 is handled by the staffWithin / out-of-range routing above.
+- **Duplicate REST dedup.** When two out-of-band voice bytes map to the same output voice and both
+  carry an explicit REST at the identical tick, the second REST is a no-op (its position is not
+  advanced); otherwise it would shift every later element.
+
+## Tuplet reconstruction edge cases
+
+Beyond the sandwich-orphan and partial-tick handling documented under "Rhythm: face value, dots,
+tuplets", several tuplet shapes need special handling:
+
+- **Compaction.** Encore can encode more notes in a tuplet run than the stated group size (e.g. 15
+  notes all marked `9:5`). When a contiguous run of N same-voice, same-face-value notes shares one
+  explicit ratio `an:nn`, `N > an`, `N` is not a multiple of `an`, and the standard reading
+  overflows the bar, recompute the ratio to fit: `m = round(available / faceTicks)`, ratio `N:m`.
+  Keep `m` in `{1,2,3,4,6,7,8}` (standard denominators); round `m = 5` or `10` to the nearest safe
+  value.
+- **9:5 without compaction.** Exactly 9 notes marked `9:5` that fit the bar form a single `[9:5]`
+  group; set the bracket duration (span `5/8`, a non-standard value) after placing all 9 notes so
+  group construction does not reject it.
+- **Nested triplets.** When an outer `3:2` group closes and the triggering note plus the next
+  `actualN-1` notes form a complete inner triplet of smaller face value, create nested groups; each
+  inner note's position advance uses `innerRatio x outerRatio`.
+- **Incomplete group at the barline.** When a mixed-duration group is truncated at the barline
+  (Encore omits the final note because its MIDI tick equals `durTicks`), the face-value sum falls
+  short of the full group even when the count matches `actualN`. Insert an invisible rest for the
+  missing face-sum to complete the group.
+- **Last note short.** The last note of a measure-spanning tuplet often has a playback duration far
+  below its face value because Encore truncates playback at the barline. Keep it via tuplet-group
+  membership, not by its short duration.
+- **No gap-snap inside a group.** Suppress the implicit-silence gap-snap while a tuplet group is
+  active; tuplet positions are computed from accumulated face-value advances, not from the raw MIDI
+  tick.
+
+## Chord column clustering and stale-tick reconciliation
+
+Using the note `xoffset` column (see ENCORE_FORMAT.md §Chord column (xoffset)), the parser
+(`normalizeChordColumnTicks`, `reconcileStaleNoteTicksByColumn` in `parsers-measure.cpp`) reconciles
+staggered playback ticks against the notated layout, per (staff, voice) group already sorted by
+tick:
+
+- **Strum collapse.** A run of consecutive notes sharing the same non-zero `xoffset` and face value
+  is collapsed to the run's earliest tick so downstream grouping sees one chord. The run window is
+  capped at one notated face duration and at 48 Encore ticks, so a short face value stays tight and
+  a long one never absorbs a genuine later note that happens to reuse the column. Notes with
+  `xoffset == 0` are left alone.
+- **Near-simultaneous split.** Two notes only a few ticks apart are merged into a chord only when
+  their columns agree; when the columns differ by at least the ~8px minimum, they stay distinct.
+  This preserves the full member count of a tightly played tuplet whose positions sit a few ticks
+  apart in different columns.
+- **Stale-tick snap-back.** A note whose column matches an earlier beat but whose MIDI tick is later
+  (edited in Encore, keeping its old playback tick) is snapped back to its column's earliest tick,
+  keeping the duration already computed from the stale tick (so the vacated time becomes a rest).
+  Only a note that is the earliest in its own (staff, voice) is moved, and only when a different
+  column does not already occupy the target tick.
+
+## Ghost rest and placeholder rest filtering
+
+- **Ghost rest.** When real durations are computed a REST's duration becomes the MIDI gap to the
+  next event, which MIDI timing slop can make far shorter than the face value (e.g. 5 ticks for a
+  32nd rest). The short-duration filter that drops MIDI artifacts (`0 < rdur < 15`) must not drop a
+  real rest: trust the face value when `faceTicks >= 30` (32nd or longer), and only drop rests whose
+  face value is also very short (`faceTicks < 30`).
+- **Placeholder rest.** A voice may carry a redundant plain (non-tuplet) REST at the same tick as a
+  real note (see ENCORE_FORMAT.md §Voice field). Drop it, or the note is pushed after the rest and
+  the bar overflows. Same-tick tuplet members (a tuplet rest followed by a tuplet note) are kept.

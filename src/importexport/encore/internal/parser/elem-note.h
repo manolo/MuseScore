@@ -175,7 +175,7 @@ struct EncGenericElem : EncMeasureElem {
 // An inline MIDI Control Change event (EncElemType::MIDI_CC). Encore stores these for
 // playback only (sustain pedal, volume, modulation); they carry no notation. The importer
 // records the controller and value for the diagnostic log and otherwise drops the element.
-// Byte layout (ENCORE_FORMAT.md "Type 0xB"): d[10] controller, d[11] value.
+// Byte layout (ENCORE_FORMAT.md §MIDI control change (type 11)): d[10] controller, d[11] value.
 struct EncMidiCc : EncMeasureElem {
     using EncMeasureElem::EncMeasureElem;
 

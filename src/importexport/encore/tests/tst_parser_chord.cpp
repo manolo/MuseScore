@@ -232,7 +232,7 @@ TEST(Tst_EncChordSym, empty_teksto_falls_through_to_numeric)
 // ---------------------------------------------------------------------------
 // EncMidiCc: inline MIDI Control Change events (EncElemType::MIDI_CC, type 0xB).
 // read() is entered at d[3] (the caller has already consumed tick + typeVoice),
-// so the buffer below starts at the size byte. See ENCORE_FORMAT.md "Type 0xB".
+// so the buffer below starts at the size byte. See ENCORE_FORMAT.md §MIDI control change (type 11).
 // ---------------------------------------------------------------------------
 TEST(Tst_EncMidiCc, decodes_controller_and_value)
 {
