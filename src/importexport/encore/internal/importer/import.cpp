@@ -88,6 +88,9 @@
 #include "engraving/engravingerrors.h"
 
 #include "engraving/editing/implodeexplode.h"
+#include "engraving/editing/editvoice.h"
+#include "engraving/editing/editenharmonicspelling.h"
+#include "engraving/editing/transaction/transaction.h"
 
 #include "log.h"
 
@@ -249,7 +252,7 @@ static void mergeNonOverlappingVoices(MasterScore* score)
         score->deselectAll();
         score->select(first, SelectType::RANGE, si);
         score->select(last, SelectType::RANGE, si);
-        score->changeSelectedElementsVoice(0);
+        EditVoice::changeSelectedElementsVoice(score->transactionManager()->currentOrDummyTransaction(), score, 0);
 
         // Drop the now-empty upper voices (their leftover rests) by imploding the
         // single staff onto voice 1.
@@ -368,7 +371,7 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
 
     resolveAll(ctx);
 
-    score->spell();
+    EditEnharmonicSpelling::spell(score);
     respellTransposingStaves(score);
     addTitleFrame(score, enc.titleBlock);
     // Assign MIDI ports/channels to every part. The file read path does this on load,

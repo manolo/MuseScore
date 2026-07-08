@@ -40,6 +40,8 @@
 #include "engraving/dom/breath.h"
 #include "engraving/dom/measurerepeat.h"
 #include "engraving/dom/trill.h"
+#include "engraving/editing/editmeasurerepeat.h"
+#include "engraving/editing/transaction/transaction.h"
 
 using namespace mu::engraving;
 
@@ -438,7 +440,7 @@ static void resolveMeasureRepeats(MasterScore* score,
             continue;
         }
         score->makeGap(firstSeg, track, m->stretchedLen(st), nullptr);
-        score->addMeasureRepeat(m->tick(), track, 1);
+        EditMeasureRepeat::addMeasureRepeat(score->transactionManager()->currentOrDummyTransaction(), score, m->tick(), track, 1);
         m->setMeasureRepeatCount(1, static_cast<staff_idx_t>(pmr.staffIdx));
     }
 }
