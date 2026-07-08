@@ -301,10 +301,10 @@ void buildParts(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
     const EncRoot& enc = ctx.enc;
-    const char* searchModeLabel =
-        ctx.opts.instrumentSearchMode == InstrumentSearchMode::MidiOnly ? "MIDI only"
-        : ctx.opts.instrumentSearchMode == InstrumentSearchMode::Piano  ? "Grand Piano for all"
-        :                                                                 "name then MIDI";
+    const char* searchModeLabel
+        =ctx.opts.instrumentSearchMode == InstrumentSearchMode::MidiOnly ? "MIDI only"
+          : ctx.opts.instrumentSearchMode == InstrumentSearchMode::Piano ? "Grand Piano for all"
+          : "name then MIDI";
     LOGD() << "---- Instrument assignment (using " << searchModeLabel << ") ----";
     int cumStaffIdx = 0;  // running index into enc.lines[0].staffData
     for (const auto& instr : enc.instruments) {

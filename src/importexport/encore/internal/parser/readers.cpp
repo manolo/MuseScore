@@ -36,7 +36,6 @@
 #include "log.h"
 
 namespace mu::iex::enc {
-
 bool skipBlock(QDataStream& ds, qint64 size)
 {
     QIODevice* dev = ds.device();
@@ -87,9 +86,8 @@ std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 chuMagio, const 
         return makeFormatReader_V0xC4();
     default:
         LOGW() << QString("Encore: unsupported format version 0x%1 - import may fail")
-                      .arg(chuMagio, 2, 16, QChar('0'));
+            .arg(chuMagio, 2, 16, QChar('0'));
         return makeFormatReader_V0xC4();
     }
 }
-
 } // namespace mu::iex::enc

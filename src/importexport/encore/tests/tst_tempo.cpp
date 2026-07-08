@@ -122,4 +122,3 @@ TEST_F(Tst_Tempo, v0c2_older_layout_tempo_beat_unit_at_plus26)
 
     delete score;
 }
-
