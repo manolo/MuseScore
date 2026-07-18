@@ -227,6 +227,16 @@ A few generic templates in `instruments.xml` (recorder, clarinet, trumpet, doubl
 Selecting such a template would leave the mixer and the Instruments panel showing a blank entry, so when the chosen template's track name is empty the importer derives the sounding instrument's name from the template id ("bass-clarinet" becomes "Bass Clarinet").
 The Encore instrument name is kept as the part long name, not copied into the track name, so the track name always reflects the instrument that will play rather than the user's part label.
 
+**Tablature staves.** Tablature is decided per staff (`clef == TAB` or `staffType == TAB` in the LINE block). `setupTablatureStaff` (called from `buildParts`) attaches `StringData` to the part instrument and a matching TAB `StaffType` (line count = string count; FULL variants for 4/5/6 strings), so notes on the staff are fretted automatically at layout (`Chord::cmdUpdateNotes` → `StringData::fretChords`). The tuning comes from Encore's tab-tuning array (see ENCORE_FORMAT.md §Tab tuning), falling back to a matched fretted template's `StringData` and then to a standard 6-string guitar.
+
+Because a tab staff is a derived view with no notes of its own (its element stream is only rests), a post-pass `applyTablatureImportMode` supplies the notes according to the `TablatureImportMode` option:
+
+- **Linked** (shipped default): each empty tab staff is paired with the notation staff immediately above it (Encore stores them as adjacent single-staff instruments) and merged into one instrument. `Excerpt::cloneStaff` clones the notation's music into the tab staff as linked clones (shared notes rendered as frets), the tab staff is reparented into the notation part, and the now-empty tab part is dropped. Per-staff visibility is applied from Encore's show flags, so a hidden notation staff behind a visible tab is preserved (a merged part cannot be hidden as a whole).
+- **Separate**: staves are left as Encore stores them (notation with notes, tab as an empty view), each its own instrument.
+- **Ignore**: tab staves are removed (`cmdRemovePart`).
+
+A **tab-only score** (no notation staff) has no notation to pair with; its tab staff carries its own notes as pitch-bearing rest elements (see ENCORE_FORMAT.md §Tab tuning), which the parser reads as notes so the standalone tab shows fret numbers.
+
 ## STAFFTEXT placement and tempo promotion
 
 For STAFFTEXT ornaments (subtype `0x1E`):
@@ -457,9 +467,11 @@ importer maps them as follows.
 imported note with it set gets `Note::setPlay(false)` (normal notes, cue notes and grace notes alike).
 
 **Cue notes** (`EncNote::isSmall()`, i.e. a small note that is NOT a grace): imported as a normal,
-full-duration note drawn small (`Note::setSmall(true)`), audible unless the mute flag is set. A cue is
-small and muted by default in Encore, but an un-muted cue plays. A cue that stands alone in its bar
-does not overlap the principal line, so it needs no separate voice.
+full-duration note drawn small, audible unless the mute flag is set. The whole chord is marked small
+(`ChordRest::setSmall(true)`), not just the notehead: `Note::mag()` multiplies the chord mag, so a
+note-only flag would shrink the head while leaving a full-size stem. A cue is small and muted by
+default in Encore, but an un-muted cue plays. A cue that stands alone in its bar does not overlap the
+principal line, so it needs no separate voice.
 
 **Grace vs cue vs appoggiatura** (`tryHandleGraceNote`), decided from the raw enc measure (same
 staff+voice). A slash (`grace2 0x04`) is always a grace (acciaccatura); a no-slash small note is:
@@ -1571,6 +1583,24 @@ tick:
   keeping the duration already computed from the stale tick (so the vacated time becomes a rest).
   Only a note that is the earliest in its own (staff, voice) is moved, and only when a different
   column does not already occupy the target tick.
+
+### Known limitation: display position drawn later than the MIDI tick
+
+The snap-back above only moves a note *earlier* (to its column's own earliest tick) and only matches
+an exact column within the same (staff, voice). The opposite case is not reconciled: a note whose
+MIDI tick is *earlier* than the horizontal position Encore draws it at (its `xoffset` sits well to the
+right of its tick's column, so on screen it appears at a later beat). This happens most often when a
+voice carries a note at the same tick and same pitch as a member of another voice's chord: Encore
+keeps both at that tick internally but nudges the single note rightward so the two do not overprint.
+
+In that situation the importer places the note at its stored MIDI tick, so the two same-pitch notes
+land on the same tick and overprint (the single note appears hidden behind the chord member). This
+matches Encore's own MusicXML export, which likewise emits the note at that tick, but not Encore's
+on-screen layout. Recovering the drawn position would require translating the absolute `xoffset` into
+a tick via Encore's measure-spacing model; a linear interpolation across the sparse note columns is
+unreliable (it can land several beats away from the true position), so the note is left at its MIDI
+tick to stay consistent with the format's canonical (exported) representation. Files that reposition
+notes purely by `xoffset` while leaving the playback tick unchanged will show this overprint.
 
 ## Ghost rest and placeholder rest filtering
 
