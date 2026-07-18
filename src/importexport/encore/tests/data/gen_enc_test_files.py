@@ -855,6 +855,28 @@ def gen_v0c4_grace1_0x30_normal_notes():
 
 # A cue note: grace1 0x20 (small bit) + grace2 0x01 (cue). It keeps its full quarter value but must
 # import small (Note::setSmall) and muted (Note::setPlay(false)), routed to the spare cue voice.
+# A beamed grace group (grace1 & 0x10) is a melodic run of separate grace notes (own stems, joined by
+# a beam), NOT a stacked chord. m1: two beamed graces (0x30) at one tick before a principal -> must be
+# TWO grace chords. m2: two non-beamed graces (0x20) at one tick -> ONE grace chord of two notes
+# (the stacked grace-chord case the merge protects). Keeps both sides of the discriminator honest.
+def gen_v0c4_grace_beamed_group():
+    m1 = (note_v0c4_grace(0, 0, 0, fv=5, pitch=72, grace1=0x30, grace2=0x04)
+          + note_v0c4_grace(0, 0, 0, fv=5, pitch=74, grace1=0x30, grace2=0x04)
+          + note_v0c4(0, 0, 0, fv=3, pitch=60)
+          + note_v0c4(240, 0, 0, fv=3, pitch=64)
+          + note_v0c4(480, 0, 0, fv=3, pitch=65)
+          + note_v0c4(720, 0, 0, fv=3, pitch=67)
+          + end_marker())
+    m2 = (note_v0c4_grace(0, 0, 0, fv=5, pitch=72, grace1=0x20, grace2=0x04)
+          + note_v0c4_grace(0, 0, 0, fv=5, pitch=74, grace1=0x20, grace2=0x04)
+          + note_v0c4(0, 0, 0, fv=3, pitch=60)
+          + note_v0c4(240, 0, 0, fv=3, pitch=64)
+          + note_v0c4(480, 0, 0, fv=3, pitch=65)
+          + note_v0c4(720, 0, 0, fv=3, pitch=67)
+          + end_marker())
+    return assemble(0xC4, [(meas_hdr(4, 4), m1), (meas_hdr(4, 4), m2)], fill_ts=(4, 4))
+
+
 def gen_v0c4_cue_note():
     e  = note_v0c4_grace(0, 0, 0, fv=3, pitch=67, grace1=0x20, grace2=0x01)
     e += end_marker()
@@ -891,6 +913,30 @@ def gen_v0c4_cue_mute_flags():
     m4 = note_v0c4_grace(0, 0, 0, fv=3, pitch=69, grace1=0x00, grace2=0x00) + end_marker()
     return assemble(0xC4, [(meas_hdr(4, 4), m1), (meas_hdr(4, 4), m2),
                            (meas_hdr(4, 4), m3), (meas_hdr(4, 4), m4)], fill_ts=(4, 4))
+
+def note_v0c2_grace(tick, voice, staffIdx, fv, pitch, grace1, grace2, xoff=0):
+    """22-byte v0xC2 note carrying grace1 (+6), grace2 (+7) and xoffset (+10). Pitch at +13."""
+    d = bytearray(19)
+    d[0]=22; d[1]=staffIdx&0x3F; d[2]=fv
+    d[3]=grace1; d[4]=grace2; d[7]=xoff; d[10]=pitch
+    return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)
+
+
+# In v0xC2 the small-note bit (grace1 0x20) and mute bit (grace2 0x01) travel together on ordinary
+# full-value notes; only the slash (grace2 0x04) marks a genuine small acciaccatura. Two measures:
+#   m1: two same-tick, same-voice quarters at nearly-equal xoffsets (a chord) with grace1 0x30 /
+#       grace2 0x01 (no slash). Must import as ONE chord of two NORMAL, audible notes: not small,
+#       not muted, not split into two single notes (which lost a member before the fix).
+#   m2: a lone slashed quarter (grace1 0x20 / grace2 0x04). The slash marks a real grace, so it must
+#       still import SMALL, proving the slash gate preserves genuine graces.
+def gen_v0c2_small_flag_chord():
+    m1  = note_v0c2_grace(0, 0, 0, fv=3, pitch=71, grace1=0x30, grace2=0x01, xoff=8)
+    m1 += note_v0c2_grace(0, 0, 0, fv=3, pitch=74, grace1=0x70, grace2=0x01, xoff=6)
+    m1 += end_marker()
+    m2  = note_v0c2_grace(0, 0, 0, fv=4, pitch=67, grace1=0x20, grace2=0x04, xoff=8)
+    m2 += end_marker()
+    return assemble(0xC2, [(meas_hdr(4, 4), m1), (meas_hdr(4, 4), m2)], fill_ts=(4, 4))
+
 
 def gen_v0c4_rest_not_chord_anchor():
     """A rest must not act as a chord-extension anchor. With the bug, prevMidiTick
@@ -1146,6 +1192,23 @@ def gen_v0c4_mrest_preceded_by_rest():
         (meas_hdr(4, 4), single_rest),
         (meas_hdr(4, 4), mrest),
         (meas_hdr(4, 4), n),
+    ])
+
+def gen_v0c4_mrest_consecutive_groups():
+    """Two CONSECUTIVE multi-rest groups with DIFFERENT counts, the first also carrying a key change.
+    Regression: (1) the old anti-cascade collapsed any mrest block whose predecessor was also a mrest
+    block, so genuine consecutive groups lost measures; (2) the all-REST check rejected a mrest block
+    that also held a companion KEYCHANGE element. Layout: [note][mrest=3 + keychange][mrest=2][note].
+    Expected: 1 + 3 + 2 + 1 + 1(pad) + 1(pad) = 9. Without fix: 1 + 1 + 1 + 1 + 1 + 1 = 6."""
+    n = note_v0c4(0, 0, 0, 3, 60) + end_marker()                                  # C4 quarter
+    mrest3_kc = keychange_v0c4(0, 0, 0, tipo=8) + rest_v0c4_mrest(0, 0, 0, 1, 3) + end_marker()
+    mrest2 = rest_v0c4_mrest(0, 0, 0, 1, 2) + end_marker()
+    n2 = note_v0c4(0, 0, 0, 3, 67) + end_marker()                                 # G4 quarter
+    return assemble(0xC4, [
+        (meas_hdr(4, 4), n),
+        (meas_hdr(4, 4), mrest3_kc),
+        (meas_hdr(4, 4), mrest2),
+        (meas_hdr(4, 4), n2),
     ])
 
 def gen_v0c4_mrest_multistaff():
@@ -2404,6 +2467,22 @@ def gen_v0c4_trill_between_notes():
       + note_v0c4_xoff(240, 0, 0, fv=3, pitch=62, xoff=40)
       + note_v0c4_xoff(480, 0, 0, fv=3, pitch=64, xoff=70)
       + note_v0c4_xoff(720, 0, 0, fv=3, pitch=65, xoff=100)
+      + end_marker()
+    )
+    return assemble(0xC4, [(meas_hdr(4, 4), elems)], fill_ts=(4, 4))
+
+
+# A "TR" (TRILL_TR) whose stored tick sits ON the second note (enc 120), but whose xoffset is drawn
+# well to the LEFT of that note's xoffset (the "tr" text is left-anchored by convention). The
+# xoffset-snap must NOT drag it back to the first note: when a note exists at the ornament's own
+# tick, the TR belongs to that note. Before the fix the >20px xoffset gap snapped it onto note@0.
+def gen_v0c4_trill_tr_on_own_note():
+    elems = (
+        note_v0c4_xoff(  0, 0, 0, fv=4, pitch=60, xoff=10)
+      + note_v0c4_xoff(120, 0, 0, fv=4, pitch=64, xoff=60)  # the trilled 2nd note
+      + ornament_v0c4( 120, 0, 0, tipo=0xB0, xoffset=25)    # "tr" text, left of note@120
+      + note_v0c4_xoff(240, 0, 0, fv=3, pitch=67, xoff=100)
+      + note_v0c4_xoff(480, 0, 0, fv=3, pitch=65, xoff=150)
       + end_marker()
     )
     return assemble(0xC4, [(meas_hdr(4, 4), elems)], fill_ts=(4, 4))
@@ -3884,6 +3963,24 @@ def gen_v0c4_trill_no_end_marker():
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
 
+# A TRILL_END (0x35) that lives several measures after an unrelated TRILL_START (0x36) on the same
+# track is a standalone terminal trill, NOT the end of that far-away start. m0 has a 0x36 start (no
+# end in its own measure -> glyph); m2 has a lone 0x35 that must render its own trill on m2's note.
+# Before the fix the m0 start greedily consumed m2's end into a 2-measure span, leaving m2 bare.
+def gen_v0c4_trill_end_far_from_start():
+    m0  = ornament_v0c4(0, 0, 0, tipo=0x36)
+    m0 += note_v0c4(  0, 0, 0, fv=3, pitch=60)
+    m0 += note_v0c4(240, 0, 0, fv=3, pitch=62)
+    m0 += note_v0c4(480, 0, 0, fv=3, pitch=64)
+    m0 += note_v0c4(720, 0, 0, fv=3, pitch=65)
+    m0 += end_marker()
+    m1  = note_v0c4(0, 0, 0, fv=1, pitch=67) + end_marker()   # whole note filler
+    m2  = ornament_v0c4(0, 0, 0, tipo=0x35)
+    m2 += note_v0c4(0, 0, 0, fv=1, pitch=69)                  # the terminal trilled note
+    m2 += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), m0), (meas_hdr(4, 4), m1), (meas_hdr(4, 4), m2)], fill_ts=(4, 4))
+
+
 # ===========================================================================
 # ornaments_trill_cross_measure.enc
 # FEATURE: TRILL_START with alMezuro=2 must create a Trill spanner spanning
@@ -4639,6 +4736,238 @@ def gen_v0c4_tab_clef_keeps_tablature():
     body = meas_block(meas_hdr(4, 4), e)
     body += b''.join(empty_meas(4, 4) for _ in range(5))
     return pre + body + SKELETON_POST
+
+
+# ---------------------------------------------------------------------------
+# Helper: patch the per-staff tab tuning array. It lives in the 8 slots that
+# sit immediately before the first PAGE block: `count` open-string MIDI pitches
+# (low->high) followed by pad bytes (0x7F customized, 0x58 default). The importer
+# derives the string count from the leading non-pad slots, so overwriting the
+# 8 slots is sufficient; the explicit count byte is kept consistent too.
+# ---------------------------------------------------------------------------
+def _set_tab_tuning(pre, pitches, pad=0x7F):
+    pre = bytearray(pre)
+    page = pre.find(b'PAGE')
+    assert page > 10, "PAGE block missing in skeleton"
+    slots = page - 8
+    for i in range(8):
+        pre[slots + i] = (pitches[i] if i < len(pitches) else pad) & 0xFF
+    pre[page - 10] = len(pitches) & 0xFF   # skeleton stores the count here
+    return bytes(pre)
+
+
+# ===========================================================================
+# instruments_tab_tuning_mandolin.enc
+# A generically-named instrument ("Melody") on a TAB-clef staff. No fretted
+# template matches the name, so before the fix the staff stayed a plain 5-line
+# STANDARD staff with no StringData, and no fret numbers were drawn. The importer
+# must read the per-staff tab tuning stored before the first PAGE block (4
+# strings, mandolin GDAE) and set up a 4-line TAB staff with matching StringData
+# so the notes are fretted automatically.
+# ===========================================================================
+def gen_v0c4_tab_tuning_mandolin():
+    name = 'Melody'.encode('utf-16-le') + b'\x00\x00'
+    pre  = _patch_tk00(name)
+    pre  = _set_staff_clef(pre, 0x08)               # EncClefType::TAB
+    pre  = _set_tab_tuning(pre, [55, 62, 69, 76])   # mandolin GDAE (G3 D4 A4 E5)
+    e  = note_v0c4(0,   0, 0, fv=3, pitch=62)        # D4 (open 2nd string)
+    e += note_v0c4(240, 0, 0, fv=3, pitch=69)        # A4 (open 3rd string)
+    e += note_v0c4(480, 0, 0, fv=3, pitch=64)        # E4
+    e += note_v0c4(720, 0, 0, fv=3, pitch=67)        # G4
+    e += end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
+# ===========================================================================
+# instruments_tab_tuning_guitar.enc
+# Same generic-name TAB staff, but the stored tuning is a standard 6-string
+# guitar (the tab-display pitches Encore writes). Exercises the 6-string path
+# (6-line TAB staff, 6 StringData strings).
+# ===========================================================================
+def gen_v0c4_tab_tuning_guitar():
+    name = 'Melody'.encode('utf-16-le') + b'\x00\x00'
+    pre  = _patch_tk00(name)
+    pre  = _set_staff_clef(pre, 0x08)               # EncClefType::TAB
+    pre  = _set_tab_tuning(pre, [52, 57, 62, 67, 71, 76])   # guitar E3 A3 D4 G4 B4 E5
+    e  = note_v0c4(0,   0, 0, fv=3, pitch=52)        # low E (open 6th string)
+    e += note_v0c4(240, 0, 0, fv=3, pitch=64)        # E4
+    e += note_v0c4(480, 0, 0, fv=3, pitch=71)        # B4 (open 2nd string)
+    e += note_v0c4(720, 0, 0, fv=3, pitch=76)        # high E (open 1st string)
+    e += end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
+# Build a custom 2-staff / N-instrument v0xC4 header + LINE block. Each entry is
+# (clef_byte, staff_type, packed_instr_staff_idx) with an optional 4th element show (1=visible,
+# 0=hidden; default visible). Mirrors how Encore lays out a notation staff followed by its
+# tablature staff (separate single-staff instruments). Returns (header, line_block).
+def _tab_header_and_line(entries):
+    ninstr = len(entries)
+    hdr = bytearray(194)
+    hdr[0:4] = b'SCOW'
+    hdr[4] = 0xC4
+    struct.pack_into('<H', hdr, 0x28, 0x0420)   # chuVersio
+    struct.pack_into('<h', hdr, 0x2E, 1)         # lineCount
+    struct.pack_into('<h', hdr, 0x30, 1)         # pageCount
+    hdr[0x32] = ninstr                            # instrumentCount
+    hdr[0x33] = len(entries)                      # staffPerSystem
+    struct.pack_into('<h', hdr, 0x34, 1)          # measureCount
+    line_entries = b''
+    for entry in entries:
+        clef_byte, staff_type, packed = entry[0], entry[1], entry[2]
+        show = entry[3] if len(entry) > 3 else 1
+        e = bytearray(30)
+        e[14] = clef_byte
+        e[19] = show & 0xFF    # showByte: 1 = visible, 0 = hidden
+        e[20] = staff_type     # 0 = melody, 1 = tablature
+        e[21] = packed         # bits 0-5 instrument, bits 6-7 staff-within
+        line_entries += bytes(e)
+    line_data = b'\x00' * 10 + struct.pack('<H', 0) + bytes([1]) + line_entries
+    var_size = len(line_data)
+    return bytes(hdr), b'LINE' + struct.pack('<I', var_size) + line_data
+
+
+# Build a real TK (instrument) block whose own tab tuning sits at the end of its content, exactly
+# where the importer reads it (content ends with the 8-slot tuning; the block's declared varSize
+# includes the next block's 8-byte header, an Encore quirk, so the block occupies varSize bytes and
+# the next block starts at block_start + varSize).
+def _tk_block(idx, name, pitches, pad=0x7F):
+    tuning = bytes([(pitches[i] if i < len(pitches) else pad) & 0xFF for i in range(8)])
+    name_b = name.encode('ascii') + b'\x00'
+    content_len = 112
+    content = name_b + b'\x00' * (content_len - len(name_b) - 8) + tuning
+    var_size = len(content) + 8   # +8: next block's header, counted in varSize
+    return ('TK%02d' % idx).encode('ascii') + struct.pack('<I', var_size) + content
+
+
+# instruments_tab_two_tunings.enc
+# Two TAB staves, each its own instrument (TK block), with DIFFERENT tunings: a 4-string tab
+# (55 62 69 76) and a 6-string tab (52 57 62 67 71 76). Each TK block carries its own tuning at the
+# end of its content. Regression: the importer must apply each staff its OWN tuning; the bug applied
+# one tuning (the last block's / global) to every tab staff, so the first tab got the wrong tuning.
+def gen_v0c4_tab_two_tunings():
+    hdr, line_block = _tab_header_and_line([
+        (0x08, 1, 0x00),   # instrument 0: tablature staff
+        (0x08, 1, 0x01),   # instrument 1: tablature staff
+    ])
+    tk0 = _tk_block(0, 'TabA', [55, 62, 69, 76])              # 4-string
+    tk1 = _tk_block(1, 'TabB', [52, 57, 62, 67, 71, 76])      # 6-string
+    meas = meas_block(meas_hdr(4, 4), end_marker())
+    return hdr + tk0 + tk1 + line_block + meas + SKELETON_POST
+
+
+# instruments_tab_hidden_notation.enc
+# A HIDDEN notation staff (instrument 0, with notes) plus a visible tablature staff (instrument 1),
+# as Encore stores a tab shown over a hidden solfeo. In Ignore mode the tab is dropped, leaving only
+# the hidden notation; the importer must reveal it, because an all-hidden score has no playable part
+# and crashes playback (PlaybackController::doPause asserts currentPlayer()).
+def gen_v0c4_tab_hidden_notation():
+    hdr, line_block = _tab_header_and_line([
+        (0x00, 0, 0x00, 0),   # instrument 0: notation, HIDDEN
+        (0x08, 1, 0x01, 1),   # instrument 1: tablature, visible
+    ])
+
+    def note_raw(tick, raw_staff, fv, pitch):
+        d = bytearray(25)
+        d[0] = 28
+        d[1] = raw_staff & 0xFF
+        d[2] = fv
+        d[12] = pitch
+        return struct.pack('<H', tick) + bytes([(9 << 4) | 0]) + bytes(d)
+
+    e = (note_raw(0, 0x00, 3, 55) + note_raw(240, 0x00, 3, 59)
+         + note_raw(480, 0x00, 3, 62) + note_raw(720, 0x00, 3, 64) + end_marker())
+    meas = meas_block(meas_hdr(4, 4), e)
+    return hdr + line_block + meas + SKELETON_POST
+
+
+# instruments_tab_linked_pair.enc
+# A notation staff (instrument 0, with notes) immediately followed by an empty tablature staff
+# (instrument 1) that has no notes of its own, exactly as Encore stores a notation+tab pair. In
+# Linked mode the two merge into one instrument with the tab linked to the notation; in Separate
+# mode they stay two parts; in Ignore mode the tab staff is dropped.
+def gen_v0c4_tab_linked_pair():
+    hdr, line_block = _tab_header_and_line([
+        (0x00, 0, 0x00),   # instrument 0: notation, treble clef
+        (0x08, 1, 0x01),   # instrument 1: tablature (TAB clef, staff type 1)
+    ])
+
+    def note_raw(tick, raw_staff, fv, pitch):
+        d = bytearray(25)
+        d[0] = 28
+        d[1] = raw_staff & 0xFF
+        d[2] = fv
+        d[12] = pitch
+        return struct.pack('<H', tick) + bytes([(9 << 4) | 0]) + bytes(d)
+
+    e = (note_raw(0,   0x00, 3, 55)   # notation staff only; the tab staff stays empty
+         + note_raw(240, 0x00, 3, 59)
+         + note_raw(480, 0x00, 3, 62)
+         + note_raw(720, 0x00, 3, 64)
+         + end_marker())
+    meas = meas_block(meas_hdr(4, 4), e)
+    return hdr + line_block + meas + SKELETON_POST
+
+
+# instruments_tab_linked_overfull.enc
+# Like the linked pair, but the notation measure overfills a 3/4 nominal bar to 7/8: five eighth
+# notes (enc ticks 0..480) followed by a quarter (enc 600). The quarter spans to the bar end, so the
+# final eighth slot (mscore tick 1440) has no notation element. The tab staff (instrument 1) carries
+# its own explicit rest fill covering the whole bar including that final slot, exactly as Encore's
+# tab view stores it. The IrregularMeasure strategy widens the bar to 7/8. In Linked mode the
+# notation is cloned onto the tab: without clearing the tab first, its rest in the final slot has no
+# notation counterpart to overwrite it, survives the clone, and pushes the tab to 8/8 (regression:
+# the score sanity check then reports the tab bar overfull).
+def gen_v0c4_tab_linked_overfull():
+    hdr, line_block = _tab_header_and_line([
+        (0x00, 0, 0x00),   # instrument 0: notation, treble clef
+        (0x08, 1, 0x01),   # instrument 1: tablature
+    ])
+
+    def note_raw(tick, raw_staff, fv, pitch):
+        d = bytearray(25)
+        d[0] = 28
+        d[1] = raw_staff & 0xFF
+        d[2] = fv
+        d[12] = pitch
+        return struct.pack('<H', tick) + bytes([(9 << 4) | 0]) + bytes(d)
+
+    e = b''.join(note_raw(120 * i, 0x00, 4, 55 + i) for i in range(5))   # notation: 5 eighths
+    e += note_raw(600, 0x00, 3, 60)                                      # notation: 1 quarter
+    e += b''.join(rest_v0c4(120 * i, 0, 1, 4) for i in range(7))         # tab: 7 eighth rests
+    e += end_marker()
+    meas = meas_block(meas_hdr(3, 4), e)
+    return hdr + line_block + meas + SKELETON_POST
+
+
+# instruments_tab_standalone_frets.enc
+# A tab-only score (one tablature staff, no notation staff). Encore materializes the tab's notes as
+# pitch-bearing REST elements: type = REST (8), voice bit 0x8 set, MIDI pitch at element +15, and no
+# face value (duration is implied by the tick gaps). The importer must read these as notes so the
+# standalone tab shows fret numbers.
+def gen_v0c4_tab_standalone_frets():
+    hdr, line_block = _tab_header_and_line([
+        (0x08, 1, 0x00),   # instrument 0: tablature only
+    ])
+
+    def tab_fingering(tick, pitch):
+        d = bytearray(15)
+        d[0] = 18            # size (rest byte layout)
+        d[1] = 0             # staff 0
+        d[12] = pitch        # MIDI pitch at element +15
+        return struct.pack('<H', tick) + bytes([(8 << 4) | 0x8]) + bytes(d)
+
+    e = (tab_fingering(0,   40)   # E2
+         + tab_fingering(240, 45)  # A2
+         + tab_fingering(480, 50)  # D3
+         + tab_fingering(720, 55)  # G3
+         + end_marker())
+    meas = meas_block(meas_hdr(4, 4), e)
+    return hdr + line_block + meas + SKELETON_POST
 
 
 # ===========================================================================
@@ -9927,6 +10256,63 @@ def gen_v0c4_bowing_tick0_xoffset_mismatch():
 #   at tick=0, so there are more ORNs than staff-1 notes. The overflow
 #   ORNs must land on staff 2, not on staff 1.
 # ===========================================================================
+# ornaments_fingering_multivoice.enc
+# 2-staff file exercising FINGER ORN routing on a MULTI-VOICE top staff (all fingerings are stored on
+# voice 0, as Encore does):
+#   m1 tick0:  voice0 REST + voice2 C4, one FINGER_1 ORN on voice0. The bass staff (voice4) has a note
+#              at tick0 too. The finger must attach to the SAME-staff voice-2 C4, NOT to the bass.
+#   m1 tick240 (last voice-0 tick, no bass note there): a voice0 3-note chord + three FINGER ORNs
+#              (5,3,2). Fingering count == chord note count, so they must stay on THIS chord and not
+#              float cross-measure to m2.
+def gen_v0c4_fingering_multivoice():
+    hdr = bytearray(194)
+    hdr[0:4] = b'SCOW'
+    hdr[4] = 0xC4
+    struct.pack_into('<H', hdr, 0x28, 0x0420)
+    struct.pack_into('<h', hdr, 0x2E, 1)
+    struct.pack_into('<h', hdr, 0x30, 1)
+    hdr[0x32] = 1
+    hdr[0x33] = 2
+    struct.pack_into('<h', hdr, 0x34, 3)   # measureCount=3 (m0..m2)
+
+    def staff_entry(clef, isidx):
+        e = bytearray(30)
+        e[14] = clef
+        e[19] = 1
+        e[21] = isidx
+        return bytes(e)
+    line_data = (b'\x00' * 10 + struct.pack('<H', 0) + bytes([3])
+                 + staff_entry(0, 0x00) + staff_entry(1, 0x40))
+    line_block = b'LINE' + struct.pack('<I', len(line_data)) + line_data
+
+    def finger(tick, tipo):
+        return ornament_v0c4(tick, 0, 0, tipo=tipo, xoffset=0)
+
+    # m0: plain 4/4 filler both staves (avoids pickup shrink)
+    m0 = (note_v0c4(0, 0, 0, 3, 60) + note_v0c4(0, 4, 0, 3, 48)
+          + note_v0c4(240, 0, 0, 3, 62) + note_v0c4(240, 4, 0, 3, 50)
+          + note_v0c4(480, 0, 0, 3, 64) + note_v0c4(480, 4, 0, 3, 52)
+          + note_v0c4(720, 0, 0, 3, 65) + note_v0c4(720, 4, 0, 3, 53)
+          + end_marker())
+    # m1: multi-voice top staff
+    m1 = (rest_v0c4(0, 0, 0, 3)                 # voice0 rest at beat 1
+          + note_v0c4(0, 2, 0, 3, 60)           # voice2 C4 at beat 1 (target of FINGER_1)
+          + note_v0c4(0, 4, 0, 3, 36)           # bass note at beat 1 (decoy for the old sibling route)
+          + finger(0, 0xB9)                     # FINGER_1 -> must land on voice2 C4, not the bass
+          + note_v0c4(240, 0, 0, 3, 60)         # voice0 chord (3 notes) at beat 2
+          + note_v0c4(240, 0, 0, 3, 64)
+          + note_v0c4(240, 0, 0, 3, 67)
+          + finger(240, 0xBD) + finger(240, 0xBB) + finger(240, 0xBA)  # 5,3,2 -> stay on this chord
+          + rest_v0c4(480, 0, 0, 2)             # fill beats 3-4 (voice0)
+          + end_marker())
+    m2 = (note_v0c4(0, 0, 0, 3, 72) + note_v0c4(0, 4, 0, 3, 48) + end_marker())
+
+    body = (meas_block(meas_hdr(4, 4), m0)
+            + meas_block(meas_hdr(4, 4), m1)
+            + meas_block(meas_hdr(4, 4), m2))
+    return bytes(hdr) + line_block + body
+
+
 def gen_v0c4_fingering_grandstaff():
     # 2-staff 194-byte header
     hdr = bytearray(194)
@@ -11920,6 +12306,7 @@ def gen_v0c4_singlestaff_voice4_second_voice():
 if __name__=='__main__':
     print("Generating synthetic Encore test files (using bazo.enc skeleton):")
     write("structure_v0c2_pitches.enc",       gen_v0c2_pitches())
+    write("importer_v0c2_small_flag_chord.enc", gen_v0c2_small_flag_chord())
     write("notes_v0c2_size24_artic_pitch.enc", gen_v0c2_size24_artic_pitch())
     write("notes_v0c2_size24_semitonepitch.enc", gen_v0c2_size24_semitonepitch())
     write("notes_v0c2_common_time_glyph.enc",         gen_v0c2_common_time_glyph())
@@ -11945,6 +12332,7 @@ if __name__=='__main__':
     write("notes_grace.enc",             gen_v0c4_grace())
     write("importer_grace1_0x30_normal_notes.enc", gen_v0c4_grace1_0x30_normal_notes())
     write("importer_cue_note.enc",               gen_v0c4_cue_note())
+    write("importer_grace_beamed_group.enc",     gen_v0c4_grace_beamed_group())
     write("importer_grace_after_contiguous.enc", gen_v0c4_grace_after_contiguous())
     write("importer_grace_trailing_no_dot.enc",  gen_v0c4_grace_trailing_no_dot())
     write("importer_cue_mute_flags.enc",         gen_v0c4_cue_mute_flags())
@@ -12005,6 +12393,7 @@ if __name__=='__main__':
     write("ornaments_accents_distributed.enc",     gen_v0c4_accents_distributed())
     write("structure_start_double_barline.enc",    gen_v0c4_start_double_barline())
     write("ornaments_trill_between_notes.enc",      gen_v0c4_trill_between_notes())
+    write("ornaments_trill_tr_on_own_note.enc",     gen_v0c4_trill_tr_on_own_note())
     write("structure_stale_tick_by_column.enc",    gen_v0c4_stale_tick_by_column())
     write("structure_voice4_rest_with_notes.enc",  gen_v0c4_voice4_rest_with_notes())
     write("structure_merge_stray_voice_rests.enc", gen_v0c4_merge_stray_voice_rests())
@@ -12040,6 +12429,13 @@ if __name__=='__main__':
     write("instruments_instr_laud_accent.enc",          gen_v0c4_instr_laud_accent())
     write("instruments_tab_template_forced_standard.enc", gen_v0c4_tab_template_forced_standard())
     write("instruments_tab_clef_keeps_tablature.enc",     gen_v0c4_tab_clef_keeps_tablature())
+    write("instruments_tab_tuning_mandolin.enc",          gen_v0c4_tab_tuning_mandolin())
+    write("instruments_tab_tuning_guitar.enc",            gen_v0c4_tab_tuning_guitar())
+    write("instruments_tab_two_tunings.enc",              gen_v0c4_tab_two_tunings())
+    write("instruments_tab_hidden_notation.enc",          gen_v0c4_tab_hidden_notation())
+    write("instruments_tab_linked_pair.enc",              gen_v0c4_tab_linked_pair())
+    write("instruments_tab_linked_overfull.enc",          gen_v0c4_tab_linked_overfull())
+    write("instruments_tab_standalone_frets.enc",         gen_v0c4_tab_standalone_frets())
     write("instruments_instr_clarinet_midi72_key0.enc",         gen_v0c4_instr_clarinet_midi72_key0())
     write("instruments_instr_empty_name_midi_clarinet.enc",     gen_v0c4_instr_empty_name_midi_clarinet())
     write("instruments_instr_clarinet_midi72_key_neg2.enc",     gen_v0c4_instr_clarinet_midi72_key_neg2())
@@ -12074,6 +12470,7 @@ if __name__=='__main__':
     write("ornaments_trill_simple_on_note.enc",   gen_v0c4_trill_simple_on_note())
     write("ornaments_trill_spanner.enc",          gen_v0c4_trill_spanner())
     write("ornaments_trill_no_end_marker.enc",    gen_v0c4_trill_no_end_marker())
+    write("ornaments_trill_end_far_from_start.enc", gen_v0c4_trill_end_far_from_start())
     write("ornaments_trill_cross_measure.enc",    gen_v0c4_trill_cross_measure())
     write("ornaments_staccato_orn.enc",           gen_v0c4_staccato_orn())
     write("ornaments_bowing.enc",                 gen_v0c4_bowing_orn())
@@ -12125,6 +12522,7 @@ if __name__=='__main__':
     write("importer_mrest_followed_by_rest.enc",          gen_v0c4_mrest_followed_by_rest())
     write("importer_mrest_preceded_by_rest.enc",         gen_v0c4_mrest_preceded_by_rest())
     write("importer_mrest_multistaff.enc",               gen_v0c4_mrest_multistaff())
+    write("importer_mrest_consecutive_groups.enc",       gen_v0c4_mrest_consecutive_groups())
     write("importer_gap_snap_eighth_meter.enc",           gen_v0c4_gap_snap_eighth_meter())
     write("importer_v0xa6_no_spurious_tremolo.enc",             gen_v0xa6_no_spurious_tremolo())
     write("importer_v0xa6_key_transposition.enc",               gen_v0xa6_key_transposition())
@@ -12255,6 +12653,7 @@ if __name__=='__main__':
     write("notes_tuplet_diff_column_keeps_members.enc",    gen_v0c4_tuplet_diff_column())
     write("ornaments_bowing_tick0_xoffset_mismatch.enc",    gen_v0c4_bowing_tick0_xoffset_mismatch())
     write("ornaments_fingering_grandstaff.enc",            gen_v0c4_fingering_grandstaff())
+    write("ornaments_fingering_multivoice.enc",            gen_v0c4_fingering_multivoice())
     write("notes_chord_inflated_rdur_keeps_eighth.enc", gen_v0c4_chord_inflated_rdur_keeps_eighth())
     write("notes_chord_symbol_large_drift.enc", gen_v0c4_chord_symbol_large_drift())
     write("notes_chord_symbol_nearbeat_subdivision.enc", gen_v0c4_chord_symbol_nearbeat_subdivision())
