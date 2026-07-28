@@ -44,6 +44,41 @@ static const mpe::ArticulationTypeSet BEND_SUPPORTED_TYPES {
     mpe::ArticulationType::Multibend, mpe::ArticulationType::ContinuousGlissando,
 };
 
+// Keyswitch articulation switching for VST instruments.
+//
+// VST instruments select articulations (pizzicato, tremolo, harmonic...) via keyswitches:
+// note-ons in a reserved low range that the instrument interprets as an articulation change
+// instead of a pitch. MuseScore already forwards manually notated keyswitch notes, but it
+// discards the articulation information it holds internally. This maps that information to a
+// keyswitch note so the correct articulation is selected automatically from the notation.
+//
+// The reserved range is the bottom octave, MIDI 0..11 (matches the keyswitch zone that
+// noteIndex() already lets through, idx < 12). 0 = normal, so a note without a mapped
+// articulation resets the instrument to its default articulation.
+static constexpr int KEYSWITCH_NORMAL = 0;
+static constexpr int KEYSWITCH_TREMOLO = 1;
+
+static int keyswitchPitchForArticulation(mpe::ArticulationType type)
+{
+    switch (type) {
+    case mpe::ArticulationType::Tremolo8th:
+    case mpe::ArticulationType::Tremolo16th:
+    case mpe::ArticulationType::Tremolo32nd:
+    case mpe::ArticulationType::Tremolo64th:
+        return KEYSWITCH_TREMOLO;
+    case mpe::ArticulationType::Pizzicato:
+    case mpe::ArticulationType::SnapPizzicato:
+        return 2;
+    case mpe::ArticulationType::Harmonic:
+        return 3;
+    case mpe::ArticulationType::PalmMute:
+    case mpe::ArticulationType::Mute:
+        return 4;
+    default:
+        return -1; // not a keyswitch-mapped articulation
+    }
+}
+
 void VstSequencer::init(ParamsMapping&& mapping, bool useDynamicEvents)
 {
     m_mapping = std::move(mapping);
@@ -99,11 +134,12 @@ muse::audio::gain_t VstSequencer::currentGain() const
 void VstSequencer::addPlaybackEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events)
 {
     SostenutoTimeAndDurations sostenutoTimeAndDurations;
+    EmittedTremoloSpans emittedTremoloSpans;
 
     for (const auto& evPair : events) {
         for (const mpe::PlaybackEvent& event : evPair.second) {
             if (std::holds_alternative<mpe::NoteEvent>(event)) {
-                addNoteEvent(destination, std::get<mpe::NoteEvent>(event), sostenutoTimeAndDurations);
+                addNoteEvent(destination, std::get<mpe::NoteEvent>(event), sostenutoTimeAndDurations, emittedTremoloSpans);
             } else if (std::holds_alternative<mpe::ControllerChangeEvent>(event)) {
                 addControlChangeEvent(destination, evPair.first, std::get<mpe::ControllerChangeEvent>(event));
             }
@@ -123,12 +159,38 @@ void VstSequencer::addDynamicEvents(EventSequenceMap& destination, const mpe::Dy
 }
 
 void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent,
-                                SostenutoTimeAndDurations& sostenutoTimeAndDurations)
+                                SostenutoTimeAndDurations& sostenutoTimeAndDurations,
+                                EmittedTremoloSpans& emittedTremoloSpans)
 {
     const mpe::ArrangementContext& arrangementCtx = noteEvent.arrangementCtx();
     const int32_t noteId = noteIndex(noteEvent.pitchCtx().nominalPitchLevel);
     const float velocityFraction = noteVelocityFraction(noteEvent);
     const float tuning = noteTuning(noteEvent, noteId);
+
+    // A notated tremolo is rendered upstream as a burst of repeated sub-notes. For an
+    // instrument that plays tremolo natively via a keyswitch, collapse that burst back into a
+    // single sustained note spanning the whole notated tremolo (from the articulation
+    // metadata), preceded by the tremolo keyswitch. Every sub-note carries the same span, so
+    // it is emitted only once per (pitch, span). This keeps adjacent tremolo notes separate
+    // and lets the instrument's tremolo sample play once instead of being retriggered.
+    for (const auto& artPair : noteEvent.expressionCtx().articulations) {
+        if (keyswitchPitchForArticulation(artPair.first) != KEYSWITCH_TREMOLO) {
+            continue;
+        }
+
+        const mpe::ArticulationMeta& meta = artPair.second.meta;
+        const mpe::timestamp_t from = meta.timestamp;
+        const mpe::timestamp_t to = from + meta.overallDuration;
+
+        if (emittedTremoloSpans.insert({ noteId, from }).second) {
+            destination[from].emplace_back(buildEvent(VstEvent::kNoteOnEvent, KEYSWITCH_TREMOLO, velocityFraction, 0.f));
+            destination[from].emplace_back(buildEvent(VstEvent::kNoteOnEvent, noteId, velocityFraction, tuning));
+            destination[to].emplace_back(buildEvent(VstEvent::kNoteOffEvent, KEYSWITCH_TREMOLO, velocityFraction, 0.f));
+            destination[to].emplace_back(buildEvent(VstEvent::kNoteOffEvent, noteId, velocityFraction, tuning));
+        }
+
+        return; // the whole tremolo is represented by the single sustained note above
+    }
 
     if (arrangementCtx.hasStart()) {
         destination[arrangementCtx.actualTimestamp].emplace_back(buildEvent(VstEvent::kNoteOnEvent, noteId, velocityFraction, tuning));
@@ -137,6 +199,28 @@ void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEv
     if (arrangementCtx.hasEnd()) {
         const mpe::timestamp_t timestampTo = arrangementCtx.actualTimestamp + noteEvent.arrangementCtx().actualDuration;
         destination[timestampTo].emplace_back(buildEvent(VstEvent::kNoteOffEvent, noteId, velocityFraction, tuning));
+    }
+
+    // Prepend a keyswitch note so instruments that select their articulation by keyswitch pick
+    // the right one automatically from the notation. 0 (normal) resets any previous
+    // articulation. The keyswitch shares the note's timeslot; sortNoteOnEventsByPitch() then
+    // delivers the low keyswitch note first. tuning is 0 for keyswitch notes.
+    if (arrangementCtx.hasStart()) {
+        int keyswitchPitch = KEYSWITCH_NORMAL;
+        for (const auto& artPair : noteEvent.expressionCtx().articulations) {
+            const int mapped = keyswitchPitchForArticulation(artPair.first);
+            if (mapped >= 0) {
+                keyswitchPitch = mapped;
+                break;
+            }
+        }
+
+        destination[arrangementCtx.actualTimestamp].emplace_back(
+            buildEvent(VstEvent::kNoteOnEvent, keyswitchPitch, velocityFraction, 0.f));
+
+        const mpe::timestamp_t keyswitchOff = arrangementCtx.actualTimestamp + noteEvent.arrangementCtx().actualDuration;
+        destination[keyswitchOff].emplace_back(
+            buildEvent(VstEvent::kNoteOffEvent, keyswitchPitch, velocityFraction, 0.f));
     }
 
     for (const auto& artPair : noteEvent.expressionCtx().articulations) {

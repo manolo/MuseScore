@@ -22,6 +22,9 @@
 
 #pragma once
 
+#include <set>
+#include <utility>
+
 #include "audio/engine/internal/abstracteventsequencer.h"
 
 #include "vsttypes.h"
@@ -40,9 +43,14 @@ private:
 
     using SostenutoTimeAndDurations = std::vector<mpe::TimestampAndDuration>;
 
+    // Tracks (pitch, tremolo start) spans already emitted, so the many repeated sub-notes of
+    // one notated tremolo collapse into a single sustained note (see addNoteEvent).
+    using EmittedTremoloSpans = std::set<std::pair<int32_t, mpe::timestamp_t> >;
+
     void addPlaybackEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events);
     void addDynamicEvents(EventSequenceMap& destination, const mpe::DynamicLevelLayers& layers);
-    void addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, SostenutoTimeAndDurations& sostenutoTimeAndDurations);
+    void addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent,
+                      SostenutoTimeAndDurations& sostenutoTimeAndDurations, EmittedTremoloSpans& emittedTremoloSpans);
     void addPedalEvent(EventSequenceMap& destination, const mpe::ArticulationMeta& meta);
     void addControlChangeEvent(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const mpe::ControllerChangeEvent& event);
     void addParamChange(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const ControlIdx controlIdx,
