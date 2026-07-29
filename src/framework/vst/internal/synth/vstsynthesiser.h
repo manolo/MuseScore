@@ -31,6 +31,7 @@
 
 #include "../vstaudioclient.h"
 #include "../../ivstinstancesregister.h"
+#include "../../ivstconfiguration.h"
 #include "vstsequencer.h"
 #include "vsttypes.h"
 
@@ -38,6 +39,7 @@ namespace muse::vst {
 class VstSynthesiser : public muse::audio::synth::AbstractSynthesizer
 {
     GlobalInject<audio::engine::IAudioEngineConfiguration> config;
+    GlobalInject<IVstConfiguration> configuration;
     ContextInject<IVstInstancesRegister> instancesRegister = { this };
 
 public:
@@ -58,6 +60,8 @@ public:
     void setupEvents(const mpe::PlaybackData& playbackData) override;
     const mpe::PlaybackData& playbackData() const override;
 
+    void setHostTrackName(const std::string& name) override;
+
     bool isActive() const override;
     void setIsActive(const bool isActive) override;
 
@@ -72,6 +76,8 @@ public:
 
 private:
     void updateRenderingMode(const audio::RenderMode mode) override;
+
+    void sendChannelContext(); // push the host track name to the plugin (VST3 channel context)
 
     void toggleVolumeGain(const bool isActive);
     audio::samples_t processSequence(const VstSequencer::EventSequence& sequence, const audio::samples_t samples, float* buffer);
@@ -88,6 +94,7 @@ private:
 
     bool m_inited = false;
     bool m_useDynamicEvents = false;
+    std::string m_hostTrackName;
 
     audio::samples_t m_currentPositionSamples = 0;
 };

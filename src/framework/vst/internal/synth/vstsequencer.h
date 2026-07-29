@@ -22,18 +22,20 @@
 
 #pragma once
 
+#include <optional>
 #include <set>
 #include <utility>
 
 #include "audio/engine/internal/abstracteventsequencer.h"
 
 #include "vsttypes.h"
+#include "../../vstkeyswitchprofile.h"
 
 namespace muse::vst {
 class VstSequencer : public audio::engine::AbstractEventSequencer<VstEvent, ParamChangeEvent, muse::audio::gain_t>
 {
 public:
-    void init(ParamsMapping&& mapping, bool useDynamicEvents);
+    void init(ParamsMapping&& mapping, bool useDynamicEvents, std::optional<VstKeyswitchProfile> keyswitchProfile = std::nullopt);
 
     muse::audio::gain_t currentGain() const;
 
@@ -72,5 +74,6 @@ private:
     bool m_inited = false;
     bool m_useDynamicEvents = false;
     ParamsMapping m_mapping;
+    std::optional<VstKeyswitchProfile> m_keyswitchProfile;
 };
 }

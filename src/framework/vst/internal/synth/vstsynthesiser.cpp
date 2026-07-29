@@ -21,6 +21,10 @@
  */
 #include "vstsynthesiser.h"
 
+#include "pluginterfaces/vst/ivstchannelcontextinfo.h"
+#include "public.sdk/source/vst/hosting/hostclasses.h"
+#include "public.sdk/source/vst/utility/stringconvert.h"
+
 #include "log.h"
 
 using namespace muse;
@@ -66,8 +70,11 @@ void VstSynthesiser::init(const OutputSpec& spec)
         m_pluginPtr->updatePluginConfig(m_params.configuration);
         m_vstAudioClient->setOutputSpec(m_outputSpec);
         m_vstAudioClient->loadSupportedParams();
-        m_sequencer.init(m_vstAudioClient->paramsMapping(SUPPORTED_CONTROLLERS), m_useDynamicEvents);
+        const std::optional<VstKeyswitchProfile> keyswitchProfile = configuration()->keyswitchProfileForPlugin(
+            m_pluginPtr->name(), m_params.resourceMeta.id, m_params.resourceMeta.vendor);
+        m_sequencer.init(m_vstAudioClient->paramsMapping(SUPPORTED_CONTROLLERS), m_useDynamicEvents, keyswitchProfile);
         m_inited = true;
+        sendChannelContext();
     };
 
     if (m_pluginPtr->isLoaded()) {
@@ -131,6 +138,37 @@ std::string VstSynthesiser::name() const
     }
 
     return m_pluginPtr->name();
+}
+
+void VstSynthesiser::setHostTrackName(const std::string& name)
+{
+    m_hostTrackName = name;
+    if (m_inited) {
+        sendChannelContext();
+    }
+}
+
+void VstSynthesiser::sendChannelContext()
+{
+    if (m_hostTrackName.empty() || !m_pluginPtr) {
+        return;
+    }
+
+    PluginControllerPtr controller = m_pluginPtr->controller();
+    if (!controller) {
+        return;
+    }
+
+    Steinberg::FUnknownPtr<Steinberg::Vst::ChannelContext::IInfoListener> infoListener(controller);
+    if (!infoListener) {
+        return; // the plugin does not use channel context
+    }
+
+    Steinberg::IPtr<Steinberg::Vst::IAttributeList> list = Steinberg::Vst::HostAttributeList::make();
+    Steinberg::Vst::String128 name128 = {};
+    Steinberg::Vst::StringConvert::convert(m_hostTrackName, name128);
+    list->setString(Steinberg::Vst::ChannelContext::kChannelNameKey, name128);
+    infoListener->setChannelContextInfos(list);
 }
 
 void VstSynthesiser::flushSound()

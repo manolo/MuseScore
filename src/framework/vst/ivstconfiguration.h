@@ -21,10 +21,15 @@
  */
 #pragma once
 
+#include <optional>
+#include <string>
+
 #include "modularity/imoduleinterface.h"
 
 #include "io/path.h"
 #include "async/channel.h"
+
+#include "vstkeyswitchprofile.h"
 
 namespace muse::vst {
 class IVstConfiguration : MODULE_GLOBAL_INTERFACE
@@ -37,6 +42,13 @@ public:
     virtual io::paths_t userVstDirectories() const = 0;
     virtual void setUserVstDirectories(const io::paths_t& paths) = 0;
     virtual async::Channel<io::paths_t> userVstDirectoriesChanged() const = 0;
+
+    // Keyswitch profile for the given plugin, from vst_keyswitches.json (bundled default plus a
+    // user override in the user data dir). Returns nullopt when the plugin is not listed, which
+    // is the signal to send plain notes (no articulation keyswitches) to that instrument.
+    virtual std::optional<VstKeyswitchProfile> keyswitchProfileForPlugin(const std::string& pluginName,
+                                                                         const std::string& resourceId,
+                                                                         const std::string& vendor) const = 0;
 
     // dev
     virtual std::string usedVstView() const = 0;
