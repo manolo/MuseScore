@@ -22,6 +22,7 @@
 #include "vstsynthesiser.h"
 
 #include "pluginterfaces/vst/ivstchannelcontextinfo.h"
+#include "pluginterfaces/vst/ivstnoteexpression.h"
 #include "public.sdk/source/vst/hosting/hostclasses.h"
 #include "public.sdk/source/vst/utility/stringconvert.h"
 
@@ -40,6 +41,80 @@ static const std::set<Steinberg::Vst::CtrlNumber> SUPPORTED_CONTROLLERS = {
     Steinberg::Vst::kCtrlSustenutoOnOff,
     Steinberg::Vst::kPitchBend,
 };
+
+// Query IKeyswitchController from a VST3 plugin and build a keyswitch profile if the plugin
+// supports it. This replaces the old JSON configuration by reading articulation metadata
+// directly from the plugin.
+static std::optional<VstKeyswitchProfile> queryKeyswitchProfile(const PluginControllerPtr& controller)
+{
+    using namespace Steinberg;
+    using namespace Steinberg::Vst;
+
+    if (!controller) {
+        return std::nullopt;
+    }
+
+    // Query for IKeyswitchController interface
+    FUnknownPtr<IKeyswitchController> keyswitchCtrl(controller);
+    if (!keyswitchCtrl) {
+        return std::nullopt; // Plugin does not support keyswitches
+    }
+
+    // Query keyswitches for event bus 0, channel 0
+    const int32 busIndex = 0;
+    const int16 channel = 0;
+    int32 count = keyswitchCtrl->getKeyswitchCount(busIndex, channel);
+
+    if (count <= 0) {
+        return std::nullopt; // No keyswitches defined
+    }
+
+    VstKeyswitchProfile profile;
+    profile.collapseTremolo = true; // Default behavior: collapse tremolo notes
+
+    for (int32 i = 0; i < count; ++i) {
+        KeyswitchInfo info;
+        if (keyswitchCtrl->getKeyswitchInfo(busIndex, channel, i, info) != kResultTrue) {
+            continue;
+        }
+
+        // Convert UTF-16 title to std::string
+        std::string title = VST3::StringConvert::convert(info.title);
+
+        // Map keyswitch titles to MuseScore ArticulationTypes
+        mpe::ArticulationType articType = mpe::ArticulationType::Standard;
+
+        if (title.find("Pick") != std::string::npos || title.find("Standard") != std::string::npos) {
+            articType = mpe::ArticulationType::Standard;
+        } else if (title.find("Trem") != std::string::npos) {
+            // Map all tremolo types to the same keyswitch
+            profile.keyswitches[mpe::ArticulationType::Tremolo8th] = info.keyswitchMin;
+            profile.keyswitches[mpe::ArticulationType::Tremolo16th] = info.keyswitchMin;
+            profile.keyswitches[mpe::ArticulationType::Tremolo32nd] = info.keyswitchMin;
+            profile.keyswitches[mpe::ArticulationType::Tremolo64th] = info.keyswitchMin;
+            continue;
+        } else if (title.find("Pizz") != std::string::npos) {
+            profile.keyswitches[mpe::ArticulationType::Pizzicato] = info.keyswitchMin;
+            profile.keyswitches[mpe::ArticulationType::SnapPizzicato] = info.keyswitchMin;
+            continue;
+        } else if (title.find("Harm") != std::string::npos) {
+            articType = mpe::ArticulationType::Harmonic;
+        } else if (title.find("Mute") != std::string::npos) {
+            profile.keyswitches[mpe::ArticulationType::PalmMute] = info.keyswitchMin;
+            profile.keyswitches[mpe::ArticulationType::Mute] = info.keyswitchMin;
+            continue;
+        }
+
+        profile.keyswitches[articType] = info.keyswitchMin;
+    }
+
+    if (profile.keyswitches.empty()) {
+        return std::nullopt;
+    }
+
+    return profile;
+}
+
 
 VstSynthesiser::VstSynthesiser(const TrackId trackId, const muse::audio::AudioInputParams& params,
                                const modularity::ContextPtr& iocCtx)
@@ -70,8 +145,11 @@ void VstSynthesiser::init(const OutputSpec& spec)
         m_pluginPtr->updatePluginConfig(m_params.configuration);
         m_vstAudioClient->setOutputSpec(m_outputSpec);
         m_vstAudioClient->loadSupportedParams();
-        const std::optional<VstKeyswitchProfile> keyswitchProfile = configuration()->keyswitchProfileForPlugin(
-            m_pluginPtr->name(), m_params.resourceMeta.id, m_params.resourceMeta.vendor);
+        
+        // Query keyswitch profile directly from the plugin via IKeyswitchController interface.
+        // This replaces the old JSON configuration system.
+        const std::optional<VstKeyswitchProfile> keyswitchProfile = queryKeyswitchProfile(m_pluginPtr->controller());
+        
         m_sequencer.init(m_vstAudioClient->paramsMapping(SUPPORTED_CONTROLLERS), m_useDynamicEvents, keyswitchProfile);
         m_inited = true;
         sendChannelContext();

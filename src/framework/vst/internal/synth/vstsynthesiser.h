@@ -31,7 +31,6 @@
 
 #include "../vstaudioclient.h"
 #include "../../ivstinstancesregister.h"
-#include "../../ivstconfiguration.h"
 #include "vstsequencer.h"
 #include "vsttypes.h"
 
@@ -39,7 +38,6 @@ namespace muse::vst {
 class VstSynthesiser : public muse::audio::synth::AbstractSynthesizer
 {
     GlobalInject<audio::engine::IAudioEngineConfiguration> config;
-    GlobalInject<IVstConfiguration> configuration;
     ContextInject<IVstInstancesRegister> instancesRegister = { this };
 
 public:

@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <map>
 #include <optional>
 #include <set>
 #include <utility>
@@ -29,9 +30,22 @@
 #include "audio/engine/internal/abstracteventsequencer.h"
 
 #include "vsttypes.h"
-#include "../../vstkeyswitchprofile.h"
+#include "mpe/mpetypes.h"
 
 namespace muse::vst {
+// Per-plugin keyswitch profile: how a VST instrument that selects articulations by keyswitch
+// wants each articulation delivered. Queried from the plugin via IKeyswitchController interface.
+struct VstKeyswitchProfile {
+    // Articulation -> keyswitch note (reserved low range, typically 0..11). A note without a
+    // mapped articulation falls back to the Standard entry, or 0 if it is absent.
+    std::map<mpe::ArticulationType, int> keyswitches;
+
+    // When true, a notated tremolo (rendered upstream as repeated sub-notes) is collapsed into
+    // a single sustained note plus the tremolo keyswitch, so the instrument's tremolo sample
+    // plays once. Set false for instruments that expect the repeated-note tremolo simulation.
+    bool collapseTremolo = true;
+};
+
 class VstSequencer : public audio::engine::AbstractEventSequencer<VstEvent, ParamChangeEvent, muse::audio::gain_t>
 {
 public:

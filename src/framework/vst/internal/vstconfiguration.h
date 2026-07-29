@@ -21,10 +21,6 @@
  */
 #pragma once
 
-#include <vector>
-
-#include <QByteArray>
-
 #include "ivstconfiguration.h"
 
 #include "global/modularity/ioc.h"
@@ -47,28 +43,11 @@ public:
     void setUserVstDirectories(const io::paths_t& paths) override;
     async::Channel<io::paths_t> userVstDirectoriesChanged() const override;
 
-    std::optional<VstKeyswitchProfile> keyswitchProfileForPlugin(const std::string& pluginName,
-                                                                 const std::string& resourceId,
-                                                                 const std::string& vendor) const override;
-
     // dev
     std::string usedVstView() const override;
     void setUsedVstView(const std::string& code) override;
 
 private:
-    struct KeyswitchProfileEntry {
-        std::string matchName;
-        std::string matchId;
-        std::string matchVendor;
-        VstKeyswitchProfile profile;
-    };
-
-    void ensureKeyswitchProfilesLoaded() const;
-    void parseKeyswitchProfiles(const QByteArray& json) const;
-
     async::Channel<io::paths_t> m_userVstDirsChanged;
-
-    mutable bool m_keyswitchProfilesLoaded = false;
-    mutable std::vector<KeyswitchProfileEntry> m_keyswitchProfiles;
 };
 }

@@ -29,7 +29,6 @@ target_sources(muse_vst PRIVATE
     ivstplugininstance.h
     vsterrors.h
     vsttypes.h
-    vstkeyswitchprofile.h
     vstmodule.cpp
     vstmodule.h
 
@@ -70,13 +69,6 @@ target_sources(muse_vst PRIVATE
 
     widgets/vstviewdialog_qwidget.cpp
     widgets/vstviewdialog_qwidget.h
-)
-
-qt_add_resources(muse_vst muse_vst_resources
-    PREFIX
-        /vst
-    FILES
-        resources/vst_keyswitches.json
 )
 
 target_link_libraries(muse_vst PRIVATE vst3sdk)
