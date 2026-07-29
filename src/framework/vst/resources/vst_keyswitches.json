@@ -2,7 +2,7 @@
     "_comment": "Per-plugin articulation to keyswitch map for VST instruments. Only plugins listed here receive articulation keyswitches; every other VST gets plain notes. A user override may be placed at <userDataPath>/vst_keyswitches.json and takes precedence. Articulation names match MuseScore's ArticulationType names; keyswitch values are MIDI notes in the reserved low range (0..11).",
     "profiles": [
         {
-            "match": { "name": "Pulso y Púa", "vendor": "Do2tis" },
+            "match": { "name": "Plectro", "vendor": "Do2tis" },
             "collapseTremolo": true,
             "keyswitches": {
                 "Standard": 0,

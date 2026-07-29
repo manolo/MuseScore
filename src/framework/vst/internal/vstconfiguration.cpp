@@ -71,7 +71,7 @@ static bool fieldMatches(const std::string& pattern, const std::string& value)
     if (pattern.empty()) {
         return true; // wildcard: this match field is not constrained
     }
-    // Case-insensitive substring, so "Bandurria" matches a host-decorated "Bandurria (Pulso y Pua)".
+    // Case-insensitive substring, so "Plectro" matches both "Plectro" and "Plectro Pro".
     const QString v = QString::fromStdString(value).toLower();
     const QString p = QString::fromStdString(pattern).toLower();
     return v.contains(p);
