@@ -54,7 +54,7 @@ std::string VSTModule::moduleName() const
 
 void VSTModule::registerExports()
 {
-    m_configuration = std::make_shared<VstConfiguration>(iocContext());
+    m_configuration = std::make_shared<VstConfiguration>();
     m_pluginModulesRepo = std::make_shared<VstModulesRepository>(iocContext());
     m_pluginInstancesRegister = std::make_shared<VstInstancesRegister>(iocContext());
     m_actionsController = std::make_shared<VstActionsController>(iocContext());

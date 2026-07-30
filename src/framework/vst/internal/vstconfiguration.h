@@ -23,20 +23,10 @@
 
 #include "ivstconfiguration.h"
 
-#include "global/modularity/ioc.h"
-#include "global/iglobalconfiguration.h"
-#include "global/io/ifilesystem.h"
-
 namespace muse::vst {
-class VstConfiguration : public IVstConfiguration, public Contextable
+class VstConfiguration : public IVstConfiguration
 {
-    GlobalInject<IGlobalConfiguration> globalConfiguration;
-    GlobalInject<io::IFileSystem> fileSystem;
-
 public:
-    VstConfiguration(const modularity::ContextPtr& iocCtx)
-        : Contextable(iocCtx) {}
-
     void init();
 
     io::paths_t userVstDirectories() const override;
