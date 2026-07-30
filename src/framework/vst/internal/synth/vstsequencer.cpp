@@ -172,9 +172,8 @@ void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEv
     const float velocityFraction = noteVelocityFraction(noteEvent);
     const float tuning = noteTuning(noteEvent, noteId);
 
-    // Keyswitch articulation handling only applies to plugins that declare a keyswitch profile
-    // in vst_keyswitches.json. Any other VST falls through to plain note events (no keyswitches),
-    // so this never sends spurious low notes to instruments that do not use them.
+    // Keyswitch articulation handling only applies to plugins that support IKeyswitchController.
+    // Plugins without keyswitch support use plain note events (no low MIDI notes prepended).
     if (m_keyswitchProfile.has_value() && m_keyswitchProfile->collapseTremolo) {
         // A notated tremolo is rendered upstream as a burst of repeated sub-notes. Collapse it
         // back into a single sustained note spanning the whole notated tremolo (from the
