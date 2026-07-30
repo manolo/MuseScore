@@ -48,6 +48,23 @@ static const std::set<Steinberg::Vst::CtrlNumber> SUPPORTED_CONTROLLERS = {
 // Query IKeyswitchController from a VST3 plugin and build a keyswitch profile if the plugin
 // supports it. Maps plugin keyswitch names to MuseScore articulation types using common
 // naming patterns (Tremolo, Pizzicato, Harmonic, Mute, etc.).
+//
+// KeyswitchInfo: only keyswitchMin on bus 0 / channel 0 is read. This is a deliberate design
+// choice for a keyswitch SENDER, not a gap to close later:
+//  - keyswitchMin already selects the articulation. keyswitchMax only widens the set of notes that
+//    would also select it, so min is always a valid choice.
+//  - typeId is effectively kNoteOnKeyswitchTypeID here: we send the keyswitch note on before the
+//    note, which is what almost every instrument expects. On the fly keyswitches are rare.
+//  - channel and unitId have no equivalent in MuseScore: playback sends every note on channel 0
+//    (see buildEvent) and mpe has no per articulation channel or unit concept. The whole keyswitch
+//    feature lives only in this fork, so there is no host machinery being wasted; honoring these
+//    fields would mean building new host support with no benefit for the current instruments.
+// If a future plugin genuinely needs ranges, another channel or on the fly keyswitches, that is
+// new, separately justified host work, not a defect in this code.
+//
+// Name matching, in contrast, IS a real limitation: it is English substring based, so localized
+// titles are not recognized and combined names can be misclassified. A robust design would be a
+// user editable mapping (expression map style) rather than a heuristic.
 static std::optional<VstKeyswitchProfile> queryKeyswitchProfile(const PluginControllerPtr& controller)
 {
     using namespace Steinberg;
