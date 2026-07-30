@@ -89,17 +89,52 @@ static std::optional<VstKeyswitchProfile> queryKeyswitchProfile(const PluginCont
         return std::nullopt; // No keyswitches defined
     }
 
-    // Curated vocabulary: exact MuseScore articulation names (lowercased) mapped to their type.
-    // Limited to what these plucked-string instruments support; the plugin must use these exact
-    // names. Close relatives are filled in by the alias pass below.
+    // Curated vocabulary: the common articulations from MuseScore's playing techniques, accents,
+    // bowing and ornament palettes, keyed by the canonical mpe::ArticulationType name (lowercased).
+    // A plugin is matched only for the names it actually advertises; the rest stay unused. The
+    // plugin must advertise using these exact names (its own responsibility).
     static const std::unordered_map<std::string, mpe::ArticulationType> NAME_TO_TYPE = {
+        // Playing techniques (text palette)
         { "standard", mpe::ArticulationType::Standard },
+        { "open", mpe::ArticulationType::Open },
+        { "mute", mpe::ArticulationType::Mute },
         { "pizzicato", mpe::ArticulationType::Pizzicato },
+        { "detache", mpe::ArticulationType::Detache },
+        { "martele", mpe::ArticulationType::Martele },
+        { "collegno", mpe::ArticulationType::ColLegno },
+        { "sulpont", mpe::ArticulationType::SulPont },
+        { "sultasto", mpe::ArticulationType::SulTasto },
+        { "distortion", mpe::ArticulationType::Distortion },
+        { "overdrive", mpe::ArticulationType::Overdrive },
+        { "harmonic", mpe::ArticulationType::Harmonic },
+        { "jazztone", mpe::ArticulationType::JazzTone },
+        { "vibrato", mpe::ArticulationType::Vibrato },
+        { "legato", mpe::ArticulationType::Legato },
+        // Accents and articulations
+        { "staccato", mpe::ArticulationType::Staccato },
+        { "staccatissimo", mpe::ArticulationType::Staccatissimo },
+        { "tenuto", mpe::ArticulationType::Tenuto },
+        { "marcato", mpe::ArticulationType::Marcato },
+        { "accent", mpe::ArticulationType::Accent },
+        { "softaccent", mpe::ArticulationType::SoftAccent },
+        { "laissezvibrer", mpe::ArticulationType::LaissezVibrer },
+        // Bowing and strings
+        { "upbow", mpe::ArticulationType::UpBow },
+        { "downbow", mpe::ArticulationType::DownBow },
+        { "jete", mpe::ArticulationType::Jete },
         { "snappizzicato", mpe::ArticulationType::SnapPizzicato },
         { "randompizzicato", mpe::ArticulationType::RandomPizzicato },
-        { "harmonic", mpe::ArticulationType::Harmonic },
-        { "mute", mpe::ArticulationType::Mute },
         { "palmmute", mpe::ArticulationType::PalmMute },
+        // Guitar
+        { "slap", mpe::ArticulationType::Slap },
+        { "pop", mpe::ArticulationType::Pop },
+        // Ornaments (the common ones)
+        { "trill", mpe::ArticulationType::Trill },
+        { "uppermordent", mpe::ArticulationType::UpperMordent },
+        { "lowermordent", mpe::ArticulationType::LowerMordent },
+        { "turn", mpe::ArticulationType::Turn },
+        { "invertedturn", mpe::ArticulationType::InvertedTurn },
+        // Tremolo subdivisions
         { "tremolo8th", mpe::ArticulationType::Tremolo8th },
         { "tremolo16th", mpe::ArticulationType::Tremolo16th },
         { "tremolo32nd", mpe::ArticulationType::Tremolo32nd },
