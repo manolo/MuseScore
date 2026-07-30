@@ -21,10 +21,9 @@
  */
 #include "vstsynthesiser.h"
 
-#include <algorithm>
-#include <cctype>
 #include <string>
-#include <unordered_map>
+
+#include "mpe/articulationstringutils.h"
 
 #include "pluginterfaces/vst/ivstchannelcontextinfo.h"
 #include "pluginterfaces/vst/ivstnoteexpression.h"
@@ -49,9 +48,9 @@ static const std::set<Steinberg::Vst::CtrlNumber> SUPPORTED_CONTROLLERS = {
 
 // Query IKeyswitchController from a VST3 plugin and build a keyswitch profile if the plugin
 // supports it. The plugin advertises each keyswitch with the exact MuseScore articulation name
-// (the mpe::ArticulationType spelling), so titles are matched exactly and case-insensitively
-// against the curated vocabulary below. Naming the keyswitches canonically is the plugin's
-// responsibility; the host does no fuzzy guessing.
+// (the mpe::ArticulationType spelling), so titles are converted straight to the type with
+// MuseScore's own name table (mpe::articulationTypeFromString). Naming the keyswitches canonically
+// is the plugin's responsibility; the host does no fuzzy guessing.
 //
 // KeyswitchInfo: only keyswitchMin on bus 0 / channel 0 is read. This is a deliberate design
 // choice for a keyswitch SENDER, not a gap to close later:
@@ -89,58 +88,6 @@ static std::optional<VstKeyswitchProfile> queryKeyswitchProfile(const PluginCont
         return std::nullopt; // No keyswitches defined
     }
 
-    // Curated vocabulary: the common articulations from MuseScore's playing techniques, accents,
-    // bowing and ornament palettes, keyed by the canonical mpe::ArticulationType name (lowercased).
-    // A plugin is matched only for the names it actually advertises; the rest stay unused. The
-    // plugin must advertise using these exact names (its own responsibility).
-    static const std::unordered_map<std::string, mpe::ArticulationType> NAME_TO_TYPE = {
-        // Playing techniques (text palette)
-        { "standard", mpe::ArticulationType::Standard },
-        { "open", mpe::ArticulationType::Open },
-        { "mute", mpe::ArticulationType::Mute },
-        { "pizzicato", mpe::ArticulationType::Pizzicato },
-        { "detache", mpe::ArticulationType::Detache },
-        { "martele", mpe::ArticulationType::Martele },
-        { "collegno", mpe::ArticulationType::ColLegno },
-        { "sulpont", mpe::ArticulationType::SulPont },
-        { "sultasto", mpe::ArticulationType::SulTasto },
-        { "distortion", mpe::ArticulationType::Distortion },
-        { "overdrive", mpe::ArticulationType::Overdrive },
-        { "harmonic", mpe::ArticulationType::Harmonic },
-        { "jazztone", mpe::ArticulationType::JazzTone },
-        { "vibrato", mpe::ArticulationType::Vibrato },
-        { "legato", mpe::ArticulationType::Legato },
-        // Accents and articulations
-        { "staccato", mpe::ArticulationType::Staccato },
-        { "staccatissimo", mpe::ArticulationType::Staccatissimo },
-        { "tenuto", mpe::ArticulationType::Tenuto },
-        { "marcato", mpe::ArticulationType::Marcato },
-        { "accent", mpe::ArticulationType::Accent },
-        { "softaccent", mpe::ArticulationType::SoftAccent },
-        { "laissezvibrer", mpe::ArticulationType::LaissezVibrer },
-        // Bowing and strings
-        { "upbow", mpe::ArticulationType::UpBow },
-        { "downbow", mpe::ArticulationType::DownBow },
-        { "jete", mpe::ArticulationType::Jete },
-        { "snappizzicato", mpe::ArticulationType::SnapPizzicato },
-        { "randompizzicato", mpe::ArticulationType::RandomPizzicato },
-        { "palmmute", mpe::ArticulationType::PalmMute },
-        // Guitar
-        { "slap", mpe::ArticulationType::Slap },
-        { "pop", mpe::ArticulationType::Pop },
-        // Ornaments (the common ones)
-        { "trill", mpe::ArticulationType::Trill },
-        { "uppermordent", mpe::ArticulationType::UpperMordent },
-        { "lowermordent", mpe::ArticulationType::LowerMordent },
-        { "turn", mpe::ArticulationType::Turn },
-        { "invertedturn", mpe::ArticulationType::InvertedTurn },
-        // Tremolo subdivisions
-        { "tremolo8th", mpe::ArticulationType::Tremolo8th },
-        { "tremolo16th", mpe::ArticulationType::Tremolo16th },
-        { "tremolo32nd", mpe::ArticulationType::Tremolo32nd },
-        { "tremolo64th", mpe::ArticulationType::Tremolo64th },
-    };
-
     VstKeyswitchProfile profile;
 
     for (int32 i = 0; i < count; ++i) {
@@ -149,13 +96,12 @@ static std::optional<VstKeyswitchProfile> queryKeyswitchProfile(const PluginCont
             continue;
         }
 
-        // Lowercase the title and match it exactly against the canonical vocabulary.
-        std::string title = VST3::StringConvert::convert(info.title);
-        std::transform(title.begin(), title.end(), title.begin(), ::tolower);
-
-        auto it = NAME_TO_TYPE.find(title);
-        if (it != NAME_TO_TYPE.cend()) {
-            profile.keyswitches[it->second] = info.keyswitchMin;
+        // The title is the exact canonical mpe::ArticulationType name; convert it directly with
+        // MuseScore's own table. Unknown or non-canonical titles yield Undefined and are skipped.
+        const std::string title = VST3::StringConvert::convert(info.title);
+        const mpe::ArticulationType type = mpe::articulationTypeFromString(QString::fromStdString(title));
+        if (type != mpe::ArticulationType::Undefined) {
+            profile.keyswitches[type] = info.keyswitchMin;
         }
     }
 
