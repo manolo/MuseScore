@@ -39,11 +39,6 @@ struct VstKeyswitchProfile {
     // Articulation -> keyswitch note (reserved low range, typically 0..11). A note without a
     // mapped articulation falls back to the Standard entry, or 0 if it is absent.
     std::map<mpe::ArticulationType, int> keyswitches;
-
-    // When true, a notated tremolo (rendered upstream as repeated sub-notes) is collapsed into
-    // a single sustained note plus the tremolo keyswitch, so the instrument's tremolo sample
-    // plays once. Set false for instruments that expect the repeated-note tremolo simulation.
-    bool collapseTremolo = true;
 };
 
 class VstSequencer : public audio::engine::AbstractEventSequencer<VstEvent, ParamChangeEvent, muse::audio::gain_t>

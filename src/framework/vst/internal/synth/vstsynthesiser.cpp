@@ -73,7 +73,6 @@ static std::optional<VstKeyswitchProfile> queryKeyswitchProfile(const PluginCont
     }
 
     VstKeyswitchProfile profile;
-    bool hasTremoloKeyswitch = false;
 
     for (int32 i = 0; i < count; ++i) {
         KeyswitchInfo info;
@@ -94,7 +93,6 @@ static std::optional<VstKeyswitchProfile> queryKeyswitchProfile(const PluginCont
             profile.keyswitches[mpe::ArticulationType::Tremolo16th] = info.keyswitchMin;
             profile.keyswitches[mpe::ArticulationType::Tremolo32nd] = info.keyswitchMin;
             profile.keyswitches[mpe::ArticulationType::Tremolo64th] = info.keyswitchMin;
-            hasTremoloKeyswitch = true;
         } else if (title.find("pizz") != std::string::npos) {
             profile.keyswitches[mpe::ArticulationType::Pizzicato] = info.keyswitchMin;
             profile.keyswitches[mpe::ArticulationType::SnapPizzicato] = info.keyswitchMin;
@@ -128,9 +126,6 @@ static std::optional<VstKeyswitchProfile> queryKeyswitchProfile(const PluginCont
             profile.keyswitches[mpe::ArticulationType::Standard] = info.keyswitchMin;
         }
     }
-    
-    // Enable tremolo collapsing only if plugin provides a tremolo keyswitch
-    profile.collapseTremolo = hasTremoloKeyswitch;
 
     if (profile.keyswitches.empty()) {
         return std::nullopt;

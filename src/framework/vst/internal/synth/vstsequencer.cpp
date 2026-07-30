@@ -172,14 +172,10 @@ void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEv
     const float velocityFraction = noteVelocityFraction(noteEvent);
     const float tuning = noteTuning(noteEvent, noteId);
 
-    // Keyswitch articulation handling only applies to plugins that support IKeyswitchController.
-    // Plugins without keyswitch support use plain note events (no low MIDI notes prepended).
-    if (m_keyswitchProfile.has_value() && m_keyswitchProfile->collapseTremolo) {
-        // A notated tremolo is rendered upstream as a burst of repeated sub-notes. Collapse it
-        // back into a single sustained note spanning the whole notated tremolo (from the
-        // articulation metadata), preceded by the tremolo keyswitch. Every sub-note carries the
-        // same span, so it is emitted only once per (pitch, span). This keeps adjacent tremolo
-        // notes separate and lets the instrument's tremolo sample play once, not retriggered.
+    // Tremolo collapsing: if plugin supports tremolo keyswitch, collapse the burst of repeated
+    // sub-notes (rendered upstream) into a single sustained note with the tremolo keyswitch.
+    // This lets the instrument's tremolo sample play once instead of being retriggered.
+    if (m_keyswitchProfile.has_value()) {
         for (const auto& artPair : noteEvent.expressionCtx().articulations) {
             if (!isTremoloType(artPair.first)) {
                 continue;
@@ -187,7 +183,7 @@ void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEv
 
             const std::optional<int> ks = keyswitchFor(*m_keyswitchProfile, artPair.first);
             if (!ks.has_value()) {
-                break; // tremolo not mapped for this plugin: leave the expanded notes as-is
+                break; // Tremolo not mapped for this plugin: leave expanded notes as-is
             }
 
             const mpe::ArticulationMeta& meta = artPair.second.meta;
@@ -201,7 +197,7 @@ void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEv
                 destination[to].emplace_back(buildEvent(VstEvent::kNoteOffEvent, noteId, velocityFraction, tuning));
             }
 
-            return; // the whole tremolo is represented by the single sustained note above
+            return; // The whole tremolo is represented by the single sustained note above
         }
     }
 
