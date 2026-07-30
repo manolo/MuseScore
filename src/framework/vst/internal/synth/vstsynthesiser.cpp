@@ -112,7 +112,6 @@ static std::optional<VstKeyswitchProfile> queryKeyswitchProfile(const PluginCont
     return profile;
 }
 
-
 VstSynthesiser::VstSynthesiser(const TrackId trackId, const muse::audio::AudioInputParams& params,
                                const modularity::ContextPtr& iocCtx)
     : AbstractSynthesizer(params, iocCtx),
@@ -142,10 +141,10 @@ void VstSynthesiser::init(const OutputSpec& spec)
         m_pluginPtr->updatePluginConfig(m_params.configuration);
         m_vstAudioClient->setOutputSpec(m_outputSpec);
         m_vstAudioClient->loadSupportedParams();
-        
+
         // Query keyswitch profile directly from the plugin via IKeyswitchController interface.
         const std::optional<VstKeyswitchProfile> keyswitchProfile = queryKeyswitchProfile(m_pluginPtr->controller());
-        
+
         m_sequencer.init(m_vstAudioClient->paramsMapping(SUPPORTED_CONTROLLERS), m_useDynamicEvents, keyswitchProfile);
         m_inited = true;
         sendChannelContext();
@@ -344,7 +343,8 @@ samples_t VstSynthesiser::process(float* buffer, samples_t samplesPerChannel)
             break;
         }
 
-        processedSamples += processSequence(it->second, durationInSamples, buffer + sampleOffset * m_outputSpec.audioChannelCount, sampleOffset);
+        processedSamples += processSequence(it->second, durationInSamples, buffer + sampleOffset * m_outputSpec.audioChannelCount,
+                                            sampleOffset);
         sampleOffset += durationInSamples;
 
         if (active) {
@@ -355,7 +355,8 @@ samples_t VstSynthesiser::process(float* buffer, samples_t samplesPerChannel)
     return processedSamples;
 }
 
-samples_t VstSynthesiser::processSequence(const VstSequencer::EventSequence& sequence, const samples_t samples, float* buffer, samples_t bufferOffset)
+samples_t VstSynthesiser::processSequence(const VstSequencer::EventSequence& sequence, const samples_t samples, float* buffer,
+                                          samples_t bufferOffset)
 {
     for (const VstSequencer::EventType& event : sequence) {
         if (std::holds_alternative<VstEvent>(event)) {

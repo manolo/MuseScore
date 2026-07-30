@@ -66,8 +66,8 @@ private:
 
     void addPlaybackEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events);
     void addDynamicEvents(EventSequenceMap& destination, const mpe::DynamicLevelLayers& layers);
-    void addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent,
-                      SostenutoTimeAndDurations& sostenutoTimeAndDurations, LastKeyswitchPerTimestamp& lastKeyswitch);
+    void addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, SostenutoTimeAndDurations& sostenutoTimeAndDurations,
+                      LastKeyswitchPerTimestamp& lastKeyswitch);
     void addPedalEvent(EventSequenceMap& destination, const mpe::ArticulationMeta& meta);
     void addControlChangeEvent(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const mpe::ControllerChangeEvent& event);
     void addParamChange(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const ControlIdx controlIdx,
