@@ -54,12 +54,13 @@ private:
 
     using SostenutoTimeAndDurations = std::vector<mpe::TimestampAndDuration>;
 
-    // Tracks the last keyswitch and tremolo span start to implement latching keyswitch with
-    // tremolo retrigger. Keyswitches persist until a different one is sent (no NoteOff required),
-    // but tremolo keyswitches are re-sent when starting a new tremolo span (detected via meta.timestamp).
+    // Tracks the last keyswitch and, for "span" articulations (tremolo), the start of the last
+    // span, to implement latching keyswitch with span retrigger. Keyswitches persist until a
+    // different one is sent (no NoteOff required), but a span keyswitch is re-sent when a new span
+    // begins (detected via meta.timestamp), which the instrument treats as a retrigger.
     struct LastKeyswitchState {
         int keyswitch = -1;
-        mpe::timestamp_t tremoloSpanStart = -1; // meta.timestamp of last tremolo span
+        mpe::timestamp_t spanStart = -1; // meta.timestamp of the last span articulation, or -1
     };
     using LastKeyswitchPerTimestamp = std::map<mpe::timestamp_t, LastKeyswitchState>;
 
