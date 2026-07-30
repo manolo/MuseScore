@@ -168,30 +168,57 @@ void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEv
         destination[timestampTo].emplace_back(buildEvent(VstEvent::kNoteOffEvent, noteId, velocityFraction, tuning));
     }
 
-    // Latching keyswitch: send keyswitch NoteOn only when articulation changes.
-    // The keyswitch persists until a different one is sent (no NoteOff required).
-    // This works for both tremolo symbols (expanded sub-notes) and tremolo text (playing technique).
+    // Latching keyswitch with tremolo retrigger: send keyswitch NoteOn when articulation changes
+    // or when starting a new tremolo span. The keyswitch persists until changed (no NoteOff required).
+    // Tremolo sub-notes share the same meta.timestamp; when it changes, it's a new original note.
     if (m_keyswitchProfile.has_value() && arrangementCtx.hasStart()) {
         const VstKeyswitchProfile& profile = *m_keyswitchProfile;
         int keyswitchPitch = normalKeyswitch(profile);
+        mpe::timestamp_t tremoloSpanStart = -1;
         
-        // Determine keyswitch for current note based on articulations
+        // Determine keyswitch and tremolo span start for current note based on articulations
         for (const auto& artPair : noteEvent.expressionCtx().articulations) {
             const std::optional<int> mapped = keyswitchFor(profile, artPair.first);
             if (mapped.has_value()) {
                 keyswitchPitch = mapped.value();
+                // Track tremolo span start (meta.timestamp) to detect new tremolo notes
+                tremoloSpanStart = artPair.second.meta.timestamp;
                 break;
             }
         }
 
-        // Send keyswitch only if it changed from the last one sent at this or earlier timestamp
+        // Get previous keyswitch state
         auto it = lastKeyswitch.lower_bound(arrangementCtx.actualTimestamp);
-        int previousKeyswitch = (it != lastKeyswitch.begin()) ? std::prev(it)->second : -1;
+        LastKeyswitchState prevState;
+        if (it != lastKeyswitch.begin()) {
+            prevState = std::prev(it)->second;
+        } else {
+            prevState.keyswitch = -1;
+            prevState.tremoloSpanStart = -1;
+        }
         
-        if (keyswitchPitch != previousKeyswitch) {
+        // Send keyswitch if:
+        // 1. Articulation changed, OR
+        // 2. Same articulation but new tremolo span (meta.timestamp changed)
+        bool needsKeyswitch = (keyswitchPitch != prevState.keyswitch);
+        bool isNewTremoloSpan = false;
+        if (!needsKeyswitch && tremoloSpanStart != -1 && tremoloSpanStart != prevState.tremoloSpanStart) {
+            needsKeyswitch = true; // New tremolo span: retrigger
+            isNewTremoloSpan = true;
+        }
+        
+        if (needsKeyswitch) {
+            if (isNewTremoloSpan) {
+                // Send standard keyswitch before the new tremolo span to reset articulation state
+                mpe::timestamp_t resetTimestamp = arrangementCtx.actualTimestamp > 0 
+                    ? arrangementCtx.actualTimestamp - 1 
+                    : 0;
+                destination[resetTimestamp].emplace_back(
+                    buildEvent(VstEvent::kNoteOnEvent, normalKeyswitch(profile), velocityFraction, 0.f));
+            }
             destination[arrangementCtx.actualTimestamp].emplace_back(
                 buildEvent(VstEvent::kNoteOnEvent, keyswitchPitch, velocityFraction, 0.f));
-            lastKeyswitch[arrangementCtx.actualTimestamp] = keyswitchPitch;
+            lastKeyswitch[arrangementCtx.actualTimestamp] = { keyswitchPitch, tremoloSpanStart };
         }
     }
 

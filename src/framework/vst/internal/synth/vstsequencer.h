@@ -54,9 +54,14 @@ private:
 
     using SostenutoTimeAndDurations = std::vector<mpe::TimestampAndDuration>;
 
-    // Tracks the last keyswitch sent at each timestamp to implement latching keyswitch behavior.
-    // Keyswitches persist until a different one is sent (no NoteOff required).
-    using LastKeyswitchPerTimestamp = std::map<mpe::timestamp_t, int>;
+    // Tracks the last keyswitch and tremolo span start to implement latching keyswitch with
+    // tremolo retrigger. Keyswitches persist until a different one is sent (no NoteOff required),
+    // but tremolo keyswitches are re-sent when starting a new tremolo span (detected via meta.timestamp).
+    struct LastKeyswitchState {
+        int keyswitch = -1;
+        mpe::timestamp_t tremoloSpanStart = -1; // meta.timestamp of last tremolo span
+    };
+    using LastKeyswitchPerTimestamp = std::map<mpe::timestamp_t, LastKeyswitchState>;
 
     void addPlaybackEvents(EventSequenceMap& destination, const mpe::PlaybackEventsMap& events);
     void addDynamicEvents(EventSequenceMap& destination, const mpe::DynamicLevelLayers& layers);
