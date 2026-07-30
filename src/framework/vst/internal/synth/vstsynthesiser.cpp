@@ -23,6 +23,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <string>
+#include <unordered_map>
 
 #include "pluginterfaces/vst/ivstchannelcontextinfo.h"
 #include "pluginterfaces/vst/ivstnoteexpression.h"
@@ -46,8 +48,10 @@ static const std::set<Steinberg::Vst::CtrlNumber> SUPPORTED_CONTROLLERS = {
 };
 
 // Query IKeyswitchController from a VST3 plugin and build a keyswitch profile if the plugin
-// supports it. Maps plugin keyswitch names to MuseScore articulation types using common
-// naming patterns (Tremolo, Pizzicato, Harmonic, Mute, etc.).
+// supports it. The plugin advertises each keyswitch with the exact MuseScore articulation name
+// (the mpe::ArticulationType spelling), so titles are matched exactly and case-insensitively
+// against the curated vocabulary below. Naming the keyswitches canonically is the plugin's
+// responsibility; the host does no fuzzy guessing.
 //
 // KeyswitchInfo: only keyswitchMin on bus 0 / channel 0 is read. This is a deliberate design
 // choice for a keyswitch SENDER, not a gap to close later:
@@ -61,10 +65,6 @@ static const std::set<Steinberg::Vst::CtrlNumber> SUPPORTED_CONTROLLERS = {
 //    fields would mean building new host support with no benefit for the current instruments.
 // If a future plugin genuinely needs ranges, another channel or on the fly keyswitches, that is
 // new, separately justified host work, not a defect in this code.
-//
-// Name matching, in contrast, IS a real limitation: it is English substring based, so localized
-// titles are not recognized and combined names can be misclassified. A robust design would be a
-// user editable mapping (expression map style) rather than a heuristic.
 static std::optional<VstKeyswitchProfile> queryKeyswitchProfile(const PluginControllerPtr& controller)
 {
     using namespace Steinberg;
@@ -89,6 +89,23 @@ static std::optional<VstKeyswitchProfile> queryKeyswitchProfile(const PluginCont
         return std::nullopt; // No keyswitches defined
     }
 
+    // Curated vocabulary: exact MuseScore articulation names (lowercased) mapped to their type.
+    // Limited to what these plucked-string instruments support; the plugin must use these exact
+    // names. Close relatives are filled in by the alias pass below.
+    static const std::unordered_map<std::string, mpe::ArticulationType> NAME_TO_TYPE = {
+        { "standard", mpe::ArticulationType::Standard },
+        { "pizzicato", mpe::ArticulationType::Pizzicato },
+        { "snappizzicato", mpe::ArticulationType::SnapPizzicato },
+        { "randompizzicato", mpe::ArticulationType::RandomPizzicato },
+        { "harmonic", mpe::ArticulationType::Harmonic },
+        { "mute", mpe::ArticulationType::Mute },
+        { "palmmute", mpe::ArticulationType::PalmMute },
+        { "tremolo8th", mpe::ArticulationType::Tremolo8th },
+        { "tremolo16th", mpe::ArticulationType::Tremolo16th },
+        { "tremolo32nd", mpe::ArticulationType::Tremolo32nd },
+        { "tremolo64th", mpe::ArticulationType::Tremolo64th },
+    };
+
     VstKeyswitchProfile profile;
 
     for (int32 i = 0; i < count; ++i) {
@@ -97,50 +114,13 @@ static std::optional<VstKeyswitchProfile> queryKeyswitchProfile(const PluginCont
             continue;
         }
 
-        // Convert UTF-16 title to std::string (case-insensitive matching)
+        // Lowercase the title and match it exactly against the canonical vocabulary.
         std::string title = VST3::StringConvert::convert(info.title);
         std::transform(title.begin(), title.end(), title.begin(), ::tolower);
 
-        // Map keyswitch titles to MuseScore ArticulationTypes using common naming patterns.
-        // Plugins can use variations like "Tremolo", "Trem", "Pizzicato", "Pizz", etc.
-        
-        if (title.find("trem") != std::string::npos) {
-            // Map all tremolo types to the same keyswitch
-            profile.keyswitches[mpe::ArticulationType::Tremolo8th] = info.keyswitchMin;
-            profile.keyswitches[mpe::ArticulationType::Tremolo16th] = info.keyswitchMin;
-            profile.keyswitches[mpe::ArticulationType::Tremolo32nd] = info.keyswitchMin;
-            profile.keyswitches[mpe::ArticulationType::Tremolo64th] = info.keyswitchMin;
-        } else if (title.find("pizz") != std::string::npos) {
-            profile.keyswitches[mpe::ArticulationType::Pizzicato] = info.keyswitchMin;
-            profile.keyswitches[mpe::ArticulationType::SnapPizzicato] = info.keyswitchMin;
-        } else if (title.find("harm") != std::string::npos) {
-            profile.keyswitches[mpe::ArticulationType::Harmonic] = info.keyswitchMin;
-        } else if (title.find("mute") != std::string::npos || title.find("palm") != std::string::npos) {
-            profile.keyswitches[mpe::ArticulationType::PalmMute] = info.keyswitchMin;
-            profile.keyswitches[mpe::ArticulationType::Mute] = info.keyswitchMin;
-        } else if (title.find("staccato") != std::string::npos || title.find("stacc") != std::string::npos) {
-            profile.keyswitches[mpe::ArticulationType::Staccato] = info.keyswitchMin;
-            profile.keyswitches[mpe::ArticulationType::Staccatissimo] = info.keyswitchMin;
-        } else if (title.find("legato") != std::string::npos) {
-            profile.keyswitches[mpe::ArticulationType::Legato] = info.keyswitchMin;
-        } else if (title.find("tenuto") != std::string::npos) {
-            profile.keyswitches[mpe::ArticulationType::Tenuto] = info.keyswitchMin;
-        } else if (title.find("marcato") != std::string::npos || title.find("accent") != std::string::npos) {
-            profile.keyswitches[mpe::ArticulationType::Marcato] = info.keyswitchMin;
-            profile.keyswitches[mpe::ArticulationType::Accent] = info.keyswitchMin;
-        } else if (title.find("col legno") != std::string::npos || title.find("collegno") != std::string::npos) {
-            profile.keyswitches[mpe::ArticulationType::ColLegno] = info.keyswitchMin;
-        } else if (title.find("sul pont") != std::string::npos || title.find("sulpont") != std::string::npos) {
-            profile.keyswitches[mpe::ArticulationType::SulPont] = info.keyswitchMin;
-        } else if (title.find("sul tasto") != std::string::npos || title.find("sultasto") != std::string::npos) {
-            profile.keyswitches[mpe::ArticulationType::SulTasto] = info.keyswitchMin;
-        } else if (title.find("vibrato") != std::string::npos) {
-            profile.keyswitches[mpe::ArticulationType::Vibrato] = info.keyswitchMin;
-        } else if (title.find("distortion") != std::string::npos || title.find("overdrive") != std::string::npos) {
-            profile.keyswitches[mpe::ArticulationType::Distortion] = info.keyswitchMin;
-        } else if (title.find("standard") != std::string::npos || title.find("normal") != std::string::npos 
-                   || title.find("natural") != std::string::npos || title.find("pick") != std::string::npos) {
-            profile.keyswitches[mpe::ArticulationType::Standard] = info.keyswitchMin;
+        auto it = NAME_TO_TYPE.find(title);
+        if (it != NAME_TO_TYPE.cend()) {
+            profile.keyswitches[it->second] = info.keyswitchMin;
         }
     }
 
