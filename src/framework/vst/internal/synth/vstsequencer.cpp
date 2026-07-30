@@ -195,16 +195,24 @@ void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEv
         int keyswitchPitch = normalKeyswitch(profile);
         mpe::timestamp_t spanStart = -1;
 
-        // Pick the keyswitch for this note. For a span articulation, remember its meta.timestamp
-        // so a new span can be detected on a later note.
+        // Pick the keyswitch by precedence, deterministically. The articulation set is a hash map,
+        // so first-match order is unspecified; instead a specific timbre or articulation (pizzicato,
+        // mute, harmonic, staccato...) wins over a tremolo, which wins over normal. This keeps a
+        // tremolo from hijacking the timbre in a pizz/mute/harmonic passage. For a span articulation
+        // (tremolo) that wins, remember its meta.timestamp so a new span can be detected later.
+        int bestRank = -1;
         for (const auto& artPair : noteEvent.expressionCtx().articulations) {
             const std::optional<int> mapped = keyswitchFor(profile, artPair.first);
-            if (mapped.has_value()) {
+            if (!mapped.has_value()) {
+                continue;
+            }
+            const bool span = isSpanArticulation(artPair.first);
+            const bool standard = (artPair.first == mpe::ArticulationType::Standard);
+            const int rank = standard ? 0 : (span ? 1 : 2);
+            if (rank > bestRank) {
+                bestRank = rank;
                 keyswitchPitch = mapped.value();
-                if (isSpanArticulation(artPair.first)) {
-                    spanStart = artPair.second.meta.timestamp;
-                }
-                break;
+                spanStart = span ? artPair.second.meta.timestamp : -1;
             }
         }
 
