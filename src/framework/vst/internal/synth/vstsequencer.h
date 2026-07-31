@@ -69,6 +69,8 @@ private:
     void addNoteEvent(EventSequenceMap& destination, const mpe::NoteEvent& noteEvent, SostenutoTimeAndDurations& sostenutoTimeAndDurations,
                       LastKeyswitchPerTimestamp& lastKeyswitch);
     void addPedalEvent(EventSequenceMap& destination, const mpe::ArticulationMeta& meta);
+    void addKeyswitchSpanEvent(EventSequenceMap& destination, const mpe::ArticulationMeta& meta,
+                               const mpe::timestamp_t noteTimestamp, int keyswitchPitch);
     void addControlChangeEvent(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const mpe::ControllerChangeEvent& event);
     void addParamChange(EventSequenceMap& destination, const mpe::timestamp_t timestamp, const ControlIdx controlIdx,
                         const PluginParamValue value);

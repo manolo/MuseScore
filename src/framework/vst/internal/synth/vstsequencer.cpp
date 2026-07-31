@@ -202,6 +202,9 @@ void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEv
         // (tremolo) that wins, remember its meta.timestamp so a new span can be detected later.
         int bestRank = -1;
         for (const auto& artPair : noteEvent.expressionCtx().articulations) {
+            if (mpe::isRangedArticulation(artPair.first)) {
+                continue; // ranged articulations are forwarded as their own span below, not as the primary
+            }
             const std::optional<int> mapped = keyswitchFor(profile, artPair.first);
             if (!mapped.has_value()) {
                 continue;
@@ -254,6 +257,29 @@ void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEv
             sostenutoTimeAndDurations.push_back(mpe::TimestampAndDuration { timestamp, meta.overallDuration });
             continue;
         }
+
+        // A ranged articulation the instrument advertises as a keyswitch is forwarded as a keyswitch
+        // that spans the range: pressed at the start, released at the end. The instrument decides
+        // what the modifier means over that span; the sequencer only reports when it is active.
+        if (m_keyswitchProfile.has_value() && mpe::isRangedArticulation(meta.type)) {
+            if (const std::optional<int> pitch = keyswitchFor(*m_keyswitchProfile, meta.type)) {
+                addKeyswitchSpanEvent(destination, meta, arrangementCtx.actualTimestamp, *pitch);
+            }
+            continue;
+        }
+    }
+}
+
+void VstSequencer::addKeyswitchSpanEvent(EventSequenceMap& destination, const mpe::ArticulationMeta& meta,
+                                         const mpe::timestamp_t noteTimestamp, int keyswitchPitch)
+{
+    // Press the modifier at this covered note's onset, not once at the range start: every covered
+    // note re-presses it, so starting playback partway through the range still engages it (a single
+    // start event would be dropped by a seek past it). Release it once at the range end.
+    destination[noteTimestamp].emplace_back(buildEvent(VstEvent::kNoteOnEvent, keyswitchPitch, 1.f, 0.f));
+
+    if (meta.hasEnd()) {
+        destination[meta.timestamp + meta.overallDuration].emplace_back(buildEvent(VstEvent::kNoteOffEvent, keyswitchPitch, 1.f, 0.f));
     }
 }
 
