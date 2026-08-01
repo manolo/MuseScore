@@ -229,8 +229,13 @@ void VstSequencer::addNoteEvent(EventSequenceMap& destination, const mpe::NoteEv
         const bool newSpan = (spanStart != -1 && spanStart != prevState.spanStart);
 
         if (articulationChanged || newSpan) {
+            // A keyswitch is a control signal, not a played note: emit it at full velocity, never at
+            // the note's dynamic. A note at a very soft dynamic yields a velocity fraction that
+            // rounds to MIDI velocity 0, which a receiver reads as a note-off and drops, so the
+            // articulation switch would be silently lost on soft notes (e.g. the first note under a
+            // crescendo). The span keyswitch below emits at full velocity for the same reason.
             destination[arrangementCtx.actualTimestamp].emplace_back(
-                buildEvent(VstEvent::kNoteOnEvent, keyswitchPitch, velocityFraction, 0.f));
+                buildEvent(VstEvent::kNoteOnEvent, keyswitchPitch, 1.f, 0.f));
             lastKeyswitch[arrangementCtx.actualTimestamp] = { keyswitchPitch, spanStart };
         }
     }
@@ -279,7 +284,26 @@ void VstSequencer::addKeyswitchSpanEvent(EventSequenceMap& destination, const mp
     destination[noteTimestamp].emplace_back(buildEvent(VstEvent::kNoteOnEvent, keyswitchPitch, 1.f, 0.f));
 
     if (meta.hasEnd()) {
-        destination[meta.timestamp + meta.overallDuration].emplace_back(buildEvent(VstEvent::kNoteOffEvent, keyswitchPitch, 1.f, 0.f));
+        // Emit a single release. This is called once per covered note and every call computes the same
+        // range-end timestamp, so without this guard N covered notes queue N identical note-offs at one
+        // instant. That burst is not only redundant: the host feeds each block through a fixed-size
+        // event list, and once it fills, later events (the following note and its keyswitch) are
+        // silently dropped, leaving the articulation stuck. Adding the release only if none is present
+        // keeps a long range from starving the events that come right after it.
+        EventSequence& bucket = destination[meta.timestamp + meta.overallDuration];
+        bool alreadyReleased = false;
+        for (const EventType& queued : bucket) {
+            if (std::holds_alternative<VstEvent>(queued)) {
+                const VstEvent& ev = std::get<VstEvent>(queued);
+                if (ev.type == VstEvent::kNoteOffEvent && ev.noteOff.pitch == keyswitchPitch) {
+                    alreadyReleased = true;
+                    break;
+                }
+            }
+        }
+        if (!alreadyReleased) {
+            bucket.emplace_back(buildEvent(VstEvent::kNoteOffEvent, keyswitchPitch, 1.f, 0.f));
+        }
     }
 }
 
