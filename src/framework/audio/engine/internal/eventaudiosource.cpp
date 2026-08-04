@@ -33,10 +33,11 @@ using namespace muse::audio::synth;
 using namespace muse::mpe;
 
 EventAudioSource::EventAudioSource(const TrackId trackId,
+                                   const std::string& trackName,
                                    const mpe::PlaybackData& playbackData,
                                    OnOffStreamEventsReceived onOffStreamReceived,
                                    const modularity::ContextPtr& iocCtx)
-    : muse::Contextable(iocCtx), m_trackId(trackId), m_playbackData(playbackData)
+    : muse::Contextable(iocCtx), m_trackId(trackId), m_hostTrackName(trackName), m_playbackData(playbackData)
 {
     ONLY_AUDIO_ENGINE_THREAD;
 
@@ -184,6 +185,8 @@ void EventAudioSource::applyInputParams(const AudioInputParams& requiredParams)
             return;
         }
     }
+
+    m_synth->setHostTrackName(m_hostTrackName);
 
     m_synth->paramsChanged().onReceive(this, [this](const AudioInputParams& params) {
         m_paramsChanges.send(params);

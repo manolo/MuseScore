@@ -58,6 +58,8 @@ public:
     void setupEvents(const mpe::PlaybackData& playbackData) override;
     const mpe::PlaybackData& playbackData() const override;
 
+    void setHostTrackName(const std::string& name) override;
+
     bool isActive() const override;
     void setIsActive(const bool isActive) override;
 
@@ -73,8 +75,11 @@ public:
 private:
     void updateRenderingMode(const audio::RenderMode mode) override;
 
+    void sendChannelContext(); // push the host track name to the plugin (VST3 channel context)
+
     void toggleVolumeGain(const bool isActive);
-    audio::samples_t processSequence(const VstSequencer::EventSequence& sequence, const audio::samples_t samples, float* buffer);
+    audio::samples_t processSequence(const VstSequencer::EventSequence& sequence, const audio::samples_t samples, float* buffer,
+                                     audio::samples_t bufferOffset);
 
     IVstPluginInstancePtr m_pluginPtr = nullptr;
     std::unique_ptr<VstAudioClient> m_vstAudioClient = nullptr;
@@ -88,6 +93,7 @@ private:
 
     bool m_inited = false;
     bool m_useDynamicEvents = false;
+    std::string m_hostTrackName;
 
     audio::samples_t m_currentPositionSamples = 0;
 };
