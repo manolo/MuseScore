@@ -215,9 +215,11 @@ instrument's sequential index.
   `step = 2158`). Equivalently the program byte is 2084 bytes into the entry, which is how to find
   it when `varsize` claims 112 on a file whose entries are really 2158 bytes `[verified]`.
 - `varsize` alone cannot tell the layouts apart, so the [entry size](#instrument-entry-table)
-  decides: an entry of 2000 bytes or more uses the large-TK offsets. Likewise a small-TK offset that
-  computes past the end of the entry means the block declared its total size, and the Encore 4.x
-  total-size offsets apply instead `[verified]`.
+  decides: an entry of 2000 bytes or more uses the large-TK offsets `[verified]`.
+- A small-TK offset that computes past the end of the entry means `varsize` overstated the content.
+  The per-staff program table then has to be found from the end of the entry instead: it ends 46
+  bytes before it in v0xC4 and 44 bytes before it in v0xC2, the two formats differing only in how
+  many bytes follow the tables `[verified]`.
 - The **small-TK Encore 4.x total-size** variant stores the total block size (including the
   8-byte header) in `varsize`, so the block stride equals `varsize` rather than `varsize + 8`;
   actual content is `varsize - 8` bytes. Its MIDI/Key offsets match the v0xA6 layout `[verified]`.

@@ -1544,3 +1544,17 @@ TEST_F(Tst_Instruments, midi_program_prefers_standard_ensemble_template)
     EXPECT_EQ(t->id, String(u"english-horn"))
         << "picked \"" << t->id.toStdString() << "\" instead of the orchestral template";
 }
+
+// Regression: an entry whose header declares the size of the whole entry, not of its content, put
+// the MIDI program read well past the end of the entry, where it picked up an unrelated byte as a
+// program number. The per-staff program table is at a fixed distance from the end of the entry.
+TEST_F(Tst_Instruments, midi_read_back_from_entry_end_when_declared_size_overshoots)
+{
+    MasterScore* score = readEncoreScore("instruments_declared_size_overshoots_entry.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load instruments_declared_size_overshoots_entry.enc";
+    ASSERT_EQ(score->parts().size(), 1u) << "expected 1 instrument";
+    const Instrument* inst = score->parts().at(0)->instrument();
+    ASSERT_FALSE(inst->channel().empty());
+    EXPECT_EQ(inst->channel(0)->program(), 21) << "GM 22 (Accordion) sits 46 bytes before the entry end";
+    delete score;
+}
