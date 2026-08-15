@@ -450,7 +450,8 @@ static void readMidiProgramsLargeEntry(std::vector<EncInstrument>& instruments, 
 static void readMidiProgramsSmallTk(
     std::vector<EncInstrument>& instruments,
     QDataStream& ds,
-    qint64 entryStride)
+    qint64 entryStride,
+    qint64 midiFromEntryEnd)
 {
     // Standard Encore 5.x: MIDI is 76 bytes past the content end
     //   (content is `instr.offset` bytes; absolute = contentFilePos + offset + 76).
@@ -467,24 +468,33 @@ static void readMidiProgramsSmallTk(
             continue;
         }
         const qint64 afterContent = instr.contentFilePos + static_cast<qint64>(instr.offset) + MIDI_AFTER_CONTENT;
-        // A varSize that is really the total block size makes the content 8 bytes shorter than it
-        // claims, so the standard offset can land past the entry and read an unrelated byte as a
-        // program number. Keep it only while it stays inside the instrument's own entry.
+        // A varSize that overstates the content makes the standard offset land past the entry, where
+        // it reads an unrelated byte as a program number. Keep it only while it stays inside the
+        // instrument's own entry; otherwise measure back from the entry end, where the per-staff
+        // tables actually sit.
         const qint64 entryEnd = entryStride > 0 ? instr.contentFilePos - 8 + entryStride : -1;
         const bool afterContentInEntry = (entryEnd < 0) || (afterContent < entryEnd);
-        const qint64 off = (totalSizeFmt || !afterContentInEntry)
-                           ? instr.contentFilePos + MIDI_IN_CONTENT
-                           : afterContent;
+        const bool contentSizeMisdeclared = totalSizeFmt || !afterContentInEntry;
+        qint64 off = afterContent;
+        if (contentSizeMisdeclared) {
+            off = entryEnd >= 0 ? entryEnd - midiFromEntryEnd : instr.contentFilePos + MIDI_IN_CONTENT;
+        }
         if (off >= static_cast<qint64>(ds.device()->size())) {
             continue;
         }
-        if (int prg = readMidiByteAt(ds, off)) {
+        int prg = readMidiByteAt(ds, off);
+        if (!prg && contentSizeMisdeclared) {
+            // Entries short enough that the tables reach back into the content itself keep the
+            // program 60 bytes in; for those the two offsets coincide, for longer ones they do not.
+            prg = readMidiByteAt(ds, instr.contentFilePos + MIDI_IN_CONTENT);
+        }
+        if (prg) {
             instr.midiProgram = prg;
         }
     }
 }
 
-void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds)
+void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds, qint64 midiFromEntryEnd)
 {
     // MIDI table offsets vary by layout. See ENCORE_FORMAT.md §Instrument block.
     if (instruments.empty()) {
@@ -506,7 +516,7 @@ void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds)
     }
 
     if (smallTK) {
-        readMidiProgramsSmallTk(instruments, ds, entryStride);
+        readMidiProgramsSmallTk(instruments, ds, entryStride, midiFromEntryEnd);
         // Fallback for mixed-TK files (e.g. v0xC2 with one named TK block and the
         // remaining instruments in a compact ~~~~ block at a fixed layout).
         // Apply compact byte-93 MIDI for any instrument that still lacks both a TK
@@ -677,7 +687,7 @@ bool EncFormatReader_V0xC4Base::readInstrumentMeta(std::vector<EncInstrument>& i
                                                    const EncRoot& /*file*/) const
 {
     recoverMissingNames(instruments, ds);
-    readMidiPrograms(instruments, ds);
+    readMidiPrograms(instruments, ds, midiProgramFromEntryEnd());
     readKeyTranspositions(instruments, ds);
     return true;
 }
