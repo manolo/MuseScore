@@ -1498,3 +1498,49 @@ TEST_F(Tst_Instruments, entry_table_names_recovered_from_file_stride)
         << "the entry with no TK magic must still be named, from its stride position";
     delete score;
 }
+
+// Regression: Encore 5.0 writes 2158-byte instrument entries but its TK headers may still declare
+// varsize 112. The declared size drove the layout choice, so the reader looked for the MIDI program
+// at content+188 (empty in a large entry) and every instrument fell back to Grand Piano. The entry
+// stride the file implies decides the layout, not the declared size.
+TEST_F(Tst_Instruments, large_entry_midi_read_despite_small_declared_size)
+{
+    MasterScore* score = readEncoreScore("instruments_large_entry_declared_small.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load instruments_large_entry_declared_small.enc";
+    ASSERT_EQ(score->parts().size(), 2u) << "expected 2 instruments";
+    const Instrument* inst0 = score->parts().at(0)->instrument();
+    const Instrument* inst1 = score->parts().at(1)->instrument();
+    ASSERT_FALSE(inst0->channel().empty());
+    ASSERT_FALSE(inst1->channel().empty());
+    EXPECT_EQ(inst0->channel(0)->program(), 68) << "GM 69 (Oboe) sits at entry+2084";
+    EXPECT_EQ(inst1->channel(0)->program(), 70) << "GM 71 (Bassoon) sits at entry+2084";
+    delete score;
+}
+
+// Regression: when a TK header declares the TOTAL block size, the entry is 8 bytes shorter than the
+// declared varsize suggests, so reading the MIDI program at content+varsize+76 lands past the entry
+// and picked up an unrelated byte as a program number (which then chose an instrument by GM family).
+// A program offset outside the instrument's own entry must be rejected.
+TEST_F(Tst_Instruments, midi_offset_outside_entry_is_rejected)
+{
+    MasterScore* score = readEncoreScore("instruments_entry_shorter_than_declared.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load instruments_entry_shorter_than_declared.enc";
+    ASSERT_EQ(score->parts().size(), 1u) << "expected 1 instrument";
+    const Instrument* inst = score->parts().at(0)->instrument();
+    ASSERT_FALSE(inst->channel().empty());
+    EXPECT_EQ(inst->channel(0)->program(), 68) << "GM 69 (Oboe) sits at content+60";
+    delete score;
+}
+
+// A General MIDI program names a mainstream instrument, so when several templates declare the same
+// program and none is tagged "common" the standard ensemble member must win. GM 70 (English Horn)
+// used to resolve to Baroque Oboe, which shares program 69 and merely comes first in the file.
+TEST_F(Tst_Instruments, midi_program_prefers_standard_ensemble_template)
+{
+    using namespace mu::iex::enc;
+    constexpr int kEnglishHorn0 = 69;
+    const InstrumentTemplate* t = findTemplateByMidi(kEnglishHorn0);
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(t->id, String(u"english-horn"))
+        << "picked \"" << t->id.toStdString() << "\" instead of the orchestral template";
+}
