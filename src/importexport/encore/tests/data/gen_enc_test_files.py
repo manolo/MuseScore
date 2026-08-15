@@ -12303,6 +12303,281 @@ def gen_v0c4_singlestaff_voice4_second_voice():
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
 
+
+# ===========================================================================
+# Encore 4 instrument entry table fixtures (reported bugs 202-211)
+# The instrument blocks form a fixed-stride table from offset 194 whose entry
+# size is NOT the varsize each TK header declares; these fixtures pin down the
+# layouts that exposed it.  See ENCORE_FORMAT.md 'Instrument entry table'.
+# ===========================================================================
+_ENC4_LEGACY_TK_END = 194 + 2158              # the skeleton's TK00 entry is 2158 bytes in total
+_ENC4_PAGE_LINE = SKELETON_PRE[_ENC4_LEGACY_TK_END:]
+
+
+def _enc4_entry(magic4, name, entry_size, declared_varsize=112, midi=None,
+          midi_from_end=46, latin1=True):
+    """One Encore 4 instrument entry: 8-byte block header + (entry_size - 8) content.
+
+    magic4 = b'TK01' or b'\\x00' * 4 for the header-less entries some Encore 4
+    saves produce. midi is the 1-indexed GM program, written midi_from_end bytes
+    before the end of the entry (the 8-slot per-staff program table).
+    """
+    content = bytearray(entry_size - 8)
+    nb = (name.encode('latin1') if latin1 else name.encode('utf-16-le')) + (b'\x00' if latin1 else b'\x00\x00')
+    content[:len(nb)] = nb
+    if midi is not None:
+        off = len(content) - midi_from_end
+        content[off:off + 8] = bytes([midi & 0xFF]) * 8
+    head = magic4 + (struct.pack('<I', declared_varsize) if magic4 != b'\x00\x00\x00\x00' else b'\x00' * 4)
+    return bytes(head) + bytes(content)
+
+
+def _enc4_body_5_measures():
+    b = meas_block(meas_hdr(4, 4), end_marker())
+    b += b''.join(empty_meas(4, 4) for _ in range(5))
+    return b
+
+
+def _enc4_build(entries, instrument_count, version=0xC4):
+    header = bytearray(SKELETON_PRE[:194])
+    header[4] = version
+    header[0x32] = instrument_count
+    return bytes(header) + b''.join(entries) + _ENC4_PAGE_LINE + _enc4_body_5_measures() + SKELETON_POST
+
+
+# ---------------------------------------------------------------------------
+# 210: instruments_tk_index_gap.enc
+# Encore 4 v0xC4 file with two 242-byte instrument entries. Entry 0's 8-byte
+# block header is all zeros (no TK00 magic), so only TK01 is discoverable. The
+# importer must place TK01 on instrument 1 and recover instrument 0's name from
+# its entry position, instead of assigning TK01 to instrument 0 and leaving
+# instrument 1 nameless.
+# ---------------------------------------------------------------------------
+def gen_tk_index_gap():
+    e0 = _enc4_entry(b'\x00\x00\x00\x00', 'Dulzaina 1', 242)
+    e1 = _enc4_entry(b'TK01', 'Dulzaina 2', 242)
+    return _enc4_build([e0, e1], 2)
+
+
+# ---------------------------------------------------------------------------
+# 206: instruments_entry_table_names.enc
+# Encore 4 v0xC4 file with two 242-byte instrument entries where only entry 0
+# carries a TK00 magic; entry 1 has a zeroed block header. Its name sits 8 bytes
+# into the entry and must be recovered from the entry stride the file itself
+# implies, instead of being left as "Part 2".
+# ---------------------------------------------------------------------------
+def gen_entry_table_names():
+    e0 = _enc4_entry(b'TK00', 'Lead', 242)
+    e1 = _enc4_entry(b'\x00\x00\x00\x00', 'Backgnd', 242)
+    return _enc4_build([e0, e1], 2)
+
+
+# ---------------------------------------------------------------------------
+# 203: instruments_large_entry_declared_small.enc
+# Encore 5.0 layout (2158-byte instrument entries) whose TK headers nevertheless
+# declare varsize 112. The declared size made the reader take the small-entry
+# path and look for the MIDI program at content+188, which in a 2158-byte entry
+# is empty, so both instruments fell back to Grand Piano. The programs sit at
+# entry+2084: 69 (Oboe) and 71 (Bassoon), 1-indexed.
+# ---------------------------------------------------------------------------
+def gen_large_entry_declared_small():
+    e0 = _enc4_entry(b'TK00', '', 2158, midi=69, midi_from_end=74)
+    e1 = _enc4_entry(b'TK01', '', 2158, midi=71, midi_from_end=74)
+    return _enc4_build([e0, e1], 2)
+
+
+# ---------------------------------------------------------------------------
+# 211: instruments_entry_shorter_than_declared.enc
+# Encore 4 v0xC2 file with a single 112-byte instrument entry whose TK header
+# declares varsize 112 as the TOTAL block size, so the content is only 104
+# bytes. Reading the MIDI program at content+varsize+76 lands past the entry, in
+# the following blocks, and returned a bogus program. The real program (69,
+# Oboe, 1-indexed) sits at content+60.
+# ---------------------------------------------------------------------------
+def gen_entry_shorter_than_declared():
+    e0 = _enc4_entry(b'TK00', '', 112, midi=69, midi_from_end=44)
+    return _enc4_build([e0], 1, version=0xC2)
+
+
+# ---------------------------------------------------------------------------
+# 209: notes_tuplet_flat_group_not_nested.enc
+# One 3:2 bracket over a half note holding a quarter then four eighths. From the
+# face values alone this also reads as a quarter plus an inner triplet of eighths
+# filling the second slot, and the importer took that reading, which makes the
+# eighths play a third of their real length and leaves the measure short by an
+# amount no plain rest can fill. The recorded tick positions say the three
+# eighths take a full quarter each way, not one outer slot.
+# ---------------------------------------------------------------------------
+def gen_tuplet_flat_group_not_nested():
+    e = (
+        rest_v0c4(0, 0, 0, fv=3)
+        + note_v0c4(240, 0, 0, fv=3, pitch=60)
+        + note_v0c4(480, 0, 0, fv=3, pitch=62, tuplet=0x32)
+        + note_v0c4(640, 0, 0, fv=4, pitch=64, tuplet=0x32)
+        + rest_v0c4_tup(720, 0, 0, fv=4, tuplet=0x32)
+        + note_v0c4(800, 0, 0, fv=4, pitch=65, tuplet=0x32)
+        + note_v0c4(880, 0, 0, fv=4, pitch=67, tuplet=0x32)
+        + end_marker()
+    )
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+# ---------------------------------------------------------------------------
+# 205: structure_wide_score_first_page.enc
+# 20-staff score whose first system is followed by a page break, mirroring a big
+# band layout: Encore puts one system per page starting on page 1. At Encore's
+# nominal staff size the system is taller than the printable area, so MuseScore
+# pushed it past the title frame onto page 2 and the score appeared to start with
+# a blank page. The staff-size fit must reduce far enough to bring it back.
+# ---------------------------------------------------------------------------
+def gen_wide_score_first_page():
+    STAVES = 22
+    hdr = bytearray(194)
+    hdr[0:4] = b'SCOW'
+    hdr[4] = 0xC4
+    struct.pack_into('<H', hdr, 0x28, 0x0420)   # chuVersio
+    struct.pack_into('<h', hdr, 0x2E, 2)        # lineCount
+    struct.pack_into('<h', hdr, 0x30, 2)        # pageCount
+    hdr[0x32] = STAVES                          # instrumentCount
+    hdr[0x33] = STAVES                          # staffPerSystem
+    struct.pack_into('<h', hdr, 0x34, 2)        # measureCount
+
+    def staff_entry(instr_idx):
+        e = bytearray(30)
+        e[13] = 3      # display size 130%
+        e[14] = 0      # treble clef
+        e[16] = 0      # page-row counter 0: every system starts a page
+        e[19] = 1      # visible
+        e[21] = instr_idx
+        return bytes(e)
+
+    def line_block(first_measure):
+        data = (b'\x00' * 10
+                + struct.pack('<H', first_measure)
+                + bytes([1])
+                + b''.join(staff_entry(i) for i in range(STAVES)))
+        return b'LINE' + struct.pack('<I', len(data)) + data
+
+    def meas(pitch):
+        e = b''.join(note_v0c4(0, 0, i, 1, pitch) for i in range(STAVES)) + end_marker()
+        return meas_block(meas_hdr(4, 4), e)
+
+    # A title frame is what pushes the oversized first system off page 1, so the
+    # fixture needs a real title in the TITL block the skeleton carries.
+    post = bytearray(SKELETON_POST)
+    idx = post.find(b'TITL')
+    content = _titl_content(title='Wide Score', author0='Composer')
+    post[idx + 8: idx + 8 + len(content)] = content
+
+    return (bytes(hdr) + line_block(0) + line_block(1)
+            + meas(60) + meas(62) + bytes(post))
+
+
+# ---------------------------------------------------------------------------
+# 207: instruments_declared_size_overshoots_entry.enc
+# v0xC4 file whose single 242-byte instrument entry declares varsize 242, i.e.
+# the whole entry rather than its content. The MIDI program read at
+# content+varsize+76 then lands well past the entry and returned an unrelated
+# byte. The program table sits 46 bytes from the end of the entry: GM 22,
+# Accordion.
+# ---------------------------------------------------------------------------
+def gen_declared_size_overshoots_entry():
+    e0 = _enc4_entry(b'TK00', '', 242, declared_varsize=242, midi=22, midi_from_end=46)
+    return _enc4_build([e0], 1)
+
+
+# ---------------------------------------------------------------------------
+# 202: text_copyright_lines_one_byte.enc
+# One-byte TITL block (varsize 2426) carrying three copyright lines. In this
+# encoding the six copyright entries are 160 bytes each, not the 96 the earlier
+# fields use, so reading them all at 96 found only the first line and landed
+# inside its own text field for the rest.
+#   2 + 14*96 + 6*160 + 120 = 2426
+# ---------------------------------------------------------------------------
+def _titl_content_one_byte(title='', author0='', copyrights=()):
+    def item(text, width):
+        prefix = bytearray(30)
+        body = text.encode('latin1')[:width - 1] + b'\x00'
+        body += b'\x00' * (width - len(body))
+        return bytes(prefix) + bytes(body)
+
+    c = b'\x00\x00'
+    c += item(title, 66)                       # title
+    c += item('', 66) * 2                      # subtitle 0-1
+    c += item('', 66) * 3                      # instruction 0-2
+    c += item(author0, 66)                     # author 0
+    c += item('', 66) * 3                      # author 1-3
+    c += item('', 66) * 2                      # header 0-1
+    c += item('', 66) * 2                      # footer 0-1
+    for i in range(6):                         # copyright 0-5, 130-byte text field
+        c += item(copyrights[i] if i < len(copyrights) else '', 130)
+    c += b'\x00' * 120
+    assert len(c) == 2426, len(c)
+    return c
+
+
+def gen_copyright_lines_one_byte():
+    post = bytearray(SKELETON_POST)
+    idx = post.find(b'TITL')
+    content = _titl_content_one_byte(
+        title='Copyright Lines',
+        author0='A Composer',
+        copyrights=('(c) 1992 - 2000.', 'e-mail: someone@example.com', 'Piece V3.0'),
+    )
+    # The one-byte block is 2426 bytes where the skeleton carries a 21242-byte
+    # two-byte one; rewrite the whole block, size field included.
+    end = idx + 8 + 21242
+    block = b'TITL' + struct.pack('<I', len(content)) + content
+    post[idx:end] = block
+
+    pre = set_chumagio(0xC4)
+    body = meas_block(meas_hdr(4, 4), end_marker())
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + bytes(post)
+
+
+# ---------------------------------------------------------------------------
+# instruments_tk_magic_digits_unreliable.enc
+# Four 242-byte instrument entries whose magics read TK00 TK01 TK03 TK03: Encore
+# skips an index and repeats another. Trusting the digits leaves a hole at slot 2
+# and pushes the last entry past the end, so every instrument from the third on
+# takes the wrong staff. The entry position is what decides.
+# ---------------------------------------------------------------------------
+def gen_tk_magic_digits_unreliable():
+    STAVES = 4
+    NAMES = ('Uno', 'Dos', 'Tres', 'Cuatro')
+    MAGICS = (b'TK00', b'TK01', b'TK03', b'TK03')
+    MIDIS = (25, 41, 57, 74)
+
+    hdr = bytearray(SKELETON_PRE[:194])
+    hdr[4] = 0xC4
+    struct.pack_into('<h', hdr, 0x2E, 1)        # lineCount
+    struct.pack_into('<h', hdr, 0x30, 1)        # pageCount
+    hdr[0x32] = STAVES                          # instrumentCount
+    hdr[0x33] = STAVES                          # staffPerSystem
+    struct.pack_into('<h', hdr, 0x34, 1)        # measureCount
+
+    def staff_entry(instr_idx):
+        e = bytearray(30)
+        e[13] = 2      # display size
+        e[14] = 0      # treble clef
+        e[16] = 0
+        e[19] = 1      # visible
+        e[21] = instr_idx
+        return bytes(e)
+
+    line_data = (b'\x00' * 10 + struct.pack('<H', 0) + bytes([1])
+                 + b''.join(staff_entry(i) for i in range(STAVES)))
+    line = b'LINE' + struct.pack('<I', len(line_data)) + line_data
+
+    entries = b''.join(_enc4_entry(MAGICS[i], NAMES[i], 242, midi=MIDIS[i], midi_from_end=46)
+                       for i in range(STAVES))
+    meas = meas_block(meas_hdr(4, 4),
+                        b''.join(note_v0c4(0, 0, i, 1, 60 + i) for i in range(STAVES))
+                        + end_marker())
+    return bytes(hdr) + entries + line + meas + SKELETON_POST
+
+
 if __name__=='__main__':
     print("Generating synthetic Encore test files (using bazo.enc skeleton):")
     write("structure_v0c2_pitches.enc",       gen_v0c2_pitches())
@@ -12722,4 +12997,13 @@ if __name__=='__main__':
     write("text_tempo_orn_compound_68.enc",                gen_v0c4_tempo_orn_compound_68())
     write("text_titl_empty_second_block.enc",              gen_v0c4_titl_empty_second_block())
     write("ornaments_ottava_two_spanners.enc",             gen_v0c4_ottava_two_spanners())
+    write("instruments_tk_index_gap.enc",                   gen_tk_index_gap())
+    write("instruments_entry_table_names.enc",              gen_entry_table_names())
+    write("instruments_large_entry_declared_small.enc",     gen_large_entry_declared_small())
+    write("instruments_entry_shorter_than_declared.enc",    gen_entry_shorter_than_declared())
+    write("instruments_declared_size_overshoots_entry.enc", gen_declared_size_overshoots_entry())
+    write("instruments_tk_magic_digits_unreliable.enc",     gen_tk_magic_digits_unreliable())
+    write("notes_tuplet_flat_group_not_nested.enc",         gen_tuplet_flat_group_not_nested())
+    write("structure_wide_score_first_page.enc",            gen_wide_score_first_page())
+    write("text_copyright_lines_one_byte.enc",              gen_copyright_lines_one_byte())
     print("Done.")
