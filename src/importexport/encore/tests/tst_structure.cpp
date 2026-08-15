@@ -44,6 +44,7 @@
 #include "engraving/dom/keysig.h"
 #include "engraving/dom/layoutbreak.h"
 #include "engraving/dom/note.h"
+#include "engraving/dom/box.h"
 #include "engraving/dom/page.h"
 #include "engraving/dom/part.h"
 #include "engraving/dom/clef.h"
@@ -1595,4 +1596,26 @@ TEST_F(Tst_Structure, coincident_placeholder_rest_dropped_note_keeps_beat)
     EXPECT_TRUE(e->isChord())
         << "beat 1 must be the note, not a placeholder rest pushed ahead of it";
     EXPECT_EQ(first->tick(), m->tick());
+}
+
+// Regression: a system of twenty-odd staves is taller than the printable area at Encore's nominal
+// staff size, so the title frame took the first page on its own and the music started on page 2.
+// The staff-size fit that pulls the first system back stopped at a fixed reduction that wide scores
+// always exceeded, which is exactly the shape of score that needs it.
+TEST_F(Tst_Structure, wide_score_first_system_shares_the_title_page)
+{
+    MasterScore* score = readEncoreScore("structure_wide_score_first_page.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load structure_wide_score_first_page.enc";
+    ASSERT_FALSE(score->pages().empty());
+    EXPECT_EQ(score->pages().size(), 2u) << "one system per page, no blank page in front";
+
+    const Page* first = score->pages().front();
+    int music = 0;
+    for (const System* sys : first->systems()) {
+        if (!sys->vbox()) {
+            ++music;
+        }
+    }
+    EXPECT_GE(music, 1) << "the first page holds the title frame AND the first system";
+    delete score;
 }

@@ -543,12 +543,18 @@ void fitFirstPageStaffSpace(BuildCtx& ctx)
     }
 
     const double sp0 = score->style().styleD(Sid::spatium);
-    constexpr double kStepInches = 0.002;   // reduction granularity
-    constexpr int kMaxSteps      = 11;      // up to 0.022 inch total
+    constexpr double kStepInches      = 0.002;   // reduction granularity
+    constexpr double kMinStaffSpaceMm = 1.0;     // below this the staff stops being readable in print
+
+    // How far the staff has to shrink scales with how many staves share a system: a band score of
+    // twenty-odd staves needs a far smaller staff than a piano part before its first system fits
+    // beside the title frame. So the limit is where the staff stops being legible, not a fixed
+    // reduction, which would stop short on exactly the wide scores that need it most.
+    const double spMin = kMinStaffSpaceMm * DPMM;
 
     // Bubble up from the smallest reduction; the first that pulls the spilled system back onto
     // the first page is the ideal (least change from Encore's staff size).
-    for (int k = 1; k <= kMaxSteps; ++k) {
+    for (int k = 1; sp0 - kStepInches * k * DPI >= spMin; ++k) {
         score->style().set(Sid::spatium, sp0 - kStepInches * k * DPI);
         score->doLayout();
         if (firstPageBreakPageIndex(score) == 0) {
@@ -556,7 +562,7 @@ void fitFirstPageStaffSpace(BuildCtx& ctx)
         }
     }
 
-    // Even a 0.022 inch reduction was not enough: restore Encore's original staff size.
+    // The system does not fit the page at any legible staff size: restore Encore's own.
     score->style().set(Sid::spatium, sp0);
     score->doLayout();
 }
