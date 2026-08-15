@@ -66,6 +66,64 @@ bool isInstrumentMagic(const QString& magic)
            && magic.at(2).isDigit() && magic.at(3).isDigit();
 }
 
+// The two digits of a TKnn magic. Only a lone block is placed by this; see placeInstrumentsInSlots.
+static int instrumentMagicIndex(const QString& magic)
+{
+    return (magic.at(2).digitValue() * 10) + magic.at(3).digitValue();
+}
+
+// Instrument entries sit in a fixed-stride table (see ENCORE_FORMAT.md §Instrument entry table), so
+// which instrument a TK block describes is decided by WHERE it sits, not by the digits in its magic:
+// files exist whose seven entries are labelled TK00 TK01 TK02 TK04 TK04 TK05 TK06. Reorder the
+// blocks, discovered in file order, into their table slots, leaving a gap for any entry whose block
+// header was zeroed out (readInstrumentMeta then names it from its position). A lone block gives no
+// stride to measure, so there the magic is the only thing to go on. Anything that does not divide
+// evenly into slots is left in discovery order.
+static void placeInstrumentsInSlots(std::vector<EncInstrument>& instruments,
+                                    const std::vector<int>& magicIndex, int instrumentCount)
+{
+    static constexpr qint64 kEntryTableBase = 194;
+    const int n = static_cast<int>(instruments.size());
+    if (n == 0 || instrumentCount <= 0) {
+        return;
+    }
+    auto entryStart = [&](int i) { return instruments[i].contentFilePos - 8; };
+
+    std::vector<int> slot(n, -1);
+    if (n == 1) {
+        slot[0] = magicIndex[0];
+    } else {
+        const qint64 stride = entryStart(1) - entryStart(0);
+        if (stride <= 0) {
+            return;
+        }
+        for (int i = 0; i < n; ++i) {
+            const qint64 delta = entryStart(i) - kEntryTableBase;
+            if (delta < 0 || delta % stride != 0) {
+                return;
+            }
+            slot[i] = static_cast<int>(delta / stride);
+        }
+    }
+
+    int highest = -1;
+    for (int i = 0; i < n; ++i) {
+        if (slot[i] < 0 || slot[i] >= instrumentCount || slot[i] <= highest) {
+            return;   // out of range or not strictly increasing: keep discovery order
+        }
+        highest = slot[i];
+    }
+    if (highest == n - 1) {
+        return;   // already one block per slot in order
+    }
+
+    std::vector<EncInstrument> placed(static_cast<size_t>(highest) + 1);
+    for (int i = 0; i < n; ++i) {
+        placed[static_cast<size_t>(slot[i])] = std::move(instruments[i]);
+    }
+    instruments = std::move(placed);
+}
+
 bool isKnownMagic(const QString& magic)
 {
     return magic == "LINE" || magic == "MEAS" || magic == "TITL" || magic == "TEXT"
@@ -328,6 +386,7 @@ bool EncRoot::read(QDataStream& ds)
     }
     readTabTuning(ds, tabTuning);
     EncCharSize charsize = EncCharSize::ONE_BYTE;
+    std::vector<int> instrumentMagicIndices;
 
     while (!ds.atEnd()) {
         // Truncated/corrupt input leaves the stream in a non-Ok state; stop rather than
@@ -395,6 +454,7 @@ bool EncRoot::read(QDataStream& ds)
             // Each TK block carries its own 8-slot tab tuning just before the trailing 8-byte header
             // of the next block; read the one for this track.
             parseTabTuningBefore(ds.device(), instr.contentFilePos + varSize - 8, instr.tabTuning);
+            instrumentMagicIndices.push_back(instrumentMagicIndex(nextId));
             instruments.push_back(std::move(instr));
         } else {
             skipBlock(ds, varSize);
@@ -411,6 +471,8 @@ bool EncRoot::read(QDataStream& ds)
             }
         }
     }
+
+    placeInstrumentsInSlots(instruments, instrumentMagicIndices, header.instrumentCount);
 
     if (instruments.empty()) {
         // No TK blocks found; seed empty entries so readInstrumentMeta can recover names.
