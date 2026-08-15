@@ -110,8 +110,8 @@ struct EncNote : EncMeasureElem {
     // faceValue is derived from realDuration later; see parsers-measure.cpp / EncRoot::read).
     bool fromTabFingering       { false };
     // Set by the v0xC2 reader when grace1 & 0x20 is set without the acciaccatura slash (grace2 &
-    // 0x04): in that format the small/cue/mute bits then travel on ordinary full-value notes and
-    // must not be honored. See ENCORE_FORMAT.md §Grace and cue notes.
+    // 0x04): in that format the small-note bit also travels on ordinary full-value notes and must
+    // not be honored. The mute bit is unaffected. See ENCORE_FORMAT.md §Grace and cue notes.
     bool smallCueMuteSpurious   { false };
 
     using EncMeasureElem::EncMeasureElem;
@@ -123,10 +123,10 @@ struct EncNote : EncMeasureElem {
     int normalNotes() const { return tuplet & 0x0F; }
 
     EncGraceType graceType() const;
-    // grace1 bit 0x20 = small note (a grace or a cue). grace2 bit 0x01 = muted (playback off), a
-    // per-note Encore flag independent of size; a cue is small and muted by default.
+    // grace1 bit 0x20 = small note (a grace or a cue). grace2 bit 0x01 = muted (playback off): the
+    // per-note Play switch, independent of size and of the v0xC2 small-note quirk.
     bool isSmall() const { return (grace1 & 0x20) && !smallCueMuteSpurious; }
-    bool isMuted() const { return (grace2 & 0x01) && !smallCueMuteSpurious; }
+    bool isMuted() const { return grace2 & 0x01; }
 
     bool read(QDataStream& ds) override;
 };
