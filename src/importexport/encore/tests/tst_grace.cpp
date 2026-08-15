@@ -288,11 +288,12 @@ TEST_F(Tst_Grace, cue_mute_flag_and_sounding_cue)
     delete score;
 }
 
-// In v0xC2 the small-note bit (grace1 0x20) and mute bit (grace2 0x01) also travel on ordinary
-// full-value notes; only the slash (grace2 0x04) marks a genuine small note. m1 holds a same-tick
-// two-note chord flagged 0x30/0x01 (no slash): it must import as ONE chord of two normal, audible
-// notes, not split into two single notes with a member lost, and not drawn small or muted. m2 holds
-// a lone slashed note (0x20/0x04) that must still import small, proving the slash gate.
+// In v0xC2 the small-note bit (grace1 0x20) also travels on ordinary full-value notes; only the
+// slash (grace2 0x04) marks a genuine small note. The mute bit (grace2 0x01) is NOT part of that
+// quirk: it is Encore's per-note Play switch and always means silent. m1 holds a same-tick two-note
+// chord flagged 0x30/0x01 (no slash): it must import as ONE chord of two full-size notes, not split
+// into two single notes with a member lost, and those notes must stay silent. m2 holds a lone
+// slashed note (0x20/0x04) that must still import small, proving the slash gate.
 TEST_F(Tst_Grace, v0c2_small_flag_on_normal_chord)
 {
     MasterScore* score = readEncoreScore("importer_v0c2_small_flag_chord.enc");
@@ -313,7 +314,7 @@ TEST_F(Tst_Grace, v0c2_small_flag_on_normal_chord)
     EXPECT_EQ(chord->notes().size(), 2u) << "the two same-tick notes must form one chord, not split";
     for (const Note* n : chord->notes()) {
         EXPECT_FALSE(n->isSmall()) << "a 0x20 flag without the slash is not a small note in v0xC2";
-        EXPECT_TRUE(n->play()) << "a 0x01 flag on a normal v0xC2 note must not mute it";
+        EXPECT_FALSE(n->play()) << "the 0x01 mute flag is independent of note size and still silences";
     }
 
     Measure* m2 = m1->nextMeasure();

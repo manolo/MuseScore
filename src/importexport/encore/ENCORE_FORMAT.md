@@ -634,12 +634,15 @@ The played length is the playback duration at `+16`, equal to the dialog's "Scal
 applied to the face value. A cue keeps its full beat value in the measure (a normal note drawn
 small, muted by default); a grace occupies no measure time and borrows from an adjacent note.
 
-In **v0xC2** the small-note bit (`grace1 & 0x20`) and the mute bit (`grace2 & 0x01`) are not reliable
-on their own: some files set both on the bulk of ordinary, full-value, audible notes (they travel
-coupled, and Encore renders those notes at normal size). The only dependable small-note signal there
-is the slash (`grace2 & 0x04`, an acciaccatura). A v0xC2 note with `grace1 & 0x20` but no slash is
-therefore treated as a normal note, not small, cue, grace, or muted; same-tick notes still form a
-chord. v0xC4 and v0xA6 honor `grace1 & 0x20` directly, as above.
+In **v0xC2** the small-note bit (`grace1 & 0x20`) is not reliable on its own: some files set it on
+the bulk of ordinary, full-value notes, which Encore renders at normal size. The only dependable
+small-note signal there is the slash (`grace2 & 0x04`, an acciaccatura). A v0xC2 note with
+`grace1 & 0x20` but no slash is therefore a normal note, not small, cue or grace, and same-tick
+notes still form a chord. v0xC4 and v0xA6 honor `grace1 & 0x20` directly, as above.
+
+The mute bit is NOT part of that quirk, in any version. `grace2 & 0x01` is Encore's per-note Play
+switch and always means the note is silent, whatever the small-note bit says; whole passages are
+written this way `[verified]`.
 
 A slur can begin on a grace note stored at the same tick as its parent chord (a grace shares its
 parent's written tick), so such a slur has no distinct start tick of its own. In v0xC4 Encore
