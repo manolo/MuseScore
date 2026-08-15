@@ -150,12 +150,16 @@ bool EncLine::read(QDataStream& ds, quint32 vs, int staffPerSystem)
 // Alignment lives at prefix+14; the text field is a fixed width per encoding.
 static constexpr int kTitlTextBytesOneByte = 66;
 static constexpr int kTitlTextBytesTwoByte = 1026;
+// In the one-byte layout the copyright entries carry a wider text field than every field before
+// them; in the two-byte layout all entries are the same width. See ENCORE_FORMAT.md §TITL block.
+static constexpr int kTitlCopyrightBytesOneByte = 130;
 
 // blockEnd bounds every read to the TITL block's declared end (startPos + varSize). A truncated
 // block would otherwise pull zero-fill past EOF and, worse, a block shorter than the fixed line
 // structure would read into the following block and desync the top-level magic scan. No read here
 // crosses blockEnd, so EncTitle::read can realign exactly with skipToBlockEnd afterwards.
-static EncHeaderFooter readTitleLine(QDataStream& ds, EncCharSize cs, qint64 blockEnd)
+static EncHeaderFooter readTitleLine(QDataStream& ds, EncCharSize cs, qint64 blockEnd,
+                                     int oneByteTextBytes = kTitlTextBytesOneByte)
 {
     const qint64 prefixAvail = std::max<qint64>(0, blockEnd - ds.device()->pos());
     const int prefixWant = static_cast<int>(std::min<qint64>(30, prefixAvail));
@@ -166,7 +170,7 @@ static EncHeaderFooter readTitleLine(QDataStream& ds, EncCharSize cs, qint64 blo
     QString item;
     bool done = false;
     if (cs == EncCharSize::ONE_BYTE) {
-        for (int j = 0; j < kTitlTextBytesOneByte; ++j) {
+        for (int j = 0; j < oneByteTextBytes; ++j) {
             if (ds.device()->pos() >= blockEnd || ds.status() != QDataStream::Ok) {
                 break;
             }
@@ -260,7 +264,7 @@ bool EncTitle::read(QDataStream& ds, quint32 vs, EncCharSize cs)
         footer.push_back(readTitleLine(ds, cs, blockEnd));
     }
     for (int i = 0; i < 6; ++i) {
-        copyright.push_back(readTextItem(ds, cs, blockEnd));
+        copyright.push_back(readTitleLine(ds, cs, blockEnd, kTitlCopyrightBytesOneByte).text);
     }
     // Realign to the block end; the fixed trailing pad (504 / 120 bytes) is whatever is left.
     skipToBlockEnd(ds, startPos, static_cast<qint64>(vs));
