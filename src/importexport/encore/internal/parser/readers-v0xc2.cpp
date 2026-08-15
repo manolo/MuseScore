@@ -153,6 +153,10 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
     const char* formatName() const override { return "v0xC2"; }
     quint8 lyricTextGapAfterKie() const override { return 7; }
 
+    // v0xC2 instrument entries end two bytes earlier than v0xC4 ones, so their MIDI program
+    // table sits 44 bytes from the end rather than 46.
+    qint64 midiProgramFromEntryEnd() const override { return 44; }
+
     // v0xC2 slur xoffset2 lives in a stale ornament-coordinate origin; anchor endpoints
     // explicitly (forward measure-count / next note) instead of by coordinate search.
     bool slurXoffset2Stale() const override { return true; }

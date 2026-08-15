@@ -110,6 +110,11 @@ struct EncFormatReader
         return true;
     }
 
+    // Distance from the end of an instrument entry back to its per-staff MIDI program table.
+    // The tail fields are laid out from the end of the entry, and v0xC2 keeps two fewer bytes
+    // there than v0xC4. See ENCORE_FORMAT.md §Instrument entry table.
+    virtual qint64 midiProgramFromEntryEnd() const { return 46; }
+
     // True when TK instrument names need UTF-16 probe.
     virtual bool probeInstrumentEncoding() const { return false; }
 
