@@ -174,6 +174,26 @@ zero out an entry's whole 8-byte header so the block is invisible to a magic sca
 [entry table](#instrument-entry-table), not by its digits. The digits are worth reading only for a
 file with a single block, where there is no second block to measure the stride against.
 
+### Instrument entry table
+
+The instrument blocks form a table of fixed-size entries starting at offset 194, each entry holding
+one instrument: the 8-byte block header, then the name, then the per-staff tables at the entry's
+tail. An entry's size is NOT the `varsize` its header declares: Encore 4 saves routinely declare 112
+there whatever the entry really measures, and Encore 5.0 files with 2158-byte entries still declare
+112 `[observed]`. The entry size is instead derived from the file:
+
+1. the distance between two blocks whose magics name instruments `n` and `m`, divided by `m - n`;
+2. failing that, the distance from 194 to a single block whose magic names instrument `n > 0`,
+   divided by `n`;
+3. failing that, the span from 194 to the first PAGE/LINE/MEAS block, divided by the instrument
+   count in the header.
+
+Observed entry sizes are 2158 for Encore 5.0 files (format revision 4 at header `0x3E`), 242 for
+Encore 4.x v0xC4 files (revision 0 or 1) and 112 for v0xC2 files `[observed]`.
+
+Every entry begins with its name 8 bytes in, whether or not the entry carries a TK magic, so an
+instrument whose block header was zeroed is still named at `194 + n*entrySize + 8`.
+
 ### MIDI program and Key by layout
 
 The layout of the MIDI-program and Key-transposition fields depends on the TK block size
