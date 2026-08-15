@@ -1421,3 +1421,35 @@ TEST_F(Tst_NotesTuplets, cross_staff_false_nesting_and_drum_corruption)
 
     delete score;
 }
+
+// Regression: a 3:2 bracket of a quarter followed by four eighths was read as a quarter plus an
+// inner triplet of eighths nested in the second slot. Both readings match the face values, but the
+// nested one plays each eighth at a third of its length, leaving a remainder no plain rest can
+// express, so the measure came up a fraction short and the score imported corrupt. The played
+// lengths the file records tell the readings apart: an inner group must fill exactly one outer slot.
+TEST_F(Tst_NotesTuplets, mixed_value_tuplet_stays_flat_not_nested)
+{
+    MasterScore* score = readEncoreScore("notes_tuplet_flat_group_not_nested.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load notes_tuplet_flat_group_not_nested.enc";
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    Measure* m1 = score->firstMeasure();
+    ASSERT_NE(m1, nullptr);
+    Fraction sum;
+    int nested = 0;
+    for (Segment* s = m1->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChordRest()) {
+            continue;
+        }
+        ChordRest* cr = toChordRest(el);
+        sum += cr->actualTicks();
+        if (cr->tuplet() && cr->tuplet()->tuplet()) {
+            ++nested;
+        }
+    }
+    EXPECT_EQ(nested, 0) << "no member belongs to a tuplet inside another tuplet";
+    EXPECT_EQ(sum, Fraction(4, 4)) << "the measure must be filled exactly, found " << sum.toString().toStdString();
+    delete score;
+}
