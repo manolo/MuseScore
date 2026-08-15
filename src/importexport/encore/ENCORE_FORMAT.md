@@ -166,6 +166,14 @@ files, whose other multi-byte fields are big-endian. A TK size of 112 is stored 
 read big-endian that is `0x70000000`, whose low 16 bits are 0, which would bound every name length
 to zero. Read this field little-endian (low 16 bits) regardless of the file byte order.
 
+**Magic suffix.** The two digits look like the index of the instrument the block describes, and
+usually are, but they cannot be trusted: files exist whose seven consecutive entries are labelled
+`TK00 TK01 TK02 TK04 TK04 TK05 TK06`, skipping an index and repeating another, and others that
+zero out an entry's whole 8-byte header so the block is invisible to a magic scan at all
+`[observed]`. What a block describes is decided by WHERE it sits in the
+[entry table](#instrument-entry-table), not by its digits. The digits are worth reading only for a
+file with a single block, where there is no second block to measure the stride against.
+
 ### MIDI program and Key by layout
 
 The layout of the MIDI-program and Key-transposition fields depends on the TK block size

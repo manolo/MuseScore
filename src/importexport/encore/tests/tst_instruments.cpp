@@ -1449,3 +1449,37 @@ TEST_F(Tst_Instruments, sco5_tk_block_instrument_names)
         << "second TK-block name must import, not fall back to a default";
     delete score;
 }
+
+// Regression: some Encore 4 saves leave an instrument entry's 8-byte block header zeroed, so the
+// TK magic of the first instrument is gone and only TK01 is discoverable. Blocks were assigned to
+// instruments in the order they were found, so TK01 landed on instrument 0 ("Dulzaina 2" on the
+// first staff) and instrument 1 was left nameless ("Part 2"). A lone block is placed by the digits
+// in its magic, the one case where there is no second block to measure the entry stride against.
+TEST_F(Tst_Instruments, tk_block_index_selects_its_instrument)
+{
+    MasterScore* score = readEncoreScore("instruments_tk_index_gap.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load instruments_tk_index_gap.enc";
+    ASSERT_EQ(score->parts().size(), 2u) << "expected 2 instruments";
+    EXPECT_EQ(score->parts().at(0)->longName(), String(u"Dulzaina 1"))
+        << "instrument 0 has no TK block; its name must be recovered from its entry position";
+    EXPECT_EQ(score->parts().at(1)->longName(), String(u"Dulzaina 2"))
+        << "TK01 names instrument 1, not instrument 0";
+    delete score;
+}
+
+// Regression: the digits in a TKnn magic are not reliable. Files exist whose entries are labelled
+// TK00 TK01 TK02 TK04 TK04 TK05 TK06 for seven instruments, skipping an index and repeating another.
+// Placing blocks by those digits left a hole and pushed the tail past the end, so every instrument
+// from the gap on took the wrong staff. Position in the entry table is what decides.
+TEST_F(Tst_Instruments, instrument_slot_comes_from_entry_position_not_magic_digits)
+{
+    MasterScore* score = readEncoreScore("instruments_tk_magic_digits_unreliable.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load instruments_tk_magic_digits_unreliable.enc";
+    ASSERT_EQ(score->parts().size(), 4u) << "four entries, four instruments, no phantom part";
+    const char16_t* expected[] = { u"Uno", u"Dos", u"Tres", u"Cuatro" };
+    for (size_t i = 0; i < 4; ++i) {
+        EXPECT_EQ(score->parts().at(i)->longName(), String(expected[i]))
+            << "instrument " << i << " must come from the entry in slot " << i;
+    }
+    delete score;
+}
