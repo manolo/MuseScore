@@ -288,49 +288,6 @@ TEST_F(Tst_Grace, cue_mute_flag_and_sounding_cue)
     delete score;
 }
 
-// In v0xC2 the small-note bit (grace1 0x20) also travels on ordinary full-value notes; only the
-// slash (grace2 0x04) marks a genuine small note. The mute bit (grace2 0x01) is NOT part of that
-// quirk: it is Encore's per-note Play switch and always means silent. m1 holds a same-tick two-note
-// chord flagged 0x30/0x01 (no slash): it must import as ONE chord of two full-size notes, not split
-// into two single notes with a member lost, and those notes must stay silent. m2 holds a lone
-// slashed note (0x20/0x04) that must still import small, proving the slash gate.
-TEST_F(Tst_Grace, v0c2_small_flag_on_normal_chord)
-{
-    MasterScore* score = readEncoreScore("importer_v0c2_small_flag_chord.enc");
-    ASSERT_NE(score, nullptr);
-    muse::Ret ret = score->sanityCheck();
-    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
-
-    Measure* m1 = score->firstMeasure();
-    ASSERT_NE(m1, nullptr);
-    const Chord* chord = nullptr;
-    for (Segment* s = m1->first(SegmentType::ChordRest); s && !chord; s = s->next(SegmentType::ChordRest)) {
-        EngravingItem* e = s->element(0);
-        if (e && e->isChord()) {
-            chord = toChord(e);
-        }
-    }
-    ASSERT_NE(chord, nullptr);
-    EXPECT_EQ(chord->notes().size(), 2u) << "the two same-tick notes must form one chord, not split";
-    for (const Note* n : chord->notes()) {
-        EXPECT_FALSE(n->isSmall()) << "a 0x20 flag without the slash is not a small note in v0xC2";
-        EXPECT_FALSE(n->play()) << "the 0x01 mute flag is independent of note size and still silences";
-    }
-
-    Measure* m2 = m1->nextMeasure();
-    ASSERT_NE(m2, nullptr);
-    bool slashStaysSmall = false;
-    for (Segment* s = m2->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
-        for (EngravingItem* e : s->elist()) {
-            if (e && e->isChord() && !toChord(e)->notes().empty() && toChord(e)->isSmall()) {
-                slashStaysSmall = true;
-            }
-        }
-    }
-    EXPECT_TRUE(slashStaysSmall) << "a slashed (grace2 0x04) note must still import small";
-    delete score;
-}
-
 // A beamed grace group (grace1 & 0x10) is a melodic run of separate grace notes joined by a beam, not
 // a stacked chord: two such graces at one tick must import as TWO grace chords (m1). Two NON-beamed
 // graces at one tick stay a single stacked grace chord of two notes (m2).
@@ -376,3 +333,45 @@ TEST_F(Tst_Grace, beamed_grace_group_stays_separate)
 
 // Covers: grace note filtering (fv>=4 only), ACCIACCATURA
 ENC_SANITY_TEST(grace_notes, "notes_grace.enc")
+// In v0xC2 the small-note bit (grace1 0x20) also travels on ordinary full-value notes; only the
+// slash (grace2 0x04) marks a genuine small note. The mute bit (grace2 0x01) is NOT part of that
+// quirk: it is Encore's per-note Play switch and always means silent. m1 holds a same-tick two-note
+// chord flagged 0x30/0x01 (no slash): it must import as ONE chord of two full-size notes, not split
+// into two single notes with a member lost, and those notes must stay silent. m2 holds a lone
+// slashed note (0x20/0x04) that must still import small, proving the slash gate.
+TEST_F(Tst_Grace, v0c2_small_flag_on_normal_chord)
+{
+    MasterScore* score = readEncoreScore("importer_v0c2_small_flag_chord.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    Measure* m1 = score->firstMeasure();
+    ASSERT_NE(m1, nullptr);
+    const Chord* chord = nullptr;
+    for (Segment* s = m1->first(SegmentType::ChordRest); s && !chord; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* e = s->element(0);
+        if (e && e->isChord()) {
+            chord = toChord(e);
+        }
+    }
+    ASSERT_NE(chord, nullptr);
+    EXPECT_EQ(chord->notes().size(), 2u) << "the two same-tick notes must form one chord, not split";
+    for (const Note* n : chord->notes()) {
+        EXPECT_FALSE(n->isSmall()) << "a 0x20 flag without the slash is not a small note in v0xC2";
+        EXPECT_FALSE(n->play()) << "the 0x01 mute flag is independent of note size and still silences";
+    }
+
+    Measure* m2 = m1->nextMeasure();
+    ASSERT_NE(m2, nullptr);
+    bool slashStaysSmall = false;
+    for (Segment* s = m2->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        for (EngravingItem* e : s->elist()) {
+            if (e && e->isChord() && !toChord(e)->notes().empty() && toChord(e)->isSmall()) {
+                slashStaysSmall = true;
+            }
+        }
+    }
+    EXPECT_TRUE(slashStaysSmall) << "a slashed (grace2 0x04) note must still import small";
+    delete score;
+}
