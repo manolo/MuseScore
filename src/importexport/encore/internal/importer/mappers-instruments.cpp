@@ -454,13 +454,36 @@ const InstrumentTemplate* findInstrumentVariant(const InstrumentTemplate* base, 
     return best;
 }
 
+// How representative a template is of a bare General MIDI program, when several templates share it.
+// A GM program names a mainstream instrument, so the "common" templates come first and the standard
+// ensemble members next; specialist entries (early music, world, none at all) are the last resort.
+// Without this, GM 69 picked Baroque Oboe over English Horn purely by file order.
+static int midiTemplateRank(const InstrumentTemplate* it)
+{
+    int rank = 0;
+    for (const InstrumentGenre* gen : it->genres) {
+        if (!gen) {
+            continue;
+        }
+        if (gen->id == "common") {
+            return 3;
+        }
+        if (gen->id == "orchestra" || gen->id == "concertband") {
+            rank = 2;
+        } else if (rank < 1) {
+            rank = 1;
+        }
+    }
+    return rank;
+}
+
 const InstrumentTemplate* findTemplateByMidi(int encMidiProgram0indexed)
 {
     if (encMidiProgram0indexed < 0) {
         return nullptr;
     }
     const InstrumentTemplate* best = nullptr;
-    bool bestIsCommon = false;
+    int bestRank = -1;
     for (const InstrumentGroup* g : instrumentGroups) {
         for (const InstrumentTemplate* it : g->instrumentTemplates) {
             if (it->useDrumset || it->channel.empty()) {
@@ -473,16 +496,10 @@ const InstrumentTemplate* findTemplateByMidi(int encMidiProgram0indexed)
             if (it->channel.front().program() != encMidiProgram0indexed) {
                 continue;
             }
-            bool isCommon = false;
-            for (const InstrumentGenre* gen : it->genres) {
-                if (gen && gen->id == "common") {
-                    isCommon = true;
-                    break;
-                }
-            }
-            if (!best || (isCommon && !bestIsCommon)) {
+            const int rank = midiTemplateRank(it);
+            if (!best || rank > bestRank) {
                 best = it;
-                bestIsCommon = isCommon;
+                bestRank = rank;
             }
         }
     }
@@ -502,7 +519,7 @@ const InstrumentTemplate* findTemplateByMidiFamily(int encMidiProgram0indexed)
     const int familyLast = familyFirst + 7;
     const InstrumentTemplate* best = nullptr;
     int bestDist = 1000;
-    bool bestIsCommon = false;
+    int bestRank = -1;
     for (const InstrumentGroup* g : instrumentGroups) {
         for (const InstrumentTemplate* it : g->instrumentTemplates) {
             if (it->useDrumset || it->channel.empty()) {
@@ -512,20 +529,14 @@ const InstrumentTemplate* findTemplateByMidiFamily(int encMidiProgram0indexed)
             if (prog < familyFirst || prog > familyLast) {
                 continue;
             }
-            bool isCommon = false;
-            for (const InstrumentGenre* gen : it->genres) {
-                if (gen && gen->id == "common") {
-                    isCommon = true;
-                    break;
-                }
-            }
+            const int rank = midiTemplateRank(it);
             const int dist = prog > encMidiProgram0indexed
                              ? prog - encMidiProgram0indexed : encMidiProgram0indexed - prog;
-            // Prefer the nearest program; break ties toward the "common" genre.
-            if (!best || dist < bestDist || (dist == bestDist && isCommon && !bestIsCommon)) {
+            // Prefer the nearest program; break ties toward the most representative template.
+            if (!best || dist < bestDist || (dist == bestDist && rank > bestRank)) {
                 best = it;
                 bestDist = dist;
-                bestIsCommon = isCommon;
+                bestRank = rank;
             }
         }
     }

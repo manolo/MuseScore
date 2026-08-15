@@ -421,10 +421,36 @@ static bool isTotalBlockSizeTkFmt(const std::vector<EncInstrument>& instruments)
     return stride > 0 && stride == static_cast<qint64>(instruments[0].offset);
 }
 
+// Entry size at or above which an instrument entry uses the Encore 5 layout, whose per-staff
+// program table sits LARGE_ENTRY_MIDI bytes into the entry.
+static constexpr qint64 LARGE_ENTRY_MIN = 2000;
+static constexpr qint64 LARGE_ENTRY_MIDI = 2084;
+
+// Read the program table of a large entry. Encore 5 files are recognised by their entry stride
+// alone: the TK size field is unreliable (4.x-era saves declare 112 whatever the entry really is),
+// so a large-entry file could otherwise be mistaken for a small-entry one and read an empty byte.
+static void readMidiProgramsLargeEntry(std::vector<EncInstrument>& instruments, QDataStream& ds,
+                                       qint64 entryStride)
+{
+    for (size_t n = 0; n < instruments.size(); ++n) {
+        const qint64 entryStart = instruments[n].contentFilePos >= 0
+                                  ? instruments[n].contentFilePos - 8
+                                  : ENTRY_TABLE_BASE + static_cast<qint64>(n) * entryStride;
+        const qint64 off = entryStart + LARGE_ENTRY_MIDI;
+        if (off >= static_cast<qint64>(ds.device()->size())) {
+            break;
+        }
+        if (int prg = readMidiByteAt(ds, off)) {
+            instruments[n].midiProgram = prg;
+        }
+    }
+}
+
 // SmallTK layout (0 < offset <= 250).
 static void readMidiProgramsSmallTk(
     std::vector<EncInstrument>& instruments,
-    QDataStream& ds)
+    QDataStream& ds,
+    qint64 entryStride)
 {
     // Standard Encore 5.x: MIDI is 76 bytes past the content end
     //   (content is `instr.offset` bytes; absolute = contentFilePos + offset + 76).
@@ -437,12 +463,18 @@ static void readMidiProgramsSmallTk(
         LOGD() << "enc: small-TK total-block-size format detected (Encore 4.x): reading MIDI at content+60";
     }
     for (auto& instr : instruments) {
-        if (instr.contentFilePos < 0) {
+        if (instr.contentFilePos < 0 || instr.midiProgram != 0) {
             continue;
         }
-        const qint64 off = totalSizeFmt
+        const qint64 afterContent = instr.contentFilePos + static_cast<qint64>(instr.offset) + MIDI_AFTER_CONTENT;
+        // A varSize that is really the total block size makes the content 8 bytes shorter than it
+        // claims, so the standard offset can land past the entry and read an unrelated byte as a
+        // program number. Keep it only while it stays inside the instrument's own entry.
+        const qint64 entryEnd = entryStride > 0 ? instr.contentFilePos - 8 + entryStride : -1;
+        const bool afterContentInEntry = (entryEnd < 0) || (afterContent < entryEnd);
+        const qint64 off = (totalSizeFmt || !afterContentInEntry)
                            ? instr.contentFilePos + MIDI_IN_CONTENT
-                           : instr.contentFilePos + static_cast<qint64>(instr.offset) + MIDI_AFTER_CONTENT;
+                           : afterContent;
         if (off >= static_cast<qint64>(ds.device()->size())) {
             continue;
         }
@@ -467,8 +499,14 @@ void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds)
     const bool compact = (instruments[0].offset == 0);
     const bool smallTK = (!compact && instruments[0].offset <= 250);
 
+    // The entry stride the file implies, not the declared TK size, tells the layouts apart.
+    const qint64 entryStride = instrumentEntryStride(instruments, ds);
+    if (entryStride >= LARGE_ENTRY_MIN) {
+        readMidiProgramsLargeEntry(instruments, ds, entryStride);
+    }
+
     if (smallTK) {
-        readMidiProgramsSmallTk(instruments, ds);
+        readMidiProgramsSmallTk(instruments, ds, entryStride);
         // Fallback for mixed-TK files (e.g. v0xC2 with one named TK block and the
         // remaining instruments in a compact ~~~~ block at a fixed layout).
         // Apply compact byte-93 MIDI for any instrument that still lacks both a TK
@@ -514,6 +552,9 @@ void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds)
         }
         if (off >= static_cast<qint64>(ds.device()->size())) {
             break;
+        }
+        if (instruments[n].midiProgram != 0) {
+            continue;
         }
         if (int prg = readMidiByteAt(ds, off)) {
             instruments[n].midiProgram = prg;
