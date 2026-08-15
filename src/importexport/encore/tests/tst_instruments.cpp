@@ -1483,3 +1483,18 @@ TEST_F(Tst_Instruments, instrument_slot_comes_from_entry_position_not_magic_digi
     }
     delete score;
 }
+
+// Regression: in Encore 4 files the instrument entries form a fixed-stride table, but only some
+// entries carry a TK magic; the rest have a zeroed block header. Name recovery probed the Encore 5
+// stride (2158) and the compact table (112), so the second name of a 242-byte table was never found
+// and such an instrument imported as "Part N".
+TEST_F(Tst_Instruments, entry_table_names_recovered_from_file_stride)
+{
+    MasterScore* score = readEncoreScore("instruments_entry_table_names.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load instruments_entry_table_names.enc";
+    ASSERT_EQ(score->parts().size(), 2u) << "expected 2 instruments";
+    EXPECT_EQ(score->parts().at(0)->longName(), String(u"Lead"));
+    EXPECT_EQ(score->parts().at(1)->longName(), String(u"Backgnd"))
+        << "the entry with no TK magic must still be named, from its stride position";
+    delete score;
+}

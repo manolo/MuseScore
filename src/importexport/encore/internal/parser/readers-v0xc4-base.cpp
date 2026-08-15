@@ -115,6 +115,52 @@ static qint64 findTildeBlockOffset(QDataStream& ds)
     return -1;
 }
 
+// Byte offset of the first instrument entry; its name starts 8 bytes in, at NAME_BASE.
+static constexpr qint64 ENTRY_TABLE_BASE = 194;
+
+// Size of one instrument entry, derived from the file rather than from the TK size field (Encore 4
+// saves routinely declare 112 there whatever the real entry is). Returns 0 when nothing reliable
+// can be derived. Three sources, most trustworthy first: the spacing between two discovered TK
+// blocks; the distance from the table base to a single block whose magic names a later instrument;
+// and the span from the table base to the first PAGE/LINE/MEAS block divided by the instrument
+// count. See ENCORE_FORMAT.md §Instrument block.
+qint64 instrumentEntryStride(const std::vector<EncInstrument>& instruments, QDataStream& ds)
+{
+    static constexpr qint64 kMinStride = 64;
+    qint64 firstPos = -1, firstIdx = -1;
+    for (size_t n = 0; n < instruments.size(); ++n) {
+        if (instruments[n].contentFilePos < 0) {
+            continue;
+        }
+        const qint64 pos = instruments[n].contentFilePos - 8;
+        if (firstPos < 0) {
+            firstPos = pos;
+            firstIdx = static_cast<qint64>(n);
+            continue;
+        }
+        const qint64 span = pos - firstPos;
+        const qint64 steps = static_cast<qint64>(n) - firstIdx;
+        if (steps > 0 && span > 0 && span % steps == 0 && span / steps >= kMinStride) {
+            return span / steps;
+        }
+    }
+    if (firstIdx > 0 && firstPos > ENTRY_TABLE_BASE) {
+        const qint64 span = firstPos - ENTRY_TABLE_BASE;
+        if (span % firstIdx == 0 && span / firstIdx >= kMinStride) {
+            return span / firstIdx;
+        }
+    }
+    const qint64 count = static_cast<qint64>(instruments.size());
+    const qint64 tableEnd = findFirstBlockOffset(ds);
+    if (count > 0 && tableEnd > ENTRY_TABLE_BASE && tableEnd < ds.device()->size()) {
+        const qint64 span = tableEnd - ENTRY_TABLE_BASE;
+        if (span % count == 0 && span / count >= kMinStride) {
+            return span / count;
+        }
+    }
+    return 0;
+}
+
 void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& ds)
 {
     // NAME_BASE=202 is the name position of instrument 0 in every compact-table layout; the step
@@ -208,6 +254,19 @@ void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& d
                 instruments[nextTarget].name = candidate;
                 ++nextTarget;
             }
+        }
+    }
+
+    // Last resort: read each still-unnamed instrument at its own position in the entry table, whose
+    // stride the file itself implies. Encore 4 writes a fixed-stride table but only puts a TK magic
+    // on some entries, so an instrument with no block of its own still has its name 8 bytes into
+    // its slot; neither the 2158 probe nor the compact table reaches it.
+    if (const qint64 stride = instrumentEntryStride(instruments, ds)) {
+        for (size_t n = 0; n < instruments.size(); ++n) {
+            if (!instruments[n].name.trimmed().isEmpty() || resolvedByTkBlock(n)) {
+                continue;
+            }
+            instruments[n].name = tryReadName(ENTRY_TABLE_BASE + 8 + static_cast<qint64>(n) * stride);
         }
     }
 }
