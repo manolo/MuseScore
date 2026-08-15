@@ -1170,17 +1170,21 @@ fixed-width field.
 
 **Encoding by varsize** `[verified]`:
 
-| varsize     | Encoding   | Bytes per line |
-|-------------|------------|----------------|
-| < 5000      | Latin-1    | 96             |
-| >= 10000    | UTF-16 LE  | 1056           |
+| varsize     | Encoding   | Bytes per line             | Bytes per copyright line |
+|-------------|------------|----------------------------|--------------------------|
+| < 5000      | Latin-1    | 96                         | 160                      |
+| >= 10000    | UTF-16 LE  | 1056                       | 1056                     |
 | 5000..9999  | (rare) not disambiguated by varsize; fall back to the file's instrument-name encoding | |
 
-The two normal layouts differ by roughly 10x (Latin-1: 2 + 20 lines x 96 + 504 pad = 2426;
-UTF-16: 2 + 20 lines x 1056 + 120 pad = 21242), so varsize resolves them unambiguously.
+The two normal layouts differ by roughly 10x (Latin-1: 2 + 14 lines x 96 + 6 copyright x 160 + 120
+pad = 2426; UTF-16: 2 + 20 lines x 1056 + 120 pad = 21242), so varsize resolves them unambiguously.
 
-Each line is a 30-byte prefix followed by the text field (66 Latin-1 bytes or 1026 UTF-16 bytes),
-NUL-terminated and zero-padded; bytes after the NUL are prior-edit debris.
+Each line is a 30-byte prefix followed by the text field, NUL-terminated and zero-padded; bytes
+after the NUL are prior-edit debris. The text field is 1026 bytes in UTF-16 for every line. In
+Latin-1 it is 66 bytes for the title, subtitles, instructions, authors, headers and footers, but
+130 bytes for the six copyright lines `[verified]`: reading those at 66 finds the first line and
+then lands inside its own text field, so the remaining copyright lines come back empty. Both
+totals close on the same 120-byte trailing pad.
 
 **Header/footer alignment.** Prefix byte `+14`: `0x02` = right, `0x04` = left, `0x06` = center;
 `0x00` on other line types.

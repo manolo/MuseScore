@@ -1632,3 +1632,16 @@ ENC_SANITY_TEST_TEXT(staff_text,           "text_staff_text.enc")
 ENC_SANITY_TEST_TEXT(titl_headers_footers, "text_titl_headers_footers.enc")
 ENC_SANITY_TEST_TEXT(staff_text_placement, "text_staff_text_placement.enc")
 ENC_SANITY_TEST_TEXT(keychange_to_c,       "structure_keychange_to_c.enc")
+
+// Regression: in the one-byte TITL layout the six copyright entries are wider than the fields
+// before them, so reading them all at the same stride found the first line and then read inside its
+// own text field for the rest. A score with three copyright lines imported only the first.
+TEST_F(Tst_Text, copyright_lines_one_byte_layout)
+{
+    MasterScore* score = readEncoreScore("text_copyright_lines_one_byte.enc");
+    ASSERT_NE(score, nullptr) << "Failed to load text_copyright_lines_one_byte.enc";
+    EXPECT_EQ(score->metaTag(u"copyright"),
+              String(u"(c) 1992 - 2000.\ne-mail: someone@example.com\nPiece V3.0"))
+        << "all three copyright lines must import, joined by newlines";
+    delete score;
+}
