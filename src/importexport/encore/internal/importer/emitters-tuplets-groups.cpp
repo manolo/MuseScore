@@ -274,12 +274,39 @@ static void processImpliedTupletGroup(
     }
 }
 
+// A nested inner group replaces exactly ONE slot of the outer tuplet, so its notes must play for
+// as long as that slot does. Face values alone cannot tell the readings apart: a quarter followed
+// by eighths in a 3:2 bracket is equally consistent with an inner triplet filling the second slot
+// and with one flat bracket of a quarter plus four eighths. The played lengths the file records
+// settle it. Returns true when they are unavailable, leaving the face-value reading in charge.
+static bool innerGroupFillsOneOuterSlot(
+    const std::vector<std::vector<const EncMeasureElem*> >& chords,
+    int outerSlotIdx, int innerGroupStartIdx, int innerEndIdx)
+{
+    auto realOf = [&chords](int idx) {
+        return chords[idx].empty() ? -1 : static_cast<int>(chords[idx][0]->realDuration);
+    };
+    const int slotReal = realOf(outerSlotIdx);
+    if (slotReal <= 0) {
+        return true;
+    }
+    int innerReal = 0;
+    for (int j = innerGroupStartIdx; j <= innerEndIdx; ++j) {
+        const int r = realOf(j);
+        if (r <= 0) {
+            return true;
+        }
+        innerReal += r;
+    }
+    return innerReal == slotReal;
+}
+
 // Nested-tuplet: the current group closed via a no-downdate reduction, and the next
 // (actualN - 1) notes also share innerBaseLen -> record NestedTupletInfo for the emitters
 // and pull the peeked-ahead notes into the result set.
 static void detectNestedTuplet(
     std::vector<NestedTupletInfo>* nestedInfos,
-    int innerGroupStartIdx, Fraction innerBaseLen, Fraction originalBaseLen,
+    int groupStart, int innerGroupStartIdx, Fraction innerBaseLen, Fraction originalBaseLen,
     int actualN, int normalN, int i, int n,
     const std::vector<std::vector<const EncMeasureElem*> >& chords,
     std::set<const EncMeasureElem*>& result)
@@ -313,7 +340,8 @@ static void detectNestedTuplet(
             }
         }
     }
-    if (innerOk && innerEndIdx >= innerGroupStartIdx) {
+    if (innerOk && innerEndIdx >= innerGroupStartIdx
+        && innerGroupFillsOneOuterSlot(chords, groupStart, innerGroupStartIdx, innerEndIdx)) {
         NestedTupletInfo ni;
         ni.outerActualN = actualN;
         ni.outerNormalN = normalN;
@@ -502,7 +530,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                         }
                     }
 
-                    detectNestedTuplet(nestedInfos, innerGroupStartIdx, innerBaseLen,
+                    detectNestedTuplet(nestedInfos, groupStart, innerGroupStartIdx, innerBaseLen,
                                        originalBaseLen, actualN, normalN, i, n, chords, result);
 
                     faceSum   = Fraction(0, 1);

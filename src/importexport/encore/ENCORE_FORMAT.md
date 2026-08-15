@@ -1317,6 +1317,13 @@ In compound and simple meters where one beat equals an eighth (6/8, 8/8, 12/8), 
 face value as a number of beats rather than an absolute note value, so the written duration is
 `faceTicks x actualN / normalN` when that product is a standard tick count.
 
+Nothing in the bytes says where one bracket ends and the next begins: the ratio is per note, not per
+group. A run of mixed face values under one ratio is therefore ambiguous. A quarter followed by four
+eighths at 3:2 reads either as one flat bracket over a half note or as a quarter plus a bracket of
+three eighths nested in the second slot, and both readings are consistent with the face values. The
+element tick positions decide: a nested group replaces exactly one slot of the outer bracket, so its
+notes must span the same distance as that slot does `[verified]`.
+
 ---
 
 ## Encoding probe
