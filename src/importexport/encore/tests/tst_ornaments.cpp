@@ -288,6 +288,58 @@ TEST_F(Tst_Ornaments, staccato_from_orn_c9)
     delete score;
 }
 
+// Coverage: SCO5 is the big-endian macOS container, 16 files in the corpus against three fixtures
+// that between them carried no ornament and no rest. The three ornament kinds the importer treats
+// differently, an articulation, a dynamic and a fermata, all reach the score in that byte order.
+TEST_F(Tst_Ornaments, sco5_bigendian_ornaments_and_rest)
+{
+    MasterScore* score = readEncoreScore("ornaments_sco5_bigendian.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int staccati = 0, fermatas = 0, rests = 0;
+    std::vector<DynamicType> dynamics;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* ann : s->annotations()) {
+                if (!ann) {
+                    continue;
+                }
+                if (ann->isFermata()) {
+                    ++fermatas;
+                } else if (ann->isDynamic()) {
+                    dynamics.push_back(toDynamic(ann)->dynamicType());
+                }
+            }
+            EngravingItem* el = s->element(0);
+            if (!el) {
+                continue;
+            }
+            if (el->isRest()) {
+                ++rests;
+            } else if (el->isChord()) {
+                for (Articulation* a : toChord(el)->articulations()) {
+                    if (a->symId() == SymId::articStaccatoAbove || a->symId() == SymId::articStaccatoBelow) {
+                        ++staccati;
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_EQ(staccati, 1);
+    EXPECT_EQ(fermatas, 1);
+    EXPECT_EQ(rests, 1) << "the rest size this container uses had no fixture before";
+    ASSERT_EQ(dynamics.size(), 1u);
+    EXPECT_EQ(dynamics[0], DynamicType::F);
+
+    delete score;
+}
+
 // Regression: Encore 4.0 moved four articulations down by six, so a file older than format 3.07
 // spells tenuto 0xCE, staccato 0xCF and fermata above 0xD2. Read with the later numbering they are
 // codes nothing recognises and the marks never reach the score. The accent shows the rest of the
