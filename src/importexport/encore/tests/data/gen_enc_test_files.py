@@ -587,6 +587,26 @@ def gen_v0c2_pre4_element_offsets():
     return set_version(assemble(0xC2, [(meas_hdr(4, 4), e)]), 773)
 
 
+def gen_v0c2_pre4_articulation_codes():
+    """Encore 3.x file whose articulations use the numbering that release predates: tenuto 0xCE,
+    staccato 0xCF and fermata above 0xD2, each six above the code every later generation uses.
+    An accent (0xBE) rides along to show the rest of the vocabulary did not move.
+
+    Read with the later numbering, the first three are codes nothing recognises and the marks
+    never reach the score.
+    """
+    e  = orn16_v0c4(0,   0, 0, tipo=0xCE)       # tenuto, 0xC8 from Encore 4.0 on
+    e += note_v0c2_pre4(0,   0, 0, 3, 60, 72)
+    e += orn16_v0c4(240, 0, 0, tipo=0xCF)       # staccato, later 0xC9
+    e += note_v0c2_pre4(240, 0, 0, 3, 62, 72)
+    e += orn16_v0c4(480, 0, 0, tipo=0xD2)       # fermata above, later 0xCC
+    e += note_v0c2_pre4(480, 0, 0, 3, 64, 72)
+    e += orn16_v0c4(720, 0, 0, tipo=0xBE)       # accent, 0xBE in every generation
+    e += note_v0c2_pre4(720, 0, 0, 3, 65, 72)
+    e += end_marker()
+    return set_version(assemble(0xC2, [(meas_hdr(4, 4), e)]), 773)
+
+
 def note_v0c2_artic_4x(tick, voice, staffIdx, fv, pitch, articUp=0, articDown=0):
     """Encore 4.x note (base 24 bytes) that grows to carry its articulations.
 
@@ -12726,6 +12746,7 @@ if __name__=='__main__':
     print("Generating synthetic Encore test files (using bazo.enc skeleton):")
     write("structure_v0c2_pitches.enc",       gen_v0c2_pitches())
     write("structure_v0c2_pre4_element_offsets.enc", gen_v0c2_pre4_element_offsets())
+    write("ornaments_v0c2_pre4_articulation_codes.enc", gen_v0c2_pre4_articulation_codes())
     write("importer_v0c2_small_flag_chord.enc", gen_v0c2_small_flag_chord())
     write("notes_v0c2_size24_artic_pitch.enc", gen_v0c2_size24_artic_pitch())
     write("notes_v0c2_artic_grows_note.enc",  gen_v0c2_artic_grows_note())

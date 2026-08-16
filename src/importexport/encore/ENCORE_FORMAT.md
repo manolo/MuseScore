@@ -1138,6 +1138,31 @@ are always standalone. The accent, up-bow and down-bow marks (`0xBE`, `0xC4`, `0
 byte that is always 0 regardless of the annotated note's voice; `0xC4` denotes an accent in v0xC2
 (where size-22 notes have no articulation slot) but an up-bow in v0xC4.
 
+#### The pre-Encore-4 articulation codes
+
+The table above is the vocabulary from Encore 4.0 on. A file older than format 3.07 states four of
+those articulations six higher, and no later generation uses the higher codes.
+
+| Format 3.05 and older | Format 3.07 and later | Meaning        | Evidence                              |
+|-----------------------|-----------------------|----------------|---------------------------------------|
+| `0xCE`                | `0xC8`                | tenuto         | conversion pair, 1 for 1 `[verified]` |
+| `0xCF`                | `0xC9`                | staccato       | conversion pair, 5 for 5 `[verified]` |
+| `0xD2`                | `0xCC`                | fermata above  | two conversion pairs `[verified]`     |
+| `0xD3`                | `0xCD`                | fermata below  | corpus counts only `[observed]`       |
+
+The rest of the vocabulary did not move: in a conversion pair whose two halves hold 26 ornaments
+each, the accent (`0xBE`), the breath (`0xA8`), the tempo mark (`0x32`), the staff text (`0x1E`)
+and the slur (`0x21`, `0x41`) all keep their codes, and only the one articulation changes.
+
+Corpus-wide the same picture holds: across 3216 files of format 3.05 there is not one staccato at
+`0xC9`, the single most common articulation in every other generation, while `0xCF` is the most
+common code in that range. Format 3.07 already uses the current numbering, so the renumbering
+happened in the same release as the two-byte element body shift, Encore 4.0.
+
+Codes `0xC0`, `0xC1`, `0xC2` and `0xCA` also occur in format 3.05 and are absent or rare later.
+They are probably the same block shifted, which would make them the fingerings and the up-bow, but
+no conversion pair covers them and they are left as they are stated.
+
 ### Hairpin direction
 
 Byte `+26` bit 0: 0 = crescendo, 1 = diminuendo. Encore 5 also sets bit 1 (crescendo = `0x02`,

@@ -170,9 +170,29 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
     // explicitly (forward measure-count / next note) instead of by coordinate search.
     bool slurXoffset2Stale() const override { return true; }
 
+    // Encore 4.0 moved four articulations down by six, in the same release that shifted the
+    // element bodies. A file older than format 3.07 states them at the higher codes, which no
+    // later generation uses and which the emitters would drop. The rest of the vocabulary did not
+    // move: an accent is 0xBE and a breath 0xA8 in every generation.
+    // See ENCORE_FORMAT.md §Ornament subtypes.
+    quint8 normalizeOrnamentSubtype(quint8 subtype) const override
+    {
+        if (m_formatVersion >= ENC_FORMAT_3_07) {
+            return subtype;
+        }
+        switch (subtype) {
+        case 0xCE: return static_cast<quint8>(EncOrnamentType::TENUTO);
+        case 0xCF: return static_cast<quint8>(EncOrnamentType::STACCATO);
+        case 0xD2: return static_cast<quint8>(EncOrnamentType::FERMATA_ABOVE);
+        case 0xD3: return static_cast<quint8>(EncOrnamentType::FERMATA_BELOW);
+        default:   return subtype;
+        }
+    }
+
     bool postProcessElement(EncMeasureElem* elem, QDataStream& ds, qint64 rawElemStart) const override
     {
         if (EncOrnament* orn = dynamic_cast<EncOrnament*>(elem)) {
+            orn->tipo = normalizeOrnamentSubtype(orn->tipo);
             // v0xC2: tipo 0xC4 (UPBOW in v0xC4) encodes accent above in this format.
             if (orn->tipo == static_cast<quint8>(EncOrnamentType::UPBOW)) {
                 orn->tipo = static_cast<quint8>(EncOrnamentType::ACCENT);
