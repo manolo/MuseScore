@@ -28,20 +28,23 @@ Corpus: **20577 real files** parsed, everything reachable under `~/Scores` follo
 | 10 | SCO5 is effectively untested | coverage | 15 | 15 of 15 ornament subtypes | measured |
 | 11 | Key signature diverges across conversion pairs | field | 6 of 399 pairs | LINE key byte on tab staves | **RESOLVED, not a defect** |
 | 12 | Chord symbol reads a fixed 36 byte text slot past the element | field | many | sizes 14 to 22 | needs check |
-| 13 | Unknown version byte silently parsed as v0xC4 | dispatch | 0 today | future Encore 6 | design |
+| 13 | Unknown version byte silently parsed as v0xC4 | dispatch | 0 today | any unseen release | **RESOLVED, reads by format version** |
 | 14 | `SCOX` / `SCOR` / `SCOS` rejected outright | dispatch | 0 of 20577 | n/a | design |
 | 15 | v0xA6 has no multi-measure rest support | field | 806 | unknown | needs check |
 | 16 | 136 ZIP archives named `.enc` | corpus hygiene | 136 | n/a | not a defect |
 | 17 | Dead `ENCORE_IMPORTER.md` links on the PR branch | docs | n/a | 3 links | won't fix, see below |
+| 18 | v0xA6 note position, rest tuplet and rest dot control at v0xC4 offsets | field | 806 | 1.72M note positions, 62591 rests | **FIXED** |
+| 19 | The four articulations Encore 4.0 renumbered | field | 3216 | 700 marks dropped | **FIXED** |
+| 20 | v0xA6 note reads its neighbour's tick as velocity, options and accidental | field | 806 | 1.72M notes, inert but one live path | **FIXED** |
 
 All of these come from **one mechanism**: a field addressed by an absolute offset that does not
 hold it in that generation of the format, with no per-generation remap. See
 [ENCORE_FORMAT_DIVERGENCE.md](ENCORE_FORMAT_DIVERGENCE.md) section 1.
 
-**What has been fixed.** Gaps 0, 3 and 4 are implemented, each with a regression test that fails
-without it. Gap 0 also closes the Encore 3.x half of gap 1, since the tie arc offsets move with the
-same shift. Gap 8 was closed as a non-defect. Gap 1's v0xA6 half is documented but deliberately not
-changed, see below. Everything else is open.
+**What has been fixed.** Gaps 0, 2, 3, 4, 13, 18, 19 and 20 are implemented, each with a regression
+test that fails without it. Gap 0 also closes the Encore 3.x half of gap 1, since the tie arc
+offsets move with the same shift. Gaps 8 and 11 were closed as non-defects. Gap 1's v0xA6 half is
+documented but deliberately not changed, see below. Gaps 5 to 7, 9, 10, 12, 14 and 15 are open.
 
 **Gap 17 is not fixable.** The importer spec lives on the working branch only, so the link is
 correct there and dead on the PR branch, and the branch invariant requires the file to be identical
@@ -355,14 +358,74 @@ nothing, so it should be read from the notation staff.
 - **Chord symbol text slot.** `EncChordSym::read` reads a fixed 36 byte text slot at `+14` whenever
   `tipo & 1`, so it reads through `+50` on elements of size 14, 16, 18, 20 and 22. Whether that
   overruns into the next element or the slot really is fixed has not been checked.
-- **Unknown version byte.** `EncFormatReader::create` falls back to the v0xC4 reader with a `LOGW`
-  the user never sees. Encore 6 is in development. Decide whether that should be a best-effort
-  parse with a visible warning or a clean "unsupported version" error.
+- **Unknown version byte.** RESOLVED. `EncFormatReader::create` now picks the layout of the highest
+  known format version at or below the file's own, and logs both numbers. The header carries no
+  date and no build stamp, so the format version at `0x28` is the only thing to go on.
 - **`SCOX` / `SCOR` / `SCOS`.** Listed in the spec as observed variants, rejected by
   `EncHeader::readMagicAndVersion`, and absent from 20577 files. Either find a sample or drop the
   claim. `ZBOP` and `ZBO6` are likewise assumed to share the `ZBOT` keystream, untested.
 - **v0xA6 multi-measure rests.** `EncRest::read` reads the count only when `size > 15`; v0xA6 rests
   are 7 bytes, so there is no support at all. Whether Encore 2.x could write them is unknown.
+
+## 18. The v0xA6 note and rest read three fields from the wrong place  (FIXED)
+
+Found by the cross-generation oracle: `rest_tuplet` diverged in every v0xA6 pair, and the counts
+gave it away, 98 zeros plus 6 ones plus 26 threes on one side against 130 zeros on the other. Same
+rests, different reading.
+
+The compact rest is 14 bytes and the compact note 20, and neither carries the fields the later
+generations keep past `+12`:
+
+| field | was read at | what is there |
+|---|---|---|
+| note staff position | `+12` | the first byte of the playback duration, a constant `0x80`, so every note reported position -128 |
+| rest tuplet | `+13` | the high byte of the rest's own duration |
+| rest dot control | `+14` | the first byte of the element behind it |
+
+The real staff position is at `+9`, signed, counted in diatonic steps from middle C. Across 1.72
+million notes each pitch falls on exactly one position and the alterations share their natural's,
+which is what confirmed it.
+
+62591 rests in 570 files carried a tuplet descriptor the file never stated. It turned out to be
+**inert**: with values 1 and 3 the actual-notes nibble is 0 and no tuplet forms. The position
+mattered more, since it feeds the percussion line mapping and the tablature fingering.
+
+Verified by re-running the oracle: `rest_tuplet` went from 12 diverging pairs to 0, and
+`note_position`, added to the census for this, diverges in exactly the 38 pairs where the pitches
+also differ, with no v0xA6 pair among them.
+
+## 19. Encore 4.0 renumbered four articulations  (FIXED)
+
+Encore 4.0 moved tenuto, staccato and the two fermatas down by six, in the same release that
+shifted every element body by two bytes. Files older than format 3.07 state them at the higher
+codes, which the emitters dropped as unrecognised.
+
+| format 3.05 and older | 3.07 and later | meaning |
+|---|---|---|
+| `0xCE` | `0xC8` | tenuto |
+| `0xCF` | `0xC9` | staccato |
+| `0xD2` | `0xCC` | fermata above |
+| `0xD3` | `0xCD` | fermata below |
+
+One conversion pair holds 26 ornaments in each half, identical one for one except `0xCE` against
+`0xC8`: the accent, the breath, the tempo mark, the staff text and the slur all keep their codes,
+so the vocabulary did not move as a block. Corpus-wide, 3216 files of format 3.05 contain not one
+staccato at `0xC9`, the most common articulation in every other generation.
+
+`0xC0`, `0xC1`, `0xC2` and `0xCA` are probably the same block shifted, which would make them the
+fingerings and the up-bow, but no pair covers them and they are left as stated.
+
+## 20. The v0xA6 note reads its neighbour's tick as data  (FIXED)
+
+The compact note body ends at `+19`. The velocity, option and accidental-glyph slots the later
+generations keep past that point fall on the following element: the option byte reads as its tick
+low byte and the accidental byte as its high byte, which is why the accidental histogram took only
+the values 0, 1, 2, 3 and 255, the tick pages of a measure plus the end marker.
+
+All three are inert today, since nothing in the importer reads the velocity or the accidental
+glyph. The option byte is the exception: the tablature fingering fallback tests its low bit
+together with the staff position, and fixing gap 18 made that position plausible, so the two
+together would have turned a neighbour's tick into a string number.
 
 ## 16. Corpus hygiene, not a defect
 
@@ -409,6 +472,30 @@ The one systematic signal is `line_key`, gap 11 above.
 **This is the harness worth keeping.** It answers "did we leave something out this time" without
 needing a ground-truth score: run the oracle before and after any importer change, and any
 invariant that moves is a regression.
+
+### The cross-generation run
+
+The 399 pairs above are one generation compared with itself. Widening the corpus to pairs that
+cross generations, 104 distinct pairs after deduplicating by file name, produced three more
+defects: 18, 19 and 20 below. Two lessons about the measurement itself came with them.
+
+**Pair on the music, not on the name.** Of the 104 pairs only **64 are true twins**, meaning their
+pitch multisets are identical. The other 40 are different arrangements of the same piece, or the
+same piece transposed, and they were the source of nearly every false signal: the whole
+`keychange_type` signal turned out to be pairs whose pitches also differ. Comparing anything else
+before checking the pitches wastes the run.
+
+**Three classes of divergence are not defects**, and comparing them measures the wrong thing:
+
+| class | invariants | why |
+|---|---|---|
+| the format does not have the field | `line_clef`, `line_stafftype`, `line_key`, `tab_strings` (v0xA6 has no `staffData`), and the note fields the compact v0xA6 body does not carry, which the importer now deliberately zeroes | an empty histogram against a populated one |
+| Encore rewrites it on save | `meas_barend` (a final barline appears in the newer file in 32 of 64 twins, including v0xC4 to v0xC4), `wini_present`, `prec_scale`, `prec_papersize`, `line_staffsize`, `line_hidden`, `instr_midiprog`, `instr_nstaves`, `instr_keytranspose` | the file changed, not the reading |
+| the field's meaning depends on the subtype | `orn_almezuro`, `orn_noto`, `orn_speguleco`, `orn_altmezuro` | comparing a slur's measure count against a tempo mark's beat unit. The subtype-scoped versions (`slur_almezuro`, `slur_end_in_range`) diverge in 2 twins out of 64 |
+
+What survives all three filters is small and each item is explained: the residual `orn_subtype` and
+`elem_type` differences are four files that lost a slur or ten staff texts between saves, which the
+matching `elem_type` counts confirm.
 
 ---
 
