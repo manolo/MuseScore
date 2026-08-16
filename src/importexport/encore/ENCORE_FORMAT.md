@@ -1276,9 +1276,15 @@ Type 7, variable size. A chord symbol (harmony marking) above the staff.
 | `+10`  | 1    | xoffset | horizontal display offset                                          |
 | `+12`  | 1    | root    | root note (see root encoding)                                      |
 | `+13`  | 1    | bass    | bass note (same encoding; valid only when flags bit 1)             |
-| `+14`  | 36   | text    | chord-text slot (present when flags bit 0; UTF-16 LE or Latin-1)   |
+| `+14`  | to the element end | text | chord text (present when flags bit 0; UTF-16 LE or Latin-1) |
 
-When flags bit 0 is set, the text slot overrides the quality and root (the name is taken from the
+The text is not a fixed slot: it runs from `+14` to the end of the element, which is why a symbol's
+size grows in steps of two with the length of its name. Across the corpus the sizes run 14, 16, 18
+and on up to 54, with 16 by far the most common `[verified]`. A name that fills its slot is not
+followed by a terminator inside its own element, so a reader that keeps going lands in whatever
+element comes next, and the name arrives with those bytes glued to it.
+
+When flags bit 0 is set, the text overrides the quality and root (the name is taken from the
 text). Flags bit 2 records whether Encore draws a guitar frame (fretboard diagram) above the
 symbol; it is independent of whether the chord name is recognisable.
 

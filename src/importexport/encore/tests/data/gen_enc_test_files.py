@@ -7180,6 +7180,42 @@ def chordsym_v0c4(tick, voice, staffIdx, text_bytes, fretboard=False):
     return struct.pack('<H', tick) + bytes([(7 << 4) | (voice & 0xF)]) + bytes(d)
 
 
+def chordsym_sized_v0c4(tick, voice, staffIdx, text_bytes):
+    """CHORD-symbol element sized to its own text, the way real files store it: the name runs from
+    element +14 to the end, so the element grows in steps of two with the length of the name. Here
+    the text fills its slot with no terminator inside the element, which is what makes a reader
+    using a fixed slot carry on into whatever follows."""
+    size = 14 + len(text_bytes)
+    assert size % 2 == 0, size
+    d = bytearray(size - 3)
+    d[0] = size
+    d[1] = staffIdx & 0x3F
+    d[2] = 0               # toniko
+    d[3] = 1               # tipo: bit0 = hasText
+    d[11:11 + len(text_bytes)] = text_bytes
+    return struct.pack('<H', tick) + bytes([(7 << 4) | (voice & 0xF)]) + bytes(d)
+
+
+def gen_v0c4_chord_symbol_text_bounded_by_element():
+    """A chord symbol whose name fills its element exactly, followed by a note. Read with a fixed
+    36-byte slot the name swallows the note's bytes and imports as a string of junk."""
+    # The symbol sits on beat 2 so the element behind it is a note whose tick low byte is nonzero.
+    # A reader running past the element end therefore has real bytes to swallow: on beat 1 the
+    # neighbour's tick is 0 and its first byte terminates the string by accident.
+    m1  = note_v0c4(0, 0, 0, fv=3, pitch=60)
+    m1 += chordsym_sized_v0c4(240, 0, 0, b'Cmaj')
+    m1 += note_v0c4(240, 0, 0, fv=3, pitch=62)
+    m1 += note_v0c4(480, 0, 0, fv=2, pitch=64)
+    m1 += end_marker()
+    m2  = note_v0c4(0, 0, 0, fv=3, pitch=67)
+    m2 += chordsym_sized_v0c4(240, 0, 0, b'Gsus')
+    m2 += note_v0c4(240, 0, 0, fv=3, pitch=69)
+    m2 += note_v0c4(480, 0, 0, fv=2, pitch=71)
+    m2 += end_marker()
+    hdr = meas_hdr(4, 4)
+    return assemble(0xC4, [(hdr, m1), (hdr, m2)])
+
+
 def chordsym_numeric_v0c4(tick, voice, staffIdx, toniko, radiko=0, baso=0, hasBass=False):
     """14-byte CHORD-symbol element (type=7) WITHOUT a text slot (tipo bit0 clear), so the
     chord name is built from the numeric toniko/radiko/baso instead of literal text."""
@@ -13118,6 +13154,7 @@ if __name__=='__main__':
     write("ornaments_fingering_multivoice.enc",            gen_v0c4_fingering_multivoice())
     write("notes_chord_inflated_rdur_keeps_eighth.enc", gen_v0c4_chord_inflated_rdur_keeps_eighth())
     write("notes_chord_symbol_large_drift.enc", gen_v0c4_chord_symbol_large_drift())
+    write("notes_chord_symbol_text_bounded.enc", gen_v0c4_chord_symbol_text_bounded_by_element())
     write("notes_chord_symbol_nearbeat_subdivision.enc", gen_v0c4_chord_symbol_nearbeat_subdivision())
     write("notes_chord_symbol_snap_to_beat1.enc", gen_v0c4_chord_symbol_snap_to_beat1())
     write("notes_chord_symbol_fretboard.enc", gen_v0c4_chord_symbol_fretboard())
