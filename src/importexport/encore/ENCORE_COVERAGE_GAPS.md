@@ -328,9 +328,27 @@ files. The table above is the measured answer: most do, and 42 do not. Beyond th
 problem is proportion: v0xC2 is 24% of the corpus and 8% of the fixtures, and encrypted files are
 25% of the corpus and 0.5% of the fixtures.
 
-**Closes with:** fixtures for the missing combinations, weighted toward encrypted containers and
-the v0xC2 generations. Every fixture is built by `tests/data/gen_enc_test_files.py`, which lives
-on this branch alongside this document.
+**Closed with** six fixtures, weighted toward what the defects taught: every one of them came from
+a field addressed at an offset the generation does not use, so the fixtures that matter are the
+ones that state a real generation and hold the geometry to match.
+
+| fixture | covers | pair | corpus |
+|---|---|---|---|
+| `structure_family_3x.enc` | note, rest, tie, staccato, MIDI CC in the pre-4.0 geometry | `0xC2` + 3.05 | 3220 files |
+| `structure_family_40x_c2.enc` | the same music in the shifted geometry | `0xC2` + 3.07 | 1718 files |
+| `structure_family_40x_c4.enc` | the same music again, on the pair that crosses the two version axes | `0xC4` + 3.07 | 996 files, none before |
+| `importer_v0xa6_tie_and_key_change.enc` | the compact tie and the compact key change | `0xA6` + 2.50 | 39772 ties, none before |
+| `ornaments_sco5_bigendian.enc` | articulation, dynamic, fermata and a rest, big-endian | SCO5 | 16 files, no ornament before |
+| `zbot_family_40x.enc` | the element family through the decryption | encrypted | 5257 files, 2 fixtures before |
+
+The first three share **one** assertion set, which is the point: Encore moved the whole element
+family in one release, so a reader that gets the generation wrong fails on all of them at once. The
+test was checked by forcing the body shift back to zero, and it fails on the 3.05 file.
+
+Every fixture is built by `tests/data/gen_enc_test_files.py`, which lives on this branch alongside
+this document. The 42 mis-stamped fixtures described above are a separate job: re-stamping one
+changes how its bytes are read, so each has to be rebuilt with the geometry that matches its
+stamp.
 
 ## 8. Element type `0xA`: RESOLVED, and the current drop is correct
 
