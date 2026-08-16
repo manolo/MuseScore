@@ -48,6 +48,8 @@
 #include "engraving/dom/page.h"
 #include "engraving/dom/part.h"
 #include "engraving/dom/clef.h"
+
+#include "importexport/encore/internal/parser/readers.h"
 #include "engraving/dom/segment.h"
 #include "engraving/dom/staff.h"
 #include "engraving/dom/tempotext.h"
@@ -683,6 +685,41 @@ TEST_F(Tst_Structure, pre_encore4_element_body_offsets)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "pre-Encore-4 score should pass sanityCheck: " << ret.text();
     delete score;
+}
+
+// ===========================================================================
+// The header carries a file format version at 0x28, BCD with the major digit in the high byte, and
+// it is the only version indicator there. Because the values are ordered, a version byte this build
+// does not know still lands on the right layout: the reader is chosen by the highest known format
+// the file is not older than, rather than defaulting to the newest one.
+// See ENCORE_FORMAT.md §Version byte and release mapping.
+TEST(Tst_EncoreFormatReader, unknown_version_byte_falls_back_on_the_format_version)
+{
+    using namespace mu::iex::enc;
+
+    // A known version byte is unaffected; the format version still picks the body layout.
+    auto encore3 = EncFormatReader::create(0xC2, "SCOW", ENC_FORMAT_3_05);
+    EXPECT_STREQ(encore3->formatName(), "v0xC2");
+    EXPECT_EQ(encore3->elementBodyShift(), -2) << "format 3.05 predates the Encore 4.0 body layout";
+
+    auto encore4 = EncFormatReader::create(0xC2, "SCOW", ENC_FORMAT_3_07);
+    EXPECT_EQ(encore4->elementBodyShift(), 0) << "format 3.07 already has the later body layout";
+
+    // An unrecognised version byte reads as the newest format it is not older than.
+    auto oldUnknown = EncFormatReader::create(0x99, "SCOW", ENC_FORMAT_2_50);
+    EXPECT_EQ(oldUnknown->headerEnd(), 0xA6) << "format 2.50 keeps the compact header";
+
+    auto midUnknown = EncFormatReader::create(0x99, "SCOW", ENC_FORMAT_3_05);
+    EXPECT_EQ(midUnknown->headerEnd(), 0xC2);
+    EXPECT_EQ(midUnknown->elementBodyShift(), -2);
+
+    // A format newer than anything known reads as the newest known one, not as a compact header.
+    auto future = EncFormatReader::create(0x99, "SCOW", 0x0500);
+    EXPECT_STREQ(future->formatName(), "v0xC4");
+    EXPECT_EQ(future->elementBodyShift(), 0);
+
+    EXPECT_EQ(encFormatVersionString(ENC_FORMAT_3_07), QString("3.07"));
+    EXPECT_EQ(encFormatVersionString(ENC_FORMAT_4_20), QString("4.20"));
 }
 
 TEST_F(Tst_Structure, old_format_v0c2_triplets_detected)
