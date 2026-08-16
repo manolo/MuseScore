@@ -1113,13 +1113,24 @@ reliable field differs by version:
   | 26                 | `+16`                 | Encore 3.x (app 773) |
   | 28                 | `+18`                 | Encore 4.0-4.2 (app 775) |
 
-  Measured over the corpus: on size-26 slurs the count at `+16` lands inside the score in 100% of
-  cases against 58% for `+18`; on size-28 slurs `+18` lands inside in 100% of cases against 68% for
-  `+16`, where the wrong slot yields values such as 255 `[verified]`.
+  Measured over the corpus, reading each generation at its own offset gives clean per-slur counts
+  and reading it at the other one gives noise `[verified]`:
 
-  Reading `+16` unconditionally is what makes the field look "unreliable for a whole file": on a
-  size-28 slur it is simply the wrong byte. Once the offset is chosen by size, the count is
-  reliable including the value 0 (a within-measure slur).
+  | Generation | correct offset, values | other offset, values |
+  |------------|------------------------|----------------------|
+  | Encore 3.x, size 26 (2751 slurs) | `+16`, 100% inside the score, values 0, 1, 2, 3 | `+18`, 48% inside, values 24, 11, 14, 37 |
+  | Encore 4.x, size 28 (6663 slurs) | `+18`, 100% inside the score, values 0, 1, 2, 3, 4 | `+16`, 67% inside, values include 255 and 254 |
+
+  Once the offset follows the generation the count is reliable, including the value 0 (a
+  within-measure slur). Two effects previously attributed to the field itself were artefacts of
+  reading the wrong byte:
+
+  - The count looking "unreliable for a whole file". On a size-28 slur `+16` is simply the wrong
+    byte, which is where the out-of-range values came from.
+  - The count looking like a **per-staff constant**: a file whose slurs all carry 11 on one staff
+    and 13 on the other at `+16` carries 0 at `+18` for every one of them `[verified]`. There is no
+    constant, only a misread. Across 887 files with slurs, a repeated multi-measure span at the
+    correct offset occurs in 83 of them and is ordinary music, not a tell.
 
 ---
 

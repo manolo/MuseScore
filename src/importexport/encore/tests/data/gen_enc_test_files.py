@@ -8561,13 +8561,13 @@ def gen_v0c2_orn_c4_accent():
 # ===========================================================================
 def gen_v0c2_cross_measure_slur():
     # Reproduces the XEQUEABU.ENC pattern: a v0xC2 slur whose spanning measure-count
-    # (element byte +16 = altMezuro = 1) marks it as ending one bar later. Encore draws
+    # (element byte +18 = alMezuro = 1) marks it as ending one bar later. Encore draws
     # these note-1 -> note-1 arcs between bar starts, and their xoffset2 is unreliable, so
     # the importer anchors the endpoint to the downbeat (first chord) of the target measure.
-    # Measure 0: note@0 + SLURSTART(altMezuro=1) + three more quarter notes (fill 4/4 so
+    # Measure 0: note@0 + SLURSTART(alMezuro=1) + three more quarter notes (fill 4/4 so
     # adjustPickupMeasure does not shrink m0).  Measure 1: note@0 = the downbeat endpoint.
     m0 = (note_v0c2_xoff(  0, 0, 0, fv=3, pitch=60, xoffset=3)
-          + ornament_v0c4(  0, 0, 0, tipo=0x21, xoffset=1, xoffset2=5, altMezuro=1)
+          + ornament_v0c4(  0, 0, 0, tipo=0x21, xoffset=1, xoffset2=5, alMezuro=1)
           + note_v0c2_xoff(240, 0, 0, fv=3, pitch=62, xoffset=2)
           + note_v0c2_xoff(480, 0, 0, fv=3, pitch=64, xoffset=3)
           + note_v0c2_xoff(720, 0, 0, fv=3, pitch=65, xoffset=4)
@@ -9121,16 +9121,16 @@ def gen_v0c2_same_measure_slur_no_cross():
 # within-bar arc. When any slur's count points past the last measure, the whole file's
 # +16 field is unreliable and every slur must resolve within its own bar.
 #   slur A @0:   +16 = 255 (0xFF, out of range) -> marks the file's counts unreliable
-#   slur B @480: +16 = 1   (plausible, would wrongly span to m1 if trusted)
+#   slur B @480: +18 = 1   (plausible, would wrongly span to m1 if trusted)
 # Measure 1 has a note so a wrongly-trusted count would form a real cross-measure slur.
 # Expected: both slurs stay inside measure 0.
 # ===========================================================================
 def gen_v0c2_unreliable_slur_count():
     e0 = (note_v0c2_xoff(  0, 0, 0, fv=3, pitch=60, xoffset=9)
-        + ornament_v0c4(    0, 0, 0, tipo=0x21, xoffset=11, xoffset2=12, altMezuro=255)  # sentinel
+        + ornament_v0c4(    0, 0, 0, tipo=0x21, xoffset=11, xoffset2=12, alMezuro=255)  # sentinel
         + note_v0c2_xoff(240, 0, 0, fv=3, pitch=62, xoffset=20)
         + note_v0c2_xoff(480, 0, 0, fv=3, pitch=64, xoffset=50)
-        + ornament_v0c4(  480, 0, 0, tipo=0x21, xoffset=50, xoffset2=70, altMezuro=1)     # plausible
+        + ornament_v0c4(  480, 0, 0, tipo=0x21, xoffset=50, xoffset2=70, alMezuro=1)     # plausible
         + note_v0c2_xoff(720, 0, 0, fv=3, pitch=65, xoffset=70)
         + end_marker())
     e1 = (note_v0c2_xoff(0, 0, 0, fv=3, pitch=67, xoffset=9)
@@ -9139,38 +9139,6 @@ def gen_v0c2_unreliable_slur_count():
     return assemble(0xC2, [(hdr, e0), (hdr, e1)])
 
 
-# ===========================================================================
-# ornaments_v0c2_constant_slur_count.enc
-# Some v0xC2 files store a per-staff CONSTANT at the slur +16 field (altMezuro) instead of a
-# per-slur measure count: every slur carries the same large value regardless of where it starts.
-# The value is in range (not the 0xFF sentinel), so the past-the-end guard misses it, and trusting
-# it draws a phantom multi-measure slur. The real arcs are short (within the bar). Two SLURSTARTs
-# at measures 0 and 4 both carry altMezuro=11; because the same span >= 3 recurs at different start
-# measures, the importer must treat +16 as unreliable and resolve each slur inside its own measure.
-# Reproduces 39 Rueda de La Ribera (top staff constant 13, bottom staff 11 -> 11/13-measure phantoms).
-# ===========================================================================
-def gen_v0c2_constant_slur_count():
-    hdr = meas_hdr(4, 4)
-    measures = []
-    for mi in range(16):
-        if mi in (0, 4):
-            # Tiny pixel span (xoffset2 - xoffset = 1) => short next-note arc once the count is dropped.
-            e = (note_v0c2_xoff(  0, 0, 0, fv=3, pitch=60, xoffset=10)
-                 + ornament_v0c4(  0, 0, 0, tipo=0x21, xoffset=10, xoffset2=11, altMezuro=11)
-                 + note_v0c2_xoff(240, 0, 0, fv=3, pitch=62, xoffset=20)
-                 + note_v0c2_xoff(480, 0, 0, fv=3, pitch=64, xoffset=30)
-                 + note_v0c2_xoff(720, 0, 0, fv=3, pitch=65, xoffset=40)
-                 + end_marker())
-        else:
-            e = note_v0c2_xoff(0, 0, 0, fv=1, pitch=60, xoffset=5) + end_marker()  # whole-note filler
-        measures.append((hdr, e))
-    return assemble(0xC2, measures)
-
-
-# ===========================================================================
-# notes_v0c2_multiinstr_compact_routing.enc
-# v0xC2 counterpart of notes_multiinstr_compact_routing.enc.
-# Verifies compact rawStaff routing in v0xC2 format (different note size=22).
 # ===========================================================================
 def gen_v0c2_multiinstr_compact_routing():
     def note_raw(tick, voice, raw_staff, fv, pitch):
@@ -12981,7 +12949,6 @@ if __name__=='__main__':
           set_line_staff_size_hint(_enc4x_base, sz0indexed=2))  # byte[13]=2 -> Size=3 -> 75%
     write("ornaments_v0c2_same_measure_slur_no_cross.enc", gen_v0c2_same_measure_slur_no_cross())
     write("ornaments_v0c2_unreliable_slur_count.enc", gen_v0c2_unreliable_slur_count())
-    write("ornaments_v0c2_constant_slur_count.enc", gen_v0c2_constant_slur_count())
     write("ornaments_multiinstr_slur_routing.enc",         gen_v0c4_multiinstr_slur_routing())
     write("ornaments_v0c2_slur_firstnote_xoff_mismatch.enc", gen_v0c2_slur_firstnote_xoff_mismatch())
     write("notes_v0c2_multiinstr_compact_routing.enc",       gen_v0c2_multiinstr_compact_routing())
