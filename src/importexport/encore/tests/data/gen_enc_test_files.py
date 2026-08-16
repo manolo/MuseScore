@@ -601,10 +601,24 @@ def gen_v0c2_pre4_articulation_codes():
     e += note_v0c2_pre4(240, 0, 0, 3, 62, 72)
     e += orn16_v0c4(480, 0, 0, tipo=0xD2)       # fermata above, later 0xCC
     e += note_v0c2_pre4(480, 0, 0, 3, 64, 72)
-    e += orn16_v0c4(720, 0, 0, tipo=0xBE)       # accent, 0xBE in every generation
+    e += orn16_v0c4(720, 0, 0, tipo=0xC4)       # accent here, an up-bow from Encore 4.0 on
     e += note_v0c2_pre4(720, 0, 0, 3, 65, 72)
     e += end_marker()
     return set_version(assemble(0xC2, [(meas_hdr(4, 4), e)]), 773)
+
+
+def gen_v0c2_post40_articulation_codes():
+    """The same file stamped format 3.07, where the vocabulary is already the current one: 0xC4 is
+    an up-bow and must stay one, and the codes six higher mean nothing.
+
+    The note bodies use the post-4.0 layout, since format 3.07 is what moved them.
+    """
+    e  = orn16_v0c4(0, 0, 0, tipo=0xC4)         # up-bow
+    e += note_v0c2(0, 0, 0, 3, 60)
+    e += orn16_v0c4(240, 0, 0, tipo=0xC9)       # staccato, at its own code
+    e += note_v0c2(240, 0, 0, 3, 62)
+    e += end_marker()
+    return set_version(assemble(0xC2, [(meas_hdr(4, 4), e)]), 775)
 
 
 def note_v0c2_artic_4x(tick, voice, staffIdx, fv, pitch, articUp=0, articDown=0):
@@ -8633,6 +8647,9 @@ def gen_sintetico_all_features():
 # (not stringsUpBow as in v0xC4).  Replaces personal file BN-COLET.ENC.
 # ===========================================================================
 def gen_v0c2_orn_c4_accent():
+    """Stamped format 3.05, the generation in which 0xC4 is the accent. The version byte is 0xC2
+    for both generations, so only the format version tells them apart; from 3.07 on the same code
+    is a genuine up-bow, which ornaments_v0c2_post40_articulation_codes.enc covers."""
     def one_measure():
         e = b''.join(
             note_v0c2(t, 0, 0, fv=3, pitch=60) + ornament_v0c4(t, 0, 0, tipo=0xC4)
@@ -8640,7 +8657,7 @@ def gen_v0c2_orn_c4_accent():
         )
         return e + end_marker()
     hdr = meas_hdr(4, 4)
-    return assemble(0xC2, [(hdr, one_measure()), (hdr, one_measure())], fill_ts=(4, 4))
+    return set_version(assemble(0xC2, [(hdr, one_measure()), (hdr, one_measure())], fill_ts=(4, 4)), 773)
 
 
 # ===========================================================================
@@ -12748,6 +12765,7 @@ if __name__=='__main__':
     write("structure_v0c2_pitches.enc",       gen_v0c2_pitches())
     write("structure_v0c2_pre4_element_offsets.enc", gen_v0c2_pre4_element_offsets())
     write("ornaments_v0c2_pre4_articulation_codes.enc", gen_v0c2_pre4_articulation_codes())
+    write("ornaments_v0c2_post40_articulation_codes.enc", gen_v0c2_post40_articulation_codes())
     write("importer_v0c2_small_flag_chord.enc", gen_v0c2_small_flag_chord())
     write("notes_v0c2_size24_artic_pitch.enc", gen_v0c2_size24_artic_pitch())
     write("notes_v0c2_artic_grows_note.enc",  gen_v0c2_artic_grows_note())
