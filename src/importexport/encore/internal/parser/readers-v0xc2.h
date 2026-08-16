@@ -28,5 +28,7 @@
 #include "readers.h"
 
 namespace mu::iex::enc {
-std::unique_ptr<EncFormatReader> makeFormatReader_V0xC2();
+// appVersion is the Encore app version at header 0x28. Below 775 the file predates the Encore 4.0
+// element layout change and every element body field from +8 onward sits two bytes earlier.
+std::unique_ptr<EncFormatReader> makeFormatReader_V0xC2(quint16 appVersion);
 } // namespace mu::iex::enc

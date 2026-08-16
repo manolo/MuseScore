@@ -520,6 +520,54 @@ def gen_v0c2_pitches():
     e += end_marker()
     return assemble(0xC2,[(meas_hdr(4,4),e)])
 
+def note_v0c2_pre4(tick, voice, staffIdx, fv, pitch, playbackLo):
+    """22-byte note as written by Encore 3.x (app version 773).
+
+    Encore 4.0 inserted two bytes into every element body at offset +8, so in a
+    pre-4.0 file the pitch is at +13 and +15 is the low byte of the playback
+    duration, not a pitch slot. `playbackLo` fills +15 with a plausible value so
+    the file exercises the case a reader using the post-4.0 offsets gets wrong:
+    it would take +15 for the pitch and import the note several semitones off.
+    """
+    d = bytearray(19)
+    d[0] = 22; d[1] = staffIdx & 0x3F; d[2] = fv
+    d[10] = pitch        # +13: MIDI pitch
+    d[12] = playbackLo   # +15: low byte of the playback duration, NOT a pitch
+    return struct.pack('<H', tick) + bytes([(9 << 4) | (voice & 0xF)]) + bytes(d)
+
+
+def tie_v0c2_pre4(tick, voice, staffIdx, arcX1, arcX2):
+    """16-byte TIE as written by Encore 3.x (app version 773).
+
+    The arc endpoints sit at +8 and +10, two bytes below the post-4.0 layout.
+    Both flag bytes (+5 direction, +6 start flag) are left clear, so the arc span
+    is the only thing that marks this as a forward tie: a reader that requires
+    the post-4.0 element length before reading the arc finds no tie at all.
+    """
+    d = bytearray(13)
+    d[0] = 16; d[1] = staffIdx & 0x3F
+    d[2] = 0             # +5: no arc-direction bit
+    d[3] = 0             # +6: no tie-start flag
+    d[5] = arcX1         # +8
+    d[7] = arcX2         # +10
+    return struct.pack('<H', tick) + bytes([(3 << 4) | (voice & 0xF)]) + bytes(d)
+
+
+def gen_v0c2_pre4_element_offsets():
+    """Encore 3.x file: pitch at +13 with a decoy at +15, and a 16-byte tie whose
+    arc span at +8/+10 is the only tie-start signal.
+
+    Reading it with the post-4.0 offsets imports both notes a fourth too high and
+    drops the tie entirely.
+    """
+    e  = note_v0c2_pre4(0,   0, 0, 2, 60, 72)   # C4, decoy 72 (C5) in the +15 slot
+    e += tie_v0c2_pre4(0,    0, 0, 10, 90)      # forward tie, arc span 10 -> 90
+    e += note_v0c2_pre4(480, 0, 0, 2, 60, 72)   # C4 again, the tie receiver
+    e += end_marker()
+    # App version 773 is what selects the pre-4.0 element body layout.
+    return set_version(assemble(0xC2, [(meas_hdr(4, 4), e)]), 773)
+
+
 def gen_v0c2_size24_artic_pitch():
     # Two size=24 v0xC2 notes: G4+staccato (0x1d) then E4+tenuto (0x1c).
     # Verifies that size=24 notes use the tuplet slot for pitch and +22 for artic.
@@ -12581,6 +12629,7 @@ def gen_tk_magic_digits_unreliable():
 if __name__=='__main__':
     print("Generating synthetic Encore test files (using bazo.enc skeleton):")
     write("structure_v0c2_pitches.enc",       gen_v0c2_pitches())
+    write("structure_v0c2_pre4_element_offsets.enc", gen_v0c2_pre4_element_offsets())
     write("importer_v0c2_small_flag_chord.enc", gen_v0c2_small_flag_chord())
     write("notes_v0c2_size24_artic_pitch.enc", gen_v0c2_size24_artic_pitch())
     write("notes_v0c2_size24_semitonepitch.enc", gen_v0c2_size24_semitonepitch())

@@ -53,7 +53,9 @@ bool EncNote::read(QDataStream& ds)
     EncMeasureElem::read(ds);
 
     ds >> faceValue >> grace1 >> grace2;
-    ds.skipRawData(2);
+    // Everything from +8 onward moved two bytes later in Encore 4.0; bodyShift folds the older
+    // layout into this one read. See ENCORE_FORMAT.md §v0xC2 note.
+    ds.skipRawData(2 + bodyShift);
     ds >> xoffset;
     ds.skipRawData(1);
     ds >> position >> tuplet >> dotControl >> semiTonePitch >> playbackDurTicks;
@@ -73,11 +75,11 @@ bool EncRest::read(QDataStream& ds)
 {
     EncMeasureElem::read(ds);
     ds >> faceValue;
-    ds.skipRawData(4);
+    ds.skipRawData(4 + bodyShift);
     ds >> xoffset;
     ds.skipRawData(2);
     ds >> tuplet >> dotControl;
-    if (static_cast<int>(size) > 15) {
+    if (static_cast<int>(size) > 15 + bodyShift) {
         ds >> mrestCount;   // multi-measure rest count at element offset +15
         if (mrestCount < 1) {
             mrestCount = 1;
@@ -113,8 +115,8 @@ bool EncMidiCc::read(QDataStream& ds)
     EncMeasureElem::read(ds);
     // Controller/value only exist in the full 12-byte element; a short/garbage one stays aligned
     // (the measure loop reseeks past it) with controller/value left at 0.
-    if (size >= 12) {
-        ds.skipRawData(5);
+    if (static_cast<int>(size) >= 12 + bodyShift) {
+        ds.skipRawData(5 + bodyShift);
         ds >> controller >> value;
     }
     return true;
