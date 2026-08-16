@@ -956,9 +956,33 @@ ornament (app 773, sizes 14, 26, 32, 36) has every field from `+6` onward two by
 Each of the first six was verified against the 4.5 conversion of an Encore 3.x file in 11 of 11
 paired ornaments, against 0 of 11 at the Encore 4.x offsets.
 
-**v0xA6 compact ornament.** The v0xA6 ornament is compact (declared size 15, a 30-byte slot). Its
-signed s16 y is at `+8` (not `+12`) and its staff-text entry index is at `+28` (not the size-based
-slot) `[verified]`.
+**v0xA6 compact ornament.** The v0xA6 ornament is compact: declared sizes 5, 12 and 15, in a slot
+of twice the declared size. It does not follow the field order above. Its own layout, established
+by converting a v0xA6 file to v0xC4 in Encore 4.5 and matching the two element streams
+`[verified]`:
+
+| Offset | Size | Description |
+|--------|------|-------------|
+| `+5`   | 1 | subtype, same encoding as the other versions |
+| `+9`   | 1 | **signed byte** y: positive above the staff, negative below |
+| `+14`  | 1 | forward measure count to the end measure |
+| `+28`  | 1 | staff-text TEXT entry index |
+
+The y and the measure count apply to every subtype, not only to staff text. Both relocated fields
+sit outside the declared size but inside the doubled slot, as the staff-text index already did.
+
+The y is a byte, not a halfword. Reading `+8` as a little-endian s16 happens to preserve the sign,
+because `+9` is that halfword's high byte, but the magnitude is then `y * 256` plus whatever `+8`
+holds: 3840 instead of 15, -4865 instead of -20. Anything that only tests the sign survives;
+anything that uses the value does not.
+
+Corpus check on the forward measure count, over all 636 v0xA6 slur and hairpin starts: read at
+`+14` every one lands inside its score, read at `+18` 105 of them (16.5%) point past the last
+measure `[verified]`.
+
+Not located: the v0xA6 x coordinates, which is what still bounds spanner endpoint recovery in this
+format. They do not survive a conversion to v0xC4 (v0xA6 stores screen pixels, see
+[WINI](#wini-block)), so the conversion that fixed the other fields could not place them.
 
 ### Ornament subtypes
 
@@ -1474,9 +1498,9 @@ inside v0xC2, it is the two-byte element shift between Encore 3.x (app 773) and 
 | [TIE](#tie-element) size      | 7                        | 16 (3.x) / 18 (4.x)            | 18                     |
 | TIE arc x pair (uint16)       | not located              | `+8` / `+10` at size 16, `+10` / `+12` at size 18 | `+10` / `+12` |
 | [Lyric](#lyric-element) text  | `+6`                     | `+0x12`                        | `+0x14`                |
-| [Ornament](#ornament-element) y | `+8` (compact)         | `+12`                          | `+12`                  |
+| [Ornament](#ornament-element) y | `+9`, signed **byte**  | `+12`, s16                     | `+12`, s16             |
 | Ornament staff-text index     | `+28` (compact)          | `+32` or `+30`                 | `+32`                  |
-| [Slur](#slur) forward-count   | (no xoffset)             | `+16` at size 26, `+18` at size 28 | `+18` / end-x at `+20` |
+| Spanner forward-count         | `+14`                    | `+16` at size 26, `+18` at size 28 | `+18` / end-x at `+20` |
 | [Chord column](#chord-column-xoffset) | not stored       | stored                         | stored                 |
 | [Key signature](#key-encoding)| LINE 22-byte entry `+14` | LINE 30-byte entry `+15`       | LINE 30-byte entry `+15` |
 | [TEXT](#text-block) run header | absent                  | present                        | present                |
