@@ -64,14 +64,29 @@ bool skipToBlockEnd(QDataStream& ds, qint64 blockStartPos, qint64 declaredLen)
     return skipBlock(ds, toSkip);
 }
 
+quint8 byteAt(QDataStream& ds, qint64 offset)
+{
+    QIODevice* dev = ds.device();
+    const qint64 savedPos = dev->pos();
+    quint8 value = 0;
+    if (dev->seek(offset)) {
+        ds >> value;
+    }
+    dev->seek(savedPos);
+    return value;
+}
+
 qint64 clampMeasureEnd(qint64 measStart, quint32 varsize, qint64 elemBlockOffset, qint64 deviceSize)
 {
     const qint64 end = measStart + static_cast<qint64>(varsize) + elemBlockOffset;
     return std::min(end, deviceSize);
 }
 
-// Selects a format reader. SCO5 (macOS Encore 5) is matched by magic string because its chuMagio
-// is not 0xC4 even though it shares the v0xC4 format; otherwise chuMagio picks the reader.
+bool isReadableEncoreMagic(const QString& magic)
+{
+    return magic == "SCOW" || magic == "SCO5";
+}
+
 QString encFormatVersionString(quint16 formatVersion)
 {
     // BCD: major digit in the high byte, minor in the low.
@@ -80,6 +95,7 @@ QString encFormatVersionString(quint16 formatVersion)
            .arg(formatVersion & 0xFF, 2, 16, QChar('0'));
 }
 
+// SCO5 is matched by magic because its version byte is not 0xC4 even though it shares that format.
 std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 chuMagio, const QString& magic, quint16 formatVersion)
 {
     if (magic == "SCO5") {
@@ -96,11 +112,9 @@ std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 chuMagio, const 
         break;
     }
 
-    // The version byte is not one this build knows. It is not the only thing that identifies the
-    // layout: the format version at header 0x28 gives the geometry and the body offsets on its own,
-    // and it is ordered, so an unseen version reads as the newest one it is not older than. Only
-    // the ornament vocabulary is genuinely the version byte's to decide, and only around format
-    // 3.07. See ENCORE_FORMAT.md §Version byte and release mapping.
+    // An unknown version byte still places itself: the format version is ordered, so the file
+    // reads as the newest generation it is not older than.
+    // See ENCORE_FORMAT.md §Version byte and release mapping.
     const char* readAs = nullptr;
     std::unique_ptr<EncFormatReader> reader;
     if (formatVersion < ENC_FORMAT_3_05) {

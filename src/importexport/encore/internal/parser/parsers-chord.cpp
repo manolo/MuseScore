@@ -129,11 +129,7 @@ bool EncChordSym::read(QDataStream& ds)
     hasFretDiagram = (tipo & 0x04) != 0;
     const bool hasText = (tipo & 1);
     if (hasText) {
-        // The text runs from here to the end of the element, which is why a chord symbol's size
-        // grows in steps of two with the length of its name. It is not a fixed slot: reading one
-        // ran off the end of every symbol shorter than 50 bytes, and where the name was not
-        // followed by a terminator inside its own element the reader carried on into the next one
-        // and produced a name with the neighbour's bytes glued to it.
+        // The name runs to the end of the element, which is why the size grows with it.
         // See ENCORE_FORMAT.md §CHORD symbol element.
         teksto = readEncodedStringFixed(ds, static_cast<int>(size) - (14 + bodyShift));
     }

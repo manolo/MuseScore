@@ -29,6 +29,11 @@
 #include "elem.h"
 
 namespace mu::iex::enc {
+// Sizes are stated in 2-byte units in this format, so these span 14, 20 and 22 bytes on disk.
+static constexpr quint8 kCompactRestSize = 7;
+static constexpr quint8 kCompactNoteSize = 10;
+static constexpr quint8 kCompactNoteWithArticSize = 11;
+
 // v0xA6 inner-grace detection: after a leading grace note (grace1 & 0x30 == 0x20),
 // subsequent NORMAL notes with (grace1 & 0x30) == 0x10 and a strictly larger faceValue
 // (shorter duration) are inner graces routed through the grace path in the emitters.
@@ -37,7 +42,7 @@ static void markInnerGraces(std::vector<EncMeasureElem*>& elems)
     quint8 leadingFv = 0;
     for (EncMeasureElem* e : elems) {
         EncNote* en = dynamic_cast<EncNote*>(e);
-        if (!en || en->size != 10) {
+        if (!en || en->size != kCompactNoteSize) {
             leadingFv = 0;
             continue;
         }
@@ -59,20 +64,15 @@ static void markInnerGraces(std::vector<EncMeasureElem*>& elems)
     }
 }
 
-// v0xA6 NOTE layouts: size=10 (position at +9, pitch at +11, tuplet at +7), size=11 (same layout
-// plus one articulation byte at +18, e.g. fermata 0x20), size=22 (pitch in tuplet slot),
-// size<27 (artic bytes lie beyond boundary, zero them). See ENCORE_FORMAT.md §Note element.
-// A v0xA6 REST carries no tuplet and no dot control at all; see below.
+// Maps the compact element bodies onto the fields the rest of the importer speaks.
+// See ENCORE_FORMAT.md §v0xA6 note and §v0xA6 rest.
 bool EncFormatReader_V0xA6::postProcessElement(EncMeasureElem* elem,
                                                QDataStream& ds,
                                                qint64 rawElemStart) const
 {
     if (EncRest* er = dynamic_cast<EncRest*>(elem)) {
-        // The compact rest is 14 bytes and stores neither a tuplet descriptor nor a dot control.
-        // The two slots the later layout keeps at +13 and +14 hold, here, the high byte of the
-        // rest's own duration and the first byte of the following element, so both were read as
-        // values the file never carried. See ENCORE_FORMAT.md §v0xA6 rest.
-        if (er->size == 7) {
+        // The compact rest has neither field: +13 is its own duration and +14 the next element.
+        if (er->size == kCompactRestSize) {
             er->tuplet = 0;
             er->dotControl = 0;
         }
@@ -84,51 +84,20 @@ bool EncFormatReader_V0xA6::postProcessElement(EncMeasureElem* elem,
         return false;
     }
 
-    if (en->size == 10 || en->size == 11) {
-        const qint64 savedPos = ds.device()->pos();
-        ds.device()->seek(rawElemStart + 11);
-        quint8 pitchByte;
-        ds >> pitchByte;
-        en->semiTonePitch = pitchByte;
-        ds.device()->seek(rawElemStart + 7);
-        quint8 tupByte;
-        ds >> tupByte;
-        en->tuplet = tupByte;
-        // Staff position: a signed count of diatonic steps from middle C, at +9. The slot the
-        // later layout uses holds a constant in this one, so every note reported the same
-        // position, which the tie matcher, the percussion line mapping and the tablature
-        // fingering all read. See ENCORE_FORMAT.md §v0xA6 note.
-        ds.device()->seek(rawElemStart + 9);
-        qint8 posByte;
-        ds >> posByte;
-        en->position = posByte;
-        // The compact note has no dot control either: its +14 belongs to the playback block. The
-        // body ends at +19, so the velocity, option and accidental slots the later layout keeps
-        // past that point fall on the element behind this one: the option byte reads as the next
-        // element's tick low byte and the accidental byte as its high byte. Left as read, the
-        // tablature fingering fallback would take a neighbour's tick for a string number.
+    if (en->size == kCompactNoteSize || en->size == kCompactNoteWithArticSize) {
+        en->semiTonePitch = byteAt(ds, rawElemStart + 11);
+        en->tuplet = byteAt(ds, rawElemStart + 7);
+        en->position = static_cast<qint8>(byteAt(ds, rawElemStart + 9));
+        // The compact body ends at +19: these four fields are not in it.
         en->dotControl = 0;
         en->velocity = 0;
         en->options = 0;
         en->alterationGlyph = 0;
-        ds.device()->seek(savedPos);
     }
 
-    if (en->size == 22) {
-        en->semiTonePitch = en->tuplet;
-        en->tuplet = 0;
-    }
-
-    // The base read already clears both articulation slots for an element this short. A size-11
-    // note is the one v0xA6 form that carries one, at +18 (size-10 notes never do); 0x20 there is
-    // a fermata. See ENCORE_FORMAT.md §v0xA6 note.
-    if (en->size == 11) {
-        const qint64 savedPos = ds.device()->pos();
-        ds.device()->seek(rawElemStart + 18);
-        quint8 articByte;
-        ds >> articByte;
-        en->articulationUp = articByte;
-        ds.device()->seek(savedPos);
+    // The one compact form with an articulation; 0x20 there is a fermata.
+    if (en->size == kCompactNoteWithArticSize) {
+        en->articulationUp = byteAt(ds, rawElemStart + 18);
     }
 
     return false;
@@ -173,21 +142,15 @@ bool EncFormatReader_V0xA6::readInstrumentMeta(std::vector<EncInstrument>& instr
                                                QDataStream& ds,
                                                const EncRoot& /*file*/) const
 {
-    const qint64 savedPos = ds.device()->pos();
     for (EncInstrument& instr : instruments) {
         if (instr.contentFilePos < 0) {
             continue;
         }
-        if (!ds.device()->seek(instr.contentFilePos + 52)) {
-            continue;
-        }
-        quint8 prg = 0;
-        ds >> prg;
+        const quint8 prg = byteAt(ds, instr.contentFilePos + 52);
         if (prg >= 1 && prg <= 128) {
             instr.midiProgram = static_cast<int>(prg);
         }
     }
-    ds.device()->seek(savedPos);
     return true;
 }
 
@@ -195,16 +158,10 @@ void EncFormatReader_V0xA6::readKeyFromTKBlock(EncInstrument& instr,
                                                QDataStream& ds,
                                                qint64 contentStart) const
 {
-    if (!ds.device()->seek(contentStart + 42)) {
-        return;
-    }
-    quint8 raw = 0;
-    ds >> raw;
-    const qint8 signedRaw = static_cast<qint8>(raw);
+    const qint8 signedRaw = static_cast<qint8>(byteAt(ds, contentStart + 42));
     if (signedRaw >= -33 && signedRaw <= 24) {
         instr.keyTransposeSemitones = signedRaw;
     }
-    ds.device()->seek(contentStart);
 }
 
 void EncFormatReader_V0xA6::readLineStaffKeys(EncLine& line, QDataStream& ds, qint64 lineContentStart) const
