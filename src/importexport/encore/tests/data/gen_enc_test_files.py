@@ -239,6 +239,11 @@ def set_score_size(data, sz):
         d[0x52] = sz & 0xFF
     return bytes(d)
 
+ENC_FORMAT_2_50 = 0x0250
+ENC_FORMAT_3_05 = 0x0305
+ENC_FORMAT_3_07 = 0x0307
+ENC_FORMAT_4_20 = 0x0420
+
 def set_version(data, ver):
     """Patch chuVersio uint16 LE at header offset 0x28."""
     d = bytearray(data)
@@ -487,6 +492,44 @@ def rest_v0xa6(tick, voice, staffIdx, fv, dur_ticks=0):
     struct.pack_into('<H', b, 12, dur_ticks)
     return bytes(b)
 
+def tie_v0xa6(tick, voice, staffIdx, startFlag=0x80):
+    """v0xA6 tie: size 7, a 14-byte slot. The arc pair the later generations carry does not fit in
+    it, so the two flag bytes at +5 and +6 are the whole of the tie signal. 39772 of these sit in
+    the corpus. See ENCORE_FORMAT.md §TIE element."""
+    b = bytearray(14)
+    struct.pack_into('<H', b, 0, tick)
+    b[2] = (3 << 4) | (voice & 0xF)   # type 3 = TIE
+    b[3] = 7
+    b[4] = staffIdx & 0x3F
+    b[5] = startFlag & 0xFF
+    return bytes(b)
+
+
+def keychange_v0xa6(tick, voice, staffIdx, tipo):
+    """v0xA6 mid-score key change: size 5, a 10-byte slot, the Encore key index at +5."""
+    b = bytearray(10)
+    struct.pack_into('<H', b, 0, tick)
+    b[2] = (2 << 4) | (voice & 0xF)   # type 2 = KEYCHANGE
+    b[3] = 5
+    b[4] = staffIdx & 0x3F
+    b[5] = tipo & 0xFF
+    return bytes(b)
+
+
+def gen_v0xa6_tie_and_key_change():
+    """Two measures of Encore 2.x: a tie across the bar line, and a key change opening the second.
+    Neither had a fixture, though the corpus holds 39772 v0xA6 ties."""
+    m1  = note_v0xa6(0, 0, 0, 2, 0, position=0)      # middle C, half
+    m1 += tie_v0xa6(0, 0, 0)
+    m1 += note_v0xa6(480, 0, 0, 2, 0, position=0)    # same pitch, the receiver
+    m1 += end_marker()
+    m2  = keychange_v0xa6(0, 0, 0, 9)                # 9 = D major, two sharps
+    m2 += note_v0xa6(0, 0, 0, 1, 2, position=1)
+    m2 += end_marker()
+    meas = [b'MEAS' + struct.pack('<I', len(e)) + _mhdr_a6(4, 4) + e for e in (m1, m2)]
+    return build_v0xa6([('Voz', 1, 0)], meas, staff_size=1)
+
+
 def lyric_v0xa6(tick, voice, staffIdx, text, kie=0):
     """v0xA6 compact lyric: tick(2)+tv(1)+size(1)+rawStaff(1)+control/anchor byte (kie = the
     horizontal x-offset), then null-terminated Latin-1 text within the size*2 slot (text at +6)."""
@@ -619,6 +662,96 @@ def gen_v0c2_post40_articulation_codes():
     e += note_v0c2(240, 0, 0, 3, 62)
     e += end_marker()
     return set_version(assemble(0xC2, [(meas_hdr(4, 4), e)]), 775)
+
+
+# ===========================================================================
+# One measure of the same music, written in the geometry of a chosen generation.
+#
+# Encore 4.0 inserted two bytes into every element body at +8, so the whole element family moves
+# together: the corpus shows a note of 22 bytes before that release and 24 after, a rest of 16 then
+# 18, a tie of 16 then 18, a MIDI CC of 10 then 12. The articulation vocabulary moved in the same
+# release, so a staccato is 0xCF before it and 0xC9 after.
+#
+# `shift` is -2 for the pre-4.0 geometry (format 3.05) and 0 for the later one (3.07 and 4.20).
+# Everything reads from one place, so the three fixtures below differ only in their stated
+# generation and in the bytes that generation implies.
+# ===========================================================================
+def _family_note(tick, voice, staffIdx, fv, pitch, shift):
+    size = 24 + shift
+    d = bytearray(size - 3)
+    d[0] = size
+    d[1] = staffIdx & 0x3F
+    d[2] = fv                     # +5 face value
+    d[12 + shift] = pitch         # +15 with the later layout, +13 before it
+    return struct.pack('<H', tick) + bytes([(9 << 4) | (voice & 0xF)]) + bytes(d)
+
+
+def _family_rest(tick, voice, staffIdx, fv, shift):
+    size = 18 + shift
+    d = bytearray(size - 3)
+    d[0] = size
+    d[1] = staffIdx & 0x3F
+    d[2] = fv                     # +5 face value
+    return struct.pack('<H', tick) + bytes([(8 << 4) | (voice & 0xF)]) + bytes(d)
+
+
+def _family_tie(tick, voice, staffIdx, arcX1, arcX2, shift):
+    size = 18 + shift
+    d = bytearray(size - 3)
+    d[0] = size
+    d[1] = staffIdx & 0x3F
+    # +5 direction and +6 start flag stay put; only the arc pair moves with the generation.
+    struct.pack_into('<H', d, 7 + shift, arcX1)    # +10 later, +8 before
+    struct.pack_into('<H', d, 9 + shift, arcX2)    # +12 later, +10 before
+    return struct.pack('<H', tick) + bytes([(3 << 4) | (voice & 0xF)]) + bytes(d)
+
+
+def _family_midicc(tick, voice, staffIdx, controller, value, shift):
+    size = 12 + shift
+    d = bytearray(size - 3)
+    d[0] = size
+    d[1] = staffIdx & 0x3F
+    d[7 + shift] = controller     # +10 later, +8 before
+    d[8 + shift] = value
+    return struct.pack('<H', tick) + bytes([(11 << 4) | (voice & 0xF)]) + bytes(d)
+
+
+def _family_staccato(tick, voice, staffIdx, shift):
+    """Size 16 ornament. The subtype itself carries the generation: before Encore 4.0 a staccato is
+    0xCF, from that release on it is 0xC9."""
+    d = bytearray(13)
+    d[0] = 16
+    d[1] = staffIdx & 0x3F
+    d[2] = 0xCF if shift else 0xC9
+    return struct.pack('<H', tick) + bytes([(5 << 4) | (voice & 0xF)]) + bytes(d)
+
+
+def _family_measure(shift):
+    e  = _family_note(0, 0, 0, 3, 60, shift)
+    e += _family_staccato(0, 0, 0, shift)
+    e += _family_tie(0, 0, 0, 10, 90, shift)
+    e += _family_note(240, 0, 0, 3, 60, shift)      # the tie receiver, same pitch
+    e += _family_note(480, 0, 0, 3, 62, shift)
+    e += _family_rest(720, 0, 0, 3, shift)
+    e += _family_midicc(720, 0, 0, 64, 127, shift)
+    return e + end_marker()
+
+
+def gen_family_3x():
+    """Encore 3.x: version byte 0xC2, format 3.05, the pre-4.0 geometry. 3220 files in the corpus."""
+    return set_version(assemble(0xC2, [(meas_hdr(4, 4), _family_measure(-2))]), ENC_FORMAT_3_05)
+
+
+def gen_family_40x_c2():
+    """Encore 4.0 to 4.2: version byte 0xC2, format 3.07, the shifted geometry. 1718 files."""
+    return set_version(assemble(0xC2, [(meas_hdr(4, 4), _family_measure(0))]), ENC_FORMAT_3_07)
+
+
+def gen_family_40x_c4():
+    """The one combination that genuinely crosses the two version axes: version byte 0xC4 with
+    format 3.07, 996 files in the corpus and no fixture before this one. The reader comes from the
+    version byte and the geometry from the format, so this is where the two must agree."""
+    return set_version(assemble(0xC4, [(meas_hdr(4, 4), _family_measure(0))]), ENC_FORMAT_3_07)
 
 
 def note_v0c2_artic_4x(tick, voice, staffIdx, fv, pitch, articUp=0, articDown=0):
@@ -8796,6 +8929,14 @@ def gen_zbot_single_note():
     return zbot_encrypt(assemble(0xC4, [(meas_hdr(4, 4), n)]))
 
 
+def gen_zbot_family_40x():
+    """The Encore 4.0 element family inside an encrypted container. Encrypted files are a quarter of
+    the corpus against two fixtures, and neither of those carries more than a note, so this one runs
+    a whole element family through the decryption and then through the generation-dependent
+    offsets."""
+    return zbot_encrypt(gen_family_40x_c2())
+
+
 def gen_zbot_from_bazo():
     """ZBOT-encrypted version of bazo.enc.  Decrypting must yield the same score."""
     bazo_path = os.path.join(OUT_DIR, 'bazo.enc')
@@ -9197,6 +9338,69 @@ def gen_sco5_tie_arc_bigendian():
         return be('H', tick) + bytes([0x30]) + bytes(d)
 
     elems = note(0, 60) + tie(0, 20, 96) + note(480, 60) + b'\xff\xff'
+    meas_blk = b'MEAS' + be('I', len(elems)) + bytes(mh) + elems
+    return bytes(h) + line_blk + meas_blk
+
+
+# ===========================================================================
+# ornaments_sco5_bigendian.enc
+# SCO5 is the big-endian macOS build, and the corpus holds 16 of them against three fixtures that
+# between them touch no ornament at all and no rest. This one carries the three ornament kinds the
+# importer treats differently, an articulation, a dynamic and a fermata, plus a rest, all in the
+# byte order that separates this container from every other.
+# ===========================================================================
+def gen_sco5_ornaments_and_rest():
+    def be(fmt, *a):
+        return struct.pack('>' + fmt, *a)
+
+    h = bytearray(194)
+    h[0:4] = b'SCO5'
+    h[4] = 0                                  # no chuMagio: the magic selects the reader
+    struct.pack_into('>H', h, 0x28, 0x0420)
+    struct.pack_into('>h', h, 0x2E, 1)
+    struct.pack_into('>h', h, 0x30, 1)
+    h[0x32] = 1
+    h[0x33] = 1
+    struct.pack_into('>h', h, 0x34, 1)
+    h[0x52] = 4
+
+    line = bytearray(10) + be('H', 0) + bytes([1])
+    staff = bytearray(30)
+    staff[19] = 1
+    line += staff
+    line_blk = b'LINE' + be('I', len(line)) + bytes(line)
+
+    mh = bytearray(0x36)
+    struct.pack_into('>H', mh, 0, 100)
+    struct.pack_into('>H', mh, 4, 240)
+    struct.pack_into('>H', mh, 6, 960)
+    mh[8], mh[9] = 4, 4
+
+    def note(tick, pitch, fv=2):
+        nd = bytearray(25)
+        nd[0] = 28
+        nd[2] = fv
+        nd[12] = pitch
+        return be('H', tick) + bytes([0x90]) + bytes(nd)
+
+    def rest(tick, fv=2):
+        rd = bytearray(15)
+        rd[0] = 18            # the rest size SCO5 uses, untouched by any fixture before this
+        rd[2] = fv
+        return be('H', tick) + bytes([0x80]) + bytes(rd)
+
+    def orn(tick, tipo):
+        d = bytearray(13)
+        d[0] = 16
+        d[2] = tipo
+        return be('H', tick) + bytes([0x50]) + bytes(d)
+
+    elems  = note(0, 60)
+    elems += orn(0, 0xC9)     # staccato
+    elems += orn(0, 0x85)     # dynamic f
+    elems += orn(0, 0xCC)     # fermata above, on the note like Encore writes it
+    elems += rest(480)
+    elems += b'\xff\xff'
     meas_blk = b'MEAS' + be('I', len(elems)) + bytes(mh) + elems
     return bytes(h) + line_blk + meas_blk
 
@@ -12800,6 +13004,9 @@ if __name__=='__main__':
     print("Generating synthetic Encore test files (using bazo.enc skeleton):")
     write("structure_v0c2_pitches.enc",       gen_v0c2_pitches())
     write("structure_v0c2_pre4_element_offsets.enc", gen_v0c2_pre4_element_offsets())
+    write("structure_family_3x.enc", gen_family_3x())
+    write("structure_family_40x_c2.enc", gen_family_40x_c2())
+    write("structure_family_40x_c4.enc", gen_family_40x_c4())
     write("ornaments_v0c2_pre4_articulation_codes.enc", gen_v0c2_pre4_articulation_codes())
     write("ornaments_v0c2_post40_articulation_codes.enc", gen_v0c2_post40_articulation_codes())
     write("importer_v0c2_small_flag_chord.enc", gen_v0c2_small_flag_chord())
@@ -12823,6 +13030,7 @@ if __name__=='__main__':
     write("importer_v0xa6_lyrics_and_stafftext.enc", gen_v0xa6_lyrics_and_stafftext())
     write("importer_v0xa6_two_verse_alignment.enc", gen_v0xa6_two_verse_alignment())
     write("importer_v0xa6_stafftext_placement.enc", gen_v0xa6_stafftext_placement())
+    write("importer_v0xa6_tie_and_key_change.enc", gen_v0xa6_tie_and_key_change())
     write("parser_v0xa6_note_position.enc", gen_v0xa6_note_position_and_rest_fields())
     write("importer_v0xa6_melisma_verse_alignment.enc", gen_v0xa6_melisma_verse_alignment())
     write("notes_corrupted.enc",     gen_v0c4_corrupted())
@@ -13073,11 +13281,13 @@ if __name__=='__main__':
     write("lyrics_rest_does_not_shift_notes.enc",  gen_v0c2_lyrics_rest_does_not_shift_notes())
     write("zbot_single_note.enc",              gen_zbot_single_note())
     write("zbot_from_bazo.enc",                 gen_zbot_from_bazo())
+    write("zbot_family_40x.enc",               gen_zbot_family_40x())
     write("sintetico_all_features.enc",          gen_sintetico_all_features())
     write("notes_multiinstr_compact_routing.enc", gen_v0c4_multiinstr_compact_routing())
     write("structure_sco5_macos.enc",             gen_sco5_macos_page_setup())
     write("instruments_sco5_tk_names.enc",         gen_sco5_tk_instrument_names(), layout=False)
     write("notes_sco5_tie_arc_bigendian.enc",       gen_sco5_tie_arc_bigendian(), layout=False)
+    write("ornaments_sco5_bigendian.enc",          gen_sco5_ornaments_and_rest(), layout=False)
     write("text_lyrics_grandstaff_routed_notes.enc", gen_v0c4_lyrics_grandstaff_routed_notes())
     write("importer_inner_tuplet_note_level_cap.enc", gen_v0c4_inner_tuplet_note_level_cap())
     write("importer_score_size2.enc", set_line_staff_size_hint(set_score_size(assemble(0xC4, [(meas_hdr(4, 4),
