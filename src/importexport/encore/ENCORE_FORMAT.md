@@ -67,14 +67,57 @@ the assumption is safe to hold: the decrypted buffer still has to pass the heade
 whose keystream turned out to differ is rejected rather than imported as wrong music.
 
 `SCOX`, `SCOR` and `SCOS` appear in earlier descriptions of the format and are deliberately **not**
-listed above. None occurs in the corpus, no byte order or layout was ever established for them, and
-nothing in the importer acts on them, so a row in the table would describe nothing. This paragraph
-is the record that they were looked for and not found.
+listed above: none occurs in the corpus and no byte order or layout was ever established for them,
+so a row would describe nothing. The likeliest reading is that they belong to the Macintosh line.
+Encore began there, that line has always run ahead of Windows, and classic Mac OS identified a
+document by a four-character type code, which `SCOR` reads as. `SCO5` fits the same naming with a
+generation number in place of the letter. This is a hypothesis: no sample supports it `[assumed]`.
+
+**A container with no magic.** One document in the corpus, of 47554 bytes, begins `00 10 00 01`
+and is turned away for having no recognisable magic, yet everything below its header is this
+format: the standard `TAG` plus 32-bit length block framing, `LINE`, `MEAS`, `PREC`, `TITL`, `TEXT`
+and `FONT` blocks, the documented measure header, `LINE` staff entries of 22 bytes carrying the
+`0x0E 0xFC` marker, and an element stream that reads cleanly with the Encore 2.x geometry, notes of
+10, rests of 7, beams of 9 `[verified]`. Its own header is different: a record of big-endian 16-bit
+fields, with the system count at `0x0A` and the measure count at `0x36`, both confirmed against the
+blocks the file actually contains, and a preamble of several thousand bytes of font and printer
+configuration before the first block, with nothing pointing at where that block starts.
+
+A big-endian header over a little-endian body is what a Macintosh-derived format looks like once
+its contents have been byte-swapped, but this particular file is not a Macintosh one: its preamble
+names Windows printer ports and drivers of the early 1990s. An early Windows Encore, or a sibling
+product sharing the engine, both fit. One document is not enough to establish the preamble, so the
+container is recorded here and not read `[observed]`.
 
 **Encryption.** In a `ZBOT` / `ZBOP` / `ZBO6` container only the first 42 bytes decrypt with a
 known XOR key; beyond that the stream is algorithmically generated and unbroken `[observed]`. The
 plaintext `SCOW` form is structurally different, so these files cannot be read without re-saving
 from Encore as `SCOW`.
+
+### Release history and format evolution
+
+Encore was written by Don Williams and first released by Passport Designs in 1984, on the
+Macintosh; the Windows line came later and has trailed the Macintosh one ever since, down to the
+last releases, 5.0.4 on Windows against 5.0.7 on macOS `[external]`. GVOX acquired the product in
+1998, Passport Music Software in 2013 and Sonic Scores in 2022 `[external]`.
+
+Four format generations occur, and each boundary is a single decision that moved many things at
+once:
+
+| Generation | Format | What the boundary changed |
+|---|---|---|
+| Encore 2.x | 2.50 | the compact bodies: element sizes counted in 2-byte units, a 10-byte note, a 7-byte rest, and no room for the fields the later generations add |
+| Encore 3.x | 3.05 | full-width bodies with sizes counted in bytes; the articulation codes still sit six above their later values |
+| Encore 4.0 to 4.2 | 3.07 | **two bytes inserted at `+6` in every element type at once**, and five articulations renumbered six lower |
+| Encore 4.3 to 5.x | 4.20 | the note alone grows by four, to carry its two articulation slots |
+
+The format version stops tracking the marketing release at 4.20: Encore 4.3, 4.5 and every 5.x
+write it unchanged, so from that point on the header cannot tell those releases apart. The version
+byte at `0x04` tracks a different axis, the ornament vocabulary, which is why the two disagree in
+the middle of the 4.0 to 4.2 line.
+
+The Macintosh line is present here only as `SCO5`, big-endian, format 4.20. Earlier Macintosh
+containers are not in hand: see [Magics and byte order](#magics-and-byte-order).
 
 ### Element sizes by generation
 
@@ -132,26 +175,26 @@ it belongs to the layout of the highest listed version it is not older than. Not
 version stopped tracking the marketing release after 4.20, which Encore 4.3, 4.5 and 5.x all
 write.
 
-| Byte   | Format | Encore release (app version at header `0x28`)                  | Tag          |
+| Byte   | Format | Encore release (format version at header `0x28`)                  | Tag          |
 |--------|--------|----------------------------------------------------------------|--------------|
-| `0xA6` | v0xA6  | Encore 2.x only (app 592)                                      | `[verified]` |
-| `0xC2` | v0xC2  | Encore 3.x (app 773) and early Encore 4.0-4.2 saves (app 775)  | `[verified]` |
-| `0xC4` | v0xC4  | later Encore 4.0-4.2 saves (app 775), and 4.5 through 5.x (app 1056) | `[verified]` |
+| `0xA6` | v0xA6  | Encore 2.x only (format 2.50)                                      | `[verified]` |
+| `0xC2` | v0xC2  | Encore 3.x (format 3.05) and early Encore 4.0-4.2 saves (format 3.07)  | `[verified]` |
+| `0xC4` | v0xC4  | later Encore 4.0-4.2 saves (format 3.07), and 4.5 through 5.x (format 4.20) | `[verified]` |
 
 Notes on the mapping:
 
-- A genuine Windows Encore 3.0 save already uses `SCOW` with version byte `0xC2` and app version
-  773, so `0xA6` is Encore 2.x only `[verified]`. Encore 4.5 opens a v0xA6 file with a font /
+- A genuine Windows Encore 3.0 save already uses `SCOW` with version byte `0xC2` and format
+  3.05, so `0xA6` is Encore 2.x only `[verified]`. Encore 4.5 opens a v0xA6 file with a font /
   conversion prompt and re-saves it as v0xC4, so no 4.5 or later build produces v0xA6.
-- **The version byte and the app version are not redundant.** App 775 occurs with both `0xC2` and
-  `0xC4`, and the two groups share every element size while using disjoint articulation subtypes:
+- **The version byte and the format version are not redundant.** Format 3.07 occurs with both
+  `0xC2` and `0xC4`, and the two groups share every element size while using disjoint articulation subtypes:
   the `0xC2` group encodes accent as `0xC4`, the `0xC4` group as `0xBE`, with no overlap across a
   corpus of 22 files. Encore 4.0 to 4.2 therefore renumbered its ornament subtypes mid-line and
-  bumped the version byte for it, leaving the app version stamp alone `[observed]`. This is why the
+  bumped the version byte for it, leaving the format version alone `[observed]`. This is why the
   version byte is the right reader selector: it is precisely the ornament-vocabulary axis.
-- The reverse case also occurs: one file carries version byte `0xC2` with app 1056 `[observed]`.
-  Whether that is an Encore 5 build saving in a legacy format is untested.
-- v0xC4 spans Encore 4.3 through 5.x, all writing version byte `0xC4` and app version 1056, so
+- The reverse case also occurs: files carrying version byte `0xC2` or `0xA6` with format 4.20 occur
+  only among synthetic fixtures, never in a file Encore wrote `[verified]`.
+- v0xC4 spans Encore 4.3 through 5.x, all writing version byte `0xC4` and format 4.20, so
   neither field alone identifies the release. The byte at header offset `0x3E` takes the values
   `0`, `1`, `2` and `4`. `4` marks Encore 5.0 and `2` macOS Encore 5 `[observed]`; Encore 4.5
   refuses a file whose `0x3E` is newer than it supports, which is why a 5.0 file fails to open in
@@ -163,28 +206,10 @@ Notes on the mapping:
   distributions `[verified]`. Nothing in a parser should branch on this byte. What it does track is
   unresolved.
 
-**Element sizes by generation.** The app version, not the version byte, predicts how large each
-element is. Every element type grew by exactly two bytes between Encore 3.x and Encore 4.x, which
-is a single change to a shared element preamble rather than a set of per-element quirks
-`[observed]`. Top three observed sizes per type, from a corpus of 262 files:
-
-| element | 2.x (592) | 3.x (773) | 4.0-4.2 (775) | 4.5 / 5.x (1056) |
-|---------|-----------|-----------|----------------|-------------------|
-| clef    | .         | .         | 16             | 16                |
-| key change | 5      | 12        | 14             | 14                |
-| tie     | 7         | 16        | 18             | 18                |
-| beam    | 9, 14, 19 | 28, 44, 76 | 30, 46, 62    | 30, 46, 62        |
-| ornament| 5, 12, 15 | 14, 26, 32 | 16, 28, 34    | 16, 28, 86        |
-| lyric   | 5, 6, 7   | 20, 22, 24 | 22, 24, 26    | 22, 24, 26        |
-| chord symbol | .    | .         | .              | 14, 16, 18        |
-| rest    | 7         | 16        | 18, 20         | 18, 20, 26        |
-| note    | 10, 11    | 22, 24    | 24, 26         | 18, 28            |
-| type 10 | .         | .         | 24             | .                 |
-| MIDI CC | 4         | 10        | 12             | 12                |
-
-**The two bytes go in at `+6`.** Bytes `+0` to `+5` are byte-identical between an Encore 3.x
-element and its Encore 4.x conversion, and from `+6` onward the 4.x element carries two extra bytes
-and then continues identically. Verified on a 3.x file converted in Encore 4.5, across ties, beams,
+**The two bytes go in at `+6`.** The size ladder above is one change, not a set of per-element
+quirks: bytes `+0` to `+5` are byte-identical between an Encore 3.x element and its Encore 4.x
+conversion, and from `+6` onward the 4.x element carries two extra bytes and then continues
+identically. Verified on a 3.x file converted in Encore 4.5, across ties, beams,
 ornaments and rests `[verified]`. Notes additionally append four bytes at the tail when they grow
 from 24 to 28.
 
@@ -223,7 +248,7 @@ block begins immediately after.
 |--------|------|----------------------------------------------------------------------------|
 | `0x00` | 4    | magic (`SCOW`, `SCO5`, ...)                                                 |
 | `0x04` | 1    | format version byte (see [Version byte](#version-byte-and-release-mapping); absent in `SCO5`) |
-| `0x28` | 2    | Encore app version: 592 (v0xA6), 773 / 775 (v0xC2), 1056 (v0xC4)           |
+| `0x28` | 2    | file format version, BCD: 2.50, 3.05, 3.07, 4.20                           |
 | `0x2A` | 2    | purpose unconfirmed (possibly total LINE-staff-entry count) `[assumed]`    |
 | `0x2C` | 2    | default beat ticks (240 = quarter-note grid); matches MEAS `+0x04`         |
 | `0x2E` | 2    | number of system (LINE) blocks                                             |
@@ -743,9 +768,9 @@ v0xA6 and v0xC4 that nibble is always 0.
 | `+12`  | playback duration in ticks, uint16                       |
 
 The staff position at `+9` is a signed count of diatonic steps from middle C: `0` is C4, `5` is A4,
-`-1` is B3, and a sharpened or flattened note shares the position of its natural `[verified]`. It
-is not the field the later generations keep at `+12`, which in this layout holds the first byte of
-the playback duration and reads as a constant `0x80` on every note.
+`-1` is B3, and a sharpened or flattened note shares the position of its natural `[verified]`. The
+later generations keep the same field at `+12`, which here is the first byte of the playback
+duration and holds a constant `0x80`.
 
 The compact note has no dot control. The slot the later generations use for one falls inside the
 playback block here, so a dotted v0xA6 note is recognised only from its duration.
@@ -772,8 +797,7 @@ quarter, 360 a dotted quarter, 120 an eighth `[verified]`.
 
 The compact rest carries neither a tuplet descriptor nor a dot control, and it has no
 multi-measure count. The two slots the later generations keep at `+13` and `+14` are, here, the
-high byte of that duration and the first byte of whichever element follows, so a reader that takes
-them at face value reports tuplets and dots the file never stated.
+high byte of that duration and the first byte of whichever element follows.
 
 ### Grace and cue notes
 
@@ -821,6 +845,24 @@ strictly larger face-value number (a shorter note). (The reconstruction rule tha
 borrowed duration lives in the importer spec.)
 
 ---
+
+### Tuplets the file does not mark
+
+The tuplet byte is not always written. In the older generations a tuplet is often stated only by
+the elements' durations: a run whose recorded durations sit at a constant fraction of their face
+values is a tuplet of that ratio, and its tuplet byte reads zero. A reader that trusts the byte
+alone loses those groups entirely.
+
+How common it is depends on the generation, counted over the corpus `[verified]`:
+
+| Format | groups found this way |
+|---|---|
+| 3.05 | 41095 |
+| 3.07 | 11711 |
+| 4.20 | 12 |
+
+So it is the ordinary case before Encore 4.3 and vanishes afterwards, which reads as the tuplet
+byte becoming reliable in the later generation rather than as two different notations.
 
 ## REST element
 
@@ -1061,7 +1103,7 @@ ornaments (notably v0xC2 size-32 staff-text elements) it is read from `+30`, sha
 tempo byte.
 
 **Encore 3.x ornament.** The offsets in the table above are the Encore 4.x layout. An Encore 3.x
-ornament (app 773, sizes 14, 26, 32, 36) has every field from `+6` onward two bytes earlier
+ornament (format 3.05, sizes 14, 26, 32, 36) has every field from `+6` onward two bytes earlier
 `[verified]`:
 
 | Field | Encore 3.x | Encore 4.x and later |
@@ -1240,8 +1282,8 @@ reliable field differs by version:
 
   | Slur ornament size | Forward measure-count | Generation |
   |--------------------|-----------------------|------------|
-  | 26                 | `+16`                 | Encore 3.x (app 773) |
-  | 28                 | `+18`                 | Encore 4.0-4.2 (app 775) |
+  | 26                 | `+16`                 | Encore 3.x (format 3.05) |
+  | 28                 | `+18`                 | Encore 4.0-4.2 (format 3.07) |
 
   Measured over the corpus, reading each generation at its own offset gives clean per-slur counts
   and reading it at the other one gives noise `[verified]`:
@@ -1308,9 +1350,8 @@ Type 7, variable size. A chord symbol (harmony marking) above the staff.
 
 The text is not a fixed slot: it runs from `+14` to the end of the element, which is why a symbol's
 size grows in steps of two with the length of its name. Across the corpus the sizes run 14, 16, 18
-and on up to 54, with 16 by far the most common `[verified]`. A name that fills its slot is not
-followed by a terminator inside its own element, so a reader that keeps going lands in whatever
-element comes next, and the name arrives with those bytes glued to it.
+and on up to 54, with 16 by far the most common `[verified]`. A name that fills its slot is not followed by a
+terminator inside its own element, so the element end is the only thing that bounds it.
 
 When flags bit 0 is set, the text overrides the quality and root (the name is taken from the
 text). Flags bit 2 records whether Encore draws a guitar frame (fretboard diagram) above the
@@ -1655,8 +1696,8 @@ of every UTF-16 code unit; the probe is always applied.
 ### Per-version deltas
 
 Every systematic deviation, with a link back to the section that details it. Where a row splits
-inside v0xC2, it is the two-byte element shift between Encore 3.x (app 773) and Encore 4.0-4.2
-(app 775), described under [Version byte](#version-byte-and-release-mapping).
+inside v0xC2, it is the two-byte element shift between Encore 3.x (format 3.05) and Encore
+4.0-4.2 (format 3.07), described under [Version byte](#version-byte-and-release-mapping).
 
 | Aspect                        | v0xA6                    | v0xC2                          | v0xC4 / SCO5           |
 |-------------------------------|--------------------------|--------------------------------|------------------------|
