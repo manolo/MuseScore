@@ -35,6 +35,7 @@
 
 #include "engraving/dom/chord.h"
 #include "engraving/dom/clef.h"
+#include "engraving/dom/keysig.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/note.h"
@@ -285,6 +286,43 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_note_position_and_absent_rest_fields)
     const std::vector<int> expected{ 5, -1, 0, 1 };
     EXPECT_EQ(positions, expected) << "staff position comes from +9, signed, 0 = middle C";
     EXPECT_EQ(restCount, 1);
+}
+
+// Coverage: the two v0xA6 element kinds the fixtures never reached, though the corpus holds 39772
+// of the first. The compact tie has no room for the arc pair the later generations carry, so its
+// flag bytes are the whole signal; the compact key change keeps its key index at +5.
+TEST_F(Tst_ImporterV0xa6, v0xa6_tie_across_the_bar_and_key_change)
+{
+    MasterScore* score = readEncoreScore("importer_v0xa6_tie_and_key_change.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int ties = 0;
+    int keySigs = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        Measure* m = toMeasure(mb);
+        for (Segment* s = m->first(); s; s = s->next()) {
+            if (s->isKeySigType() && s->element(0)) {
+                ++keySigs;
+            }
+            EngravingItem* el = s->element(0);
+            if (el && el->isChord()) {
+                for (Note* n : toChord(el)->notes()) {
+                    if (n->tieFor()) {
+                        ++ties;
+                    }
+                }
+            }
+        }
+    }
+    EXPECT_EQ(ties, 1) << "the compact tie is recognised from its flag byte alone";
+    EXPECT_GE(keySigs, 2) << "the opening key plus the change at the second measure";
+
+    delete score;
 }
 
 // Regression: a size-11 v0xA6 NOTE carries an articulation byte (0x20 = fermata); the reader must still
