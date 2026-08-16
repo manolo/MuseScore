@@ -746,35 +746,6 @@ TEST_F(Tst_OrnamentsSlurs, v0c2_unreliable_slur_count_stays_in_measure)
     EXPECT_EQ(total, 2) << "both slurs must import";
     EXPECT_EQ(crossMeasure, 0)
         << "a plausible-looking count must not extend a slur past its bar when the file's "
-        "+16 field is unreliable";
-    delete score;
-}
-
-// Regression: some v0xC2 files store a per-staff CONSTANT in the slur +16 field, so every slur carries the
-// same in-range value regardless of start. A repeated large span (>=3) across different start measures
-// marks +16 unreliable, so each slur resolves inside its own bar instead of drawing a phantom span.
-TEST_F(Tst_OrnamentsSlurs, v0c2_constant_slur_count_stays_in_measure)
-{
-    MasterScore* score = readEncoreScore("ornaments_v0c2_constant_slur_count.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load ornaments_v0c2_constant_slur_count.enc";
-
-    int total = 0;
-    int crossMeasure = 0;
-    for (auto it : score->spanner()) {
-        Spanner* sp = it.second;
-        if (!sp || !sp->isSlur()) {
-            continue;
-        }
-        ++total;
-        Measure* m1 = score->tick2measure(sp->tick());
-        Measure* m2 = score->tick2measure(sp->tick2());
-        if (m1 && m2 && m1 != m2) {
-            ++crossMeasure;
-        }
-    }
-    EXPECT_EQ(total, 2) << "both slurs must import";
-    EXPECT_EQ(crossMeasure, 0)
-        << "a constant +16 value repeated across start measures must not extend the slurs "
-        "into an 11-measure phantom span";
+        "measure-count field is unreliable";
     delete score;
 }

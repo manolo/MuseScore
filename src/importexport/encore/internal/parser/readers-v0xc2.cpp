@@ -181,17 +181,10 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
             // endpoint, since the xoffset2 coordinate is stale in this format. Marking it valid lets
             // the post-pass anchor by measure count instead. See ENCORE_FORMAT.md §Slur.
             //
-            // Which field holds it depends on the generation. In a pre-4.0 file elementBodyShift()
-            // has already pointed alMezuro at the right byte, so it must be left alone; in a post-4.0
-            // file the span is one field lower than alMezuro reads.
-            if (orn->tipo == static_cast<quint8>(EncOrnamentType::SLURSTART)) {
-                if (elementBodyShift() == 0) {
-                    orn->alMezuro = orn->altMezuro;
-                }
-                orn->alMezuroValid = true;
-            } else {
-                orn->alMezuroValid = false;
-            }
+            // elementBodyShift() has already pointed alMezuro at the right byte for the file's
+            // generation, so the value read inline is the span in both. Only the trust flag differs
+            // by subtype: outside a slur the field is stale in this format.
+            orn->alMezuroValid = (orn->tipo == static_cast<quint8>(EncOrnamentType::SLURSTART));
             // v0xC2 has two TEMPO layouts. New (v0xC4-style): beat-unit code at +28, BPM at +30.
             // Old: BPM at +28 (read into noto) with a constant in the +30 slot. Discriminate by
             // whether +28 holds a valid beat-unit code (low 7 bits 0..6). See ENCORE_FORMAT.md §Ornament subtypes.
