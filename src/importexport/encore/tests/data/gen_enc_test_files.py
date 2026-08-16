@@ -890,6 +890,7 @@ def gen_v0xa6_note_position_and_rest_fields():
     e += note_v0xa6(240, 0, 0, 3, -1, position=-1)    # B3, one step below
     e += rest_v0xa6(360, 0, 0, 1, dur_ticks=960)
     e += note_v0xa6(480, 0, 0, 3, 0,  position=0)     # middle C, tick 480 -> 0xE0 past the rest
+    e += note_v0xa6(481, 0, 0, 3, 2,  position=1)     # tick 481 = 0xE1 0x01, the bytes at +20/+21
     e += end_marker()
     meas = b'MEAS' + struct.pack('<I', len(e)) + _mhdr_a6(2, 4) + e
     return build_v0xa6([('Voz', 1, 0)], [meas], staff_size=1)
