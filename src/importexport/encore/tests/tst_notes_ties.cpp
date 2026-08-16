@@ -578,3 +578,41 @@ TEST_F(Tst_NotesTies, sintetico_all_features_imports_cleanly)
 
     delete score;
 }
+
+// ===========================================================================
+// The tie arc endpoints are uint16 fields. Reading only their first byte works by accident on a
+// little-endian file, where that byte is the significant one, and fails completely on a big-endian
+// SCO5 file, where it is always zero. Both endpoints then read equal, which the arc test classifies
+// as an intra-chord decorative arc, so every tie in a macOS Encore file is dropped.
+// See ENCORE_FORMAT.md §TIE element.
+//
+// The fixture is a big-endian SCO5 file with two half notes of the same pitch and a tie whose only
+// forward-tie signal is its arc span; both flag bytes are clear.
+TEST_F(Tst_NotesTies, sco5_tie_arc_is_uint16)
+{
+    MasterScore* score = readEncoreScore("notes_sco5_tie_arc_bigendian.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<Note*> notes;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->elist()) {
+                if (e && e->isChord()) {
+                    for (Note* n : toChord(e)->notes()) {
+                        notes.push_back(n);
+                    }
+                }
+            }
+        }
+    }
+
+    ASSERT_EQ(notes.size(), 2u) << "fixture holds two half notes";
+    EXPECT_NE(notes[0]->tieFor(), nullptr)
+        << "the arc span 20 -> 96 marks a forward tie once the endpoints are read as uint16";
+
+    delete score;
+}
