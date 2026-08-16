@@ -274,13 +274,15 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_note_position_and_absent_rest_fields)
     for (const auto& e : enc.measures[0].elements) {
         if (const auto* n = dynamic_cast<const mu::iex::enc::EncNote*>(e.get())) {
             positions.push_back(n->position);
+            EXPECT_EQ(n->options, 0) << "the compact note body ends at +19; +20 is the next element";
+            EXPECT_EQ(n->alterationGlyph, 0) << "+21 is the next element's tick high byte";
         } else if (const auto* r = dynamic_cast<const mu::iex::enc::EncRest*>(e.get())) {
             ++restCount;
             EXPECT_EQ(r->tuplet, 0) << "the byte at +13 is the rest's own duration, not a tuplet";
             EXPECT_EQ(r->dotControl, 0) << "the byte at +14 belongs to the next element";
         }
     }
-    const std::vector<int> expected{ 5, -1, 0 };
+    const std::vector<int> expected{ 5, -1, 0, 1 };
     EXPECT_EQ(positions, expected) << "staff position comes from +9, signed, 0 = middle C";
     EXPECT_EQ(restCount, 1);
 }
