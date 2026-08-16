@@ -231,14 +231,6 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
         // ordinary full-value notes; only a slash (grace2 0x04) marks a genuine small acciaccatura.
         // A 0x20 without the slash is therefore not small/cue/muted here. See ENCORE_FORMAT.md.
         en->smallCueMuteSpurious = (en->grace1 & 0x20) && !(en->grace2 & 0x04);
-        // size=24 notes carry an articulation byte at +22 (2 bytes after alterGlyph at +21).
-        if (en->size == 24 && ds.device()->seek(rawElemStart + 22)) {
-            ds >> en->articulationUp;
-            en->articulationDown = 0;
-        } else {
-            en->articulationUp   = 0;
-            en->articulationDown = 0;
-        }
         return false;
     }
 

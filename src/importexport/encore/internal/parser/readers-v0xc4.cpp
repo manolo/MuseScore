@@ -38,20 +38,6 @@ namespace mu::iex::enc {
 struct EncFormatReader_V0xC4 : EncFormatReader_V0xC4Base
 {
     const char* formatName() const override { return "v0xC4"; }
-
-    bool postProcessElement(EncMeasureElem* elem, QDataStream& /*ds*/, qint64 /*rawElemStart*/) const override
-    {
-        EncNote* en = dynamic_cast<EncNote*>(elem);
-        if (!en) {
-            return false;
-        }
-        // Clear artic bytes that were read beyond the element boundary for size<27.
-        if (en->size < 27) {
-            en->articulationUp   = 0;
-            en->articulationDown = 0;
-        }
-        return false;
-    }
 };
 
 std::unique_ptr<EncFormatReader> makeFormatReader_V0xC4()

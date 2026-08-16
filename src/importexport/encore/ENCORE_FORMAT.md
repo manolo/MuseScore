@@ -662,8 +662,22 @@ of the playback duration, usually small, and `+13` is the real pitch. Reading th
 recovers it, but the tuplet ratio at `+11` is then never read at all, which is what makes an
 Encore 3.x score look as though it has no explicit tuplets.
 
-Size 22 notes carry no articulation slot; size 24 notes add one at `+22`. A `dotControl` of `0xC0`
-is characteristic of size-24 notes (a layout flag; bit 0 clear, so not dotted).
+**Articulations grow the note.** The two articulation slots sit immediately past the base note, so
+a note carries them only by being longer: two bytes more for the mark above, four for both. They
+move with the generation like the rest of the body `[verified]`:
+
+| Generation | base note | mark above | mark below | sizes seen |
+|------------|-----------|------------|------------|------------|
+| Encore 3.x | 22 | `+22` | `+24` | 22 plain, 24 with one mark |
+| Encore 4.x and later | 24 | `+24` | `+26` | 24 plain, 26 with one mark, 28 with both |
+
+Measured over 5.1 million v0xC2 notes: on Encore 3.x size-24 notes the byte at `+22` holds a value
+from the articulation vocabulary in 99.8% of cases; on Encore 4.x the same byte is never an
+articulation, while `+24` is one in 95.7% of size-26 notes and `+26` in 100% of size-28 notes. A
+note at its base length has no slot at all, so reading one there yields an unrelated byte.
+
+A `dotControl` of `0xC0` is characteristic of size-24 notes in the Encore 4.x generation (a layout
+flag; bit 0 clear, so not dotted).
 
 In v0xC2, when a grace note is a tie sender its `grace1` low nibble is 1 (`grace1 & 0x0F == 1`); in
 v0xA6 and v0xC4 that nibble is always 0.

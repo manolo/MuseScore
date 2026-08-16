@@ -1706,6 +1706,40 @@ TEST_F(Tst_Notes, notes_v0c2_multiinstr_compact_routing)
     delete score;
 }
 
+// A v0xC2 note grows past its base length to carry its articulations: the slot for the mark above
+// sits immediately after the base note and the one below two bytes further, the same places v0xC4
+// uses. Reading every note as if it were the base length drops them all.
+// See ENCORE_FORMAT.md §Note element.
+//
+// The fixture is an Encore 4.x file (base note 24) with a 26-byte note carrying staccato above, a
+// 28-byte note carrying accent above and staccato below, a plain 24-byte note with no mark, and a
+// second 26-byte note with tenuto above.
+TEST_F(Tst_Notes, notes_v0c2_articulation_grows_the_note)
+{
+    MasterScore* score = readEncoreScore("notes_v0c2_artic_grows_note.enc");
+    ASSERT_NE(score, nullptr);
+
+    Measure* m = measureAt(score, 0);
+    ASSERT_NE(m, nullptr);
+
+    std::vector<size_t> articCounts;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        articCounts.push_back(toChord(el)->articulations().size());
+    }
+
+    ASSERT_EQ(articCounts.size(), 4u) << "fixture holds four notes";
+    EXPECT_EQ(articCounts[0], 1u) << "26-byte note carries the mark above";
+    EXPECT_EQ(articCounts[1], 2u) << "28-byte note carries both marks";
+    EXPECT_EQ(articCounts[2], 0u) << "24-byte note has no slot and no mark";
+    EXPECT_EQ(articCounts[3], 1u) << "26-byte note carries the mark above";
+
+    delete score;
+}
+
 // v0xC2 size=24 notes carry pitch and articulation at the same offsets as size=22; reading the v0xC4 pitch
 // slot yields 0 (C-1). See ENCORE_FORMAT.md §v0xC2 note (size 22 or 24).
 TEST_F(Tst_Notes, notes_v0c2_size24_correct_pitch_and_artic)
