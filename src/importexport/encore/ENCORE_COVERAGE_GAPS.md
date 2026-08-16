@@ -36,6 +36,7 @@ Corpus: **20577 real files** parsed, everything reachable under `~/Scores` follo
 | 18 | v0xA6 note position, rest tuplet and rest dot control at v0xC4 offsets | field | 806 | 1.72M note positions, 62591 rests | **FIXED** |
 | 19 | The four articulations Encore 4.0 renumbered | field | 3216 | 700 marks dropped | **FIXED** |
 | 20 | v0xA6 note reads its neighbour's tick as velocity, options and accidental | field | 806 | 1.72M notes, inert but one live path | **FIXED** |
+| 21 | `0xC4` remapped to an accent for every v0xC2 generation | field | 2673 + a few | 22 up-bows | **FIXED** |
 
 All of these come from **one mechanism**: a field addressed by an absolute offset that does not
 hold it in that generation of the format, with no per-generation remap. See
@@ -426,6 +427,30 @@ All three are inert today, since nothing in the importer reads the velocity or t
 glyph. The option byte is the exception: the tablature fingering fallback tests its low bit
 together with the staff position, and fixing gap 18 made that position plausible, so the two
 together would have turned a neighbour's tick into a string number.
+
+## 21. Heuristics measured against the corpus
+
+With the body offsets following the generation, the five v0xC2 heuristics were instrumented and the
+corpus run to see which still fire, split by format version (773 is 3.05, 775 is 3.07, 1056 is
+4.20 with a `0xC2` version byte).
+
+| heuristic | 3.05 | 3.07 | 4.20 | verdict |
+|---|---|---|---|---|
+| implied tuplet from a duration mismatch | 41095 | 11711 | 12 | keep, still the main source of tuplets in those files |
+| dotted-eighth anomaly | 1198 | 504 | 2 | keep |
+| `0xC4` remapped to an accent | 745 | 6 | 16 | **was a defect**, see below |
+| pitch and tuplet slots swapped | 0 | 0 | 45 | keep, already scoped to the post-4.0 layout |
+| old TEMPO layout | 0 | 0 | 3 | keep, three tempo marks depend on it |
+
+None was dead, so nothing was removed for being unused. The distribution did expose one thing: the
+`0xC4` remap fires almost only on format 3.05, which is the signature of the renumbering in gap 19
+rather than of a heuristic. It is the fifth member of that block, `0xC4` before Encore 4.0 being
+the accent that later releases spell `0xBE`, and it was being applied to every v0xC2 file
+regardless of generation, so the 22 genuine up-bows in the newer two generations imported as
+accents. It now lives with the other four, scoped by format version.
+
+The fixture behind the original test was stamped format 4.20, the generation in which `0xC4` is an
+up-bow, so it asserted the opposite of what it claimed. It carries its own generation now.
 
 ## 16. Corpus hygiene, not a defect
 
