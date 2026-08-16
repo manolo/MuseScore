@@ -38,6 +38,7 @@ Corpus: **20577 real files** parsed, everything reachable under `~/Scores` follo
 | 20 | v0xA6 note reads its neighbour's tick as velocity, options and accidental | field | 806 | 1.72M notes, inert but one live path | **FIXED** |
 | 21 | `0xC4` remapped to an accent for every v0xC2 generation | field | 2673 + a few | 22 up-bows | **FIXED** |
 | 22 | Chord symbol name read as a fixed slot, running into the next element | field | many | **1098 names corrupted** | **FIXED** |
+| 23 | Do the version byte and the format version ever disagree | dispatch | 996 crossed | 3 behaviours checked | **RESOLVED, no defect** |
 
 All of these come from **one mechanism**: a field addressed by an absolute offset that does not
 hold it in that generation of the format, with no per-generation remap. See
@@ -297,12 +298,35 @@ Per format, features present in the corpus but in no fixture of that format:
 - **v0xC2**: staff text `0x1E`, 47 of 51 ornament subtypes, rest size 20, note sizes 26 and 28.
 - **v0xC4**: 17 of 76 ornament subtypes, articulation-down bytes including `0x1D`.
 
-**Correction to an earlier draft of this document.** A first pass, run before the census followed
-symlinks, saw only 347 of the available files and concluded that 48 fixtures carried header
-combinations no Encore build writes. On the full corpus **every fixture header combination occurs
-in real files**. There are no synthetic-only headers. The fixture problem is proportion, not
-realism: v0xC2 is 24% of the corpus and 8% of the fixtures, and encrypted files are 25% of the
-corpus and 0.5% of the fixtures.
+### The fixtures state a generation they do not have
+
+Re-checked against the two axes that matter, the version byte and the format version, **42 fixtures
+carry a pair that occurs in no real file**: 31 v0xC2 fixtures and 11 v0xA6 fixtures stamped format
+4.20. They were built without a format version and inherited the skeleton's.
+
+| pair | fixtures | real files |
+|---|---|---|
+| `0xC2` + 4.20 | 31 | 0 |
+| `0xA6` + 4.20 | 11 | 0 |
+| `0xC2` + 3.05 | 4 | 3220 |
+| `0xC2` + 3.07 | 2 | 1718 |
+| `0xA6` + 2.50 | 8 | 786 |
+
+This matters more than a wrong number in a header, because every behaviour keyed off the format
+version is invisible to those 42: the two byte element body shift, and the articulation
+renumbering. A v0xC2 fixture stamped 4.20 exercises the v0xC2 reader against the newest geometry, a
+combination Encore never wrote.
+
+Re-stamping is not a one line change. A fixture moved to format 3.05 gets a body shift of -2, so
+its bytes have to be rebuilt with the geometry that goes with the stamp. It is fixture work, not a
+patch, which is why it belongs with the coverage fixtures rather than with the defect fixes.
+
+**Correction to two earlier drafts.** The first pass ran before the census followed symlinks, saw
+347 of the available files, and concluded that 48 fixtures carried header combinations no Encore
+build writes. The second over-corrected, and said every fixture header combination occurs in real
+files. The table above is the measured answer: most do, and 42 do not. Beyond that the fixture
+problem is proportion: v0xC2 is 24% of the corpus and 8% of the fixtures, and encrypted files are
+25% of the corpus and 0.5% of the fixtures.
 
 **Closes with:** fixtures for the missing combinations, weighted toward encrypted containers and
 the v0xC2 generations. Every fixture is built by `tests/data/gen_enc_test_files.py`, which lives
@@ -474,6 +498,35 @@ The fix reads to the element end instead, `size - (14 + bodyShift)`, which is wh
 say the slot is. The regression test needed the symbol placed on beat 2: on beat 1 the element
 behind it is a note at tick 0, whose first byte terminates the string by accident, so the defect
 does not show.
+
+## 23. The two version axes agree in real files
+
+The reader is chosen by the version byte at `0x04` while the element geometry follows the format
+version at `0x28`, so it is worth knowing whether the two ever disagree. Across the corpus:
+
+| version byte | format | files | element base size |
+|---|---|---|---|
+| `0xA6` | 2.50 | 786 | 10 |
+| `0xC2` | 3.05 | 3220 | 22 |
+| `0xC2` | 3.07 | 1718 | 24 |
+| `0xC4` | 3.07 | 996 | 24 |
+| `0xC4` | 4.20 | 14633 | 28 |
+| SCO5 | 4.20 | 16 | 28 |
+
+The note size ladder confirms that the body geometry belongs to the format version and not to the
+version byte: format 3.07 gives a 24 byte note whether the file says `0xC2` or `0xC4`.
+
+**One combination genuinely crosses the two axes**, `0xC4` with format 3.07, 996 files. Each
+behaviour the two readers disagree about was checked against those files rather than assumed:
+
+| behaviour | verdict |
+|---|---|
+| element body shift | correct: 3.07 and 4.20 share the shifted layout, and both readers return 0 |
+| lyric text offset | correct, and it follows the **version byte**: 99.2% of 26043 syllables read as text at the v0xC4 offset, against 0.3% at the v0xC2 one |
+| MIDI program from the entry end | correct: forcing the v0xC2 value on these files raises the share of unassigned programs from 43.1% to 44.4%, so it is not better |
+
+Nothing is misaligned in real files. The only crossed pairs left are in the fixtures, see gaps 5 to
+7 above.
 
 ## 16. Corpus hygiene, not a defect
 
