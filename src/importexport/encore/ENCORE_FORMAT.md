@@ -346,6 +346,12 @@ with header `0x52` as a global fallback. The packed staff index at `+21` uses th
 the element [Staff byte](#staff-byte-encoding). The staff type at `+20` is constant across all
 LINE blocks for the same staff position.
 
+**The key field is not authoritative on a tablature staff.** A tab staff draws fret numbers and no
+key signature, so Encore never renders this byte there and does not keep it consistent: across 399
+pairs of the same score saved by two Encore releases, the key field differs in 6 pairs and **all
+six are files with a tablature staff**, always on the tab staff and always on systems after the
+first `[verified]`. Read the key from the notation staff; on a tab staff the byte means nothing.
+
 ### v0xA6 staff size and clef
 
 v0xA6 reports staves-per-system as 0 and uses a 22-byte staff entry (not the 30-byte v0xC2/C4
