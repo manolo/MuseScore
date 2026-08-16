@@ -212,6 +212,12 @@ struct EncFormatReader
     // when the format keeps it in the inline slot. v0xA6 stores it at +14. See ENCORE_FORMAT.md.
     virtual int ornamentMeasureCountOffset() const { return -1; }
 
+    // An ornament subtype in the vocabulary the rest of the importer speaks. Encore 4.0 renumbered
+    // part of the articulation block, so a file older than format 3.07 states those subtypes six
+    // higher and they reach the emitters as codes nothing recognises.
+    // See ENCORE_FORMAT.md §Ornament subtypes.
+    virtual quint8 normalizeOrnamentSubtype(quint8 subtype) const { return subtype; }
+
     virtual ~EncFormatReader() = default;
 
     // Factory: returns the reader for the file. The 4-char magic string is needed because some
