@@ -26,7 +26,7 @@ Corpus: **20577 real files** parsed, everything reachable under `~/Scores` follo
 | 8 | Element type `0xA` | field | 14 | 1174 elements | **RESOLVED, drop is correct** |
 | 9 | v0xA6 ties, beams, key changes never tested | coverage | 806 | 39772 ties alone | measured |
 | 10 | SCO5 is effectively untested | coverage | 15 | 15 of 15 ornament subtypes | measured |
-| 11 | Key signature diverges across conversion pairs | field | 6 of 399 pairs | LINE key byte | **lead, unconfirmed** |
+| 11 | Key signature diverges across conversion pairs | field | 6 of 399 pairs | LINE key byte on tab staves | **RESOLVED, not a defect** |
 | 12 | Chord symbol reads a fixed 36 byte text slot past the element | field | many | sizes 14 to 22 | needs check |
 | 13 | Unknown version byte silently parsed as v0xC4 | dispatch | 0 today | future Encore 6 | design |
 | 14 | `SCOX` / `SCOR` / `SCOS` rejected outright | dispatch | 0 of 20577 | n/a | design |
@@ -333,19 +333,22 @@ add music Encore does not display and would collide with the accompanying rests.
 than falling through the "unknown element" counter in `debug-dump.cpp`, and the type belongs in the
 element table in `ENCORE_FORMAT.md`, where it now is.
 
-## 11. Key signature diverges across conversion pairs (lead)
+## 11. Key signature diverges across conversion pairs  (RESOLVED, not a defect)
 
-The differential oracle below flags `line_key` as differing in 6 of 399 pairs (1.5%). In every
-case the total number of LINE staff entries is preserved exactly and the key values merely
-redistribute, for example `{0:12, 8:40, 11:10}` becoming `{0:6, 8:51, 11:5}`. All six are
-two-instrument files.
+The differential oracle flagged `line_key` as differing in 6 of 399 pairs. All six turn out to be
+files with a **tablature staff**, and in every one the differing entries sit on the tab staff and on
+systems after the first. Only 6 of the 27 pairs that have a tab staff diverge at all.
 
-Two hypotheses, both untested: either the importer misaligns staff entries in one generation, or
-Encore 5 genuinely rewrites the key on re-save for some staves. This is a lead, not a confirmed
-defect.
+Opened in Encore, both halves of a pair render identically: a tab staff draws fret numbers and no
+key signature, so the byte is never rendered there and Encore does not keep it consistent across
+saves `[verified]`.
 
-**Closes with:** opening one of the six pairs in Encore and reading the key signatures off the
-score. `Vals sobre las olas.Bandurria 1.enc` has the largest divergence.
+It does not reach the importer either. The initial key signature comes from the first system's LINE
+entries only, and later systems are never read for it; mid-score changes come from KEYCHANGE
+elements. Importing both halves of two such pairs gives byte-identical key signatures.
+
+Recorded in `ENCORE_FORMAT.md` under the LINE staff entry: on a tablature staff the key field means
+nothing, so it should be read from the notation staff.
 
 ## 12 to 15. Remaining
 
