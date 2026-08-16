@@ -72,7 +72,6 @@ qint64 clampMeasureEnd(qint64 measStart, quint32 varsize, qint64 elemBlockOffset
 
 // Selects a format reader. SCO5 (macOS Encore 5) is matched by magic string because its chuMagio
 // is not 0xC4 even though it shares the v0xC4 format; otherwise chuMagio picks the reader.
-// appVersion only matters for v0xC2, which spans the element layout change Encore 4.0 introduced.
 std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 chuMagio, const QString& magic, quint16 appVersion)
 {
     if (magic == "SCO5") {
