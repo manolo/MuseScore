@@ -323,8 +323,39 @@ TEST_F(Tst_Ornaments, pre_encore4_articulation_codes_map_to_the_current_vocabula
     EXPECT_TRUE(marks[0] == SymId::articTenutoAbove || marks[0] == SymId::articTenutoBelow);
     EXPECT_TRUE(marks[1] == SymId::articStaccatoAbove || marks[1] == SymId::articStaccatoBelow);
     EXPECT_TRUE(marks[2] == SymId::articAccentAbove || marks[2] == SymId::articAccentBelow)
-        << "the accent code did not move between generations";
+        << "0xC4 is the pre-Encore-4 spelling of the accent, not an up-bow";
     EXPECT_EQ(fermatas, 1) << "0xD2 is the pre-Encore-4 spelling of fermata above";
+
+    delete score;
+}
+
+// The other half of the same rule: from format 3.07 on the vocabulary is the current one, so 0xC4
+// is a genuine up-bow and must not be remapped. The importer used to convert it for every v0xC2
+// file regardless of generation.
+TEST_F(Tst_Ornaments, post_encore4_articulation_codes_are_left_alone)
+{
+    MasterScore* score = readEncoreScore("ornaments_v0c2_post40_articulation_codes.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<SymId> marks;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Articulation* a : toChord(el)->articulations()) {
+                marks.push_back(a->symId());
+            }
+        }
+    }
+    ASSERT_EQ(marks.size(), 2u);
+    EXPECT_TRUE(marks[0] == SymId::stringsUpBow) << "0xC4 stays an up-bow from Encore 4.0 on";
+    EXPECT_TRUE(marks[1] == SymId::articStaccatoAbove || marks[1] == SymId::articStaccatoBelow);
 
     delete score;
 }

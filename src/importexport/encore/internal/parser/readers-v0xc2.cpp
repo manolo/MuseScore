@@ -142,7 +142,6 @@ static void markImpliedTupletMembers(std::vector<EncMeasureElem*>& elems)
 
 // Encore 3.x / 4.x (v0xC2) format reader.
 // Differences from v0xC4:
-//   - ORN 0xC4 is an accent, not an up-bow
 //   - grace1 low nibble encodes the tie-sender flag
 //   - alMezuro field in ornaments is unreliable
 //   - Lyric text starts at element offset +18 (not +20)
@@ -170,10 +169,11 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
     // explicitly (forward measure-count / next note) instead of by coordinate search.
     bool slurXoffset2Stale() const override { return true; }
 
-    // Encore 4.0 moved four articulations down by six, in the same release that shifted the
-    // element bodies. A file older than format 3.07 states them at the higher codes, which no
-    // later generation uses and which the emitters would drop. The rest of the vocabulary did not
-    // move: an accent is 0xBE and a breath 0xA8 in every generation.
+    // Encore 4.0 moved five articulations down by six, in the same release that shifted the
+    // element bodies. A file older than format 3.07 states them at the higher codes, so its accent
+    // arrives as 0xC4, which is a genuine up-bow from that release on, and the other four as codes
+    // no later generation uses at all. The rest of the vocabulary did not move: a marcato is 0xBF
+    // and a breath 0xA8 in every generation.
     // See ENCORE_FORMAT.md §Ornament subtypes.
     quint8 normalizeOrnamentSubtype(quint8 subtype) const override
     {
@@ -181,6 +181,7 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
             return subtype;
         }
         switch (subtype) {
+        case 0xC4: return static_cast<quint8>(EncOrnamentType::ACCENT);
         case 0xCE: return static_cast<quint8>(EncOrnamentType::TENUTO);
         case 0xCF: return static_cast<quint8>(EncOrnamentType::STACCATO);
         case 0xD2: return static_cast<quint8>(EncOrnamentType::FERMATA_ABOVE);
@@ -193,10 +194,6 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
     {
         if (EncOrnament* orn = dynamic_cast<EncOrnament*>(elem)) {
             orn->tipo = normalizeOrnamentSubtype(orn->tipo);
-            // v0xC2: tipo 0xC4 (UPBOW in v0xC4) encodes accent above in this format.
-            if (orn->tipo == static_cast<quint8>(EncOrnamentType::UPBOW)) {
-                orn->tipo = static_cast<quint8>(EncOrnamentType::ACCENT);
-            }
             // The forward slur span (0 = within measure, N = ends N bars later) is what anchors the
             // endpoint, since the xoffset2 coordinate is stale in this format. Marking it valid lets
             // the post-pass anchor by measure count instead. See ENCORE_FORMAT.md §Slur.
