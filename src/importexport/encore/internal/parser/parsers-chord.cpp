@@ -121,7 +121,7 @@ bool EncChordSym::read(QDataStream& ds)
 {
     EncMeasureElem::read(ds);
     ds >> toniko >> tipo;
-    ds.skipRawData(3);
+    ds.skipRawData(3 + bodyShift);
     ds >> xoffset;
     ds.skipRawData(1);
     ds >> radiko >> baso;

@@ -150,8 +150,17 @@ static void markImpliedTupletMembers(std::vector<EncMeasureElem*>& elems)
 //   - Instrument metadata: names only (no TK-based MIDI/key tables)
 struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
 {
+    explicit EncFormatReader_V0xC2(quint16 appVersion)
+        : m_appVersion(appVersion) {}
+
     const char* formatName() const override { return "v0xC2"; }
     quint8 lyricTextGapAfterKie() const override { return 7; }
+
+    // Encore 4.0 inserted two bytes into every element body at offset +8, so a file written by an
+    // earlier build keeps those fields two bytes lower. The app version is what separates the two
+    // generations: the version byte is 0xC2 for both, and element sizes overlap between them.
+    // See ENCORE_FORMAT.md §Version byte and release mapping.
+    int elementBodyShift() const override { return m_appVersion < kFirstEncore4AppVersion ? -2 : 0; }
 
     // v0xC2 instrument entries end two bytes earlier than v0xC4 ones, so their MIDI program
     // table sits 44 bytes from the end rather than 46.
@@ -168,11 +177,17 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
             if (orn->tipo == static_cast<quint8>(EncOrnamentType::UPBOW)) {
                 orn->tipo = static_cast<quint8>(EncOrnamentType::ACCENT);
             }
-            // v0xC2 keeps the reliable forward slur span at +16 (altMezuro), not +18 (garbage here):
-            // 0 = within measure, N = ends N bars later. Marking it valid lets the post-pass anchor
-            // by measure count instead of the unreliable xoffset2 coordinate. See ENCORE_FORMAT.md §Slur.
+            // The forward slur span (0 = within measure, N = ends N bars later) is what anchors the
+            // endpoint, since the xoffset2 coordinate is stale in this format. Marking it valid lets
+            // the post-pass anchor by measure count instead. See ENCORE_FORMAT.md §Slur.
+            //
+            // Which field holds it depends on the generation. In a pre-4.0 file elementBodyShift()
+            // has already pointed alMezuro at the right byte, so it must be left alone; in a post-4.0
+            // file the span is one field lower than alMezuro reads.
             if (orn->tipo == static_cast<quint8>(EncOrnamentType::SLURSTART)) {
-                orn->alMezuro = orn->altMezuro;
+                if (elementBodyShift() == 0) {
+                    orn->alMezuro = orn->altMezuro;
+                }
                 orn->alMezuroValid = true;
             } else {
                 orn->alMezuroValid = false;
@@ -206,12 +221,14 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
         if (!en) {
             return false;
         }
-        // v0xC2 usually keeps the MIDI pitch in the tuplet slot (+13) with +15 empty; swap it
-        // across. Some files instead store a real pitch at +15 and a genuine tuplet ratio at +13.
-        // Discriminate by whether +15 is a plausible pitch (>= C0), not merely nonzero: a stray
-        // small flag there must not be read as MIDI 1. See ENCORE_FORMAT.md §Note element.
+        // Pre-4.0 files store the pitch at +13 and the tuplet at +11; elementBodyShift() already
+        // put both in the right field, so the recovery below must not run and destroy the tuplet.
+        // For the post-4.0 layout some files still keep the pitch in the tuplet slot (+13) with
+        // +15 empty; swap it across. Discriminate by whether +15 is a plausible pitch (>= C0), not
+        // merely nonzero: a stray small flag there must not be read as MIDI 1.
+        // See ENCORE_FORMAT.md §Note element.
         static constexpr quint8 kMinPlausiblePitch = 12; // C0; below this is not a MIDI note
-        if (en->tuplet > 0 && en->semiTonePitch < kMinPlausiblePitch) {
+        if (elementBodyShift() == 0 && en->tuplet > 0 && en->semiTonePitch < kMinPlausiblePitch) {
             en->semiTonePitch = en->tuplet;
             en->tuplet = 0;
         }
@@ -237,10 +254,16 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
         fixDottedEighthPattern(elems, durTicks);
         markImpliedTupletMembers(elems);
     }
+
+private:
+    // First Encore app version that writes the post-4.0 element body layout.
+    static constexpr quint16 kFirstEncore4AppVersion = 775;
+
+    quint16 m_appVersion { 0 };
 };
 
-std::unique_ptr<EncFormatReader> makeFormatReader_V0xC2()
+std::unique_ptr<EncFormatReader> makeFormatReader_V0xC2(quint16 appVersion)
 {
-    return std::make_unique<EncFormatReader_V0xC2>();
+    return std::make_unique<EncFormatReader_V0xC2>(appVersion);
 }
 } // namespace mu::iex::enc
