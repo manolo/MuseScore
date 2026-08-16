@@ -184,16 +184,20 @@ struct EncFormatReader
     // header. See ENCORE_FORMAT.md §TEXT block.
     virtual bool textBlockEntryHasRunHeader() const { return true; }
 
-    // Byte offset of a STAFFTEXT ornament's TEXT-entry index (tind) measured from the type/voice
-    // byte, or -1 to use the size-based location read inline. v0xA6 stores it at +26 in its compact
-    // ornament; other formats return -1. See ENCORE_FORMAT.md §Ornament subtypes.
+    // Element-relative offset of a STAFFTEXT ornament's TEXT-entry index (tind), or -1 to use the
+    // size-based location read inline. v0xA6 stores it at +28 in its compact ornament; other
+    // formats return -1. See ENCORE_FORMAT.md §Ornament element.
     virtual int staffTextTindOffset() const { return -1; }
 
-    // Byte offset of a STAFFTEXT ornament's vertical placement value (signed Cartesian y, positive =
-    // above, negative = below) measured from the type/voice byte, or -1 to use the offset read inline.
-    // v0xA6 stores it at +6 in its compact ornament; other formats return -1. See ENCORE_FORMAT.md
-    // §Ornament subtypes.
-    virtual int staffTextYoffsetOffset() const { return -1; }
+    // Element-relative offset of the ornament's vertical placement, stored as a signed byte
+    // (positive = above the staff, negative = below), or -1 when the format keeps it in the inline
+    // s16 slot. v0xA6 stores it at +9 in its compact ornament and it applies to every subtype, not
+    // only to staff text. See ENCORE_FORMAT.md §Ornament element.
+    virtual int ornamentYoffsetOffset() const { return -1; }
+
+    // Element-relative offset of the ornament's forward measure count (spanner endpoint), or -1
+    // when the format keeps it in the inline slot. v0xA6 stores it at +14. See ENCORE_FORMAT.md.
+    virtual int ornamentMeasureCountOffset() const { return -1; }
 
     virtual ~EncFormatReader() = default;
 

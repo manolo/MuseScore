@@ -55,11 +55,14 @@ struct EncFormatReader_V0xA6 final : EncFormatReader
     // Compact lyric: kie byte immediately after rawStaff (+5), text at +6, no gap.
     quint8 lyricPreKieSkip() const override { return 0; }
     quint8 lyricTextGapAfterKie() const override { return 0; }
-    // TEXT entries carry no per-entry header; STAFFTEXT tind sits at +26 in the compact ornament.
+    // TEXT entries carry no per-entry header. The compact ornament keeps three fields outside the
+    // v0xC4 field order: the staff-text index at +28, a signed-byte y at +9 and the forward measure
+    // count at +14. See ENCORE_FORMAT.md §Ornament element.
     quint8 textBlockEntryTextOffset() const override { return 0; }
     bool textBlockEntryHasRunHeader() const override { return false; }
-    int staffTextTindOffset() const override { return 26; }
-    int staffTextYoffsetOffset() const override { return 6; }
+    int staffTextTindOffset() const override { return 28; }
+    int ornamentYoffsetOffset() const override { return 9; }
+    int ornamentMeasureCountOffset() const override { return 14; }
     const char* formatName() const override { return "v0xA6"; }
 
     void postProcessVoiceGroup(std::vector<EncMeasureElem*>& elems, qint16 durTicks) const override;
