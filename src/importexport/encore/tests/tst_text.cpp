@@ -1470,6 +1470,35 @@ TEST_F(Tst_Text, chord_symbols_present)
 }
 
 // Regression: chord symbols stored without text (tipo bit0 == 0) were silently skipped.
+// Regression: a chord symbol's name runs from element +14 to the end of the element, which is why
+// the element grows in steps of two with the length of the name. Reading a fixed 36-byte slot ran
+// off the end of every symbol shorter than 50 bytes, and where the name filled its slot with no
+// terminator inside it the reader carried on into the following element and produced a name with
+// the neighbour's bytes glued to it.
+TEST_F(Tst_Text, chord_symbol_text_stops_at_the_element_end)
+{
+    MasterScore* score = readEncoreScore("notes_chord_symbol_text_bounded.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<String> names;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            if (Harmony* h = segmentHarmony(s)) {
+                names.push_back(h->harmonyName());
+            }
+        }
+    }
+    ASSERT_EQ(names.size(), 2u);
+    EXPECT_EQ(names[0], String(u"CMaj")) << "the name is exactly the four bytes the element holds";
+    EXPECT_EQ(names[1], String(u"Gsus")) << "and not one byte of the element behind it";
+
+    delete score;
+}
+
 TEST_F(Tst_Text, numeric_chord_symbols)
 {
     MasterScore* score = readEncoreScore("chord_parsing.enc");
