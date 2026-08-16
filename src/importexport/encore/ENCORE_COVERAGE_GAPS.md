@@ -27,16 +27,17 @@ Corpus: **20577 real files** parsed, everything reachable under `~/Scores` follo
 | 9 | v0xA6 ties, beams, key changes never tested | coverage | 806 | 39772 ties alone | measured |
 | 10 | SCO5 is effectively untested | coverage | 15 | 15 of 15 ornament subtypes | measured |
 | 11 | Key signature diverges across conversion pairs | field | 6 of 399 pairs | LINE key byte on tab staves | **RESOLVED, not a defect** |
-| 12 | Chord symbol reads a fixed 36 byte text slot past the element | field | many | sizes 14 to 22 | needs check |
+| 12 | Chord symbol reads a fixed 36 byte text slot past the element | field | many | 1098 names corrupted | **FIXED, see gap 22** |
 | 13 | Unknown version byte silently parsed as v0xC4 | dispatch | 0 today | any unseen release | **RESOLVED, reads by format version** |
 | 14 | `SCOX` / `SCOR` / `SCOS` rejected outright | dispatch | 0 of 20577 | n/a | design |
-| 15 | v0xA6 has no multi-measure rest support | field | 806 | unknown | needs check |
+| 15 | v0xA6 has no multi-measure rest support | field | 806 | none | **RESOLVED, the format has none** |
 | 16 | 136 ZIP archives named `.enc` | corpus hygiene | 136 | n/a | not a defect |
 | 17 | Dead `ENCORE_IMPORTER.md` links on the PR branch | docs | n/a | 3 links | won't fix, see below |
 | 18 | v0xA6 note position, rest tuplet and rest dot control at v0xC4 offsets | field | 806 | 1.72M note positions, 62591 rests | **FIXED** |
 | 19 | The four articulations Encore 4.0 renumbered | field | 3216 | 700 marks dropped | **FIXED** |
 | 20 | v0xA6 note reads its neighbour's tick as velocity, options and accidental | field | 806 | 1.72M notes, inert but one live path | **FIXED** |
 | 21 | `0xC4` remapped to an accent for every v0xC2 generation | field | 2673 + a few | 22 up-bows | **FIXED** |
+| 22 | Chord symbol name read as a fixed slot, running into the next element | field | many | **1098 names corrupted** | **FIXED** |
 
 All of these come from **one mechanism**: a field addressed by an absolute offset that does not
 hold it in that generation of the format, with no per-generation remap. See
@@ -356,17 +357,17 @@ nothing, so it should be read from the notation staff.
 
 ## 12 to 15. Remaining
 
-- **Chord symbol text slot.** `EncChordSym::read` reads a fixed 36 byte text slot at `+14` whenever
-  `tipo & 1`, so it reads through `+50` on elements of size 14, 16, 18, 20 and 22. Whether that
-  overruns into the next element or the slot really is fixed has not been checked.
+- **Chord symbol text slot.** RESOLVED, and it was a defect. See gap 22 below.
 - **Unknown version byte.** RESOLVED. `EncFormatReader::create` now picks the layout of the highest
   known format version at or below the file's own, and logs both numbers. The header carries no
   date and no build stamp, so the format version at `0x28` is the only thing to go on.
 - **`SCOX` / `SCOR` / `SCOS`.** Listed in the spec as observed variants, rejected by
   `EncHeader::readMagicAndVersion`, and absent from 20577 files. Either find a sample or drop the
   claim. `ZBOP` and `ZBO6` are likewise assumed to share the `ZBOT` keystream, untested.
-- **v0xA6 multi-measure rests.** `EncRest::read` reads the count only when `size > 15`; v0xA6 rests
-  are 7 bytes, so there is no support at all. Whether Encore 2.x could write them is unknown.
+- **v0xA6 multi-measure rests.** RESOLVED, nothing to support. The compact rest states its own
+  duration at `+12`, and across 806 files and 249589 rests the largest value is 960, one whole
+  note, with the rest of the distribution being 120, 240, 480, 360, 180, 60, 720, 80, 30 and 90.
+  Not one rest spans more than a single measure, and the 14 byte element has no room for a count.
 
 ## 18. The v0xA6 note and rest read three fields from the wrong place  (FIXED)
 
@@ -451,6 +452,22 @@ accents. It now lives with the other four, scoped by format version.
 
 The fixture behind the original test was stamped format 4.20, the generation in which `0xC4` is an
 up-bow, so it asserted the opposite of what it claimed. It carries its own generation now.
+
+## 22. Chord symbol names run into the element behind them  (FIXED)
+
+`EncChordSym::read` read a fixed 36 byte text slot at `+14`, which needs a 50 byte element. The
+corpus says the slot is not fixed at all: chord symbol sizes run 14, 16, 18 and up to 54, two bytes
+at a time, because the element grows with the name. Only 14 elements in 21620 files are big enough
+for the fixed read.
+
+Instrumenting the parser and running the corpus: of 4221 chord symbols carrying an explicit text,
+**1098 import with a name that continues past the element**, for example `C䔯bːṀč` where the score
+shows `C`. The remainder are saved by luck, their neighbour's first byte happening to be zero.
+
+The fix reads to the element end instead, `size - (14 + bodyShift)`, which is what the size steps
+say the slot is. The regression test needed the symbol placed on beat 2: on beat 1 the element
+behind it is a note at tick 0, whose first byte terminates the string by accident, so the defect
+does not show.
 
 ## 16. Corpus hygiene, not a defect
 
