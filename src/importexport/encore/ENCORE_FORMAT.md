@@ -1140,8 +1140,8 @@ Subtypes marked "confirmed by opening the file in Encore 5" are `[verified]`; th
 `[observed]`. A trill-span start (`0x36`) opens a trill + wavy-line span when a `0x35` or a
 non-zero forward measure-count is present, otherwise it is a plain trill glyph. `0xB0` and `0xB6`
 are always standalone. The accent, up-bow and down-bow marks (`0xBE`, `0xC4`, `0xC5`) carry a voice
-byte that is always 0 regardless of the annotated note's voice; `0xC4` denotes an accent in v0xC2
-(where size-22 notes have no articulation slot) but an up-bow in v0xC4.
+byte that is always 0 regardless of the annotated note's voice; `0xC4` denotes an accent before
+format 3.07 (where size-22 notes have no articulation slot) but an up-bow from that format on.
 
 #### The pre-Encore-4 articulation codes
 
@@ -1150,14 +1150,20 @@ those articulations six higher, and no later generation uses the higher codes.
 
 | Format 3.05 and older | Format 3.07 and later | Meaning        | Evidence                              |
 |-----------------------|-----------------------|----------------|---------------------------------------|
+| `0xC4`                | `0xBE`                | accent         | 745 of 767 firings are format 3.05 `[verified]` |
 | `0xCE`                | `0xC8`                | tenuto         | conversion pair, 1 for 1 `[verified]` |
 | `0xCF`                | `0xC9`                | staccato       | conversion pair, 5 for 5 `[verified]` |
 | `0xD2`                | `0xCC`                | fermata above  | two conversion pairs `[verified]`     |
 | `0xD3`                | `0xCD`                | fermata below  | corpus counts only `[observed]`       |
 
+The accent is the one whose two spellings collide: `0xC4` is a genuine up-bow from Encore 4.0 on,
+so the mapping has to be scoped by format version rather than by the version byte, which reads
+`0xC2` for both generations.
+
 The rest of the vocabulary did not move: in a conversion pair whose two halves hold 26 ornaments
-each, the accent (`0xBE`), the breath (`0xA8`), the tempo mark (`0x32`), the staff text (`0x1E`)
-and the slur (`0x21`, `0x41`) all keep their codes, and only the one articulation changes.
+each, the accent at its later code (`0xBE`), the breath (`0xA8`), the tempo mark (`0x32`), the
+staff text (`0x1E`) and the slur (`0x21`, `0x41`) all keep their codes, and only the one
+articulation changes.
 
 Corpus-wide the same picture holds: across 3216 files of format 3.05 there is not one staccato at
 `0xC9`, the single most common articulation in every other generation, while `0xCF` is the most
