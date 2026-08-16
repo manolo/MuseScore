@@ -139,14 +139,15 @@ Notes:
   element size but use disjoint articulation subtypes: the `0xC2` group encodes accent as `0xC4`,
   the `0xC4` group as `0xBE`, with no overlap `[observed]`. Encore 4.0 to 4.2 therefore renumbered
   its ornament subtypes mid-line while keeping the same app version stamp.
-- The 69 files carrying version byte `0xC2` with app 1056, and the 22 carrying `0xA6` with app
-  1056, are unexplained. An Encore 5 build saving in a legacy format is the obvious hypothesis and
-  is untested.
+- The files carrying version byte `0xC2` or `0xA6` with format 4.20 are **synthetic fixtures of
+  this test suite**, not files Encore wrote: every one of them lives under the fixture directories
+  and was generated without a format version, inheriting the skeleton's `[verified]`.
 - No file in the corpus predates Encore 2.x. Whether Encore 1.x for Macintosh wrote `.enc` at all,
-  and what magic it used, is untested. `SCOX` / `SCOR` / `SCOS` are the natural suspects but no
-  sample exists in 20577 files.
-- Encore 6 has not shipped a file into this corpus. When it does, the unknown-version fallback in
-  `EncFormatReader::create` will parse it as v0xC4 and emit only a `LOGW`.
+  and what magic it used, is untested. `SCOX` / `SCOR` / `SCOS` are the natural suspects, and read
+  as classic Mac OS four-character type codes, but no sample exists. One magic-less container does
+  occur, and it is a Windows file: see ENCORE_FORMAT.md §Magics and byte order.
+- Encore 6 has not shipped a file into this corpus. When it does, the unknown-version fallback
+  reads it as the newest generation its format version is not older than, and logs both numbers.
 
 ---
 

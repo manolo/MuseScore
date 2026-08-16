@@ -31,7 +31,7 @@ Corpus: **20577 real files** parsed, everything reachable under `~/Scores` follo
 | 13 | Unknown version byte silently parsed as v0xC4 | dispatch | 0 today | any unseen release | **RESOLVED, reads by format version** |
 | 14 | `SCOX` / `SCOR` / `SCOS` rejected outright | dispatch | 0 of 21620 | n/a | **RESOLVED, dropped from the spec** |
 | 15 | v0xA6 has no multi-measure rest support | field | 806 | none | **RESOLVED, the format has none** |
-| 16 | 136 ZIP archives named `.enc` | corpus hygiene | 136 | n/a | not a defect |
+| 16 | 136 ZIP archives named `.enc`, and one unrecognised container | corpus hygiene | 137 | n/a | **RESOLVED, documented** |
 | 17 | Dead `ENCORE_IMPORTER.md` links on the PR branch | docs | n/a | 3 links | won't fix, see below |
 | 18 | v0xA6 note position, rest tuplet and rest dot control at v0xC4 offsets | field | 806 | 1.72M note positions, 62591 rests | **FIXED** |
 | 19 | The four articulations Encore 4.0 renumbered | field | 3216 | 700 marks dropped | **FIXED** |
@@ -549,10 +549,17 @@ Nothing is misaligned in real files. The only crossed pairs left are in the fixt
 ## 16. Corpus hygiene, not a defect
 
 160 files carry a `.enc` extension but are not Encore documents: 136 ZIP archives (multi-megabyte,
-all under `downloads/brasilsonoro`), 15 empty files, 7 with magic `00 10 00 01`, one JPEG, one text
-file. The parser rejects all of them. The ZIPs presumably need extracting before they contribute
-anything. The 7 files with magic `00 10 00 01` are worth one look in case they are an unrecognised
-Encore variant.
+all under `downloads/brasilsonoro`), 15 empty files, one JPEG, one text file. The parser rejects all
+of them, and the ZIPs presumably need extracting before they contribute anything.
+
+**The 7 files with magic `00 10 00 01` are the exception, and they were looked at.** They are seven
+copies of one document, and it is a genuine Encore file: standard block framing, the documented
+measure header, `LINE` staff entries of 22 bytes with the `0x0E 0xFC` marker, and an element stream
+that reads cleanly with the Encore 2.x geometry. Only its header differs, a record of big-endian
+16-bit fields with a multi-thousand-byte font and printer preamble and nothing pointing at where the
+blocks begin. It is a Windows file, not a Macintosh one: the preamble names `LPT1:`, `COM1:` and
+early 1990s printer drivers. Documented in ENCORE_FORMAT.md §Magics and byte order and deliberately
+not read, since one document cannot establish a variable-length preamble.
 
 ---
 
