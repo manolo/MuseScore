@@ -29,7 +29,7 @@ Corpus: **20577 real files** parsed, everything reachable under `~/Scores` follo
 | 11 | Key signature diverges across conversion pairs | field | 6 of 399 pairs | LINE key byte on tab staves | **RESOLVED, not a defect** |
 | 12 | Chord symbol reads a fixed 36 byte text slot past the element | field | many | 1098 names corrupted | **FIXED, see gap 22** |
 | 13 | Unknown version byte silently parsed as v0xC4 | dispatch | 0 today | any unseen release | **RESOLVED, reads by format version** |
-| 14 | `SCOX` / `SCOR` / `SCOS` rejected outright | dispatch | 0 of 20577 | n/a | design |
+| 14 | `SCOX` / `SCOR` / `SCOS` rejected outright | dispatch | 0 of 21620 | n/a | **RESOLVED, dropped from the spec** |
 | 15 | v0xA6 has no multi-measure rest support | field | 806 | none | **RESOLVED, the format has none** |
 | 16 | 136 ZIP archives named `.enc` | corpus hygiene | 136 | n/a | not a defect |
 | 17 | Dead `ENCORE_IMPORTER.md` links on the PR branch | docs | n/a | 3 links | won't fix, see below |
@@ -361,9 +361,15 @@ nothing, so it should be read from the notation staff.
 - **Unknown version byte.** RESOLVED. `EncFormatReader::create` now picks the layout of the highest
   known format version at or below the file's own, and logs both numbers. The header carries no
   date and no build stamp, so the format version at `0x28` is the only thing to go on.
-- **`SCOX` / `SCOR` / `SCOS`.** Listed in the spec as observed variants, rejected by
-  `EncHeader::readMagicAndVersion`, and absent from 20577 files. Either find a sample or drop the
-  claim. `ZBOP` and `ZBO6` are likewise assumed to share the `ZBOT` keystream, untested.
+- **`SCOX` / `SCOR` / `SCOS`.** RESOLVED. Dropped from the magic table and reduced to one
+  paragraph recording that they were looked for and not found. They occur in none of the 21620
+  files, no byte order or layout was ever established, and no line of the importer acts on them, so
+  a table row described nothing. The paragraph keeps the trace for anyone who does meet one.
+
+  `ZBOP` and `ZBO6` are a different case and stay in the table: the importer branches on them, in
+  the error message and in the decryption. They keep their `[assumed]` mark, with the reason the
+  assumption is safe to hold, that a wrong keystream fails the header check and the file is
+  rejected rather than imported as wrong music.
 - **v0xA6 multi-measure rests.** RESOLVED, nothing to support. The compact rest states its own
   duration at `+12`, and across 806 files and 249589 rests the largest value is 960, one whole
   note, with the rest of the distribution being 120, 240, 480, 360, 180, 60, 720, 80, 30 and 90.
