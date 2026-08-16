@@ -169,12 +169,8 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
     // explicitly (forward measure-count / next note) instead of by coordinate search.
     bool slurXoffset2Stale() const override { return true; }
 
-    // Encore 4.0 moved five articulations down by six, in the same release that shifted the
-    // element bodies. A file older than format 3.07 states them at the higher codes, so its accent
-    // arrives as 0xC4, which is a genuine up-bow from that release on, and the other four as codes
-    // no later generation uses at all. The rest of the vocabulary did not move: a marcato is 0xBF
-    // and a breath 0xA8 in every generation.
-    // See ENCORE_FORMAT.md §Ornament subtypes.
+    // Encore 4.0 moved five articulations down by six; the rest of the vocabulary stayed put.
+    // See ENCORE_FORMAT.md §The pre-Encore-4 articulation codes.
     quint8 normalizeOrnamentSubtype(quint8 subtype) const override
     {
         if (m_formatVersion >= ENC_FORMAT_3_07) {
@@ -212,16 +208,8 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
                     orn->tempo = orn->noto;   // old layout: +28 is the BPM
                     // Old layout keeps the per-mark beat unit at +26; recover it so the mark shows
                     // the composer's unit instead of the compound-meter dotted-quarter default.
-                    orn->noto = 0;
-                    const qint64 save = ds.device()->pos();
-                    if (ds.device()->seek(rawElemStart + 26)) {
-                        quint8 beatUnit = 0;
-                        ds >> beatUnit;
-                        if ((beatUnit & 0x7F) <= 6) {
-                            orn->noto = beatUnit;
-                        }
-                    }
-                    ds.device()->seek(save);
+                    const quint8 beatUnit = byteAt(ds, rawElemStart + 26);
+                    orn->noto = (beatUnit & 0x7F) <= 6 ? beatUnit : 0;
                 }
             }
             return false;
