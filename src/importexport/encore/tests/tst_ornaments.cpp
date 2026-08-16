@@ -288,6 +288,47 @@ TEST_F(Tst_Ornaments, staccato_from_orn_c9)
     delete score;
 }
 
+// Regression: Encore 4.0 moved four articulations down by six, so a file older than format 3.07
+// spells tenuto 0xCE, staccato 0xCF and fermata above 0xD2. Read with the later numbering they are
+// codes nothing recognises and the marks never reach the score. The accent shows the rest of the
+// vocabulary stayed put.
+TEST_F(Tst_Ornaments, pre_encore4_articulation_codes_map_to_the_current_vocabulary)
+{
+    MasterScore* score = readEncoreScore("ornaments_v0c2_pre4_articulation_codes.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<SymId> marks;
+    int fermatas = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* ann : s->annotations()) {
+                if (ann && ann->isFermata()) {
+                    ++fermatas;
+                }
+            }
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Articulation* a : toChord(el)->articulations()) {
+                marks.push_back(a->symId());
+            }
+        }
+    }
+    ASSERT_EQ(marks.size(), 3u) << "tenuto, staccato and accent, one per chord";
+    EXPECT_TRUE(marks[0] == SymId::articTenutoAbove || marks[0] == SymId::articTenutoBelow);
+    EXPECT_TRUE(marks[1] == SymId::articStaccatoAbove || marks[1] == SymId::articStaccatoBelow);
+    EXPECT_TRUE(marks[2] == SymId::articAccentAbove || marks[2] == SymId::articAccentBelow)
+        << "the accent code did not move between generations";
+    EXPECT_EQ(fermatas, 1) << "0xD2 is the pre-Encore-4 spelling of fermata above";
+
+    delete score;
+}
+
 // TRILL_START/TRILL_END markers create a Trill spanner (tr + wavy line), while a TRILL_ALT inside that span
 // stays a glyph-only Ornament.
 TEST_F(Tst_Ornaments, trill_spanner_start_markers)
