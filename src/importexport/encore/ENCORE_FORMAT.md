@@ -902,9 +902,24 @@ gracefully: it classifies every tie in the file as an intra-chord arc rather tha
 The fallback byte signal `(+5 & 0x80) || (+5 & 0x02) || (+6 & 0x80)` is only correct where the arc
 pair is genuinely absent, which no observed form is.
 
-**7-byte form (v0xA6).** Encore 2.x ties are 7 bytes in a 14-byte slot. A duplicated byte pair at
-`+9` and `+11` matches the source-position pattern of the later forms, but the arc pair has not been
-located `[assumed]`.
+**7-byte form (v0xA6).** Encore 2.x ties are 7 bytes in a 14-byte slot, and the two flag bytes are
+**the other way round** from every later version `[verified]`:
+
+| Offset | Description |
+|--------|-------------|
+| `+5`   | tie-start flag (`0x80` = outgoing), the role `+6` plays later |
+| `+6`   | arc-direction byte, the same `0x02` / `0x04` / `0xFC` / `0xFE` encoding `+5` carries later |
+| `+9`   | staff position of the source note, duplicated at `+11` |
+
+Measured over 39772 v0xA6 ties: `+6` holds a value from the four-way direction vocabulary in 99.4%
+of them and `+5` in none, while `+5` is `0x80` in 85% and `0x00` in the rest. The source position at
+`+9` matches the converted file exactly across a v0xA6 to v0xC4 conversion.
+
+The arc x pair has not been located. In the one file where a conversion gives ground truth the
+bytes at `+8`, `+10` and `+12` are constant across every tie while the converted arc positions
+vary, so they are not it; x does not survive the conversion either way (see
+[WINI](#wini-block)). Without the arc span there is no equivalent of the authoritative forward-tie
+test, so tie direction in this format rests on the two flag bytes alone.
 
 A tie element marks only the start note; there is no matching tie-stop element. The receiver is the
 next note of the same pitch on the same staff and voice.
@@ -1506,6 +1521,7 @@ inside v0xC2, it is the two-byte element shift between Encore 3.x (app 773) and 
 | Note pitch offset             | `+11`                    | `+13` at size 22, `+15` at size 24 | `+15`              |
 | Note tuplet offset            | `+7`                     | `+13`                          | `+13`                  |
 | [TIE](#tie-element) size      | 7                        | 16 (3.x) / 18 (4.x)            | 18                     |
+| TIE flag bytes                | `+5` start, `+6` direction | `+5` direction, `+6` start   | `+5` direction, `+6` start |
 | TIE arc x pair (uint16)       | not located              | `+8` / `+10` at size 16, `+10` / `+12` at size 18 | `+10` / `+12` |
 | [Lyric](#lyric-element) text  | `+6`                     | `+0x12`                        | `+0x14`                |
 | [Ornament](#ornament-element) y | `+9`, signed **byte**  | `+12`, s16                     | `+12`, s16             |
