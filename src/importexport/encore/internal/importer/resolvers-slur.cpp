@@ -431,14 +431,11 @@ void resolveSlurs(BuildCtx& ctx)
     std::set<const Spanner*> explicitSlurs;
 
     // The v0xC2 slur measure-count (element +16) is unreliable: some files store noise or a
-    // per-staff constant there rather than a per-slur forward count. Two tells mark the whole
-    // file's field as junk, so every slur then resolves by the xoffset heuristic: (1) any count
-    // pointing past the last measure, and (2) the same multi-measure count repeated at different
-    // start measures (a real span varies per slur). See ENCORE_FORMAT.md §Slur.
+    // count pointing past the last measure marks the whole file's field as junk, so every slur
+    // then resolves by the xoffset heuristic instead. See ENCORE_FORMAT.md §Slur.
     bool v0c2SlurCountUnreliable = false;
     if (enc.fmt->slurXoffset2Stale()) {
         const int measCount = static_cast<int>(ctx.measuresByIdx.size());
-        std::map<int, std::set<int> > startMeasuresByCount;   // alMezuro value -> distinct start measures
         for (const PendingSlur& ps : ctx.pendingSlurs) {
             if (!ps.alMezuroValid || ps.alMezuro <= 0) {
                 continue;
@@ -447,21 +444,12 @@ void resolveSlurs(BuildCtx& ctx)
                 v0c2SlurCountUnreliable = true;
                 break;
             }
-            // A multi-measure span (>= 3) repeated at two or more different start measures is a
-            // constant, not a per-slur count. Small spans (1-2 measures) legitimately recur.
-            if (ps.alMezuro >= 3) {
-                startMeasuresByCount[ps.alMezuro].insert(ps.startMeasIdx);
-                if (startMeasuresByCount[ps.alMezuro].size() >= 2) {
-                    v0c2SlurCountUnreliable = true;
-                    break;
-                }
-            }
         }
     }
 
     // .enc has no SLURSTOP; endpoint derived from alMezuro (target measure) + xoffset heuristic.
     for (PendingSlur ps : ctx.pendingSlurs) {
-        // File-level: +16 is noise here, so drop the count and let the heuristic anchor the arc.
+        // File-level: the count is noise here, so drop it and let the heuristic anchor the arc.
         if (v0c2SlurCountUnreliable) {
             ps.alMezuroValid = false;
             ps.alMezuro = 0;

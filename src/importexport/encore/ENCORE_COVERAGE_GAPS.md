@@ -17,7 +17,7 @@ Corpus: **20577 real files** parsed, everything reachable under `~/Scores` follo
 |---|-----|-------|-------|-------------------|--------|
 | 0 | **Every Encore 3.x element body read 2 bytes late** | field | **3215 (15.6%)** | **4.23M notes, 581k rests, 11.5k ornaments** | **FIXED** |
 | 1 | Tie arc fields discarded by a size guard | field | ~4000 | **124131 ties** | **Encore 3.x half FIXED with gap 0**; v0xA6 half open, see below |
-| 2 | v0xC2 slur measure count read from the wrong offset on Encore 4.x | field | 1760 | **2185 slurs lost of 6691** | open, gap 0 corrected the Encore 3.x side only |
+| 2 | v0xC2 slur measure count read from the wrong offset on Encore 4.x | field | 1760 | **2185 slurs lost of 6691**, plus 83 files losing every count to a stale guard | **FIXED** |
 | 3 | v0xA6 ornament y and measure count at v0xC4 offsets | field | 806 | **105 spanners lost of 636 (16.5%)**, plus every ornament y | **FIXED** |
 | 4 | SCO5 tie arc read as 8-bit, always zero | field | 15 | 515 ties | **FIXED** |
 | 5 | Encrypted containers: 25% of the corpus, 2 fixtures | coverage | 5255 | whole container class | measured |
@@ -159,7 +159,7 @@ many ties, so the layout is recorded and the behaviour left alone.
 **Closes with:** a v0xA6 file with a converted twin whose ties pair densely enough to separate the
 two readings, or a round trip through Encore 2.x.
 
-## 2. v0xC2 slur measure count read from the wrong byte (2185 slurs lost)
+## 2. v0xC2 slur measure count read from the wrong byte  (FIXED)
 
 `EncFormatReader_V0xC2::postProcessElement` always takes the forward measure count from `+16`
 (`orn->alMezuro = orn->altMezuro`). The field moved with the +2 shift, and the corpus separates the
@@ -175,9 +175,20 @@ Zero failures on the generation the code was tuned for, one in three on the othe
 The ~4500 slurs that do not land outside the score are not therefore correct: they read the wrong
 byte and happen to land in range.
 
-**Fix:** pick the offset from the ornament size, 26 means `+16`, 28 means `+18`. No version lookup
-needed. The existing spec note about `+16` being "unreliable for a whole file" is a symptom-level
-workaround for this.
+**Fixed** by dropping the copy that put the value back on the `+16` field: gap 0 already points the
+inline read at the byte the file's generation uses, so the value read is the span in both.
+
+The fix had a second layer. The "unreliable count" guard was calibrated against the garbage `+16`
+values and, once the field was correct, was nullifying it. Measured over 887 files with slurs at the
+correct offset: the "count points past the last measure" tell fires on **0** files and stays as a
+cheap sanity check; the "same multi-measure span repeated" tell fires on **83** files, where a
+repeated span is ordinary music, and because it condemns the whole file it was discarding every
+count in it. That tell came from a file whose slurs carry 11 and 13 per staff at `+16` and **0 at
+`+18` for every one of them**: there was no per-staff constant, only a misread. It was removed,
+along with the test and fixture that encoded the phantom.
+
+Measured effect on a 44-measure file whose bytes declare 82 cross-measure slurs: the import goes
+from **21 to 82** cross-measure slurs, matching the file exactly.
 
 **Closes with:** one Encore 3.x and one Encore 4.0-4.2 fixture, each with a multi-measure slur.
 
