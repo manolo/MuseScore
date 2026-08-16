@@ -36,7 +36,6 @@
 #include <map>
 #include <set>
 #include <vector>
-#include <QDataStream>
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
