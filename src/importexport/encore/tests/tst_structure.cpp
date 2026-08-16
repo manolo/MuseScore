@@ -48,6 +48,8 @@
 #include "engraving/dom/page.h"
 #include "engraving/dom/part.h"
 #include "engraving/dom/clef.h"
+#include "engraving/dom/articulation.h"
+#include "engraving/dom/tie.h"
 
 #include "importexport/encore/internal/parser/readers.h"
 #include "engraving/dom/segment.h"
@@ -685,6 +687,75 @@ TEST_F(Tst_Structure, pre_encore4_element_body_offsets)
     muse::Ret ret = score->sanityCheck();
     EXPECT_TRUE(ret) << "pre-Encore-4 score should pass sanityCheck: " << ret.text();
     delete score;
+}
+
+// ===========================================================================
+// The same measure written in the geometry of each generation that occurs in the corpus. Encore 4.0
+// moved every element body two bytes later at once, so the note, the rest, the tie and the MIDI CC
+// all change size together, and the articulation vocabulary moved in the same release. A reader
+// that gets the generation wrong therefore fails on all of them at once, which is what makes one
+// assertion set over three files worth more than three separate tests.
+//
+// The third file is the combination that genuinely crosses the two version axes, a version byte of
+// 0xC4 with format 3.07: 996 files in the corpus and no fixture before this one. The reader comes
+// from the version byte and the geometry from the format version, so it is the case where the two
+// have to agree. See ENCORE_FORMAT.md §Version byte and release mapping.
+// ===========================================================================
+static void checkElementFamily(MasterScore* score, const char* what)
+{
+    ASSERT_NE(score, nullptr) << what;
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << what << ": " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr) << what;
+
+    std::vector<int> pitches;
+    int rests = 0, ties = 0, staccati = 0;
+    for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        EngravingItem* el = seg->element(0);
+        if (!el) {
+            continue;
+        }
+        if (el->isRest()) {
+            ++rests;
+            continue;
+        }
+        if (!el->isChord()) {
+            continue;
+        }
+        Chord* c = toChord(el);
+        for (Note* n : c->notes()) {
+            pitches.push_back(n->pitch());
+            if (n->tieFor()) {
+                ++ties;
+            }
+        }
+        for (Articulation* a : c->articulations()) {
+            if (a->symId() == SymId::articStaccatoAbove || a->symId() == SymId::articStaccatoBelow) {
+                ++staccati;
+            }
+        }
+    }
+    EXPECT_EQ(pitches, (std::vector<int> { 60, 60, 62 })) << what << ": pitches come from the body offset of this generation";
+    EXPECT_EQ(ties, 1) << what << ": the tie arc pair moves with the body too";
+    EXPECT_EQ(staccati, 1) << what << ": the staccato subtype is the one this generation spells";
+    EXPECT_EQ(rests, 1) << what;
+}
+
+TEST_F(Tst_Structure, element_family_reads_the_same_in_every_generation)
+{
+    MasterScore* encore3 = readEncoreScore("structure_family_3x.enc");
+    checkElementFamily(encore3, "Encore 3.x, version byte 0xC2 with format 3.05");
+    delete encore3;
+
+    MasterScore* encore4 = readEncoreScore("structure_family_40x_c2.enc");
+    checkElementFamily(encore4, "Encore 4.0 to 4.2, version byte 0xC2 with format 3.07");
+    delete encore4;
+
+    MasterScore* crossed = readEncoreScore("structure_family_40x_c4.enc");
+    checkElementFamily(crossed, "version byte 0xC4 with format 3.07, the crossed pair");
+    delete crossed;
 }
 
 // ===========================================================================

@@ -76,6 +76,30 @@ known XOR key; beyond that the stream is algorithmically generated and unbroken 
 plaintext `SCOW` form is structurally different, so these files cannot be read without re-saving
 from Encore as `SCOW`.
 
+### Element sizes by generation
+
+Encore 4.0 inserted two bytes into every element body at once, so the whole family moves together.
+Measured over the corpus, excluding the synthetic fixtures, these are the sizes each generation
+writes (the most common size for each element, in bytes, and for v0xA6 in its own 2-byte units):
+
+| Element | 2.50 (v0xA6) | 3.05 | 3.07 | 4.20 |
+|---------|--------------|------|------|------|
+| CLEF | 5 | 14 | 16 | 16 |
+| KEYCHANGE | 5 | 12 | 14 | 14 |
+| TIE | 7 | 16 | 18 | 18 |
+| BEAM | 9 | 28 | 30 | 30 |
+| ORNAMENT | 5 | 26 | 28 | 28 |
+| LYRIC | 5 | 22 | 24 | 24 |
+| CHORD | 6 | 14 | 18 | 16 |
+| REST | 7 | 16 | 18 | 18 |
+| NOTE | 10 | 22 | 24 | 28 |
+| MIDI CC | 4 | 10 | 12 | 12 |
+
+Every element gains exactly two bytes from 3.05 to 3.07 `[verified]`. From 3.07 to 4.20 only the
+note changes, growing by four to hold the two articulation slots, which is why a 4.20 note is 28
+where the generation before it is 24. A v0xA6 size is stated in 2-byte units, so its 10-byte note
+occupies 20 bytes on disk.
+
 ### Version byte and release mapping
 
 The byte at file offset `0x04` (present only in the plaintext containers) is the format version.
