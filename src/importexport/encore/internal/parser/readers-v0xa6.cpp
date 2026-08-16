@@ -102,8 +102,15 @@ bool EncFormatReader_V0xA6::postProcessElement(EncMeasureElem* elem,
         qint8 posByte;
         ds >> posByte;
         en->position = posByte;
-        // The compact note has no dot control either: its +14 belongs to the playback block.
+        // The compact note has no dot control either: its +14 belongs to the playback block. The
+        // body ends at +19, so the velocity, option and accidental slots the later layout keeps
+        // past that point fall on the element behind this one: the option byte reads as the next
+        // element's tick low byte and the accidental byte as its high byte. Left as read, the
+        // tablature fingering fallback would take a neighbour's tick for a string number.
         en->dotControl = 0;
+        en->velocity = 0;
+        en->options = 0;
+        en->alterationGlyph = 0;
         ds.device()->seek(savedPos);
     }
 

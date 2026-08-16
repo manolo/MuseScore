@@ -722,6 +722,11 @@ the playback duration and reads as a constant `0x80` on every note.
 The compact note has no dot control. The slot the later generations use for one falls inside the
 playback block here, so a dotted v0xA6 note is recognised only from its duration.
 
+The body ends at `+19`. The velocity, option and accidental-glyph slots the later generations keep
+past that point belong to the following element: at `+20` sits its tick low byte and at `+21` its
+tick high byte, which is why an accidental byte read there takes only the values `0`, `1`, `2`, `3`
+and `255`, the tick pages of a measure plus the end marker `[verified]`.
+
 A v0xA6 note that carries one articulation is written as size 11 (a 22-byte slot); the layout is
 otherwise identical (pitch at `+11`, tuplet at `+7`) with the single articulation byte at `+18`
 (`0x20` there is a fermata above) `[verified]`.
