@@ -80,8 +80,29 @@ It is one of three independent coordinates, and it is the one a parser dispatche
 | Coordinate | Where | What it tracks |
 |------------|-------|----------------|
 | version byte | `0x04` | the **ornament subtype vocabulary** |
-| app version | `0x28` | the **element size generation** |
-| format revision | `0x3E` | the build within the app-1056 line |
+| format version | `0x28` | the **element size generation** |
+| format revision | `0x3E` | not a layout selector, see below |
+
+**The field at `0x28` is a file format version, in BCD.** The major digit is the high byte and the
+minor the low, so `0x0420` is format 4.20. Every value observed has valid BCD nibbles and the
+sequence rises with the generation `[observed]`:
+
+| bytes | format | generation | files |
+|-------|--------|------------|-------|
+| `0x0250` | 2.50 | Encore 2.x | 784 |
+| `0x0305` | 3.05 | Encore 3.x | 3216 |
+| `0x0307` | 3.07 | Encore 4.0-4.2 | 2673 |
+| `0x0420` | 4.20 | Encore 4.3 through 5.x | 13959 |
+
+This is the **only** version indicator the header carries. Scanning every header byte across the
+four generations finds exactly two that are constant within a generation and differ between them,
+and they are `0x28` and `0x29` `[verified]`. There is no date and no build stamp, so the release
+that wrote a file can be narrowed to its format generation and no further.
+
+Because the values are ordered, a format version this document does not list still places itself:
+it belongs to the layout of the highest listed version it is not older than. Note that the format
+version stopped tracking the marketing release after 4.20, which Encore 4.3, 4.5 and 5.x all
+write.
 
 | Byte   | Format | Encore release (app version at header `0x28`)                  | Tag          |
 |--------|--------|----------------------------------------------------------------|--------------|

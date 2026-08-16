@@ -380,18 +380,19 @@ bool EncRoot::read(QDataStream& ds)
     if (!header.readMagicAndVersion(ds)) {
         return false;
     }
-    // The app version at 0x28 selects the element body layout, and the reader has to know it before
-    // the header is read (reading the header needs the reader). Peek it and restore the cursor;
-    // 0x28 is the same offset in every format. See ENCORE_FORMAT.md §Version byte and release mapping.
-    quint16 appVersion = 0;
+    // The format version at 0x28 selects the element body layout, and the reader has to know it
+    // before the header is read (reading the header needs the reader). Peek it and restore the
+    // cursor; 0x28 is the same offset in every format.
+    // See ENCORE_FORMAT.md §Version byte and release mapping.
+    quint16 formatVersion = 0;
     if (QIODevice* dev = ds.device()) {
         const qint64 saved = dev->pos();
         if (dev->seek(0x28)) {
-            ds >> appVersion;
+            ds >> formatVersion;
         }
         dev->seek(saved);
     }
-    fmt = EncFormatReader::create(header.chuMagio, header.magic, appVersion);
+    fmt = EncFormatReader::create(header.chuMagio, header.magic, formatVersion);
     if (!header.read(ds, *fmt)) {
         return false;
     }

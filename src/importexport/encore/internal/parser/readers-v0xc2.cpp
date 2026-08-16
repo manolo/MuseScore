@@ -150,17 +150,17 @@ static void markImpliedTupletMembers(std::vector<EncMeasureElem*>& elems)
 //   - Instrument metadata: names only (no TK-based MIDI/key tables)
 struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
 {
-    explicit EncFormatReader_V0xC2(quint16 appVersion)
-        : m_appVersion(appVersion) {}
+    explicit EncFormatReader_V0xC2(quint16 formatVersion)
+        : m_formatVersion(formatVersion) {}
 
     const char* formatName() const override { return "v0xC2"; }
     quint8 lyricTextGapAfterKie() const override { return 7; }
 
     // Encore 4.0 inserted two bytes into every element body at offset +8, so a file written by an
-    // earlier build keeps those fields two bytes lower. The app version is what separates the two
-    // generations: the version byte is 0xC2 for both, and element sizes overlap between them.
+    // earlier build keeps those fields two bytes lower. The format version is what separates the
+    // two generations: the version byte is 0xC2 for both, and element sizes overlap between them.
     // See ENCORE_FORMAT.md §Version byte and release mapping.
-    int elementBodyShift() const override { return m_appVersion < kFirstEncore4AppVersion ? -2 : 0; }
+    int elementBodyShift() const override { return m_formatVersion < ENC_FORMAT_3_07 ? -2 : 0; }
 
     // v0xC2 instrument entries end two bytes earlier than v0xC4 ones, so their MIDI program
     // table sits 44 bytes from the end rather than 46.
@@ -241,14 +241,11 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
     }
 
 private:
-    // First Encore app version that writes the post-4.0 element body layout.
-    static constexpr quint16 kFirstEncore4AppVersion = 775;
-
-    quint16 m_appVersion { 0 };
+    quint16 m_formatVersion { 0 };
 };
 
-std::unique_ptr<EncFormatReader> makeFormatReader_V0xC2(quint16 appVersion)
+std::unique_ptr<EncFormatReader> makeFormatReader_V0xC2(quint16 formatVersion)
 {
-    return std::make_unique<EncFormatReader_V0xC2>(appVersion);
+    return std::make_unique<EncFormatReader_V0xC2>(formatVersion);
 }
 } // namespace mu::iex::enc
