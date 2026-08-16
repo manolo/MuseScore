@@ -43,6 +43,7 @@ set(MODULE_TEST_SRC
     ${CMAKE_CURRENT_LIST_DIR}/tst_ornaments_slurs.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tst_grace.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tst_text.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tst_census.cpp
 )
 
 set(MODULE_TEST_LINK
