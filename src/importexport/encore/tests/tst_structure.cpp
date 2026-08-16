@@ -641,6 +641,50 @@ TEST_F(Tst_Structure, old_format_v0c2_correct_pitches)
     delete score;
 }
 
+// ===========================================================================
+// Encore 4.0 inserted two bytes into every element body at offset +8, so a file written by an
+// earlier build (app version 773) keeps every field from there on two bytes lower. Reading such a
+// file with the post-4.0 offsets takes the wrong byte for the pitch and never reaches the tie arc.
+// See ENCORE_FORMAT.md §Version byte and release mapping.
+//
+// The fixture is an Encore 3.x file holding two half notes whose real pitch (C4, 60) sits at +13,
+// with a decoy 72 at +15 where the post-4.0 layout expects the pitch, plus a 16-byte tie whose arc
+// span at +8/+10 is its only tie-start signal (both flag bytes are clear).
+//
+// Before the offsets were keyed on the generation this imported the notes as C5 and produced no
+// tie at all.
+TEST_F(Tst_Structure, pre_encore4_element_body_offsets)
+{
+    MasterScore* score = readEncoreScore("structure_v0c2_pre4_element_offsets.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<Note*> notes;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s;
+             s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->elist()) {
+                if (e && e->isChord()) {
+                    for (Note* n : toChord(e)->notes()) {
+                        notes.push_back(n);
+                    }
+                }
+            }
+        }
+    }
+
+    ASSERT_EQ(notes.size(), 2u) << "fixture holds two half notes";
+    EXPECT_EQ(notes[0]->pitch(), 60) << "pitch comes from +13 in a pre-4.0 note, not from the +15 decoy";
+    EXPECT_EQ(notes[1]->pitch(), 60) << "pitch comes from +13 in a pre-4.0 note, not from the +15 decoy";
+    EXPECT_NE(notes[0]->tieFor(), nullptr) << "the 16-byte tie carries its arc span at +8/+10";
+
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "pre-Encore-4 score should pass sanityCheck: " << ret.text();
+    delete score;
+}
+
 TEST_F(Tst_Structure, old_format_v0c2_triplets_detected)
 {
     // v0xC2: 6 eighth notes at 80-tick spacing (2/3 of an eighth) → detectImpliedTuplet returns 3:2.

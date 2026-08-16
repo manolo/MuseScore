@@ -55,12 +55,17 @@ integer in the file (with one exception, the TK size field, noted under [Instrum
 |--------|-----------|---------------|------------------------------|
 | `SCOW` | plaintext | little-endian | Windows Encore, all versions |
 | `SCO5` | plaintext | big-endian    | macOS Encore 5               |
-| `SCOX` | plaintext | ,             | rare variant `[observed]`    |
-| `SCOR` | plaintext | ,             | rare variant `[observed]`    |
-| `SCOS` | plaintext | ,             | rare variant `[observed]`    |
+| `SCOX` | plaintext | unknown       | reported variant, no sample `[assumed]` |
+| `SCOR` | plaintext | unknown       | reported variant, no sample `[assumed]` |
+| `SCOS` | plaintext | unknown       | reported variant, no sample `[assumed]` |
 | `ZBOT` | encrypted | ,             | Encore 4.x default `[observed]` |
-| `ZBOP` | encrypted | ,             | encrypted variant `[observed]` |
-| `ZBO6` | encrypted | ,             | encrypted variant `[observed]` |
+| `ZBOP` | encrypted | ,             | encrypted variant `[assumed]` |
+| `ZBO6` | encrypted | ,             | encrypted variant `[assumed]` |
+
+Only `SCOW` and `SCO5` carry a documented byte order, and only those two are accepted by a parser
+that dispatches on the magic. `SCOX`, `SCOR`, `SCOS`, `ZBOP` and `ZBO6` appear in earlier
+descriptions of the format, but none of the five occurs in a corpus of twenty thousand files, so
+neither their byte order nor their layout is established.
 
 **Encryption.** In a `ZBOT` / `ZBOP` / `ZBO6` container only the first 42 bytes decrypt with a
 known XOR key; beyond that the stream is algorithmically generated and unbroken `[observed]`. The
@@ -70,25 +75,75 @@ from Encore as `SCOW`.
 ### Version byte and release mapping
 
 The byte at file offset `0x04` (present only in the plaintext containers) is the format version.
+It is one of three independent coordinates, and it is the one a parser dispatches on:
+
+| Coordinate | Where | What it tracks |
+|------------|-------|----------------|
+| version byte | `0x04` | the **ornament subtype vocabulary** |
+| app version | `0x28` | the **element size generation** |
+| format revision | `0x3E` | the build within the app-1056 line |
 
 | Byte   | Format | Encore release (app version at header `0x28`)                  | Tag          |
 |--------|--------|----------------------------------------------------------------|--------------|
 | `0xA6` | v0xA6  | Encore 2.x only (app 592)                                      | `[verified]` |
-| `0xC2` | v0xC2  | Encore 3.x (app 773) and Encore 4.0-4.2 (app 775)              | `[verified]` |
-| `0xC4` | v0xC4  | Encore 4.5 through 5.x (app 1056)                              | `[verified]` |
+| `0xC2` | v0xC2  | Encore 3.x (app 773) and early Encore 4.0-4.2 saves (app 775)  | `[verified]` |
+| `0xC4` | v0xC4  | later Encore 4.0-4.2 saves (app 775), and 4.5 through 5.x (app 1056) | `[verified]` |
 
 Notes on the mapping:
 
 - A genuine Windows Encore 3.0 save already uses `SCOW` with version byte `0xC2` and app version
   773, so `0xA6` is Encore 2.x only `[verified]`. Encore 4.5 opens a v0xA6 file with a font /
   conversion prompt and re-saves it as v0xC4, so no 4.5 or later build produces v0xA6.
-- v0xC4 spans Encore 4.5 through 5.x: both write version byte `0xC4` and app version 1056, so
-  neither field alone identifies the release. The byte at header offset `0x3E` is a
-  format-revision counter that does, constant for a given Encore build regardless of score
-  content: `0` on early pre-4.5 files, `1` on Encore 4.5, `4` on Encore 5.0 `[verified]`. Encore
-  4.5 refuses a file whose `0x3E` revision is newer than it supports, which is why a 5.0 file
-  fails to open in 4.5. Dated saves corroborate the split: `0x3E=1` files run 1999-2008, `0x3E=4`
-  files never appear before 2009 `[observed]`.
+- **The version byte and the app version are not redundant.** App 775 occurs with both `0xC2` and
+  `0xC4`, and the two groups share every element size while using disjoint articulation subtypes:
+  the `0xC2` group encodes accent as `0xC4`, the `0xC4` group as `0xBE`, with no overlap across a
+  corpus of 22 files. Encore 4.0 to 4.2 therefore renumbered its ornament subtypes mid-line and
+  bumped the version byte for it, leaving the app version stamp alone `[observed]`. This is why the
+  version byte is the right reader selector: it is precisely the ornament-vocabulary axis.
+- The reverse case also occurs: one file carries version byte `0xC2` with app 1056 `[observed]`.
+  Whether that is an Encore 5 build saving in a legacy format is untested.
+- v0xC4 spans Encore 4.3 through 5.x, all writing version byte `0xC4` and app version 1056, so
+  neither field alone identifies the release. The byte at header offset `0x3E` takes the values
+  `0`, `1`, `2` and `4`. `4` marks Encore 5.0 and `2` macOS Encore 5 `[observed]`; Encore 4.5
+  refuses a file whose `0x3E` is newer than it supports, which is why a 5.0 file fails to open in
+  4.5. Dated saves corroborate that split: `0x3E=1` files run 1999-2008, `0x3E=4` files never
+  appear before 2009 `[observed]`.
+- **`0x3E` is not a layout selector, and `0` versus `1` is not a build boundary.** One author
+  working in Encore 4.3 produced 153 files at revision 0 and 246 at revision 1; the two groups have
+  identical instrument entry strides, element size classes, ornament vocabulary and score-shape
+  distributions `[verified]`. Nothing in a parser should branch on this byte. What it does track is
+  unresolved.
+
+**Element sizes by generation.** The app version, not the version byte, predicts how large each
+element is. Every element type grew by exactly two bytes between Encore 3.x and Encore 4.x, which
+is a single change to a shared element preamble rather than a set of per-element quirks
+`[observed]`. Top three observed sizes per type, from a corpus of 262 files:
+
+| element | 2.x (592) | 3.x (773) | 4.0-4.2 (775) | 4.5 / 5.x (1056) |
+|---------|-----------|-----------|----------------|-------------------|
+| clef    | .         | .         | 16             | 16                |
+| key change | 5      | 12        | 14             | 14                |
+| tie     | 7         | 16        | 18             | 18                |
+| beam    | 9, 14, 19 | 28, 44, 76 | 30, 46, 62    | 30, 46, 62        |
+| ornament| 5, 12, 15 | 14, 26, 32 | 16, 28, 34    | 16, 28, 86        |
+| lyric   | 5, 6, 7   | 20, 22, 24 | 22, 24, 26    | 22, 24, 26        |
+| chord symbol | .    | .         | .              | 14, 16, 18        |
+| rest    | 7         | 16        | 18, 20         | 18, 20, 26        |
+| note    | 10, 11    | 22, 24    | 24, 26         | 18, 28            |
+| type 10 | .         | .         | 24             | .                 |
+| MIDI CC | 4         | 10        | 12             | 12                |
+
+**The two bytes go in at `+6`.** Bytes `+0` to `+5` are byte-identical between an Encore 3.x
+element and its Encore 4.x conversion, and from `+6` onward the 4.x element carries two extra bytes
+and then continues identically. Verified on a 3.x file converted in Encore 4.5, across ties, beams,
+ornaments and rests `[verified]`. Notes additionally append four bytes at the tail when they grow
+from 24 to 28.
+
+So a field addressed by an absolute offset at or past `+6` is at `X` in Encore 3.x and at `X + 2`
+in Encore 4.x. The affected layouts are documented in place: [note](#v0xc2-note-size-22-or-24),
+[ornament](#ornament-element), [TIE](#tie-element) and the [Slur](#slur) forward measure count.
+Both of the "two v0xC2 layouts" noted elsewhere in this document, the tempo BPM slot and the slur
+measure count, are this one shift seen from different fields.
 
 `SCO5` files carry no version byte at `0x04` (the byte order is big-endian and `chuMagio` is not
 `0xC4`); they are the macOS variant of the v0xC4 format and are recognised by the `SCO5` magic
@@ -568,32 +623,38 @@ visual staff line: `line = max(-4, 10 - position)`, placing A4 on the middle lin
 
 ### v0xC2 note (size 22 or 24)
 
-More compact than v0xC4. Two pitch-storage sub-variants exist, distinguished by whether `+15`
-holds a plausible MIDI pitch (at least C0, MIDI 12):
+Size 22 and size 24 are **not sub-variants of one layout**: they are the two sides of the two-byte
+insertion described under [Version byte](#version-byte-and-release-mapping). A size-22 note is an
+Encore 3.x note; a size-24 note is an Encore 4.0-4.2 note, and its body from `+8` onward sits two
+bytes later. Size 28 (Encore 4.5 and later) is size 24 with four more bytes appended at the tail
+`[verified]`.
 
-- **Sub-variant A:** `+15` is empty or a small stray flag (observed 1 or 3). MIDI pitch is at
-  `+13` (the slot v0xC4 uses for the tuplet byte); there is no explicit tuplet byte.
-- **Sub-variant B:** `+15` holds a plausible pitch (the standard slot). `+13` then holds a genuine
-  tuplet ratio (for example `0x32` = 3:2).
+| Field                | size 22 (3.x) | size 24 / 28 (4.x and later) |
+|----------------------|---------------|------------------------------|
+| face value           | `+5`          | `+5`                         |
+| grace1               | `+6`          | `+6`                         |
+| grace2               | `+7`          | `+7`                         |
+| xoffset              | **`+8`**      | `+10`                        |
+| position             | **`+10`**     | `+12`                        |
+| tuplet ratio         | **`+11`**     | `+13`                        |
+| dotControl           | **`+12`**     | `+14`                        |
+| MIDI pitch           | **`+13`**     | `+15`                        |
+| playback duration    | `+14` (2)     | `+16` (2)                    |
+| velocity             | `+17`         | `+19`                        |
+| options              | `+18`         | `+20`                        |
+| alteration glyph     | `+19`         | `+21`                        |
+| articulation byte    | none          | `+22` (size 24 only)         |
+| placement flag       | none          | `+23` (size 24 only; `0x01` or `0x08`, not a second articulation) |
 
-A value below C0 at `+15` cannot be a real note, so the pitch comes from `+13` in that case; a bare
-"non-zero at `+15`" test is wrong in both directions.
+Verified by converting an Encore 3.x file to v0xC4 in Encore 4.5 and matching the two element
+streams: over 374 paired notes, `xoffset`, `tuplet` and `dotControl` agree with the converted file
+in 374 of 374 cases at the size-22 offsets and in at most 9 of 374 at the size-24 offsets
+`[verified]`.
 
-| Offset | Size | Description                                                       |
-|--------|------|-------------------------------------------------------------------|
-| `+5`   | 1    | face value                                                        |
-| `+6`   | 1    | grace1                                                            |
-| `+7`   | 1    | grace2                                                            |
-| `+10`  | 1    | xoffset                                                           |
-| `+13`  | 1    | MIDI pitch (sub-variant A) or tuplet ratio (sub-variant B)        |
-| `+14`  | 1    | dotControl                                                        |
-| `+15`  | 1    | MIDI pitch (sub-variant B); stray flag in sub-variant A           |
-| `+16`  | 2    | playback duration in ticks                                        |
-| `+19`  | 1    | velocity                                                          |
-| `+20`  | 1    | options                                                           |
-| `+21`  | 1    | alteration glyph                                                  |
-| `+22`  | 1    | articulation byte (size 24 only)                                  |
-| `+23`  | 1    | placement/direction flag, size 24 only (`0x01` or `0x08`; not a second articulation) |
+This is why a "sub-variant" test on `+15` appears to work: in a size-22 note `+15` is the low byte
+of the playback duration, usually small, and `+13` is the real pitch. Reading the pitch that way
+recovers it, but the tuplet ratio at `+11` is then never read at all, which is what makes an
+Encore 3.x score look as though it has no explicit tuplets.
 
 Size 22 notes carry no articulation slot; size 24 notes add one at `+22`. A `dotControl` of `0xC0`
 is characteristic of size-24 notes (a layout flag; bit 0 clear, so not dotted).
@@ -658,7 +719,7 @@ grace at a real tick pushes the following notes forward, so the last real note i
 with a raw gap to the measure end that is smaller than its face value: the grace "borrowed" that
 time. Inner graces (`grace1 & 0x30 == 0x10`) after a leading grace (`grace1 & 0x30 == 0x20`) have a
 strictly larger face-value number (a shorter note). (The reconstruction rule that restores the
-borrowed duration lives in ENCORE_IMPORTER.md.)
+borrowed duration lives in the importer spec.)
 
 ---
 
@@ -793,8 +854,9 @@ Size 6. Byte `+5` is the key index above.
 
 ## TIE element
 
-Size 16 or 18. Byte `+5` is a signed arc-curvature value (the vertical bow), NOT a bitfield; byte
-`+6` is a tie-start flag.
+Size 7 (v0xA6), 16 (Encore 3.x) or 18 (Encore 4.x and later). Byte `+5` is a signed arc-curvature
+value (the vertical bow), NOT a bitfield; byte `+6` is a tie-start flag. Both sit at the same
+offset in every form.
 
 | Byte `+5` | Signed | Arc        |
 |-----------|--------|------------|
@@ -806,14 +868,17 @@ Size 16 or 18. Byte `+5` is a signed arc-curvature value (the vertical bow), NOT
 All four values mark a real outgoing tie. Treating `+5` as a bitfield (for example
 `(+5 & 0x80) || (+5 & 0x02)`) silently drops the equally valid `0x04`.
 
-**18-byte form.** Two additional bytes encode the visual x-positions of the arc endpoints, and
-these are the authoritative forward-tie signal:
+**Arc endpoints.** Both forms carry the visual x-positions of the arc endpoints, and these are the
+authoritative forward-tie signal. They sit two bytes earlier in the 16-byte form, following the same shift as every other element between Encore 3.x and 4.x:
 
-| Offset | Description                                                     |
-|--------|-----------------------------------------------------------------|
-| `+10`  | arc-start x (measure-relative pixels)                           |
-| `+12`  | arc-end x                                                       |
-| `+14`  | staff position of the source note (disambiguates chord members) |
+| Field                                 | 16-byte form | 18-byte form |
+|---------------------------------------|--------------|--------------|
+| arc-start x (measure-relative pixels) | `+8`         | `+10`        |
+| arc-end x                             | `+10`        | `+12`        |
+| staff position of the source note (disambiguates chord members) | `+12` | `+14` |
+
+The bytes between `+7` and the arc pair are always zero in both forms, which is where the two extra
+bytes of the 18-byte form went `[observed]`.
 
 - `arcX1 < arcX2`: a genuine left-to-right span, a real forward tie regardless of `+5`.
 - `arcX1 == arcX2`: zero horizontal extent, an intra-chord decorative arc (Encore connects two
@@ -822,8 +887,14 @@ these are the authoritative forward-tie signal:
   `arcX2 = arcX1` as a placeholder. Intra-chord arcs often appear in groups of 2-4 identical copies
   at the same tick.
 
-**16-byte form.** With no arc x-positions, tie-start falls back to the byte signal
-`(+5 & 0x80) || (+5 & 0x02) || (+6 & 0x80)`.
+Because a zeroed arc pair reads as `arcX1 == arcX2`, failing to read these fields does not degrade
+gracefully: it classifies every tie in the file as an intra-chord arc rather than a forward tie.
+The fallback byte signal `(+5 & 0x80) || (+5 & 0x02) || (+6 & 0x80)` is only correct where the arc
+pair is genuinely absent, which no observed form is.
+
+**7-byte form (v0xA6).** Encore 2.x ties are 7 bytes in a 14-byte slot. A duplicated byte pair at
+`+9` and `+11` matches the source-position pattern of the later forms, but the arc pair has not been
+located `[assumed]`.
 
 A tie element marks only the start note; there is no matching tie-stop element. The receiver is the
 next note of the same pitch on the same staff and voice.
@@ -864,6 +935,26 @@ encoding), which matters in compound meters.
 **Staff-text entry index.** Present at `+32` only when the element is at least 33 bytes. In shorter
 ornaments (notably v0xC2 size-32 staff-text elements) it is read from `+30`, sharing it with the
 tempo byte.
+
+**Encore 3.x ornament.** The offsets in the table above are the Encore 4.x layout. An Encore 3.x
+ornament (app 773, sizes 14, 26, 32, 36) has every field from `+6` onward two bytes earlier
+`[verified]`:
+
+| Field | Encore 3.x | Encore 4.x and later |
+|-------|-----------|----------------------|
+| subtype | `+5` | `+5` |
+| xoffset | `+8` | `+10` |
+| y (signed s16) | `+10` | `+12` |
+| v0xC2 forward measure-count | `+14` | `+16` |
+| forward measure-count | `+16` | `+18` |
+| end x | `+18` | `+20` |
+| hairpin direction | `+24` | `+26` |
+| tempo beat unit | `+26` | `+28` |
+| tempo BPM | `+28` | `+30` |
+| staff-text entry index | `+30` | `+32` |
+
+Each of the first six was verified against the 4.5 conversion of an Encore 3.x file in 11 of 11
+paired ornaments, against 0 of 11 at the Encore 4.x offsets.
 
 **v0xA6 compact ornament.** The v0xA6 ornament is compact (declared size 15, a 30-byte slot). Its
 signed s16 y is at `+8` (not `+12`) and its staff-text entry index is at `+28` (not the size-based
@@ -965,10 +1056,21 @@ reliable field differs by version:
   stored as a signed byte but must be read unsigned for this arithmetic (values above 127 are
   stored negative).
 - **v0xC2:** the absolute end-x lives in a stale coordinate origin and must not be matched
-  directly. The slur's forward measure-count is at `+16` (not `+18`) and is usually reliable,
-  including the value 0 (a within-measure slur). It is unreliable for a whole file when any slur's
-  `+16` points past the last measure, or when the same multi-measure value (3 or more) repeats
-  across slurs starting in different measures (a per-staff constant rather than a real count).
+  directly, so the forward measure-count is the only usable endpoint. **Its offset follows the
+  element size**, with the same two-byte shift as every other element between Encore 3.x and 4.x:
+
+  | Slur ornament size | Forward measure-count | Generation |
+  |--------------------|-----------------------|------------|
+  | 26                 | `+16`                 | Encore 3.x (app 773) |
+  | 28                 | `+18`                 | Encore 4.0-4.2 (app 775) |
+
+  Measured over the corpus: on size-26 slurs the count at `+16` lands inside the score in 100% of
+  cases against 58% for `+18`; on size-28 slurs `+18` lands inside in 100% of cases against 68% for
+  `+16`, where the wrong slot yields values such as 255 `[verified]`.
+
+  Reading `+16` unconditionally is what makes the field look "unreliable for a whole file": on a
+  size-28 slur it is simply the wrong byte. Once the offset is chosen by size, the count is
+  reliable including the value 0 (a within-measure slur).
 
 ---
 
@@ -1095,7 +1197,7 @@ v0xC4, and SCO5; v0xA6 does not store it.
   beat.
 
 (How a parser uses the column to rebuild chords, split tightly played tuplets, and correct
-stale ticks is in ENCORE_IMPORTER.md.)
+stale ticks is in the importer spec.)
 
 ---
 
@@ -1356,7 +1458,9 @@ of every UTF-16 code unit; the probe is always applied.
 
 ### Per-version deltas
 
-Every systematic deviation, with a link back to the section that details it.
+Every systematic deviation, with a link back to the section that details it. Where a row splits
+inside v0xC2, it is the two-byte element shift between Encore 3.x (app 773) and Encore 4.0-4.2
+(app 775), described under [Version byte](#version-byte-and-release-mapping).
 
 | Aspect                        | v0xA6                    | v0xC2                          | v0xC4 / SCO5           |
 |-------------------------------|--------------------------|--------------------------------|------------------------|
@@ -1364,18 +1468,21 @@ Every systematic deviation, with a link back to the section that details it.
 | Size selector offset          | `0x8D`                   | `0x52`                         | `0x52`                 |
 | [MEAS](#measure-block-meas) header | `0x1A` (26)         | `0x36` (54)                    | `0x36` (54)            |
 | Element slot stride           | `size * 2`               | `size`                         | `size`                 |
-| [Note](#note-element) size    | 10 / 11                  | 22 / 24                        | 28                     |
-| Note pitch offset             | `+11`                    | `+13` or `+15` (sub-variant)   | `+15`                  |
-| Note tuplet offset            | `+7`                     | `+13` (sub-variant B)          | `+13`                  |
+| [Note](#note-element) size    | 10 / 11                  | 22 (3.x) / 24 (4.x)            | 24 (4.x) / 28 (4.5+)   |
+| Note pitch offset             | `+11`                    | `+13` at size 22, `+15` at size 24 | `+15`              |
+| Note tuplet offset            | `+7`                     | `+13`                          | `+13`                  |
+| [TIE](#tie-element) size      | 7                        | 16 (3.x) / 18 (4.x)            | 18                     |
+| TIE arc x pair (uint16)       | not located              | `+8` / `+10` at size 16, `+10` / `+12` at size 18 | `+10` / `+12` |
 | [Lyric](#lyric-element) text  | `+6`                     | `+0x12`                        | `+0x14`                |
 | [Ornament](#ornament-element) y | `+8` (compact)         | `+12`                          | `+12`                  |
 | Ornament staff-text index     | `+28` (compact)          | `+32` or `+30`                 | `+32`                  |
-| Slur forward-count field      | (no xoffset)             | `+16`                          | `+18` / end-x at `+20` |
+| [Slur](#slur) forward-count   | (no xoffset)             | `+16` at size 26, `+18` at size 28 | `+18` / end-x at `+20` |
 | [Chord column](#chord-column-xoffset) | not stored       | stored                         | stored                 |
 | [Key signature](#key-encoding)| LINE 22-byte entry `+14` | LINE 30-byte entry `+15`       | LINE 30-byte entry `+15` |
 | [TEXT](#text-block) run header | absent                  | present                        | present                |
 | Grace1 tie-sender nibble      | always 0                 | low nibble = 1 when tie sender | always 0               |
 | [WINI](#wini-block) unit      | screen pixels            | pixels or points               | points                 |
+
 
 ### Other oddities
 
