@@ -23,6 +23,7 @@
 // Read ORNAMENT elements (slurs, wedges, staff text, etc.): geometry, spanning measure counts, tind.
 
 #include "elem-ornament.h"
+#include "readers.h"
 
 namespace mu::iex::enc {
 bool EncOrnament::read(QDataStream& ds)
@@ -58,32 +59,16 @@ bool EncOrnament::read(QDataStream& ds)
     } else {
         tind = tempo;
     }
-    // A compact ornament (v0xA6) does not follow the field order read above, so the fields it
-    // places elsewhere are re-read from their own offsets. Scope each seek to the device so an
-    // ornament near EOF cannot desync the element loop.
+    // The compact ornament keeps these three elsewhere. See ENCORE_FORMAT.md §Ornament element.
     const qint64 elemStart = elemPos - 3;   // elemPos sits just past the type/voice byte, at +3
-    auto readAt = [&](int elemOffset, auto& dest) {
-        const qint64 pos = elemStart + elemOffset;
-        if (pos >= 0 && pos < ds.device()->size()) {
-            ds.device()->seek(pos);
-            ds >> dest;
-        }
-    };
-
-    // The staff-text TEXT index is the one compact field that is subtype-specific.
     if (tindOffset >= 0 && ornType() == EncOrnamentType::STAFFTEXT) {
-        readAt(tindOffset, tind);
+        tind = byteAt(ds, elemStart + tindOffset);
     }
-    // Vertical placement is a signed byte in the compact ornament, not the s16 read above, and it
-    // applies to every subtype: dynamics placement and the fermata above/below pair need it too.
     if (yByteOffset >= 0) {
-        qint8 y = 0;
-        readAt(yByteOffset, y);
-        yoffset = y;
+        yoffset = static_cast<qint8>(byteAt(ds, elemStart + yByteOffset));
     }
-    // Forward measure count, likewise for every subtype.
     if (measCountOffset >= 0) {
-        readAt(measCountOffset, alMezuro);
+        alMezuro = byteAt(ds, elemStart + measCountOffset);
     }
     // No trailing skip: the element loop reseeks to the element end after read().
     return true;

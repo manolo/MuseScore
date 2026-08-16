@@ -60,6 +60,12 @@ bool skipBlock(QDataStream& ds, qint64 size);
 // Returns false when the cursor is already at/past that end or the end lies past EOF.
 bool skipToBlockEnd(QDataStream& ds, qint64 blockStartPos, qint64 declaredLen);
 
+// One byte at an absolute file offset, leaving the cursor where it was. Returns 0 past EOF.
+quint8 byteAt(QDataStream& ds, qint64 offset);
+
+// True for a plaintext container this build reads. See ENCORE_FORMAT.md §Magics and byte order.
+bool isReadableEncoreMagic(const QString& magic);
+
 // Device position just past a MEAS element stream, clamped to deviceSize so an oversized varsize
 // cannot push the element loop past EOF. Pure so it can be unit-tested with synthetic sizes.
 qint64 clampMeasureEnd(qint64 measStart, quint32 varsize, qint64 elemBlockOffset, qint64 deviceSize);
