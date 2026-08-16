@@ -53,19 +53,23 @@ integer in the file (with one exception, the TK size field, noted under [Instrum
 
 | Magic  | Storage   | Byte order    | Notes                        |
 |--------|-----------|---------------|------------------------------|
-| `SCOW` | plaintext | little-endian | Windows Encore, all versions |
-| `SCO5` | plaintext | big-endian    | macOS Encore 5               |
-| `SCOX` | plaintext | unknown       | reported variant, no sample `[assumed]` |
-| `SCOR` | plaintext | unknown       | reported variant, no sample `[assumed]` |
-| `SCOS` | plaintext | unknown       | reported variant, no sample `[assumed]` |
-| `ZBOT` | encrypted | ,             | Encore 4.x default `[observed]` |
-| `ZBOP` | encrypted | ,             | encrypted variant `[assumed]` |
-| `ZBO6` | encrypted | ,             | encrypted variant `[assumed]` |
+| `SCOW` | plaintext | little-endian | Windows Encore, all versions `[verified]` |
+| `SCO5` | plaintext | big-endian    | macOS Encore 5 `[verified]`               |
+| `ZBOT` | encrypted | ,             | Encore 4.x default `[verified]`           |
+| `ZBOP` | encrypted | ,             | encrypted variant, no sample `[assumed]`  |
+| `ZBO6` | encrypted | ,             | encrypted variant, no sample `[assumed]`  |
 
-Only `SCOW` and `SCO5` carry a documented byte order, and only those two are accepted by a parser
-that dispatches on the magic. `SCOX`, `SCOR`, `SCOS`, `ZBOP` and `ZBO6` appear in earlier
-descriptions of the format, but none of the five occurs in a corpus of twenty thousand files, so
-neither their byte order nor their layout is established.
+`SCOW`, `SCO5` and `ZBOT` are the three that occur: a corpus of 21620 files holds 16187, 16 and
+5257 of them, and every `ZBOT` decrypts to a `SCOW` body.
+
+`ZBOP` and `ZBO6` are assumed to share the `ZBOT` keystream. No sample exists to confirm it, but
+the assumption is safe to hold: the decrypted buffer still has to pass the header check, so a file
+whose keystream turned out to differ is rejected rather than imported as wrong music.
+
+`SCOX`, `SCOR` and `SCOS` appear in earlier descriptions of the format and are deliberately **not**
+listed above. None occurs in the corpus, no byte order or layout was ever established for them, and
+nothing in the importer acts on them, so a row in the table would describe nothing. This paragraph
+is the record that they were looked for and not found.
 
 **Encryption.** In a `ZBOT` / `ZBOP` / `ZBO6` container only the first 42 bytes decrypt with a
 known XOR key; beyond that the stream is algorithmically generated and unbroken `[observed]`. The
