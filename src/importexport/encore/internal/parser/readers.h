@@ -99,6 +99,12 @@ struct EncFormatReader
     // See ENCORE_FORMAT.md §Known quirks for per-version values.
     virtual qint64 headerEnd() const { return 0xC2; }
 
+    // Bytes to add to every element body field from offset +8 onward. Encore 4.0 inserted two
+    // bytes there in every element type, so a pre-4.0 file (app version below 775) needs -2 while
+    // every later generation needs 0. Fields at +5, +6 and +7 never move.
+    // See ENCORE_FORMAT.md §Version byte and release mapping.
+    virtual int elementBodyShift() const { return 0; }
+
     // Read MIDI program, Key, and name metadata stored outside TK blocks.
     virtual bool readInstrumentMeta(std::vector<EncInstrument>& instruments,
                                     QDataStream& ds,
@@ -193,8 +199,10 @@ struct EncFormatReader
 
     // Factory: returns the reader for the file. The 4-char magic string is needed because some
     // formats are not distinguished by chuMagio (SCO5/macOS Encore 5 shares the v0xC4 format but
-    // does not carry chuMagio 0xC4). See create() in readers.cpp.
-    static std::unique_ptr<EncFormatReader> create(quint8 chuMagio, const QString& magic);
+    // does not carry chuMagio 0xC4). appVersion is the Encore app version at header 0x28; it
+    // selects the element body layout, which the version byte alone does not identify.
+    // See create() in readers.cpp.
+    static std::unique_ptr<EncFormatReader> create(quint8 chuMagio, const QString& magic, quint16 appVersion);
 };
 } // namespace mu::iex::enc
 
