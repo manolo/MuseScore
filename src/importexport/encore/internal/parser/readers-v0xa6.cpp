@@ -89,20 +89,16 @@ bool EncFormatReader_V0xA6::postProcessElement(EncMeasureElem* elem,
         en->tuplet = 0;
     }
 
-    if (en->size < 27) {
-        en->articulationUp   = 0;
-        en->articulationDown = 0;
-        // A size-11 note carries one articulation byte at +18 (size-10 notes never do);
-        // 0x20 there is a fermata. The base read pulls articulations from beyond the
-        // element boundary, so read the real slot explicitly.
-        if (en->size == 11) {
-            const qint64 savedPos = ds.device()->pos();
-            ds.device()->seek(rawElemStart + 18);
-            quint8 articByte;
-            ds >> articByte;
-            en->articulationUp = articByte;
-            ds.device()->seek(savedPos);
-        }
+    // The base read already clears both articulation slots for an element this short. A size-11
+    // note is the one v0xA6 form that carries one, at +18 (size-10 notes never do); 0x20 there is
+    // a fermata. See ENCORE_FORMAT.md §v0xA6 note.
+    if (en->size == 11) {
+        const qint64 savedPos = ds.device()->pos();
+        ds.device()->seek(rawElemStart + 18);
+        quint8 articByte;
+        ds >> articByte;
+        en->articulationUp = articByte;
+        ds.device()->seek(savedPos);
     }
 
     return false;

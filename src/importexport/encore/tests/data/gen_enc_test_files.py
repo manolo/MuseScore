@@ -568,13 +568,50 @@ def gen_v0c2_pre4_element_offsets():
     return set_version(assemble(0xC2, [(meas_hdr(4, 4), e)]), 773)
 
 
+def note_v0c2_artic_4x(tick, voice, staffIdx, fv, pitch, articUp=0, articDown=0):
+    """Encore 4.x note (base 24 bytes) that grows to carry its articulations.
+
+    The two slots sit immediately past the base note: +24 for the mark above and
+    +26 for the one below, the same places v0xC4 uses. A note with only the mark
+    above is 26 bytes; one with both is 28.
+    """
+    size = 28 if articDown else (26 if articUp else 24)
+    d = bytearray(size - 3)
+    d[0] = size; d[1] = staffIdx & 0x3F; d[2] = fv
+    d[12] = pitch              # +15
+    if articUp:
+        d[21] = articUp        # +24
+    if articDown:
+        d[23] = articDown      # +26
+    return struct.pack('<H', tick) + bytes([(9 << 4) | (voice & 0xF)]) + bytes(d)
+
+
+def gen_v0c2_artic_grows_note():
+    """Encore 4.x file whose notes grow to carry their articulations.
+
+    Reading it as if every note were the 24-byte base drops all three marks: the
+    slots only exist because the element is longer.
+    """
+    e  = note_v0c2_artic_4x(0,   0, 0, fv=3, pitch=67, articUp=0x1d)                  # 26 bytes
+    e += note_v0c2_artic_4x(240, 0, 0, fv=3, pitch=64, articUp=0x12, articDown=0x1d)  # 28 bytes
+    e += note_v0c2_artic_4x(480, 0, 0, fv=3, pitch=60)                                # 24, sin marca
+    e += note_v0c2_artic_4x(720, 0, 0, fv=3, pitch=62, articUp=0x1c)                  # 26 bytes
+    e += end_marker()
+    return set_version(assemble(0xC2, [(meas_hdr(4, 4), e)]), 775)
+
+
 def gen_v0c2_size24_artic_pitch():
-    # Two size=24 v0xC2 notes: G4+staccato (0x1d) then E4+tenuto (0x1c).
-    # Verifies that size=24 notes use the tuplet slot for pitch and +22 for artic.
+    """Encore 3.x notes that carry an articulation: G4+staccato then E4+tenuto.
+
+    A v0xC2 note grows past its base length to hold an articulation, so in this
+    generation, whose base note is 22 bytes, an articulated note is 24 bytes with
+    the mark at +22. The pitch is at +13, as it is for every note of that base.
+    App version 773 is what selects the pre-4.0 body layout.
+    """
     e  = note_v0c2_size24(0,   0, 0, fv=3, pitch=67, artic=0x1d)  # G4 staccato
     e += note_v0c2_size24(480, 0, 0, fv=3, pitch=64, artic=0x1c)  # E4 tenuto
     e += end_marker()
-    return assemble(0xC2,[(meas_hdr(4,4),e)])
+    return set_version(assemble(0xC2, [(meas_hdr(4, 4), e)]), 773)
 
 def note_v0c2_size24_semitone(tick, voice, staffIdx, fv, pitch):
     """24-byte v0xC2 note with pitch at semiTonePitch slot (d[12]=rawElemStart+15),
@@ -12658,6 +12695,7 @@ if __name__=='__main__':
     write("structure_v0c2_pre4_element_offsets.enc", gen_v0c2_pre4_element_offsets())
     write("importer_v0c2_small_flag_chord.enc", gen_v0c2_small_flag_chord())
     write("notes_v0c2_size24_artic_pitch.enc", gen_v0c2_size24_artic_pitch())
+    write("notes_v0c2_artic_grows_note.enc",  gen_v0c2_artic_grows_note())
     write("notes_v0c2_size24_semitonepitch.enc", gen_v0c2_size24_semitonepitch())
     write("notes_v0c2_common_time_glyph.enc",         gen_v0c2_common_time_glyph())
     write("notes_v0c2_common_time_glyph_uc.enc",     gen_v0c2_common_time_glyph_uppercase())

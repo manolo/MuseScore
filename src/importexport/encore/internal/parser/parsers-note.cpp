@@ -65,6 +65,16 @@ bool EncNote::read(QDataStream& ds)
     ds >> articulationUp;
     ds.skipRawData(1);
     ds >> articulationDown;
+    // The two articulation slots sit immediately past the base note, so a note carries them only
+    // when it is long enough: it grows by two bytes to hold one and by four to hold both. Both
+    // slots move with the generation, like the rest of the body.
+    // See ENCORE_FORMAT.md §Note element.
+    if (static_cast<int>(size) <= 24 + bodyShift) {
+        articulationUp = 0;
+    }
+    if (static_cast<int>(size) <= 26 + bodyShift) {
+        articulationDown = 0;
+    }
     // No trailing skip to the element end: the measure element loop reseeks to
     // elemStart + elemSpacing(size) after every read(), so any remaining bytes are
     // skipped there. The same applies to the other element readers below.
