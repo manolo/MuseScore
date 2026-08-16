@@ -9000,6 +9000,64 @@ def gen_sco5_tk_instrument_names():
 
 
 # ===========================================================================
+# notes_sco5_tie_arc_bigendian.enc
+# SCO5 (big-endian macOS Encore 5): two half notes of the same pitch joined by a
+# tie whose only forward-tie signal is the arc span. The arc endpoints are uint16,
+# so in this byte order their significant byte is the second one: a reader taking
+# only the first byte sees arcX1 == arcX2 == 0, reads that as an intra-chord
+# decorative arc and drops the tie. Both flag bytes are clear so nothing else can
+# rescue it.
+# ===========================================================================
+def gen_sco5_tie_arc_bigendian():
+    def be(fmt, *a):
+        return struct.pack('>' + fmt, *a)
+
+    h = bytearray(194)
+    h[0:4] = b'SCO5'
+    h[4] = 0                                  # chuMagio -> default v0xC4 reader
+    struct.pack_into('>H', h, 0x28, 0x0420)   # chuVersio = Encore 5
+    struct.pack_into('>h', h, 0x2E, 1)        # lineCount
+    struct.pack_into('>h', h, 0x30, 1)        # pageCount
+    h[0x32] = 1                               # instrumentCount
+    h[0x33] = 1                               # staffPerSystem
+    struct.pack_into('>h', h, 0x34, 1)        # measureCount
+    h[0x52] = 4                               # scoreSize (default)
+
+    line = bytearray(10) + be('H', 0) + bytes([1])
+    staff = bytearray(30)
+    staff[19] = 1                             # show staff (clef@14=0=G)
+    line += staff
+    line_blk = b'LINE' + be('I', len(line)) + bytes(line)
+
+    mh = bytearray(0x36)
+    struct.pack_into('>H', mh, 0, 100)        # bpm
+    struct.pack_into('>H', mh, 4, 240)        # beatTicks
+    struct.pack_into('>H', mh, 6, 960)        # durTicks
+    mh[8] = 4
+    mh[9] = 4
+
+    def note(tick, pitch):
+        nd = bytearray(25)
+        nd[0] = 28        # element size
+        nd[2] = 2         # faceValue = half
+        nd[12] = pitch    # +15
+        return be('H', tick) + bytes([0x90]) + bytes(nd)
+
+    def tie(tick, arcX1, arcX2):
+        # 18-byte TIE: d[0]=size, d[2]=+5 direction, d[3]=+6 start flag, both clear.
+        # arcX1 at +10 and arcX2 at +12 are uint16 and so are written big-endian here.
+        d = bytearray(15)
+        d[0] = 18
+        struct.pack_into('>H', d, 7, arcX1)    # d[7] = element +10
+        struct.pack_into('>H', d, 9, arcX2)    # d[9] = element +12
+        return be('H', tick) + bytes([0x30]) + bytes(d)
+
+    elems = note(0, 60) + tie(0, 20, 96) + note(480, 60) + b'\xff\xff'
+    meas_blk = b'MEAS' + be('I', len(elems)) + bytes(mh) + elems
+    return bytes(h) + line_blk + meas_blk
+
+
+# ===========================================================================
 # ornaments_v0c2_same_measure_slur_no_cross.enc
 # Regression: v0xC2 slur starting mid-measure must end within the same measure,
 # not cross to the next. The cross-measure extension must not fire when there is
@@ -12903,6 +12961,7 @@ if __name__=='__main__':
     write("notes_multiinstr_compact_routing.enc", gen_v0c4_multiinstr_compact_routing())
     write("structure_sco5_macos.enc",             gen_sco5_macos_page_setup())
     write("instruments_sco5_tk_names.enc",         gen_sco5_tk_instrument_names(), layout=False)
+    write("notes_sco5_tie_arc_bigendian.enc",       gen_sco5_tie_arc_bigendian(), layout=False)
     write("text_lyrics_grandstaff_routed_notes.enc", gen_v0c4_lyrics_grandstaff_routed_notes())
     write("importer_inner_tuplet_note_level_cap.enc", gen_v0c4_inner_tuplet_note_level_cap())
     write("importer_score_size2.enc", set_line_staff_size_hint(set_score_size(assemble(0xC4, [(meas_hdr(4, 4),

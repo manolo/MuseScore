@@ -869,7 +869,8 @@ All four values mark a real outgoing tie. Treating `+5` as a bitfield (for examp
 `(+5 & 0x80) || (+5 & 0x02)`) silently drops the equally valid `0x04`.
 
 **Arc endpoints.** Both forms carry the visual x-positions of the arc endpoints, and these are the
-authoritative forward-tie signal. They sit two bytes earlier in the 16-byte form, following the same shift as every other element between Encore 3.x and 4.x:
+authoritative forward-tie signal. They are **uint16 fields**, and they sit two bytes earlier in the
+16-byte form, following the same shift as every other element between Encore 3.x and 4.x:
 
 | Field                                 | 16-byte form | 18-byte form |
 |---------------------------------------|--------------|--------------|
@@ -879,6 +880,15 @@ authoritative forward-tie signal. They sit two bytes earlier in the 16-byte form
 
 The bytes between `+7` and the arc pair are always zero in both forms, which is where the two extra
 bytes of the 18-byte form went `[observed]`.
+
+**Read the arc x as uint16, not as a single byte.** In little-endian `SCOW` files the significant
+byte comes first, so a byte-wide read at the field offset happens to work; in big-endian `SCO5`
+files it comes second, and a byte-wide read yields 0 for every tie in the file. Measured over
+17082 `SCOW` and 181 `SCO5` size-18 ties, `SCOW` has `+10` nonzero in 100% of ties and `+11` in 0%,
+while `SCO5` is the exact mirror `[verified]`.
+
+This does not degrade gracefully: a zeroed pair reads as `arcX1 == arcX2`, which is the
+intra-chord decorative arc case, so every tie in the file is classified as decorative and dropped.
 
 - `arcX1 < arcX2`: a genuine left-to-right span, a real forward tie regardless of `+5`.
 - `arcX1 == arcX2`: zero horizontal extent, an intra-chord decorative arc (Encore connects two

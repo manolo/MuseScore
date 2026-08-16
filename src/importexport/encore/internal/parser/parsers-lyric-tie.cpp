@@ -68,16 +68,15 @@ bool EncTie::read(QDataStream& ds)
     // too. See ENCORE_FORMAT.md §TIE element.
     if (static_cast<int>(size) >= 18 + bodyShift) {
         ds.skipRawData(3 + bodyShift);   // to offset +10, or +8 before Encore 4.0
-        ds >> arcX1;
-        ds.skipRawData(1);          // to offset +12
-        ds >> arcX2;
+        // Both endpoints are uint16, read through the stream so the file's byte order applies.
+        // Taking only their low byte silently yields zero on a big-endian file.
+        ds >> arcX1 >> arcX2;
         if (arcX1 < arcX2) {
             isTieStart = true;
         } else if (arcX1 == arcX2 && (startFlag & 0x80) == 0) {
             isTieStart = false;
         }
-        ds.skipRawData(1);          // to offset +14: staff position of source note
-        quint8 sp = 0;
+        quint8 sp = 0;              // offset +14: staff position of source note
         ds >> sp;
         sourcePosition = static_cast<qint8>(sp);
     }
