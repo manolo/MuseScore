@@ -37,13 +37,10 @@ bool EncHeader::readMagicAndVersion(QDataStream& ds)
         ds >> ch;
         magic.append(QChar(ch));
     }
-    if (magic == "SCOW") {
-        ds.setByteOrder(QDataStream::LittleEndian);
-    } else if (magic == "SCO5") {
-        ds.setByteOrder(QDataStream::BigEndian);
-    } else {
+    if (!isReadableEncoreMagic(magic)) {
         return false;
     }
+    ds.setByteOrder(magic == "SCO5" ? QDataStream::BigEndian : QDataStream::LittleEndian);
     ds >> chuMagio;
     return true;
 }

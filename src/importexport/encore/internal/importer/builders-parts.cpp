@@ -31,7 +31,6 @@
 #include <map>
 #include <set>
 #include <vector>
-#include <QDataStream>
 #include "engraving/dom/chord.h"
 #include "engraving/dom/clef.h"
 #include "engraving/dom/excerpt.h"

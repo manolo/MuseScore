@@ -48,6 +48,8 @@
 #include <QFileInfo>
 #include <QRegularExpression>
 
+#include "../parser/readers.h"
+
 #include "engraving/dom/arpeggio.h"
 #include "engraving/dom/box.h"
 #include "engraving/dom/chord.h"
@@ -423,7 +425,7 @@ muse::String encoreLoadErrorMessage(const QString& path)
     }
     // Recognizable Encore header, but the file could not be parsed: unsupported variant, damaged,
     // or empty.
-    if (magic == "SCOW" || magic == "SCO5") {
+    if (isReadableEncoreMagic(QString::fromLatin1(magic))) {
         const QString ver = QStringLiteral("%1").arg(
             head.size() >= 5 ? static_cast<unsigned char>(head[4]) : 0, 2, 16, QChar('0'));
         return muse::mtrc("engraving",
