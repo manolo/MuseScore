@@ -59,13 +59,26 @@ static void markInnerGraces(std::vector<EncMeasureElem*>& elems)
     }
 }
 
-// v0xA6 NOTE layouts: size=10 (pitch at +11, tuplet at +7), size=11 (same layout plus one
-// articulation byte at +18, e.g. fermata 0x20), size=22 (pitch in tuplet slot),
+// v0xA6 NOTE layouts: size=10 (position at +9, pitch at +11, tuplet at +7), size=11 (same layout
+// plus one articulation byte at +18, e.g. fermata 0x20), size=22 (pitch in tuplet slot),
 // size<27 (artic bytes lie beyond boundary, zero them). See ENCORE_FORMAT.md §Note element.
+// A v0xA6 REST carries no tuplet and no dot control at all; see below.
 bool EncFormatReader_V0xA6::postProcessElement(EncMeasureElem* elem,
                                                QDataStream& ds,
                                                qint64 rawElemStart) const
 {
+    if (EncRest* er = dynamic_cast<EncRest*>(elem)) {
+        // The compact rest is 14 bytes and stores neither a tuplet descriptor nor a dot control.
+        // The two slots the later layout keeps at +13 and +14 hold, here, the high byte of the
+        // rest's own duration and the first byte of the following element, so both were read as
+        // values the file never carried. See ENCORE_FORMAT.md §v0xA6 rest.
+        if (er->size == 7) {
+            er->tuplet = 0;
+            er->dotControl = 0;
+        }
+        return false;
+    }
+
     EncNote* en = dynamic_cast<EncNote*>(elem);
     if (!en) {
         return false;
@@ -81,6 +94,16 @@ bool EncFormatReader_V0xA6::postProcessElement(EncMeasureElem* elem,
         quint8 tupByte;
         ds >> tupByte;
         en->tuplet = tupByte;
+        // Staff position: a signed count of diatonic steps from middle C, at +9. The slot the
+        // later layout uses holds a constant in this one, so every note reported the same
+        // position, which the tie matcher, the percussion line mapping and the tablature
+        // fingering all read. See ENCORE_FORMAT.md §v0xA6 note.
+        ds.device()->seek(rawElemStart + 9);
+        qint8 posByte;
+        ds >> posByte;
+        en->position = posByte;
+        // The compact note has no dot control either: its +14 belongs to the playback block.
+        en->dotControl = 0;
         ds.device()->seek(savedPos);
     }
 

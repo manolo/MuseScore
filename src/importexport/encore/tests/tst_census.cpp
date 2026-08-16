@@ -267,6 +267,10 @@ void censusOneFile(const QString& path, FileRow& row, Hist& hist)
                 bump(hist, "note_grace2", n->grace2);
                 bump(hist, "note_tuplet", n->tuplet);
                 bump(hist, "note_dotcontrol", n->dotControl);
+                // Staff position, signed: the same note keeps it across generations, so a
+                // conversion pair that disagrees here means one of the two layouts is misread.
+                bump(hist, "note_position", n->position);
+                bump(hist, "note_pitch", n->semiTonePitch);
                 bump(hist, "note_options", n->options);
                 bump(hist, "note_alterglyph", n->alterationGlyph);
                 if (n->articulationUp) {

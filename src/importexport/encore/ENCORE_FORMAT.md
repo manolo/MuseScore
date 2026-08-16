@@ -710,12 +710,37 @@ v0xA6 and v0xC4 that nibble is always 0.
 | `+5`   | face value                                               |
 | `+6`   | grace1 (see below)                                       |
 | `+7`   | tuplet byte (3:2 = `0x32`, 5:4 = `0x54`, ...)            |
-| `+9`   | staff-position / diatonic line, NOT the MIDI pitch       |
+| `+9`   | staff position, signed, NOT the MIDI pitch               |
 | `+11`  | MIDI pitch (absolute 0-127)                              |
+| `+12`  | playback duration in ticks, uint16                       |
+
+The staff position at `+9` is a signed count of diatonic steps from middle C: `0` is C4, `5` is A4,
+`-1` is B3, and a sharpened or flattened note shares the position of its natural `[verified]`. It
+is not the field the later generations keep at `+12`, which in this layout holds the first byte of
+the playback duration and reads as a constant `0x80` on every note.
+
+The compact note has no dot control. The slot the later generations use for one falls inside the
+playback block here, so a dotted v0xA6 note is recognised only from its duration.
 
 A v0xA6 note that carries one articulation is written as size 11 (a 22-byte slot); the layout is
 otherwise identical (pitch at `+11`, tuplet at `+7`) with the single articulation byte at `+18`
 (`0x20` there is a fermata above) `[verified]`.
+
+### v0xA6 rest (size 7, on-disk slot 14)
+
+| Offset | Description                                              |
+|--------|----------------------------------------------------------|
+| `+5`   | face value                                               |
+| `+10`  | x-offset                                                 |
+| `+12`  | duration in ticks, uint16                                |
+
+The duration at `+12` is the rest's nominal value, unscaled: 960 for a whole, 480 a half, 240 a
+quarter, 360 a dotted quarter, 120 an eighth `[verified]`.
+
+The compact rest carries neither a tuplet descriptor nor a dot control, and it has no
+multi-measure count. The two slots the later generations keep at `+13` and `+14` are, here, the
+high byte of that duration and the first byte of whichever element follows, so a reader that takes
+them at face value reports tuplets and dots the file never stated.
 
 ### Grace and cue notes
 

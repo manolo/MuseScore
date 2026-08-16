@@ -452,7 +452,7 @@ def note_v0c2_spurious_semitone(tick, voice, staffIdx, fv, pitch, flag=1):
     d[12]=flag                # elemStart+15 = spurious flag, not a pitch
     return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)
 
-def note_v0xa6(tick, voice, staffIdx, fv, pitch_offset):
+def note_v0xa6(tick, voice, staffIdx, fv, pitch_offset, position=None):
     """v0xA6 note: size=10, slot=20 bytes. MIDI pitch lives at elemStart+11
     (= file offset within the 20-byte slot, NOT within the 10-byte d
     array). The slot layout is 3 header bytes + 7 d bytes + 10 padding
@@ -460,13 +460,32 @@ def note_v0xa6(tick, voice, staffIdx, fv, pitch_offset):
     offset accepted for callers used to the C4-based convention) at
     offset 11 by overwriting the first padding byte. Real Encore 2.x
     files store the same field at the same offset.
+
+    position: staff position at elemStart+9, a signed count of diatonic steps from middle C
+    (0 = C4, 5 = A4, -1 = B3). Left unwritten when None so existing fixtures keep their bytes.
     """
     d = bytearray(7)
     d[0]=10; d[1]=staffIdx&0x3F; d[2]=fv
+    if position is not None:
+        d[6] = position & 0xFF      # = file offset +9
     pad = bytearray(10)
     midi = 60 + (pitch_offset if pitch_offset >= -128 and pitch_offset <= 127 else 0)
     pad[11 - 3 - 7] = midi & 0xFF   # = pad[1] = file offset +11
     return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)+bytes(pad)
+
+def rest_v0xa6(tick, voice, staffIdx, fv, dur_ticks=0):
+    """v0xA6 rest: size=7, slot=14 bytes. faceValue at +5 and the rest's own duration in ticks
+    as a uint16 at +12. The layout carries neither a tuplet descriptor nor a dot control: the
+    two slots the later generations keep at +13 and +14 are, here, the duration's high byte and
+    the first byte of whatever element follows."""
+    b = bytearray(14)
+    struct.pack_into('<H', b, 0, tick)
+    b[2] = (8 << 4) | (voice & 0xF)   # type 8 = REST
+    b[3] = 7                          # size, in 2-byte units
+    b[4] = staffIdx & 0x3F
+    b[5] = fv
+    struct.pack_into('<H', b, 12, dur_ticks)
+    return bytes(b)
 
 def lyric_v0xa6(tick, voice, staffIdx, text, kie=0):
     """v0xA6 compact lyric: tick(2)+tv(1)+size(1)+rawStaff(1)+control/anchor byte (kie = the
@@ -840,6 +859,20 @@ def gen_v0xa6_stafftext_placement():
     meas = b'MEAS' + struct.pack('<I', len(e)) + _mhdr_a6(2, 4) + e
     f = build_v0xa6([('Voz', 1, 0)], [meas], staff_size=1)
     return f + text_block_v0xa6(["cresc.", "espressivo"])
+
+def gen_v0xa6_note_position_and_rest_fields():
+    """Two notes carrying an explicit staff position at +9 (A4 = 5, B3 = -1), then a rest whose
+    duration word at +12 is 960 so its high byte is 3, followed by a note at tick 480 so the byte
+    just past the rest is 0xE0. Reading the later layout's slots gave every note position -128 and
+    turned the rest's duration byte into a tuplet descriptor and the neighbour's byte into a dot
+    control."""
+    e  = note_v0xa6(0,   0, 0, 3, 9,  position=5)     # A4, five diatonic steps above middle C
+    e += note_v0xa6(240, 0, 0, 3, -1, position=-1)    # B3, one step below
+    e += rest_v0xa6(360, 0, 0, 1, dur_ticks=960)
+    e += note_v0xa6(480, 0, 0, 3, 0,  position=0)     # middle C, tick 480 -> 0xE0 past the rest
+    e += end_marker()
+    meas = b'MEAS' + struct.pack('<I', len(e)) + _mhdr_a6(2, 4) + e
+    return build_v0xa6([('Voz', 1, 0)], [meas], staff_size=1)
 
 def gen_v0xa6_two_verse_alignment():
     """Two lyric verses over three notes. Encore stores verse 2 (voice 1) with tick=0 on EVERY
@@ -12714,6 +12747,7 @@ if __name__=='__main__':
     write("importer_v0xa6_lyrics_and_stafftext.enc", gen_v0xa6_lyrics_and_stafftext())
     write("importer_v0xa6_two_verse_alignment.enc", gen_v0xa6_two_verse_alignment())
     write("importer_v0xa6_stafftext_placement.enc", gen_v0xa6_stafftext_placement())
+    write("parser_v0xa6_note_position.enc", gen_v0xa6_note_position_and_rest_fields())
     write("importer_v0xa6_melisma_verse_alignment.enc", gen_v0xa6_melisma_verse_alignment())
     write("notes_corrupted.enc",     gen_v0c4_corrupted())
     write("notes_swing.enc",         gen_v0c4_swing())

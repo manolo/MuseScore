@@ -28,8 +28,10 @@
 
 #include <QByteArray>
 #include <QDataStream>
+#include <QFile>
 
 #include "../internal/parser/elem.h"
+#include "../internal/parser/readers.h"
 
 #include "engraving/dom/chord.h"
 #include "engraving/dom/clef.h"
@@ -250,6 +252,37 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_triplet_byte_at_offset_7)
         EXPECT_EQ(s->element(1), nullptr) << "voice 1 should stay empty";
     }
     delete score;
+}
+
+// Regression: the compact v0xA6 note keeps its staff position at +9, and the compact rest carries
+// no tuplet descriptor and no dot control at all. Reading the slots the later generations use gave
+// every note the same position and turned the rest's own duration byte, plus the first byte of the
+// element behind it, into musical values the file never stated.
+TEST_F(Tst_ImporterV0xa6, v0xa6_note_position_and_absent_rest_fields)
+{
+    QFile f(ENC_DIR + "parser_v0xa6_note_position.enc");
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly)) << "Failed to open parser_v0xa6_note_position.enc";
+    QDataStream ds(&f);
+    ds.setByteOrder(QDataStream::LittleEndian);
+
+    mu::iex::enc::EncRoot enc;
+    ASSERT_TRUE(enc.read(ds));
+    ASSERT_EQ(enc.measures.size(), 1u);
+
+    std::vector<int> positions;
+    int restCount = 0;
+    for (const auto& e : enc.measures[0].elements) {
+        if (const auto* n = dynamic_cast<const mu::iex::enc::EncNote*>(e.get())) {
+            positions.push_back(n->position);
+        } else if (const auto* r = dynamic_cast<const mu::iex::enc::EncRest*>(e.get())) {
+            ++restCount;
+            EXPECT_EQ(r->tuplet, 0) << "the byte at +13 is the rest's own duration, not a tuplet";
+            EXPECT_EQ(r->dotControl, 0) << "the byte at +14 belongs to the next element";
+        }
+    }
+    const std::vector<int> expected{ 5, -1, 0 };
+    EXPECT_EQ(positions, expected) << "staff position comes from +9, signed, 0 = middle C";
+    EXPECT_EQ(restCount, 1);
 }
 
 // Regression: a size-11 v0xA6 NOTE carries an articulation byte (0x20 = fermata); the reader must still
