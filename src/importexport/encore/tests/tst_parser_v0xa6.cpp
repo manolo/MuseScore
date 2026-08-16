@@ -605,21 +605,49 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_text_block_entry_text_at_offset_0)
 
 // v0xA6 compact STAFFTEXT ornaments hold the TEXT-entry index (tind) at a fixed offset, not the
 // newer size-based one. See ENCORE_FORMAT.md §Ornament element.
-TEST_F(Tst_ImporterV0xa6, v0xa6_stafftext_tind_at_offset_26)
+//
+// The buffer starts at the size byte, so element offset +3 is buf[0] and element offset N is
+// buf[N - 3]: the index at element +28 lands on buf[25].
+TEST_F(Tst_ImporterV0xa6, v0xa6_stafftext_tind_at_element_offset_28)
 {
     QByteArray buf(30, 0);   // size*2 slot
     buf[0] = char(15);       // element size
     buf[2] = char(0x1E);     // tipo = STAFFTEXT (read right after size + rawStaff)
-    buf[25] = char(0x04);    // tind: +26 from the type/voice byte, which sits one byte before the buffer
+    buf[25] = char(0x04);    // tind at element +28
 
     QDataStream ds(buf);
     ds.setByteOrder(QDataStream::LittleEndian);
 
     mu::iex::enc::EncOrnament orn(0, 5, 0);
-    orn.tindOffset = 26;     // v0xA6
+    orn.tindOffset = 28;     // v0xA6
     orn.read(ds);
 
     EXPECT_EQ(orn.tind, 4);
+}
+
+// The compact ornament keeps its vertical placement as a SIGNED BYTE at element +9 and its forward
+// measure count at element +14, and both apply to every subtype, not just to staff text. Reading
+// the y from the inline s16 slot preserves only its sign, and reading the measure count from the
+// v0xC4 slot lands outside the element. See ENCORE_FORMAT.md §Ornament element.
+TEST_F(Tst_ImporterV0xa6, v0xa6_ornament_y_byte_and_measure_count)
+{
+    // A dynamic (not a staff text) placed below the staff, spanning two measures forward.
+    QByteArray buf(24, 0);   // size 12, size*2 slot
+    buf[0] = char(12);       // element size
+    buf[2] = char(0x83);     // tipo = dynamic p
+    buf[6] = char(0xEC);     // y = -20 at element +9
+    buf[11] = char(0x02);    // forward measure count = 2 at element +14
+
+    QDataStream ds(buf);
+    ds.setByteOrder(QDataStream::LittleEndian);
+
+    mu::iex::enc::EncOrnament orn(0, 5, 0);
+    orn.yByteOffset     = 9;
+    orn.measCountOffset = 14;
+    orn.read(ds);
+
+    EXPECT_EQ(orn.yoffset, -20) << "y is a signed byte at +9, so it keeps its magnitude";
+    EXPECT_EQ(orn.alMezuro, 2) << "forward measure count comes from +14";
 }
 
 // End-to-end: a real v0xA6 file whose measure carries a compact lyric syllable ("loco") and a
