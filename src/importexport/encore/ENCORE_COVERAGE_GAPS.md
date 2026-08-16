@@ -1,0 +1,446 @@
+# Encore importer coverage gaps, ranked
+
+Every item carries its evidence and the thing that would close it. Ranked by corpus impact times
+severity, so effort lands where real files exist.
+
+Companion documents: [ENCORE_VERSION_INVENTORY.md](ENCORE_VERSION_INVENTORY.md),
+[ENCORE_FORMAT_DIVERGENCE.md](ENCORE_FORMAT_DIVERGENCE.md),
+[ENCORE_FORMAT_EVOLUTION.md](ENCORE_FORMAT_EVOLUTION.md).
+
+Corpus: **20577 real files** parsed, everything reachable under `~/Scores` following symlinks.
+
+---
+
+## Summary
+
+| # | Gap | Class | Files | Elements affected | Status |
+|---|-----|-------|-------|-------------------|--------|
+| 0 | **Every Encore 3.x element body read 2 bytes late** | field | **3215 (15.6%)** | **4.23M notes, 581k rests, 11.5k ornaments** | **FIXED** |
+| 1 | Tie arc fields discarded by a size guard | field | ~4000 | **124131 ties** | **Encore 3.x half FIXED with gap 0**; v0xA6 half open, see below |
+| 2 | v0xC2 slur measure count read from the wrong offset on Encore 4.x | field | 1760 | **2185 slurs lost of 6691** | open, gap 0 corrected the Encore 3.x side only |
+| 3 | v0xA6 ornament y and measure count at v0xC4 offsets | field | 806 | **105 spanners lost of 636 (16.5%)**, plus every ornament y | **FIXED** |
+| 4 | SCO5 tie arc read as 8-bit, always zero | field | 15 | 515 ties | **FIXED** |
+| 5 | Encrypted containers: 25% of the corpus, 2 fixtures | coverage | 5255 | whole container class | measured |
+| 6 | Encore 3.x and 4.0-4.2 have zero fixtures | coverage | 4902 | two whole generations | measured |
+| 7 | Encore 4.3 to 4.5 (rev 0/1) has 24 fixtures for 3671 files | coverage | 3671 | whole revision line | measured |
+| 8 | Element type `0xA` | field | 14 | 1174 elements | **RESOLVED, drop is correct** |
+| 9 | v0xA6 ties, beams, key changes never tested | coverage | 806 | 39772 ties alone | measured |
+| 10 | SCO5 is effectively untested | coverage | 15 | 15 of 15 ornament subtypes | measured |
+| 11 | Key signature diverges across conversion pairs | field | 6 of 399 pairs | LINE key byte | **lead, unconfirmed** |
+| 12 | Chord symbol reads a fixed 36 byte text slot past the element | field | many | sizes 14 to 22 | needs check |
+| 13 | Unknown version byte silently parsed as v0xC4 | dispatch | 0 today | future Encore 6 | design |
+| 14 | `SCOX` / `SCOR` / `SCOS` rejected outright | dispatch | 0 of 20577 | n/a | design |
+| 15 | v0xA6 has no multi-measure rest support | field | 806 | unknown | needs check |
+| 16 | 136 ZIP archives named `.enc` | corpus hygiene | 136 | n/a | not a defect |
+| 17 | Dead `ENCORE_IMPORTER.md` links on the PR branch | docs | n/a | 3 links | won't fix, see below |
+
+All of these come from **one mechanism**: a field addressed by an absolute offset that does not
+hold it in that generation of the format, with no per-generation remap. See
+[ENCORE_FORMAT_DIVERGENCE.md](ENCORE_FORMAT_DIVERGENCE.md) section 1.
+
+**What has been fixed.** Gaps 0, 3 and 4 are implemented, each with a regression test that fails
+without it. Gap 0 also closes the Encore 3.x half of gap 1, since the tie arc offsets move with the
+same shift. Gap 8 was closed as a non-defect. Gap 1's v0xA6 half is documented but deliberately not
+changed, see below. Everything else is open.
+
+**Gap 17 is not fixable.** The importer spec lives on the working branch only, so the link is
+correct there and dead on the PR branch, and the branch invariant requires the file to be identical
+on both. The dead links are a consequence of the branch layout, not an oversight.
+
+---
+
+## 0. Every Encore 3.x element body is read two bytes late  (FIXED)
+
+**The largest defect found, and it subsumes several of the others.**
+
+Fixed by keying the element body offsets on the app version at header `0x28`, which is what
+separates the two generations: the version byte is `0xC2` for both and the element sizes overlap,
+so neither identifies the layout on its own. Verified end to end against a conversion pair, where
+the Encore 3.x original and its Encore 4.5 conversion now import to the same music: 374 of 374
+pitches, identical durations, 11 slurs with identical endpoints.
+
+VM experiment B converted an Encore 3.x file (app 773, 18 measures) to v0xC4 in Encore 4.5. The two
+element streams align exactly: 634 elements each, 374 notes, 138 lyrics, 67 beams, 32 rests, 11
+ornaments, 2 ties, same measures, ticks, staves and voices.
+
+Diffing the paired elements byte for byte gives one answer for every element type: **bytes `+0` to
+`+5` are identical, and from `+6` onward the Encore 4.x element carries two extra bytes and then
+continues identically.** The v0xC2 reader uses Encore 4.x offsets for both generations, so on an
+Encore 3.x file every field at or past `+6` is read from the wrong byte.
+
+Ornaments, verified against the converted file:
+
+| field | code reads | **correct for 3.x** | agreement |
+|-------|-----------|---------------------|-----------|
+| xoffset | `+10` | **`+8`** | 0/11 versus **11/11** |
+| y (s16) | `+12` | **`+10`** | 0/11 versus **11/11** |
+| v0xC2 measure count | `+16` | **`+14`** | 0/11 versus **11/11** |
+| forward measure count | `+18` | **`+16`** | 0/11 versus **11/11** |
+| end x | `+20` | **`+18`** | 0/11 versus **11/11** |
+| hairpin direction | `+26` | **`+24`** | 0/11 versus **11/11** |
+
+Notes, over 374 paired notes:
+
+| field | code reads | **correct for size 22** | agreement |
+|-------|-----------|--------------------------|-----------|
+| xoffset | `+10` | **`+8`** | 9/374 versus **374/374** |
+| position | `+12` | **`+10`** | 0/374 versus 228/374 |
+| tuplet ratio | `+13` | **`+11`** | 0/374 versus **374/374** |
+| dotControl | `+14` | **`+12`** | 1/374 versus **374/374** |
+| MIDI pitch | `+15` | **`+13`** | 0/374 versus 228/374 |
+
+(The 228/374 on position and pitch is chord-member ordering inside a tick group, not disagreement.)
+
+**Scope: 3215 files, 15.6% of the corpus, 4231117 size-22 notes, 581269 size-16 rests, 84337
+size-16 ties, 11457 ornaments.**
+
+**What this explains.** Three existing pieces of the importer are workarounds for this one shift:
+
+- The "two v0xC2 tempo layouts", where older files supposedly store the BPM at `+28` instead of
+  `+30`. They store it at `+28` because `+30` minus two is `+28`.
+- The slur measure count being "unreliable for a whole file" (gap 2). It is at `+16` in 3.x and
+  `+18` in 4.x.
+- `markImpliedTupletMembers`, which infers tuplet membership from a duration mismatch. It exists
+  because the explicit tuplet byte is at `+11` in a size-22 note and is never read: the pitch-swap
+  heuristic recovers the pitch from `+13` and then sets the tuplet to zero. Encore 3.x scores
+  therefore look as though they carry no explicit tuplets at all.
+
+**Fix:** key the element body offsets on the generation, which is readable from the element size
+(note 22 versus 24/28, ornament 26 versus 28, tie 16 versus 18, rest 16 versus 18), exactly as gaps
+1 and 2 propose for their individual fields. Doing it once at the layout level closes gaps 1 and 2
+as special cases.
+
+**Closes with:** fixtures from the Encore 3.x generation, of which there are currently none for
+2744 + 467 real files.
+
+## 1. Tie arc fields discarded (124131 ties)  (Encore 3.x half FIXED)
+
+`EncTie::read` reads `arcX1`, `arcX2` and `sourcePosition` only when `size >= 18`. Encore 3.x ties
+are 16 bytes and Encore 2.x ties are 7, so **124131 ties fall through** (84359 at size 16, 39772 at
+size 7) and the tie direction is decided from the two flag bytes alone.
+
+The fields are present. Per-byte profile of Encore 3.x size-16 ties against size-18 ties, showing
+the same uniform +2 shift as every other element:
+
+| field | Encore 3.x (size 16) | Encore 4.x and later (size 18) |
+|-------|----------------------|--------------------------------|
+| dirByte | `+5`, 100% nonzero | `+5`, 100% nonzero |
+| startFlag | `+6` | `+6` |
+| padding | `+7`, always 0 | `+7`, `+8`, `+9`, always 0 |
+| **arcX1** | **`+8`**, 100% nonzero, `+9` always 0 | `+10`, 100% nonzero, `+11` always 0 |
+| **arcX2** | **`+10`**, 100% nonzero, `+11` always 0 | `+12`, 100% nonzero, `+13` always 0 |
+| **sourcePosition** | **`+12`**/`+13` duplicated pair | `+14`/`+15` duplicated pair |
+
+**Fixed for the Encore 3.x half** by gap 0: the arc offsets move with the same two-byte shift, so
+keying the body layout on the generation reaches them without a tie-specific rule.
+
+**Still open for the 39772 v0xA6 ties.** Their layout has since been located (the two flag bytes are
+swapped relative to every later version, and the source position sits at `+9` duplicated at `+11`),
+but the arc pair was not found and the available ground truth is too thin to justify changing the
+tie-start decision.
+
+### The v0xA6 tie layout, and why it was not acted on
+
+Measured over all 39772 v0xA6 ties, the byte at `+6` carries a value from the four-way arc-direction
+vocabulary (`0x02` / `0x04` / `0xFC` / `0xFE`) in 99.4% of them and the byte at `+5` in none, while
+`+5` is `0x80` in 85% and `0x00` in the rest. So the two flag bytes hold the opposite roles from
+every later version. The source position at `+9`, duplicated at `+11`, matches a converted file
+exactly.
+
+The arc pair was not found. In the file where a conversion gives ground truth the candidate bytes
+are constant across every tie while the converted arc positions vary, and x coordinates do not
+survive the conversion anyway.
+
+Acting on the swap would change the tie-start decision for 39772 elements. Against the 14 ties that
+pair cleanly with a converted twin, reading the direction from `+6` scores 71% correct against the
+current 64%, with the same four false positives on both. That is not enough evidence to move that
+many ties, so the layout is recorded and the behaviour left alone.
+
+**Closes with:** a v0xA6 file with a converted twin whose ties pair densely enough to separate the
+two readings, or a round trip through Encore 2.x.
+
+## 2. v0xC2 slur measure count read from the wrong byte (2185 slurs lost)
+
+`EncFormatReader_V0xC2::postProcessElement` always takes the forward measure count from `+16`
+(`orn->alMezuro = orn->altMezuro`). The field moved with the +2 shift, and the corpus separates the
+two cases perfectly:
+
+| generation | slur size | slurs | endpoint lost | count at `+16` lands in score | count at `+18` |
+|------------|-----------|-------|---------------|-------------------------------|----------------|
+| Encore 3.x (app 773) | 26 | 2762 | **0 (0.0%)** | **100%** | 58% |
+| Encore 4.0-4.2 `0xC2` (app 775) | 28 | 6663 | **2172 (32.6%)** | 68% | **100%** |
+| `0xC2` with app 1056 | 28 | 28 | 13 (46.4%) | | |
+
+Zero failures on the generation the code was tuned for, one in three on the other, same code path.
+The ~4500 slurs that do not land outside the score are not therefore correct: they read the wrong
+byte and happen to land in range.
+
+**Fix:** pick the offset from the ornament size, 26 means `+16`, 28 means `+18`. No version lookup
+needed. The existing spec note about `+16` being "unreliable for a whole file" is a symptom-level
+workaround for this.
+
+**Closes with:** one Encore 3.x and one Encore 4.0-4.2 fixture, each with a multi-measure slur.
+
+## 3. v0xA6 ornament fields read at v0xC4 offsets  (FIXED)
+
+The v0xA6 reader overrides only `staffTextTindOffset` and `staffTextYoffsetOffset`, and both apply
+only to STAFFTEXT. Every other ornament field kept its v0xC4 offset.
+
+**VM experiment A has been run** and settles it. `SILENT.enc` (v0xA6, 12 measures) was opened in
+Encore 4.5 and saved as `SILENT-45.enc` (v0xC4). The two element streams match exactly: 171 notes,
+86 lyrics, 9 beams, 7 rests, 6 ties and 6 ornaments, same measures, ticks, staves and subtypes. The
+v0xC4 half is therefore ground truth for the v0xA6 half.
+
+Brute-forcing every offset and integer encoding in the v0xA6 slot against that ground truth gives a
+unique answer for two fields:
+
+| field | current read | **correct** | evidence |
+|-------|--------------|-------------|----------|
+| ornament y | s16 LE at `+8`, STAFFTEXT only | **signed byte at `+9`, all subtypes** | 6 of 6 exact: 15, -1, 9, 1, 5, -20 |
+| forward measure count | `+18` | **`+14`** | 5 of 5 exact, and see the corpus check below |
+
+Corpus-wide confirmation over all **636 v0xA6 slur and hairpin starts**:
+
+| read at | land inside the score |
+|---------|------------------------|
+| `+18` (current) | 531 of 636, **105 out of range (16.5%)** |
+| `+14` | **636 of 636, 0.0% out of range** |
+
+The signed byte at `+9` spans -4 to 17 across the same 636 elements, a plausible vertical range.
+The current s16 read yields values in the thousands (3840 where the truth is 15, -4865 where it is
+-20). It preserves the sign, structurally, because `+9` is that halfword's high byte, which is why
+staff-text above-versus-below placement works today while everything that uses the magnitude does
+not, and why dynamics and the `0xCC` versus `0xCD` fermata direction never get it at all.
+
+**Also validated by the same experiment, no defect:** the v0xA6 note reader is correct. All 85 note
+groups keyed by (measure, tick, staff, voice) match on both pitch (`+11`) and face value (`+5`).
+The staff-text TEXT index at `+28` is consistent; it reads 0 and 1 where the converted file reads 4
+and 5, which is TEXT block re-indexing across the conversion, not a misread.
+
+**Still unlocated:** the v0xA6 x coordinates and the hairpin direction. x does not survive the
+conversion at all, because v0xA6 stores screen pixels and v0xC4 stores a different unit, so no
+offset in the slot matches the converted values. The sample carried no hairpin.
+
+**Fix:** give v0xA6 a real ornament layout with y at `+9` and the measure count at `+14`, applied
+to every subtype, the way the v0xA6 note already gets its own pitch and tuplet offsets.
+
+## 4. SCO5 tie arc always reads zero (515 ties, 15 files)  (FIXED)
+
+`arcX1` and `arcX2` are declared `quint8` and read with `ds >> arcX1` at `+10` and `+12`. The
+corpus shows they are **16-bit** fields:
+
+| | `+10` | `+11` | `+12` | `+13` |
+|--|-------|-------|-------|-------|
+| SCOW size-18 ties | mean 50.6, 100% nonzero | 0.0% nonzero | mean 36.1, 100% nonzero | 0.0% nonzero |
+| SCO5 size-18 ties | **0.6% nonzero** | mean 57.7, 100% nonzero | **0.6% nonzero** | mean 38.5, 100% nonzero |
+
+A perfect mirror: little-endian SCOW puts the significant byte first, big-endian SCO5 puts it
+second. Reading a single byte at `+10` therefore yields 0 on every SCO5 tie.
+
+Downstream, `EncTie::read` does:
+
+```
+if (arcX1 < arcX2)  isTieStart = true;
+else if (arcX1 == arcX2 && (startFlag & 0x80) == 0)  isTieStart = false;
+```
+
+With `arcX1 == arcX2 == 0` on every SCO5 tie, the second branch fires whenever the start flag's
+high bit is clear, forcing `isTieStart = false`. 61% of SCO5 ties have a zero start flag byte.
+
+**Fixed** by reading `arcX1` and `arcX2` as `quint16` through the stream, which already carries the
+right byte order per magic. SCOW is unchanged. Comes with the first SCO5 fixture carrying a tie.
+
+
+
+## 5 to 7, 9, 10. Coverage
+
+**14272 of 20577 files (69%) sit in a header combination with no fixture at all.**
+
+| Missing combination | Real files | Fixtures |
+|---------------------|-----------|----------|
+| ZBOT encrypted, rev 1 | 4253 | 0 |
+| Encore 4.3-4.5, `0xC4` app 1056 rev 1 | 3155 | 0 |
+| Encore 3.x, `0xC2` app 773 rev 1 | 2744 | 0 |
+| Encore 4.0-4.2, `0xC2` app 775 rev 1 | 1298 | 0 |
+| ZBOT encrypted, rev 0 | 994 | 0 |
+| Encore 2.x, app 592 rev 1 | 709 | 0 |
+| Encore 3.x, rev 0 | 467 | 0 |
+| Encore 4.0-4.2, `0xC2` rev 0 | 393 | 0 |
+| Encore 4.0-4.2, `0xC4` rev 0 | 243 | 0 |
+| SCO5 rev 2 | 11 | 0 |
+
+**Encrypted containers are 5255 files, 25.5% of the corpus, against 2 fixtures.** That is the
+single largest coverage gap by file count.
+
+Per format, features present in the corpus but in no fixture of that format:
+
+- **SCO5**: 15 of 15 ornament subtypes, 17 of 18 element size classes, all 4 ornament sizes, rest
+  size 18, tab tuning. Two fixtures cover essentially nothing.
+- **v0xA6**: ties (39772), beams, key changes, MIDI CC, slurs, dynamics `0x82`/`0x83`/`0x85`,
+  To Coda `0xA5`.
+- **v0xC2**: staff text `0x1E`, 47 of 51 ornament subtypes, rest size 20, note sizes 26 and 28.
+- **v0xC4**: 17 of 76 ornament subtypes, articulation-down bytes including `0x1D`.
+
+**Correction to an earlier draft of this document.** A first pass, run before the census followed
+symlinks, saw only 347 of the available files and concluded that 48 fixtures carried header
+combinations no Encore build writes. On the full corpus **every fixture header combination occurs
+in real files**. There are no synthetic-only headers. The fixture problem is proportion, not
+realism: v0xC2 is 24% of the corpus and 8% of the fixtures, and encrypted files are 25% of the
+corpus and 0.5% of the fixtures.
+
+**Closes with:** fixtures for the missing combinations, weighted toward encrypted containers and
+the v0xC2 generations. Every fixture is built by `tests/data/gen_enc_test_files.py`, which lives
+on this branch alongside this document.
+
+## 8. Element type `0xA`: RESOLVED, and the current drop is correct
+
+Type `0xA` carries **pitched events Encore plays but does not notate**. It uses the note layout of
+its own generation byte for byte (face value `+5`, xoffset `+10`, staff position `+12`, MIDI pitch
+`+15`, playback duration `+16`, velocity `+19`), and decoding it as a note yields coherent music:
+in `zustrara.enc` a stepwise melody with accidentals, in `RONDAA~1.ENC` a run of constant
+middle-line quarters.
+
+Opening `RONDAA~1.ENC` in Encore 4.5 confirms what it is. The carrying staff is **hidden** in the
+Staff Sheet; revealing it shows stemless noteheads piled up, with an ordinary **whole-measure rest
+in every affected measure**. Encore therefore considers those measures notationally empty and keeps
+the events for playback only.
+
+Supporting evidence from the corpus:
+
+- The events never share a tick with a type-9 note on the same staff (0 of 166 in `RONDAA~1.ENC`).
+- The staff switches from type 9 to type 10 at a measure boundary and never switches back
+  (measures 0-20 notes, 21-31 type 10, zero overlap).
+- Saving from Encore 4.5 and from Encore 5.0 preserves all 166 elements; 146 of them change by
+  exactly one byte, `xoffset` at `+10`, by plus or minus one. That is re-layout, not conversion. So
+  this is a live element type, not a legacy artefact.
+
+**Correction to an earlier draft.** This document previously implied the importer loses music here.
+It does not: Encore renders those measures as whole rests too. Emitting the events as notes would
+add music Encore does not display and would collide with the accompanying rests.
+
+**What to change:** nothing behavioural. The drop should become a named, deliberate skip rather
+than falling through the "unknown element" counter in `debug-dump.cpp`, and the type belongs in the
+element table in `ENCORE_FORMAT.md`, where it now is.
+
+## 11. Key signature diverges across conversion pairs (lead)
+
+The differential oracle below flags `line_key` as differing in 6 of 399 pairs (1.5%). In every
+case the total number of LINE staff entries is preserved exactly and the key values merely
+redistribute, for example `{0:12, 8:40, 11:10}` becoming `{0:6, 8:51, 11:5}`. All six are
+two-instrument files.
+
+Two hypotheses, both untested: either the importer misaligns staff entries in one generation, or
+Encore 5 genuinely rewrites the key on re-save for some staves. This is a lead, not a confirmed
+defect.
+
+**Closes with:** opening one of the six pairs in Encore and reading the key signatures off the
+score. `Vals sobre las olas.Bandurria 1.enc` has the largest divergence.
+
+## 12 to 15. Remaining
+
+- **Chord symbol text slot.** `EncChordSym::read` reads a fixed 36 byte text slot at `+14` whenever
+  `tipo & 1`, so it reads through `+50` on elements of size 14, 16, 18, 20 and 22. Whether that
+  overruns into the next element or the slot really is fixed has not been checked.
+- **Unknown version byte.** `EncFormatReader::create` falls back to the v0xC4 reader with a `LOGW`
+  the user never sees. Encore 6 is in development. Decide whether that should be a best-effort
+  parse with a visible warning or a clean "unsupported version" error.
+- **`SCOX` / `SCOR` / `SCOS`.** Listed in the spec as observed variants, rejected by
+  `EncHeader::readMagicAndVersion`, and absent from 20577 files. Either find a sample or drop the
+  claim. `ZBOP` and `ZBO6` are likewise assumed to share the `ZBOT` keystream, untested.
+- **v0xA6 multi-measure rests.** `EncRest::read` reads the count only when `size > 15`; v0xA6 rests
+  are 7 bytes, so there is no support at all. Whether Encore 2.x could write them is unknown.
+
+## 16. Corpus hygiene, not a defect
+
+160 files carry a `.enc` extension but are not Encore documents: 136 ZIP archives (multi-megabyte,
+all under `downloads/brasilsonoro`), 15 empty files, 7 with magic `00 10 00 01`, one JPEG, one text
+file. The parser rejects all of them. The ZIPs presumably need extracting before they contribute
+anything. The 7 files with magic `00 10 00 01` are worth one look in case they are an unrecognised
+Encore variant.
+
+---
+
+## Differential oracle
+
+`~/Scores/downloads/bandurriator` holds **399 matched pairs**: an Encore 4.3 encrypted original in
+`backup_zbot/` and the same score converted to Encore 5.0.2 in the parent directory. Measures,
+instruments and systems are identical in all 399 pairs, so any difference in what the importer
+reads is a defect in one of the two readings.
+
+| invariant | pairs | differ | |
+|-----------|-------|--------|--|
+| note face values | 399 | 0 | 0.0% |
+| note tuplets | 399 | 0 | 0.0% |
+| rest face values | 396 | 0 | 0.0% |
+| clefs | 399 | 0 | 0.0% |
+| time signatures | 399 | 0 | 0.0% |
+| staff types | 399 | 0 | 0.0% |
+| tab tunings | 399 | 0 | 0.0% |
+| key changes | 144 | 0 | 0.0% |
+| tempo marks | 82 | 0 | 0.0% |
+| articulations | 27 | 0 | 0.0% |
+| clef changes | 10 | 0 | 0.0% |
+| ornament subtypes | 387 | 1 | 0.3% |
+| staff text indices | 336 | 1 | 0.3% |
+| element types | 399 | 1 | 0.3% |
+| **LINE key** | **399** | **6** | **1.5%** |
+
+Thirteen musical invariants are identical across all 399 pairs. That is strong positive validation
+of the v0xC4 reading across revisions 0, 1 and 4, and of the ZBOT decryption at scale. The single
+ornament, staff-text and element-type difference is one file (`Kalinka Orquesta Plectro.enc`) that
+differs by one element, most likely an edit between saves rather than a reading defect.
+
+The one systematic signal is `line_key`, gap 11 above.
+
+**This is the harness worth keeping.** It answers "did we leave something out this time" without
+needing a ground-truth score: run the oracle before and after any importer change, and any
+invariant that moves is a regression.
+
+---
+
+## VM experiments
+
+Encore 4.5 and 5.0.2 are available by hand in a VM. Neither writes v0xA6 or v0xC2, so **conversion
+saves are the high-value experiments**. Two of the originally planned experiments are now
+unnecessary: the bandurriator corpus already supplies 399 Encore 4.3 to 5.0.2 pairs, which covers
+the rev-0/1 against rev-4 question, and the ZBOT decryption is validated at scale by those pairs.
+
+What remains, ranked.
+
+### A. v0xA6 to v0xC4 conversion: DONE
+
+`SILENT.enc` opened in Encore 4.5 and saved as `SILENT-45.enc`, both in `~/Scores/demos/2.5/`.
+Encore 4.5 asked twice to substitute a missing font (TimesNewRomanPS) and accepted the file. Note
+that Encore 4.5 wrote **format revision 0**, which is further evidence that `0x3E` is not a build
+stamp.
+
+Results in gap 3 above. The v0xA6 tie arc fields could not be located from it: like the ornament x
+coordinates, the tie arc x does not survive the unit change across the conversion.
+
+### B. Encore 3.x to Encore 4.5 conversion: DONE
+
+`SALVEDOL.ENC` was opened in Encore 4.5, which showed a legacy-conversion dialog: score titles are
+no longer stored now that Windows supports long filenames, so the title would be lost and the file
+must be renamed. Pressing **Rename** renamed it to `Salve Dolorosa.ENC` without converting; a
+later explicit save produced the v0xC4 version in place (app 1056, revision 0, 25392 bytes against
+the original 20332).
+
+The Encore 3.x original survives as `~/Downloads/SALVEDOL.ENC`. The staged pair is in the session
+scratchpad as `SALVE-orig.ENC` and `SALVE-45.enc`.
+
+Results in gap 0 above. The dialog is itself a format fact: before Encore 4.5 the score title
+doubled as the document name `[external]`.
+
+Element type `0xA` did not appear in this file, so it remains unidentified. A conversion of an
+Encore 4.0-4.2 file that does contain it would settle that.
+
+### C. Key signature check (closes gap 11)
+
+Open both halves of one diverging pair, for example `Vals sobre las olas.Bandurria 1.enc` from
+`backup_zbot/` and from the parent directory, and read the key signatures off the score in Encore.
+That decides between "we misalign staff entries" and "Encore rewrites the key on re-save".
+
+### D. Tie probe (gives gap 1 and 4 their fixtures)
+
+One score with four ties: one short, one long, one on a chord, one across a barline. Save from
+Encore 5.0.2. If a macOS Encore is available, save it there too for the first real SCO5 fixture.
