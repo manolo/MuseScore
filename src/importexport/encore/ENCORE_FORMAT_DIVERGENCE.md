@@ -102,8 +102,7 @@ at `+14` when `tipo & 1`, so it reads through `+50` regardless of the element si
 - **v0xA6**: note pitch `+11`, note tuplet `+7`, articulation `+18` for size 11, zero articulations
   below size 27. **No ornament handling at all.**
 - **v0xC2**: ornament accent `0xC4` to `0xBE`, slur count from `altMezuro`, tempo layout
-  discrimination; tie-sender nibble, articulation
-  `+22` for size 24.
+  discrimination; articulation `+22` for size 24.
 - **v0xC4**: zero articulations below size 27.
 - **SCO5**: inherits v0xC4 unchanged.
 

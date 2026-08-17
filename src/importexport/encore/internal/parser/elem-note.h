@@ -100,7 +100,7 @@ struct EncNote : EncMeasureElem {
     // Set by calculateRealDurations() for v0xA6: note is a non-leading grace
     // within a grace group (shorter duration than the leading grace).
     bool isInnerGrace           { false };
-    // Set by postProcessElement() for formats where grace1 low nibble encodes tie-sender (v0xC2).
+    // grace1 low nibble bit 0: the note itself records an outgoing tie. See ENCORE_FORMAT.md.
     bool isTieSender            { false };
     // Set by calculateRealDurations() Phase 4 for v0xC2: note belongs to an implied tuplet group
     // (rdur/faceValue mismatch gives the ratio). Explicit flag so incidental MIDI timing drift
