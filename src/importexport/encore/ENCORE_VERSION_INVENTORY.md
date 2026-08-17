@@ -114,40 +114,57 @@ The same corpus moves the app-version boundary: app 1056 begins at Encore **4.3*
 
 ## 5. Release mapping
 
-Public release history `[external]`: Encore was created by Don Williams and first released in 1984
-by Passport Designs. GVOX acquired Passport's intellectual property in 1998. Encore 4.5 was
-announced in November 2001. Encore 5 followed roughly ten years after Encore 4, around 2008.
-Passport Music Software LLC took over in August 2013, shipping 5.0.4 on Windows and 5.0.7 on
-macOS. Sonic Scores acquired the rights in June 2022 and has Encore 6 in development.
+Ordered by date. Three of the releases are held as original distributions and their example files
+give hard anchors: the format version a release writes can be read straight off a file that release
+shipped with, rather than inferred from a corpus.
 
-| Release | Platform | magic | ver `0x04` | app `0x28` | rev `0x3E` | corpus | Tag |
-|---------|----------|-------|-----------|-----------|-----------|--------|-----|
-| Encore 2.x | Windows | SCOW | `0xA6` | 592 | 0, 1 | 784 | `[verified]` |
-| Encore 3.x | Windows | SCOW | `0xC2` | 773 | 0, 1 | 3211 | `[verified]` |
-| Encore 4.0 to 4.2, early saves | Windows | SCOW | `0xC2` | 775 | 0, 1 | 1691 | `[observed]` |
-| Encore 4.0 to 4.2, later saves | Windows | SCOW | `0xC4` | 775 | 0, 1 | 974 | `[observed]` |
-| Encore 4.3, encrypted | Windows | ZBOT | `0xC4` | 1056 | 0, 1 | 5247 | `[external]` |
-| Encore 4.3 to 4.5 | Windows | SCOW | `0xC4` | 1056 | 0, 1 | 3671 | `[observed]` |
-| Encore 5.x | Windows | SCOW | `0xC4` | 1056 | 4 | 4879 | `[verified]` |
-| Encore 5.x | macOS | SCO5 | none | 1056 | 0, 1, 2 | 15 | `[observed]` |
-| Encore 1.x | Macintosh | unknown | unknown | unknown | unknown | 0 | `[assumed]` |
-| Encore 6 | both | unknown | unknown | unknown | unknown | 0 | not yet seen |
+**Where the dates come from.** The distribution readmes state the release year `[external, WinWorld]`.
+The corpus dates the rest: file modification times survive on 6637 files, and the earliest date a
+format version appears on is a lower bound for when the release existed, since a file cannot predate
+the program that wrote it. Bulk copy dates (large 2011 and 2017 spikes) are ignored for this.
+
+| Release | Year | Platform | magic | ver `0x04` | format `0x28` | rev `0x3E` | Evidence |
+|---------|------|----------|-------|-----------|--------------|-----------|----------|
+| Encore 2.0.4 | 1991 | DOS | unknown | unknown | unknown | unknown | distribution held, no example score on its disks |
+| Encore 2.5.1 | 1992 | Windows 3.0 MME | SCOW | `0xA6` | 2.50 | 1 | **its own `SILENT.ENC`** `[verified]` |
+| Encore 3 | 1993-1996 | DOS and Windows | SCOW | `0xC2` | 3.05 | 0, 1 | distribution holds a 3.05 file; corpus from 1996 `[verified]` |
+| unsampled | 1999+ | Windows | SCOW | `0xC2` or `0xC4` | 3.07 | 0, 1 | corpus only, earliest 1999 `[observed]` |
+| Encore 4.x | 1997+ | Windows | SCOW | `0xC4` | 4.20 | 0 | **Encore 4 example files, dated 1997-11-12** `[verified]` |
+| Encore 4.5 | 2001 | Windows | SCOW | `0xC4` | 4.20 | 1 | corpus from 1999; two examples re-saved 2001-09-10 `[observed]` |
+| Encore 5.0 | 2009+ | Windows | SCOW | `0xC4` | 4.20 | 4 | revision 4 never appears before 2009 in 761 dated files `[verified]` |
+| Encore 5.x | ? | macOS | SCO5 | none | 4.20 | 0, 1, 2 | 16 files `[observed]` |
+| Encore 6 | in development | both | unknown | unknown | unknown | unknown | not yet seen |
+
+**The format version is the Encore version, in BCD.** Encore 2.5.1 ships a score stamped 2.50 and
+Encore 3 ships one stamped 3.05, so the field at `0x28` names the release that wrote the file rather
+than an abstract generation `[verified]`. It stops tracking the release after 4.20, which Encore 4.5
+and every 5.x write unchanged, so from that point the revision byte at `0x3E` is what separates them.
 
 Notes:
 
-- The app-775 line splits on the version byte, not the app version. The two groups share every
+- **Format 3.07 has no distribution behind it.** It was previously mapped to "Encore 4.0 to 4.2" on
+  the strength of nothing recorded here. Its files run 1999 onwards and its element geometry sits
+  between 3.05 and 4.20, so it belongs between them, but which release wrote it is unestablished.
+  The Encore 4 examples carry 4.20 and are dated 1997, which is earlier, so the old mapping cannot
+  be right as stated.
+- **The 3.07 line splits on the version byte, not the format version.** The two groups share every
   element size but use disjoint articulation subtypes: the `0xC2` group encodes accent as `0xC4`,
-  the `0xC4` group as `0xBE`, with no overlap `[observed]`. Encore 4.0 to 4.2 therefore renumbered
-  its ornament subtypes mid-line while keeping the same app version stamp.
-- The files carrying version byte `0xC2` or `0xA6` with format 4.20 are **synthetic fixtures of
-  this test suite**, not files Encore wrote: every one of them lives under the fixture directories
-  and was generated without a format version, inheriting the skeleton's `[verified]`.
-- No file in the corpus predates Encore 2.x. Whether Encore 1.x for Macintosh wrote `.enc` at all,
-  and what magic it used, is untested. `SCOX` / `SCOR` / `SCOS` are the natural suspects, and read
-  as classic Mac OS four-character type codes, but no sample exists. One magic-less container does
-  occur, and it is a Windows file: see ENCORE_FORMAT.md §Magics and byte order.
-- Encore 6 has not shipped a file into this corpus. When it does, the unknown-version fallback
-  reads it as the newest generation its format version is not older than, and logs both numbers.
+  the `0xC4` group as `0xBE`, with no overlap `[observed]`. Whichever release wrote 3.07 renumbered
+  its ornament subtypes mid-line while keeping the same format stamp.
+- **One genuine file carries version byte `0xC2` with format 4.20**: `LaKotta.enc`, an official
+  Encore example, dated 2000-04-17. The other 66 files in that combination are fixtures of this test
+  suite, generated without a format version and inheriting the skeleton's. An earlier note here
+  claimed all of them were fixtures; that was wrong.
+- **Encore did not begin on the Macintosh.** The distribution readmes say it originated on the Atari
+  ST in 1984 `[external, WinWorld]`, which is itself doubtful since the ST shipped in 1985, but no
+  source here supports a Macintosh origin. An earlier note claimed a 1984 Macintosh release by Don
+  Williams and a Passport lineage; none of that was sourced and it is withdrawn. What the
+  distributions do establish is Passport Designs as the publisher in 1991 and 1992.
+- **No file in the corpus predates Encore 2.5**, and no Macintosh file predates Encore 5. Whether
+  any earlier release wrote `.enc`, and with what magic, is untested. `SCOX` / `SCOR` / `SCOS` remain
+  unsampled.
+- Encore 6 has not shipped a file into this corpus. When it does, the unknown-version fallback reads
+  it as the newest generation its format version is not older than, and logs both numbers.
 
 ---
 

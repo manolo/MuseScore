@@ -646,7 +646,7 @@ TEST_F(Tst_Structure, old_format_v0c2_correct_pitches)
 }
 
 // ===========================================================================
-// Encore 4.0 inserted two bytes into every element body at offset +8, so a file written by an
+// Format 3.07 inserted two bytes into every element body at offset +8, so a file written by an
 // earlier build (app version 773) keeps every field from there on two bytes lower. Reading such a
 // file with the post-4.0 offsets takes the wrong byte for the pitch and never reaches the tie arc.
 // See ENCORE_FORMAT.md §Version byte and release mapping.
@@ -680,17 +680,17 @@ TEST_F(Tst_Structure, pre_encore4_element_body_offsets)
     }
 
     ASSERT_EQ(notes.size(), 2u) << "fixture holds two half notes";
-    EXPECT_EQ(notes[0]->pitch(), 60) << "pitch comes from +13 in a pre-4.0 note, not from the +15 decoy";
-    EXPECT_EQ(notes[1]->pitch(), 60) << "pitch comes from +13 in a pre-4.0 note, not from the +15 decoy";
+    EXPECT_EQ(notes[0]->pitch(), 60) << "pitch comes from +13 in an older note, not from the +15 decoy";
+    EXPECT_EQ(notes[1]->pitch(), 60) << "pitch comes from +13 in an older note, not from the +15 decoy";
     EXPECT_NE(notes[0]->tieFor(), nullptr) << "the 16-byte tie carries its arc span at +8/+10";
 
     muse::Ret ret = score->sanityCheck();
-    EXPECT_TRUE(ret) << "pre-Encore-4 score should pass sanityCheck: " << ret.text();
+    EXPECT_TRUE(ret) << "the older layout should pass sanityCheck: " << ret.text();
     delete score;
 }
 
 // ===========================================================================
-// The same measure written in the geometry of each generation that occurs in the corpus. Encore 4.0
+// The same measure written in the geometry of each generation that occurs in the corpus. Format 3.07
 // moved every element body two bytes later at once, so the note, the rest, the tie and the MIDI CC
 // all change size together, and the articulation vocabulary moved in the same release. A reader
 // that gets the generation wrong therefore fails on all of them at once, which is what makes one
@@ -746,11 +746,11 @@ static void checkElementFamily(MasterScore* score, const char* what)
 TEST_F(Tst_Structure, element_family_reads_the_same_in_every_generation)
 {
     MasterScore* encore3 = readEncoreScore("structure_family_3x.enc");
-    checkElementFamily(encore3, "Encore 3.x, version byte 0xC2 with format 3.05");
+    checkElementFamily(encore3, "format 3.05 with version byte 0xC2");
     delete encore3;
 
     MasterScore* encore4 = readEncoreScore("structure_family_40x_c2.enc");
-    checkElementFamily(encore4, "Encore 4.0 to 4.2, version byte 0xC2 with format 3.07");
+    checkElementFamily(encore4, "format 3.07 with version byte 0xC2");
     delete encore4;
 
     MasterScore* crossed = readEncoreScore("structure_family_40x_c4.enc");
@@ -771,10 +771,10 @@ TEST(Tst_EncoreFormatReader, unknown_version_byte_falls_back_on_the_format_versi
     // A known version byte is unaffected; the format version still picks the body layout.
     auto encore3 = EncFormatReader::create(0xC2, "SCOW", ENC_FORMAT_3_05);
     EXPECT_STREQ(encore3->formatName(), "v0xC2");
-    EXPECT_EQ(encore3->elementBodyShift(), -2) << "format 3.05 predates the Encore 4.0 body layout";
+    EXPECT_EQ(encore3->elementBodyShift(), -2) << "format 3.05 predates the shifted body layout";
 
     auto encore4 = EncFormatReader::create(0xC2, "SCOW", ENC_FORMAT_3_07);
-    EXPECT_EQ(encore4->elementBodyShift(), 0) << "format 3.07 already has the later body layout";
+    EXPECT_EQ(encore4->elementBodyShift(), 0) << "format 3.07 already has the shifted body layout";
 
     // An unrecognised version byte reads as the newest format it is not older than.
     auto oldUnknown = EncFormatReader::create(0x99, "SCOW", ENC_FORMAT_2_50);

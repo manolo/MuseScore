@@ -340,7 +340,7 @@ TEST_F(Tst_Ornaments, sco5_bigendian_ornaments_and_rest)
     delete score;
 }
 
-// Regression: Encore 4.0 moved four articulations down by six, so a file older than format 3.07
+// Regression: format 3.07 moved four articulations down by six, so a file older than that
 // spells tenuto 0xCE, staccato 0xCF and fermata above 0xD2. Read with the later numbering they are
 // codes nothing recognises and the marks never reach the score. The accent shows the rest of the
 // vocabulary stayed put.
@@ -375,8 +375,8 @@ TEST_F(Tst_Ornaments, pre_encore4_articulation_codes_map_to_the_current_vocabula
     EXPECT_TRUE(marks[0] == SymId::articTenutoAbove || marks[0] == SymId::articTenutoBelow);
     EXPECT_TRUE(marks[1] == SymId::articStaccatoAbove || marks[1] == SymId::articStaccatoBelow);
     EXPECT_TRUE(marks[2] == SymId::articAccentAbove || marks[2] == SymId::articAccentBelow)
-        << "0xC4 is the pre-Encore-4 spelling of the accent, not an up-bow";
-    EXPECT_EQ(fermatas, 1) << "0xD2 is the pre-Encore-4 spelling of fermata above";
+        << "0xC4 is the older spelling of the accent, not an up-bow";
+    EXPECT_EQ(fermatas, 1) << "0xD2 is the older spelling of fermata above";
 
     delete score;
 }
@@ -406,7 +406,7 @@ TEST_F(Tst_Ornaments, post_encore4_articulation_codes_are_left_alone)
         }
     }
     ASSERT_EQ(marks.size(), 2u);
-    EXPECT_TRUE(marks[0] == SymId::stringsUpBow) << "0xC4 stays an up-bow from Encore 4.0 on";
+    EXPECT_TRUE(marks[0] == SymId::stringsUpBow) << "0xC4 stays an up-bow from format 3.07 on";
     EXPECT_TRUE(marks[1] == SymId::articStaccatoAbove || marks[1] == SymId::articStaccatoBelow);
 
     delete score;

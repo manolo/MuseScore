@@ -46,7 +46,7 @@ struct EncLine;
 // See ENCORE_FORMAT.md §Version byte and release mapping.
 inline constexpr quint16 ENC_FORMAT_2_50 = 0x0250;   // Encore 2.x
 inline constexpr quint16 ENC_FORMAT_3_05 = 0x0305;   // Encore 3.x
-inline constexpr quint16 ENC_FORMAT_3_07 = 0x0307;   // Encore 4.0 to 4.2
+inline constexpr quint16 ENC_FORMAT_3_07 = 0x0307;   // the two-byte body shift starts here
 inline constexpr quint16 ENC_FORMAT_4_20 = 0x0420;   // Encore 4.3 through 5.x
 
 // "3.07" for 0x0307, for logging and messages.
@@ -118,7 +118,7 @@ struct EncFormatReader
     // See ENCORE_FORMAT.md §Known quirks for per-version values.
     virtual qint64 headerEnd() const { return 0xC2; }
 
-    // Bytes to add to every element body field from offset +8 onward. Encore 4.0 inserted two
+    // Bytes to add to every element body field from offset +8 onward. Format 3.07 inserted two
     // bytes there in every element type, so a file older than format 3.07 needs -2 while every
     // later generation needs 0. Fields at +5, +6 and +7 never move.
     // See ENCORE_FORMAT.md §Version byte and release mapping.
@@ -218,7 +218,7 @@ struct EncFormatReader
     // when the format keeps it in the inline slot. v0xA6 stores it at +14. See ENCORE_FORMAT.md.
     virtual int ornamentMeasureCountOffset() const { return -1; }
 
-    // An ornament subtype in the vocabulary the rest of the importer speaks. Encore 4.0 renumbered
+    // An ornament subtype in the vocabulary the rest of the importer speaks. Format 3.07 renumbered
     // part of the articulation block, so a file older than format 3.07 states those subtypes six
     // higher and they reach the emitters as codes nothing recognises.
     // See ENCORE_FORMAT.md §Ornament subtypes.

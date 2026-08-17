@@ -63,8 +63,8 @@ struct EncTie : EncMeasureElem {
     // Arc endpoints, uint16. Reading them a byte at a time works only on a little-endian file:
     // in a big-endian one the significant byte is the second, so a byte-wide read yields zero for
     // every tie in the file. See ENCORE_FORMAT.md §TIE element.
-    quint16 arcX1        { 0 };     // arc start x (element offset +10, or +8 before Encore 4.0)
-    quint16 arcX2        { 0 };     // arc end   x (element offset +12, or +10 before Encore 4.0)
+    quint16 arcX1        { 0 };     // arc start x (element offset +10, or +8 before format 3.07)
+    quint16 arcX2        { 0 };     // arc end   x (element offset +12, or +10 before format 3.07)
     qint8 sourcePosition { -1 };    // staff position of source note (+14); -1 = all notes in chord
 
     using EncMeasureElem::EncMeasureElem;
