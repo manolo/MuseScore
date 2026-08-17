@@ -95,7 +95,7 @@ qint64 clampMeasureEnd(qint64 measStart, quint32 varsize, qint64 elemBlockOffset
 
 bool isReadableEncoreMagic(const QString& magic)
 {
-    return magic == "SCOW" || magic == "SCO5";
+    return magic == "SCOW" || magic == "SCO5" || magic == "MTIW" || magic == "MTIM";
 }
 
 QString encFormatVersionString(quint16 formatVersion)
@@ -111,6 +111,10 @@ std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 chuMagio, const 
 {
     if (magic == "SCO5") {
         return makeFormatReader_SCO5();
+    }
+    // The MusicTime containers carry no version byte on the macOS side, so both are matched by magic.
+    if (magic == "MTIW" || magic == "MTIM") {
+        return std::make_unique<EncFormatReader_V0xA6>();
     }
     switch (chuMagio) {
     case static_cast<quint8>(EncFormatVersion::V2_X):

@@ -45,11 +45,15 @@ The first four bytes are the file magic, and they fix the byte order for every m
 |--------|-----------|---------------|-------------------------------------------------|
 | `SCOW` | plaintext | little-endian | Windows Encore, every version `[verified]`      |
 | `SCO5` | plaintext | big-endian    | macOS Encore 5 `[verified]`                     |
+| `MTIW` | plaintext | little-endian | Windows MusicTime `[verified]`                  |
+| `MTIM` | plaintext | big-endian    | macOS MusicTime `[verified]`                    |
 | `ZBOT` | encrypted | ,             | wraps `SCOW`, older Encore 4 saves `[verified]` |
 | `ZBOP` | encrypted | ,             | wraps `SCOS`, no sample `[verified]`            |
 | `ZBO6` | encrypted | ,             | wraps `SCO5`, no sample `[verified]`            |
 
-Three of them occur: `SCOW` in most files, `ZBOT` in a sizeable minority, `SCO5` in a handful, and every `ZBOT` decrypts to a `SCOW` body.
+`SCOW` covers most files, `ZBOT` a sizeable minority and `SCO5` a handful; every `ZBOT` decrypts to a `SCOW` body.
+
+**MusicTime writes the same format.** It is the smaller and cheaper program of the same publisher, and the two open each other's documents because there is nothing to convert: a MusicTime file has its own magic and is otherwise an Encore file, with the same blocks in the same order and the same element geometry. Every sample states format 2.62 and carries the compact 2.x layout of 1.3, so a reader that handles Encore 2.x handles MusicTime by accepting two more magics `[verified]`. The pairing of the names is the same on both sides: `SCOW` and `MTIW` on Windows, `SCO5` and `MTIM` on the Macintosh, big-endian.
 
 **The magic is the whole test.** A file whose first four bytes are none of the above is not an Encore document and is to be rejected. There is no fallback signature and no recovery: the byte order, the header layout and the position of the first block all follow from the magic, so nothing below it can be read without one.
 
@@ -66,11 +70,12 @@ The format version at `0x28` is BCD, the major digit in the high byte, so `0x042
 | Format | Bytes    | Release        | First dated | Evidence                            |  |
 |--------|----------|----------------|-------------|-------------------------------------|--|
 | 2.50   | `0x0250` | Encore 2.5     | 1993        | its own `SILENT.ENC` `[verified]`   |  |
+| 2.62   | `0x0262` | MusicTime      | ,           | its own documents `[verified]`      |  |
 | 3.05   | `0x0305` | Encore 3       | 1996        | a file on its disks `[verified]`    |  |
 | 3.07   | `0x0307` | unsampled      | 1999        | corpus only `[observed]`            |  |
 | 4.20   | `0x0420` | Encore 4.x-5.x | 1997        | its own example scores `[verified]` |  |
 
-Every generation is represented in the corpus, 4.20 in most files and 2.50 in the fewest. The dates are the earliest file seen carrying each, which is a lower bound: a file cannot predate the program that wrote it, but a user may keep an old release for years, and many did.
+Every generation is represented in the corpus, 4.20 in most files and 2.50 in the fewest. Format 2.62 belongs to MusicTime rather than to Encore, and every MusicTime document seen carries it, on both platforms; it reads with the 2.50 geometry in full. The dates are the earliest file seen carrying each, which is a lower bound: a file cannot predate the program that wrote it, but a user may keep an old release for years, and many did.
 
 Which release wrote format 3.07 is not established. Its files run from 1999 and its element geometry sits squarely between 3.05 and 4.20, so it belongs between them, but no distribution in hand produces it, and the Encore 4 example scores are dated November 1997 and carry 4.20, which is earlier.
 
@@ -132,7 +137,7 @@ Encore 4.5 refuses a file whose `0x3E` is newer than it supports, which is why a
 
 Everything above reduces to this procedure.
 
-1. Read four bytes. If they are not one of the five magics in 1.2, reject the file.
+1. Read four bytes. If they are not one of the magics listed in 1.2, reject the file.
 2. If the magic is a `ZBOT` family one, decrypt, then start again from step 1 on the result.
 3. Set the byte order from the magic: big-endian for `SCO5`, little-endian otherwise.
 4. Read the format version at `0x28`. It gives the element geometry, and it is ordered, so a value this document does not list belongs to the layout of the highest listed version it is not older than.

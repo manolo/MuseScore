@@ -457,7 +457,7 @@ def note_v0c2_spurious_semitone(tick, voice, staffIdx, fv, pitch, flag=1):
     d[12]=flag                # elemStart+15 = spurious flag, not a pitch
     return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)
 
-def note_v0xa6(tick, voice, staffIdx, fv, pitch_offset, position=None):
+def note_v0xa6(tick, voice, staffIdx, fv, pitch_offset, position=None, end='<'):
     """v0xA6 note: size=10, slot=20 bytes. MIDI pitch lives at elemStart+11
     (= file offset within the 20-byte slot, NOT within the 10-byte d
     array). The slot layout is 3 header bytes + 7 d bytes + 10 padding
@@ -476,7 +476,7 @@ def note_v0xa6(tick, voice, staffIdx, fv, pitch_offset, position=None):
     pad = bytearray(10)
     midi = 60 + (pitch_offset if pitch_offset >= -128 and pitch_offset <= 127 else 0)
     pad[11 - 3 - 7] = midi & 0xFF   # = pad[1] = file offset +11
-    return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)+bytes(pad)
+    return struct.pack(end+'H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)+bytes(pad)
 
 def rest_v0xa6(tick, voice, staffIdx, fv, dur_ticks=0):
     """v0xA6 rest: size=7, slot=14 bytes. faceValue at +5 and the rest's own duration in ticks
@@ -926,21 +926,23 @@ def gen_v0xa6_basic():
 # content+52. Reproduces the on-disk v0xA6 instrument/header layout so the
 # v0xA6-specific MIDI and staff-size reads can be exercised.
 # ---------------------------------------------------------------------------
-def build_v0xa6(instruments, meas_list, staff_size=1, keyIndex=0):
+def build_v0xa6(instruments, meas_list, staff_size=1, keyIndex=0, magic=b'SCOW', chu_versio=592, end='<'):
     """instruments: list of (name:str, midi_1indexed:int, key_signed:int).
     staff_size: global 1-4 selector at header 0x8D (1=60%, 2=75%, 3=100%, 4=130%).
     keyIndex: Encore key-signature index (0=C, 2=Bb, 9=D, 10=A, 11=E...) written at
     offset 14 of every 22-byte LINE staff entry, the real v0xA6 key-signature location."""
     n = len(instruments)
     hdr = bytearray(0xA6)
-    hdr[0:4] = b'SCOW'
-    hdr[4] = 0xA6
-    struct.pack_into('<H', hdr, 0x28, 592)      # chuVersio
-    struct.pack_into('<h', hdr, 0x2E, 1)        # lineCount
-    struct.pack_into('<h', hdr, 0x30, 1)        # pageCount
+    hdr[0:4] = magic
+    # The field at +4 is the offset of the first block. A Windows container has it as a
+    # little-endian word, a macOS one as a big-endian word, so packing it follows the byte order.
+    struct.pack_into(end+'I', hdr, 4, 0xA6)
+    struct.pack_into(end+'H', hdr, 0x28, chu_versio)   # format version
+    struct.pack_into(end+'h', hdr, 0x2E, 1)        # lineCount
+    struct.pack_into(end+'h', hdr, 0x30, 1)        # pageCount
     hdr[0x32] = n                               # instrumentCount
     hdr[0x33] = 0                               # staffPerSystem (v0xA6 stores 0)
-    struct.pack_into('<h', hdr, 0x34, len(meas_list))   # measureCount
+    struct.pack_into(end+'h', hdr, 0x34, len(meas_list))   # measureCount
     hdr[0x52] = 8                               # 0x52 is unrelated in v0xA6 (invalid 8)
     hdr[0x8D] = staff_size & 0xFF               # global staff-size selector (v0xA6)
     tks = b''
@@ -950,13 +952,13 @@ def build_v0xa6(instruments, meas_list, staff_size=1, keyIndex=0):
         content[0:len(nm)] = nm                 # name, NUL-terminated by zero fill
         content[42] = key & 0xFF                # Key/octave transpose (content+42)
         content[52] = midi & 0xFF               # MIDI program (content+52 == block+60)
-        magic = ('TK%02d' % i).encode('ascii')
-        tks += magic + struct.pack('<I', 64) + bytes(content)
+        tk_magic = ('TK%02d' % i).encode('ascii')
+        tks += tk_magic + struct.pack(end+'I', 64) + bytes(content)
     # v0xA6 LINE: 14-byte pre-header (skip10 + start u16 + measureCount u8 + pad), then one
     # 22-byte staff entry per instrument. The written key index sits at entry offset 14 and a
     # 0x0E 0xFC marker at offset 16 bounds the run (matches real MusicTime/Encore-2.x files).
     line = bytearray(14)
-    struct.pack_into('<H', line, 10, 0)         # start
+    struct.pack_into(end+'H', line, 10, 0)         # start
     line[12] = len(meas_list) & 0xFF            # measureCount
     for _ in range(n):
         ent = bytearray(22)
@@ -964,20 +966,38 @@ def build_v0xa6(instruments, meas_list, staff_size=1, keyIndex=0):
         ent[16] = 0x0E
         ent[17] = 0xFC
         line += ent
-    line_block = b'LINE' + struct.pack('<I', len(line)) + bytes(line)
+    line_block = b'LINE' + struct.pack(end+'I', len(line)) + bytes(line)
     body = b''.join(meas_list)
     return bytes(hdr) + tks + line_block + body
 
-def _mhdr_a6(tsNum, tsDen, bpm=100):
+def _mhdr_a6(tsNum, tsDen, bpm=100, end='<'):
     h = bytearray(0x1A)
-    struct.pack_into('<H', h, 0, bpm)
-    struct.pack_into('<HH', h, 4, 240, 240 * tsNum * 4 // tsDen)
+    struct.pack_into(end+'H', h, 0, bpm)
+    struct.pack_into(end+'HH', h, 4, 240, 240 * tsNum * 4 // tsDen)
     h[8], h[9] = tsNum, tsDen
     return bytes(h)
 
-def _meas_a6(note_specs, tsNum=2, tsDen=4):
-    e = b''.join(note_v0xa6(t, v, s, fv, p) for (t, v, s, fv, p) in note_specs) + end_marker()
-    return b'MEAS' + struct.pack('<I', len(e)) + _mhdr_a6(tsNum, tsDen) + e
+def _meas_a6(note_specs, tsNum=2, tsDen=4, end='<'):
+    e = b''.join(note_v0xa6(t, v, s, fv, p, end=end) for (t, v, s, fv, p) in note_specs) + end_marker()
+    return b'MEAS' + struct.pack(end+'I', len(e)) + _mhdr_a6(tsNum, tsDen, end=end) + e
+
+# ===========================================================================
+# structure_musictime_windows.mus and structure_musictime_mac.mus
+# MusicTime is Passport's smaller sibling of Encore and writes the same file with
+# its own magic: MTIW on Windows, MTIM on macOS, the second big-endian the way SCO5
+# is. Both carry the version byte of the compact 2.x generation and format 2.62, so
+# they read with the same geometry as an Encore 2.x file. Same two notes in each, so
+# the pair also proves the byte order is honoured.
+# ===========================================================================
+def gen_musictime_windows():
+    m = _meas_a6([(0, 0, 0, 3, 0), (240, 0, 0, 3, 4)])
+    return build_v0xa6([('Melody', 74, 0)], [m], magic=b'MTIW', chu_versio=0x0262)
+
+
+def gen_musictime_mac():
+    m = _meas_a6([(0, 0, 0, 3, 0), (240, 0, 0, 3, 4)], end='>')
+    return build_v0xa6([('Melody', 74, 0)], [m], magic=b'MTIM', chu_versio=0x0262, end='>')
+
 
 # instruments_v0xa6_midi_program.enc
 # v0xA6 stores the MIDI program at TK content+52. The reader used to skip it
@@ -13013,6 +13033,8 @@ if __name__=='__main__':
     write("notes_tuplet_sort.enc",   gen_v0c4_tuplet_sort())
     write("importer_counter_bytes.enc", gen_v0c4_counter_bytes())
     write("structure_v0xa6_basic.enc",        gen_v0xa6_basic())
+    write("structure_musictime_windows.mus", gen_musictime_windows())
+    write("structure_musictime_mac.mus",     gen_musictime_mac())
     write("instruments_v0xa6_midi_program.enc",   gen_v0xa6_midi_program())
     write("structure_v0xa6_score_size.enc",       gen_v0xa6_score_size())
     write("structure_v0xa6_key_signature.enc",    gen_v0xa6_key_signature())
