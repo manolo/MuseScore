@@ -68,7 +68,7 @@ MasterScore  (complete)
 
 ## Import options (Preferences → Import → Encore)
 
-`EncImportOptions` (in `importer/import-options.h`) holds eleven user-configurable options.
+`EncImportOptions` (in `importer/import-options.h`) holds twelve user-configurable options.
 `IEncImportConfiguration` / `EncImportConfiguration` (in `ienc-importconfiguration.h` / `internal/enc-importconfiguration.h`) persist them via `muse::Settings` and expose `async::Channel<T>` change signals.
 `NotationEncoreReader` reads the config on every import and passes the filled struct into `importEncore()`.
 
@@ -81,6 +81,7 @@ MasterScore  (complete)
 | `importTempoTextSemantic`              | true             | Italian tempo terms to TempoText    |
 | `importUnsupportedArticulationsAsText` | false            | unknown artic bytes to StaffText    |
 | `instrumentSearchMode`                 | NameAndMidi      | name+MIDI, MidiOnly, or Piano       |
+| `tablatureImportMode`                  | Linked           | Linked, Separate, or Ignore         |
 | `underfillMeasureStrategy`             | IrregularMeasure | fill trailing gaps (see below)      |
 | `overfillMeasureStrategy`              | IrregularMeasure | handle overfull measure (see below) |
 | `firstMeasureIsPickup`                 | true             | shorten first measure as pickup     |
@@ -89,7 +90,7 @@ MasterScore  (complete)
 `EncImportOptions` is stored in `BuildCtx` and consulted throughout `emitters-*.cpp` and `resolvers-*.cpp`.
 The "Default" column above is the shipped Preferences default (set in `enc-importconfiguration.cpp`).
 For the two measure-correction strategies the in-code struct fallback in `import-options.h` stays at `InvisibleRests` / `Truncate`, which is what direct callers and the unit tests use; only the GUI default is `IrregularMeasure`.
-`mergeVoices` follows the same split: the struct fallback is `false` (so unit-test fixtures keep their voices unless a test opts in) while the shipped GUI default is `true`.
+`mergeVoices` follows the same split: the struct fallback is `false` (so unit-test fixtures keep their voices unless a test opts in) while the shipped GUI default is `true`, and `tablatureImportMode` likewise falls back to `Separate` in the struct while the GUI ships `Linked`.
 The collapse moves notes from the upper voices into voice 1 with the generic voice-change editing command, which rebuilds the destination chord and does not carry a single-chord tremolo across; `mergeNonOverlappingVoices` therefore snapshots each staff's tremolos by onset tick before the move and re-attaches any that were dropped, so tremolos survive the merge.
 
 ## Overfull measures
@@ -209,7 +210,7 @@ so that is the first place to look.
 - "common" genre tiebreaker so the everyday classical guitar wins
   over the soprano variant when both share GM program 24.
 
-**Percussion detection, four-level chain.** Encore percussion tracks always report `midiProgram = 1` (see ENCORE_FORMAT.md), so a strict MIDI-program lookup would route them to Grand Piano. The importer uses a prioritized chain instead:
+**The chain, seven steps.** Encore percussion tracks always report `midiProgram = 1` (see ENCORE_FORMAT.md), so a strict MIDI-program lookup would route them to Grand Piano. `applyBestInstrument` runs an ordered chain instead, and the step that matched is named in the import log:
 
 1. **PERC clef (primary, language-agnostic).** If the first staff of
    the instrument carries `EncClefType::PERC` in the binary LINE block,
@@ -228,14 +229,28 @@ so that is the first place to look.
    names ("Batería", "Batterie", "Drumset", …) drive the match, so no
    hardcoded keyword list is needed and any UI language is supported.
 
-4. **MIDI program lookup** (`searchTemplateForMidiProgram`). Active for
-   any instrument that has a non-zero `midiProgram` and has not been
-   matched by earlier steps. This is the only available signal when the
-   name is absent, so the step has no name-length gate.
+4. **Generic percussion keyword in the name.** `perc`, `drum` or `bater`
+   in the instrument name routes to the `drumset` template, for names the
+   localized template scoring did not reach.
 
-**Short-name guard.** Instrument names shorter than four characters (typically SATB choir labels `S` / `A` / `T` / `B` and the Spanish `C` for Contralto) skip steps 2 and 3 only.
+5. **RHYTHM staff.** A staff Encore marks as rhythm takes the `snare-drum`
+   template, and the MIDI step is skipped for it so program 0 cannot pull
+   it back to Grand Piano.
+
+6. **MIDI program lookup** (`findTemplateByMidi`). Active for any instrument
+   that has a non-zero `midiProgram` and has not been matched by earlier
+   steps. This is the only available signal when the name is absent, so the
+   step has no name-length gate. Among templates sharing a program the
+   everyday one wins, by genre rank.
+
+7. **Nearest template in the same GM family** (`findTemplateByMidiFamily`).
+   Catches the programs no template carries as its primary sound, such as
+   Pizzicato Strings or Muted Trumpet, so the part keeps its category
+   instead of collapsing to Grand Piano.
+
+**Short-name guard.** Instrument names shorter than four characters (typically SATB choir labels `S` / `A` / `T` / `B` and the Spanish `C` for Contralto) skip the two name-scoring steps, 2 and 3.
 With a 1- to 3-character needle the substring scoring in those steps matches almost any template that contains that letter (e.g. `S` lands on Bass Clarinet, `C` on Piccolo).
-Step 4 (keyword) and step 5 (MIDI) still fire: when the name is empty the MIDI program is the sole signal, and suppressing it would force every un-named instrument to Grand Piano regardless of what program Encore recorded.
+The keyword and MIDI steps still fire: when the name is empty the MIDI program is the sole signal, and suppressing it would force every un-named instrument to Grand Piano regardless of what program Encore recorded.
 The chain falls through to Grand Piano only when both name and MIDI give no result; the original label is preserved and the user can reassign from the instrument browser.
 
 **Display names.** Once a template is chosen, the part's long name is set to the Encore instrument name and the short name is cleared.
@@ -354,7 +369,7 @@ Chord extensions (same tick, same Encore voice) reuse `lastChordPos[trackKey]` a
 ## Per-instrument Key transposition
 
 Encore's Staff Sheet exposes a per-instrument "Key" dropdown that adds a chromatic transposition at playback time (see ENCORE_FORMAT.md).
-The value is stored as a signed `int8` in semitones, 23 bytes before the MIDI program byte in the same fixed-offset table (`PRG_BASE - 23 + n * PRG_STEP`), and `EncFile::read` populates `EncInstrument::keyTransposeSemitones` right next to the MIDI-program read.
+The value is stored as a signed `int8` in semitones, 23 bytes before the MIDI program byte in the same fixed-offset table (`PRG_BASE - 23 + n * PRG_STEP`), and `EncRoot::read` populates `EncInstrument::keyTransposeSemitones` right next to the MIDI-program read.
 
 Compact-TK files (TK varsize <= 250, e.g. SATB choir scores saved by Encore 5.0.2 with `offset = 112`) do NOT follow the `PRG_BASE + n * PRG_STEP` layout: the formula reads garbage and any non-zero byte would mis-shift every pitch on that staff.
 The reader skips the Key lookup entirely for those files (the staff- sheet "Key" feature is absent there anyway) and falls back to a sanity bound (`-33..+24`, Encore's UI range) on regular-TK files where the formula offset still happens to land on unrelated data.
@@ -366,7 +381,7 @@ Two adjustments are made for these files:
   v0xA6, not `0xC2` (194). Skipping past `0xC2` would consume the
   first TK block (whose magic sits at `0xA6` in real v0xA6 files)
   and shift every per-instrument metadata field by one slot.
-- The per-instrument loop in `EncFile::read` reads the v0xA6 Key
+- The per-instrument loop in `EncRoot::read` reads the v0xA6 Key
   byte directly from the in-flight TK block content, BEFORE
   delegating to `EncInstrument::read`. The byte is sanity-bound
   to `-33..+24` and stored on the same `EncInstrument::
@@ -875,8 +890,8 @@ Test assertions on `harmonyName()` must use the normalized form.
 
 - `tst_parser_chord.cpp`: unit tests for `EncChordSym::chordName()` in isolation.
   Covers all natural roots, sharps, flats, major/minor/dom7/aug/dim/sus4/slash, and edge cases (invalid radiko, out-of-range toniko, text mode passthrough).
-- `tst_importer.cpp` → `numeric_chord_symbols`: integration test over a score with one numeric chord per measure spanning the full toniko range (0-63). Verifies C, Cm, C+, C7, Cdim, CMaj7.
-- `tst_importer.cpp` → `numeric_chord_with_bass_note`: integration test over a slash chord (tipo=2 with a bass note present); verifies `Ab13sus4/F#`.
+- `tst_text.cpp` → `numeric_chord_symbols`: integration test over a score with one numeric chord per measure spanning the full toniko range (0-63). Verifies C, Cm, C+, C7, Cdim, CMaj7.
+- `tst_text.cpp` → `numeric_chord_with_bass_note`: integration test over a slash chord (tipo=2 with a bass note present); verifies `Ab13sus4/F#`.
 
 ## Duplicate NOTE elements in chord clusters
 
@@ -1131,18 +1146,19 @@ All format-specific interpretation is resolved in the parser layer before `EncRo
 `postProcessElement()` in each `EncFormatReader` subclass is the single hook where raw binary quirks are normalized into semantic fields.
 The importer (`BuildCtx` and all emitters/resolvers) has no knowledge of which format version produced the data.
 
-The three v0xC2 normalizations performed in `EncFormatReader_V0xC2::postProcessElement`:
+What each layer normalizes:
 
-| Quirk                       | Raw binary encoding   | Normalized field                    |
-|-----------------------------|-----------------------|-------------------------------------|
-| Ornament tipo 0xC4 = accent | ORN tipo byte = 0xC4  | remapped to ACCENT (0xBE)           |
-| grace1 tie-sender flag      | `grace1 & 0x0F == 1`  | `EncNote.isTieSender = true`        |
-| alMezuro unreliable         | may hold stale values | `EncOrnament.alMezuroValid = false` |
+| Quirk                            | Raw binary encoding           | Normalized field                | Where                                  |
+|----------------------------------|-------------------------------|---------------------------------|----------------------------------------|
+| the note's own tie flag          | `grace1` bit 0                | `EncNote::isTieSender`          | the base reader, every generation      |
+| the older articulation numbering | ORN subtype six codes higher  | the shared subtype vocabulary   | `normalizeOrnamentSubtype`, below 3.07 |
+| the two TEMPO layouts            | BPM at `+28` or at `+30`      | `EncOrnament::tempo` and `noto` | the v0xC2 reader                       |
+| which forward count to trust     | a count on any ornament       | `EncOrnament::alMezuroValid`    | the v0xC2 reader, true on a slur start |
 
 The importer uses `en->isTieSender` and `en->isImpliedTupletMember` directly (no format flags) and `ps.alMezuroValid` (per-slur, not a global context flag).
 
 **The note's own tie flag is read for every generation.** `grace1` bit 0 marks an outgoing tie (see ENCORE_FORMAT.md), and the base `EncFormatReader::postProcessElement` decodes it, so every reader inherits it and a format-specific override calls the base first. It used to be decoded only for v0xC2, which left the same flag unread in the other three generations. It is a second record of a tie that usually has a TIE element too, so on real files it rarely changes the outcome; it matters for the notes where that element is missing.
-Adding a new Encore format version requires only a new `EncFormatReader` subclass and its `postProcessElement` (for the three ornament/note quirks) plus a `calculateRealDurations` phase when tuplet detection semantics differ.
+Adding a new Encore format version requires a new `EncFormatReader` subclass, whatever offsets and quirks it overrides, and a `calculateRealDurations` phase when tuplet detection semantics differ.
 
 ## v0xC2 size=24 pitch sub-variants
 
@@ -1182,7 +1198,7 @@ Exercised by:
 ## Ghost MEAS blocks past header.measureCount
 
 Encore 5 occasionally leaves trailing MEAS blocks in the file from prior edits that the user truncated; the file header's `measureCount` field at offset 0x34 is authoritative and reflects what Encore actually displays.
-`EncFile::read` stops appending once `measures.size() == header.measureCount` so the imported score matches what the user saw in Encore. Without this cap an Encore 5 file with rendered count 36 and 56 MEAS blocks on disk produces a 56-measure MuseScore score with 20 measures of stale content past the real end of the piece.
+`EncRoot::read` stops appending once `measures.size() == header.measureCount` so the imported score matches what the user saw in Encore. Without this cap an Encore 5 file with rendered count 36 and 56 MEAS blocks on disk produces a 56-measure MuseScore score with 20 measures of stale content past the real end of the piece.
 
 ## Text encoding probes (unified table)
 
@@ -1191,7 +1207,7 @@ Every text-bearing path in the format applies an encoding probe so both modern (
 | Site                         | Function              | Probe                                   |
 |------------------------------|-----------------------|-----------------------------------------|
 | TK block instrument name     | `EncInstrument::read` | printable + NUL → UTF-16; else Latin-1  |
-| TK name recovery (NAME_BASE) | `EncFile::read`       | same as TK name                         |
+| TK name recovery (NAME_BASE) | `EncRoot::read`       | same as TK name                         |
 | LYRIC element                | `EncLyric::read`      | byte 0/1 probe at payload start         |
 | TEXT block entry             | `EncTextBlock::read`  | byte 14/15; `0x04 0x00` = line break    |
 | CHORD-symbol text            | `EncChordSym::read`   | byte 0/1 probe (36-byte slot)           |
@@ -1290,10 +1306,10 @@ The post-pass:
 
 If `alMezuro > 0` (cross-measure span) the heuristic is skipped: xoffsets reset at the bar line, so the importer matches xoffset2 directly against the target measure's notes, falling back to the last ChordRest there.
 
-### v0xC2, reliable +16 measure-count
+### v0xC2, the forward measure count
 
 In v0xC2 the absolute slur xoffset2 lives in a stale ornament-coordinate origin, so matching it directly over-extends slurs (a note-1→note-2 arc read as note-1→note-4).
-The reliable signal is the forward measure-count at element +16, which the parser copies into `alMezuro` and marks valid (see ENCORE_FORMAT.md).
+The dependable signal is the forward measure count, which the parser reads at the offset the file's generation uses, `+16` before format 3.07 and `+18` from it on, copies into `alMezuro` and marks valid (see ENCORE_FORMAT.md §6.8 Ornament).
 Resolution:
 
 - **count > 0 (cross-measure):** Encore draws these as note-1 → note-1 arcs between
@@ -1306,7 +1322,7 @@ Resolution:
   means a short note-to-next-note slur, so the end is the next note on the staff after
   the start. A grace note co-located at the start instead resolves grace-to-main.
 
-The cross-measure pixel-extension heuristic that previously guessed v0xC2 endpoints by xoffset is no longer used; the +16 count supersedes it (validated against real legacy files: cross-measure arcs in one score, within-measure note-to-next slurs in another).
+The cross-measure pixel-extension heuristic that previously guessed v0xC2 endpoints by xoffset is no longer used; the forward count supersedes it (validated against real legacy files: cross-measure arcs in one score, within-measure note-to-next slurs in another).
 
 ## Grace-to-main and grace-to-later slurs
 
