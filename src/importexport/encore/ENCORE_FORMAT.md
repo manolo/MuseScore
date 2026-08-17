@@ -25,6 +25,8 @@ Statements with no tag are structural facts read straight off the byte stream: b
 
 Four generations of the format occur in the wild. They are not variations on a theme: each boundary is one decision that moved many things at once, and a parser that gets the generation wrong does not misread one field, it misreads every element in the file.
 
+Two programs write it. Alongside Encore, the same publisher sold MusicTime, a smaller and cheaper sibling, and it writes the same file down to the element geometry: its own magic, its own format version of 2.62, and the compact layout of 1.3 for everything else. The two open each other's documents because there is nothing to convert, so every page here describes both and the rest of the document has no reason to name MusicTime again `[verified]`.
+
 ## 1.1 Three independent coordinates
 
 The header carries three values that a reader might use to decide what it is holding. They are not redundant, and no one of them is sufficient.
@@ -53,7 +55,7 @@ The first four bytes are the file magic, and they fix the byte order for every m
 
 `SCOW` covers most files, `ZBOT` a sizeable minority and `SCO5` a handful; every `ZBOT` decrypts to a `SCOW` body.
 
-**MusicTime writes the same format.** It is the smaller and cheaper program of the same publisher, and the two open each other's documents because there is nothing to convert: a MusicTime file has its own magic and is otherwise an Encore file, with the same blocks in the same order and the same element geometry. Every sample states format 2.62 and carries the compact 2.x layout of 1.3, so a reader that handles Encore 2.x handles MusicTime by accepting two more magics `[verified]`. The pairing of the names is the same on both sides: `SCOW` and `MTIW` on Windows, `SCO5` and `MTIM` on the Macintosh, big-endian.
+The names pair up the same way on both sides: `SCOW` and `MTIW` on Windows, `SCO5` and `MTIM` on the Macintosh, big-endian. A reader that handles the compact generation handles MusicTime by accepting the two extra magics.
 
 **The magic is the whole test.** A file whose first four bytes are none of the above is not an Encore document and is to be rejected. There is no fallback signature and no recovery: the byte order, the header layout and the position of the first block all follow from the magic, so nothing below it can be read without one.
 
