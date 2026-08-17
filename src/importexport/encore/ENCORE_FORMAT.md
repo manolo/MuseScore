@@ -675,9 +675,9 @@ A beamed grace group is a melodic run of separate grace notes joined by a beam, 
 
 Among small notes, a slash marks an acciaccatura; a small note without one is either an appoggiatura, when it ornaments an adjacent principal note, or a cue, when it stands alone at full value. The two are byte-identical and separated only by context. A cue keeps its full beat in the measure, drawn small and muted by default, while a grace occupies no measure time and borrows from an adjacent note. Any note can be muted, and a cue can be un-muted.
 
-**In format 3.05 and 3.07 the small-note bit is not reliable on its own.** Some files set it on the bulk of ordinary full-value notes, which Encore renders at normal size, so there the only dependable small-note signal is the slash. A note with the bit but no slash is a normal note, and same-tick notes still form a chord. The other generations honour the bit directly.
+**The bit means the same in every generation.** A score saved by Encore 3 and saved again by Encore 5 carries the identical flags on the identical notes, cue passages included, so nothing about the small note changed with the format `[verified]`. Where a whole passage is small the notes are cues, at full value and usually silent: the mute bit accompanies the small bit in almost every such note in the corpus, while a small note carrying the slash is a grace `[observed]`.
 
-The mute bit is not part of that quirk in any generation: it is Encore's per-note Play switch and always means silence, whatever the small-note bit says. Whole passages are written this way `[verified]`.
+The mute bit is independent of size: it is Encore's per-note Play switch and always means silence, whatever the small-note bit says. Whole passages are written this way `[verified]`.
 
 A slur can begin on a grace note stored at the same tick as its parent chord, since a grace shares its parent's written tick, so such a slur has no distinct start tick. With version byte `0xC4` Encore serialises the main note before its grace at the same beat; with `0xC2` the grace comes first `[verified]`.
 
