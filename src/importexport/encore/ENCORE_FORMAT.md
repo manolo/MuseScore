@@ -964,7 +964,7 @@ In compound and simple meters where one beat is an eighth, 6/8, 8/8 and 12/8, En
 
 The dot count is not in the bytes: the layout byte at `+14` is not a count and its bit 0 is an unreliable hint, as 6.3 describes. Dots come from the sounding duration against the face value: one dot when the duration is 3/2 of the face ticks, two when it is 7/4, three when it is 15/8.
 
-There is one case where the dot is not recoverable at all. In the `0xC2` generations, the sixteenth of a dotted-eighth-plus-sixteenth pair has its note-on stored at `tick + 120`, a plain eighth, rather than at `tick + 180`, so the dotted eighth reads as a plain eighth and its layout byte lacks bit 0 as well. Nothing in the bytes says the note is dotted.
+Bit 0 of the layout byte carries the dot in every generation at much the same rate, around 5% of notes in format 3.05 and 8% in 4.20, so it is a hint worth using where the durations are ambiguous `[verified]`. A sixteenth whose note-on sits a plain eighth after the note before it is not evidence of a dot: that spacing is what an undotted eighth followed by a sixteenth looks like, and it occurs at the same rate in every generation.
 
 ## 7.4 Tuplets
 
@@ -972,7 +972,7 @@ A tuplet is stated one of two ways.
 
 **Explicitly**, in a byte packing the two counts, the actual in the high nibble and the normal in the low, so `0x32` is 3:2 and `0x54` is 5:4.
 
-**Implicitly**, by duration alone: a run whose sounding durations sit at a constant fraction of their face values is a tuplet of that ratio, and its tuplet byte reads zero. This is not an edge case in the older generations: in 3.05 and 3.07 most tuplet groups in the corpus are stated this way, while in 4.20 barely a dozen are `[verified]`.
+**Implicitly**, by duration alone: a run whose sounding durations sit at a constant fraction of their face values is a tuplet of that ratio, and its tuplet byte reads zero. Around one triplet in ten is written this way, and the proportion is the same in every generation, so it is a property of how the score was entered rather than of the format `[verified]`.
 
 So it is the ordinary case before 4.20 and vanishes afterwards, which reads as the tuplet byte becoming reliable rather than as two different notations. A reader that trusts the byte alone loses those groups entirely.
 
