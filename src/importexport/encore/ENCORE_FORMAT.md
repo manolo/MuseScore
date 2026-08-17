@@ -196,9 +196,9 @@ for each byte of the file:
     advance sub; when it passes the fourth value of the row, reset it to 0 and set pos = (pos + 1) mod 9776
 ```
 
-Within a row the four values are consumed in the order third, fourth, first, second, relative to how they sit in the source data `[verified]`. Getting that permutation wrong produces plausible looking noise rather than an obvious failure, so check the output and not the reasoning: the first eight keystream bytes are `09 01 00 03 01 06 04 05`, which is exactly what carries `ZBOT` to `SCOW`.
+Within a row the four values are consumed in the order third, fourth, first, second, relative to how they sit in a build for a little-endian processor `[verified]`. The row is one 32-bit word, which is why its order matters and why a big-endian build stores it mirrored: the PowerPC Macintosh releases carry the identical table with every word byte-swapped. Getting the order wrong produces plausible looking noise rather than an obvious failure, so check the output and not the reasoning: the first eight keystream bytes are `09 01 00 03 01 06 04 05`, which is exactly what carries `ZBOT` to `SCOW`.
 
-**Where the substitution table comes from.** It is data, not program logic, and it ships verbatim with Encore: the same 39104 bytes are present in what both the 4.5 and the 5.0.2 releases install. Comparing what the two releases ship and keeping only the regions they hold in common isolates it, with no examination of program instructions involved. The table's own shape makes it easy to confirm once the comparison narrows the search, because a run of that length in which almost every byte is a digit from 0 to 9 looks like nothing else around it.
+**Where the substitution table comes from.** It is data, not program logic, and it ships verbatim with the program: the same 39104 bytes sit contiguously in the Windows releases of Encore 4.5 and 5.0.2, in the macOS releases of Encore 4.5.6 and 5.0.5, and in both platforms' releases of MusicTime Deluxe, a different product of the same publisher `[verified]`. Comparing what those releases ship and keeping only the regions they hold in common isolates it, with no examination of program instructions involved.
 
 **Verify before trusting.** Decryption always produces bytes, so it never fails on its own. Treat the result as a candidate: it counts as decrypted only if the leading magic is now a plaintext one and the header reads sensibly. Anything else is rejected, which is what keeps an unfamiliar variant from being imported as wrong music.
 
@@ -993,7 +993,7 @@ A tuplet is stated one of two ways.
 
 **Explicitly**, in a byte packing the two counts, the actual in the high nibble and the normal in the low, so `0x32` is 3:2 and `0x54` is 5:4.
 
-**Implicitly**, by duration alone: a run whose sounding durations sit at a constant fraction of their face values is a tuplet of that ratio, and its tuplet byte reads zero. Around one triplet in ten is written this way, and the proportion is the same in every generation, so it is a property of how the score was entered rather than of the format `[verified]`.
+**Implicitly**, by duration alone: a run whose sounding durations sit at a constant fraction of their face values is a tuplet of that ratio, and its tuplet byte reads zero. It is uncommon, and equally so in every generation: runs of three such notes occur in between one and three files in a thousand, whether the file is format 3.05 or 4.20 `[verified]`. A single note at a tuplet ratio proves nothing, since a note-on can drift; only a full run does.
 
 So it is the ordinary case before 4.20 and vanishes afterwards, which reads as the tuplet byte becoming reliable rather than as two different notations. A reader that trusts the byte alone loses those groups entirely.
 
