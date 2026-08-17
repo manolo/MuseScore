@@ -209,3 +209,21 @@ reproduces anywhere.
 The census reports the element list **after** parsing, so it includes the spanner stops synthesized
 by `addSpannerEnds` and excludes elements dropped by `deduplicateRest`. For raw byte questions,
 probe the file directly.
+
+## MusicTime and the older Macintosh containers
+
+Material extracted from the MusicTime and Encore releases turned up three containers the corpus of
+`.enc` files never contained.
+
+`MTIW` and `MTIM` are MusicTime's own magics, Windows and macOS. Both state format 2.62 and read with
+the compact 2.x geometry, so the importer supports them by accepting the magics.
+
+`ZBO6` finally has samples: seventeen of them, every one decrypting to a big-endian `SCO5` document
+of format 4.20, which confirms by measurement what the keystream arithmetic predicted.
+
+`SCOR` is the interesting one. Two example files ship with a macOS MusicTime updater, both big-endian,
+both with a 64-byte header holding the document name. They carry `TK` blocks and no others: no `LINE`,
+no `MEAS`, no `PAGE`, and the four-character tag scan finds nothing else in the whole file, so the
+score data follows the instrument blocks in a layout with no block framing at all. The tick base
+appears at header `0x2A` as 240 and a 4/4 time signature sits inline after the first instrument block.
+Reading these would be a separate piece of work, not an adjustment to the existing readers.
