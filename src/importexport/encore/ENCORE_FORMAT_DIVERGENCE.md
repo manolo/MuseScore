@@ -97,6 +97,13 @@ at `+14` when `tipo & 1`, so it reads through `+50` regardless of the element si
 | `postProcessElement` | note only | ornament + note | note only | inherits v0xC4 |
 | `postProcessVoiceGroup` | inner graces | implied tuplets | none | none |
 
+The implied-tuplet marking runs for v0xC2 only, and that asymmetry was measured rather than assumed.
+Runs of three notes at a tuplet ratio with no tuplet byte occur in 0.1% to 0.3% of the files of every
+generation, so the phenomenon is not particular to v0xC2. Moving the detection to the base reader,
+however, produced no new tuplet at all across thirteen Encore 4 and 5 files picked precisely because
+they hold such runs, so the extension buys nothing on real files and it reinterprets spacings that a
+drifting note-on can also produce. The detection stays where it is.
+
 `postProcessElement` coverage in detail:
 
 - **v0xA6**: note pitch `+11`, note tuplet `+7`, articulation `+18` for size 11, zero articulations
