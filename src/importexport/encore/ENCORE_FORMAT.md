@@ -49,7 +49,7 @@ The first four bytes are the file magic, and they fix the byte order for every m
 | `MTIM` | plaintext | big-endian    | macOS MusicTime `[verified]`                    |
 | `ZBOT` | encrypted | ,             | wraps `SCOW`, older Encore 4 saves `[verified]` |
 | `ZBOP` | encrypted | ,             | wraps `SCOS`, no sample `[verified]`            |
-| `ZBO6` | encrypted | ,             | wraps `SCO5`, no sample `[verified]`            |
+| `ZBO6` | encrypted | ,             | wraps `SCO5` `[verified]`                       |
 
 `SCOW` covers most files, `ZBOT` a sizeable minority and `SCO5` a handful; every `ZBOT` decrypts to a `SCOW` body.
 
@@ -57,9 +57,11 @@ The first four bytes are the file magic, and they fix the byte order for every m
 
 **The magic is the whole test.** A file whose first four bytes are none of the above is not an Encore document and is to be rejected. There is no fallback signature and no recovery: the byte order, the header layout and the position of the first block all follow from the magic, so nothing below it can be read without one.
 
-The three encrypted magics are the three plaintext ones seen through the keystream, which is fixed and does not depend on the file: its first four bytes are `09 01 00 03`, and applying them turns `ZBOT` into `SCOW`, `ZBOP` into `SCOS` and `ZBO6` into `SCO5` `[verified]`. No `ZBOP` or `ZBO6` file has been seen, so what a decrypted one holds is untested, but the risk is contained: a decrypted buffer still has to pass the magic and header check, and a file that fails it is rejected rather than imported as wrong music.
+The three encrypted magics are the three plaintext ones seen through the keystream, which is fixed and does not depend on the file: its first four bytes are `09 01 00 03`, and applying them turns `ZBOT` into `SCOW`, `ZBOP` into `SCOS` and `ZBO6` into `SCO5` `[verified]`. The `ZBO6` case is no longer arithmetic: seventeen such files decrypt to a `SCO5` document, every one of them big-endian format 4.20 with its first block at `0xC2`, which is a macOS Encore 5 file wrapped exactly as a Windows one is `[verified]`. No `ZBOP` file has turned up, so that row still rests on the keystream alone; the risk is contained, since a decrypted buffer has to pass the magic and header check and a file that fails it is rejected rather than imported as wrong music.
 
-`SCOX` and `SCOR` appear in earlier descriptions of the format and are deliberately absent from the table. Neither occurs in the corpus and no byte order or layout was ever established for them, so a row would describe nothing. They read as four-character type codes of the kind classic Mac OS used, `SCOR` for a score, but Encore's earliest platforms were the Atari ST and then DOS, so that reading is speculation `[assumed]`. `SCOS` is a third name of that shape, but it stands on firmer ground than the other two: it is what `ZBOP` decrypts to, so the program has a container by that name even though no file carrying it has turned up.
+`SCOX` and `SCOR` appear in earlier descriptions of the format and are absent from the table for different reasons. `SCOX` has never been seen. `SCOR` has: two example files ship with a macOS MusicTime release, and they are big-endian and older than anything else here. Their header is 64 bytes with the document name written into it, they carry instrument blocks and nothing else, and the score itself follows without a single block magic `[verified]`. That is a layout this document does not describe, so a row in the table would promise a reader more than the pages behind it deliver.
+
+`SCOS` is a third name of that shape, and it stands on firmer ground than `SCOX`: it is what `ZBOP` decrypts to, so the program has a container by that name even though no file carrying it has turned up.
 
 **Encryption is a wrapper, not a format.** A `ZBOT` family file is an ordinary Encore document under a layer of XOR, and once that layer is undone everything in this document applies to it unchanged. Nothing below the magic, the version byte included, can be read until then. Section 2.3 describes the layer.
 
@@ -1268,8 +1270,9 @@ Gathered here rather than scattered, because knowing the edge of the map matters
 
 - **Which release wrote format 3.07.** Its files run from 1999 and its geometry sits between 3.05 and 4.20, but no distribution in hand produces it, and the format 4.20 example scores are older.
 - **What the revision byte tracks.** Values 0 and 1 do not separate builds, as 1.6 shows.
-- **`SCOX` and `SCOR`.** Reported in earlier descriptions, absent from the corpus, no byte order or layout ever established.
-- **What a `ZBOP` or `ZBO6` file holds.** Their magics decrypt to `SCOS` and `SCO5`, but no file of either has been seen, so the `SCOS` layout in particular is unknown.
+- **`SCOX`.** Reported in earlier descriptions and never seen.
+- **The `SCOR` layout.** Two files exist, big-endian, with a 64-byte header and instrument blocks; what follows them carries no block magic and is not decoded.
+- **What a `ZBOP` file holds.** Its magic decrypts to `SCOS`, but no file has been seen and the `SCOS` layout is unknown.
 - **The clef in format 2.50.** Encore renders the right clefs from those files, so it has the information, but the field was not found. See 5.2.
 - **The x coordinates of format 2.50 ornaments and tie arcs.** Not located, and they do not survive a conversion because that generation stores screen pixels. This is what bounds spanner endpoint recovery there.
 - **Ornament codes `0xC0`, `0xC1`, `0xC2` and `0xCA` in format 3.05.** Probably the shifted fingerings and up bow, but no conversion pair covers them.
