@@ -8946,6 +8946,13 @@ def gen_zbot_family_40x():
     return zbot_encrypt(gen_family_40x_c2())
 
 
+# The macOS side of the encrypted wrapper. Encrypting a SCO5 document turns its magic into ZBO6 by
+# itself, since the keystream carries 'S' to 'Z' and '5' to '6', so the fixture is the plain SCO5
+# page-setup document run through the same cipher. Seventeen real files of this shape exist.
+def gen_zbo6_from_sco5():
+    return zbot_encrypt(gen_sco5_macos_page_setup())
+
+
 def gen_zbot_from_bazo():
     """ZBOT-encrypted version of bazo.enc.  Decrypting must yield the same score."""
     bazo_path = os.path.join(OUT_DIR, 'bazo.enc')
@@ -13291,6 +13298,7 @@ if __name__=='__main__':
     write("lyrics_v0c2_compound_meter.enc",        gen_v0c2_compound_meter_lyrics())
     write("lyrics_rest_does_not_shift_notes.enc",  gen_v0c2_lyrics_rest_does_not_shift_notes())
     write("zbot_single_note.enc",              gen_zbot_single_note())
+    write("zbo6_from_sco5.enc",           gen_zbo6_from_sco5())
     write("zbot_from_bazo.enc",                 gen_zbot_from_bazo())
     write("zbot_family_40x.enc",               gen_zbot_family_40x())
     write("sintetico_all_features.enc",          gen_sintetico_all_features())
