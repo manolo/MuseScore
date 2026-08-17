@@ -671,6 +671,8 @@ The flags come from Encore's Grace and Cue Note dialog `[verified]`.
 | grace2 `0x04` | slash, marking an acciaccatura                               |
 | grace2 `0x01` | muted, playback off                                          |
 
+Only the high nibble of `grace1` carries these. Its low nibble is a separate field, the tie flags of 6.7.
+
 A beamed grace group is a melodic run of separate grace notes joined by a beam, so two beamed graces at the same tick stay two grace notes with two stems, not one stacked grace chord.
 
 Among small notes, a slash marks an acciaccatura; a small note without one is either an appoggiatura, when it ornaments an adjacent principal note, or a cue, when it stands alone at full value. The two are byte-identical and separated only by context. A cue keeps its full beat in the measure, drawn small and muted by default, while a grace occupies no measure time and borrows from an adjacent note. Any note can be muted, and a cue can be un-muted.
@@ -770,6 +772,25 @@ This does not fail gracefully. A zeroed pair reads as start equal to end, which 
 Measured over every compact tie in the corpus, `+6` holds a value from the four-way direction vocabulary in 99.4% of them and `+5` in none, while `+5` is `0x80` in 85% and zero in the rest. The source position at `+9` matches a converted file exactly.
 
 The arc x pair has not been located in this generation. In the one file where a conversion gives ground truth, the bytes at `+8`, `+10` and `+12` are constant across every tie while the converted arc positions vary, so they are not it, and x does not survive the conversion either way because this generation stores screen pixels. Without the arc span there is no equivalent of the authoritative test, so tie direction here rests on the two flag bytes alone.
+
+### The note's own tie flags
+
+A tie is recorded twice over, and the second record is on the note itself: the low nibble of `grace1`, at note offset `+6`, is a two-bit field saying whether the note is an end of a tie `[verified]`.
+
+| Low nibble | Meaning                                                          |
+|------------|------------------------------------------------------------------|
+| `0`        | no tie touches the note                                          |
+| `1`        | the note starts a tie                                            |
+| `2`        | the note ends a tie                                              |
+| `3`        | both: a note in the middle of a chain of tied notes              |
+
+The reading is confirmed by what surrounds each note. A note flagged `1` is followed by a note of the same pitch in about three quarters of cases and preceded by one in a sixth; a note flagged `2` is the mirror image; a note flagged `3` has both neighbours at its pitch in about four cases in five `[verified]`.
+
+The field means the same in all four generations. A nibble of `1` sits on 1.9% of the notes of a format 2.50 file, 2.1% in 3.05 and 3.07 and 3.9% in 4.20, and in every one of them the note that follows repeats its pitch in three cases out of four `[verified]`. The high nibble of the same byte carries the grace flags of 6.3, in 2.50 as everywhere else, and the two halves do not interfere.
+
+**It is mostly redundant, and that is the point.** Between 93% and 96% of the notes flagged `1` also have a `TIE` element at their tick, so almost always the two records agree. The remainder is what makes the field worth reading: those notes carry no `TIE` element at all, and their tie is recorded nowhere else. They behave like the rest, with a following note of the same pitch about as often, so they are ties and not noise.
+
+A reader should therefore take a tie as starting when either record says so, and let the receiver rule of this section do the rest.
 
 ## 6.8 Ornament
 
@@ -1247,4 +1268,5 @@ Gathered here rather than scattered, because knowing the edge of the map matters
 - **The clef in format 2.50.** Encore renders the right clefs from those files, so it has the information, but the field was not found. See 5.2.
 - **The x coordinates of format 2.50 ornaments and tie arcs.** Not located, and they do not survive a conversion because that generation stores screen pixels. This is what bounds spanner endpoint recovery there.
 - **Ornament codes `0xC0`, `0xC1`, `0xC2` and `0xCA` in format 3.05.** Probably the shifted fingerings and up bow, but no conversion pair covers them.
+- **Bit 3 of the note's tie nibble.** Value `8` occurs on 0.4% of notes in format 4.20 and never alongside a `TIE` element; its neighbours share its pitch no more often than chance, so it is not a tie flag.
 - **Page block contents.** Not decoded; a parser skips them.

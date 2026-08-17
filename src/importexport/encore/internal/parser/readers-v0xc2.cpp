@@ -148,6 +148,7 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
 
     bool postProcessElement(EncMeasureElem* elem, QDataStream& ds, qint64 rawElemStart) const override
     {
+        EncFormatReader::postProcessElement(elem, ds, rawElemStart);
         if (EncOrnament* orn = dynamic_cast<EncOrnament*>(elem)) {
             orn->tipo = normalizeOrnamentSubtype(orn->tipo);
             // The forward slur span (0 = within measure, N = ends N bars later) is what anchors the
@@ -175,14 +176,6 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
             return false;
         }
 
-        EncNote* en = dynamic_cast<EncNote*>(elem);
-        if (!en) {
-            return false;
-        }
-        // Pre-4.0 files store the pitch at +13 and the tuplet at +11; elementBodyShift() already
-        // put both in the right field, so the recovery below must not run and destroy the tuplet.
-        // Decode tie-sender flag from grace1 low nibble (v0xC2 only).
-        en->isTieSender = ((en->grace1 & 0x0F) == 1);
         return false;
     }
 

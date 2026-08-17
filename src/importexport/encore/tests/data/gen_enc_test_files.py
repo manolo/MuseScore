@@ -3368,6 +3368,21 @@ def gen_v0c4_multi_measure_slur():
 # main loop completes.
 # ===========================================================================
 # ===========================================================================
+# notes_tie_flag_on_note.enc
+# v0xC4 (format 4.20) file whose tie is recorded only on the note: the first
+# quarter carries grace1 low nibble 1 (outgoing tie) and there is no TIE
+# element anywhere in the measure. A second quarter of the same pitch follows,
+# so the tie has a receiver. Every generation writes this flag; reading it only
+# for v0xC2 dropped the tie here.
+# ===========================================================================
+def gen_v0c4_tie_flag_on_note():
+    e  = note_v0c4_grace(0,   0, 0, fv=3, pitch=60, grace1=0x01, grace2=0)
+    e += note_v0c4_grace(240, 0, 0, fv=3, pitch=60, grace1=0x02, grace2=0)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(2, 4), e)], fill_ts=(2, 4))
+
+
+# ===========================================================================
 # notes_tie_dir_fc.enc
 #
 # Two C4 quarter notes tied together with a TIE element whose direction
@@ -13159,6 +13174,7 @@ if __name__=='__main__':
     write("structure_section_markers.enc",        gen_v0c4_section_markers())
     write("structure_jump_marks.enc",             gen_v0c4_jump_marks())
     write("structure_jump_marks_all.enc",         gen_v0c4_jump_marks_all())
+    write("notes_tie_flag_on_note.enc",       gen_v0c4_tie_flag_on_note())
     write("notes_tie_dir_fc.enc",              gen_v0c4_tie_dir_fc())
     write("notes_tie_intra_chord_arc_no_spurious.enc", gen_v0c4_tie_intra_chord_arc_no_spurious())
     write("notes_tie_18byte_real_forward.enc", gen_v0c4_tie_18byte_real_forward())

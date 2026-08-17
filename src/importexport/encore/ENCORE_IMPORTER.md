@@ -1124,6 +1124,8 @@ The three v0xC2 normalizations performed in `EncFormatReader_V0xC2::postProcessE
 | alMezuro unreliable         | may hold stale values | `EncOrnament.alMezuroValid = false` |
 
 The importer uses `en->isTieSender` and `en->isImpliedTupletMember` directly (no format flags) and `ps.alMezuroValid` (per-slur, not a global context flag).
+
+**The note's own tie flag is read for every generation.** `grace1` bit 0 marks an outgoing tie (see ENCORE_FORMAT.md), and the base `EncFormatReader::postProcessElement` decodes it, so every reader inherits it and a format-specific override calls the base first. It used to be decoded only for v0xC2, which left the same flag unread in the other three generations. It is a second record of a tie that usually has a TIE element too, so on real files it rarely changes the outcome; it matters for the notes where that element is missing.
 Adding a new Encore format version requires only a new `EncFormatReader` subclass and its `postProcessElement` (for the three ornament/note quirks) plus a `calculateRealDurations` phase when tuplet detection semantics differ.
 
 ## v0xC2 size=24 pitch sub-variants
