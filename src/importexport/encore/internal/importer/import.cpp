@@ -21,7 +21,7 @@
  */
 
 // Top-level Encore (.enc) import: read the file, build the score, and run whole-score fix-up passes.
-// Binary format reverse-engineered by Leon Vinken (Enc2MusicXML, GPL v3+) building on enc2ly by Felipe Castro.
+// Binary format documented by Leon Vinken (Enc2MusicXML, GPL v3+) building on enc2ly by Felipe Castro.
 
 #include "ctx.h"
 #include "builders.h"
