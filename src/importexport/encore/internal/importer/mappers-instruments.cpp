@@ -542,4 +542,33 @@ const InstrumentTemplate* findTemplateByMidiFamily(int encMidiProgram0indexed)
     }
     return best;
 }
+
+// A template with neither track name nor long name is one MuseScore keeps out of its own instrument
+// list (InstrumentsRepository::load drops them), so nothing in the UI can name it.
+static bool isListedTemplate(const InstrumentTemplate* it)
+{
+    return !it->trackName.isEmpty() && !it->instrumentName.longName().empty();
+}
+
+const InstrumentTemplate* resolveListedTemplate(const InstrumentTemplate* tmpl)
+{
+    if (!tmpl || isListedTemplate(tmpl) || !tmpl->family || tmpl->channel.empty()) {
+        return tmpl;
+    }
+    // The unlisted entry is the generic member of a family ("recorder", "harmonica"); the sibling
+    // that stands for it is the one sounding the same and written the same way.
+    for (const InstrumentGroup* g : instrumentGroups) {
+        for (const InstrumentTemplate* it : g->instrumentTemplates) {
+            if (it == tmpl || !isListedTemplate(it) || it->family != tmpl->family || it->channel.empty()) {
+                continue;
+            }
+            if (it->channel.front().program() == tmpl->channel.front().program()
+                && it->minPitchA == tmpl->minPitchA && it->maxPitchA == tmpl->maxPitchA
+                && it->transpose.chromatic == tmpl->transpose.chromatic) {
+                return it;
+            }
+        }
+    }
+    return tmpl;
+}
 } // namespace mu::iex::enc
