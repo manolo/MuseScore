@@ -22,7 +22,7 @@
 
 // v0xA6 (Encore 2.x) importer coverage: the format's distinct element offsets, absolute pitch, tuplet byte,
 // duplicate-rest dedupe, octave-key clef compensation, grace time-borrowing, and compact lyric/text/stafftext.
-// See ENCORE_FORMAT.md §v0xA6 note (size 10, on-disk slot 20).
+// See ENCORE_FORMAT.md §6.3 Note, The compact note.
 
 #include <gtest/gtest.h>
 
@@ -626,7 +626,7 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_grace_restores_face_value)
 }
 
 // v0xA6 stores LYRIC elements in a compact layout the shared newer-format reader would skip past,
-// dropping every 2.x lyric. See ENCORE_FORMAT.md §Lyric element. Feeds the raw bytes for "lent".
+// dropping every 2.x lyric. See ENCORE_FORMAT.md §6.9 Lyric. Feeds the raw bytes for "lent".
 TEST_F(Tst_ImporterV0xa6, v0xa6_compact_lyric_parses_text)
 {
     QByteArray buf;
@@ -652,7 +652,7 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_compact_lyric_parses_text)
 }
 
 // v0xA6 TEXT-block entries carry no per-entry header (text at offset 0, not the newer +14), so short
-// entries read empty at the wrong offset. See ENCORE_FORMAT.md §TEXT block. Feeds a one-entry "Moderato".
+// entries read empty at the wrong offset. See ENCORE_FORMAT.md §5.5 Text block. Feeds a one-entry "Moderato".
 TEST_F(Tst_ImporterV0xa6, v0xa6_text_block_entry_text_at_offset_0)
 {
     QByteArray buf;
@@ -677,7 +677,7 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_text_block_entry_text_at_offset_0)
 }
 
 // v0xA6 compact STAFFTEXT ornaments hold the TEXT-entry index (tind) at a fixed offset, not the
-// newer size-based one. See ENCORE_FORMAT.md §Ornament element.
+// newer size-based one. See ENCORE_FORMAT.md §6.8 Ornament.
 //
 // The buffer starts at the size byte, so element offset +3 is buf[0] and element offset N is
 // buf[N - 3]: the index at element +28 lands on buf[25].
@@ -701,7 +701,7 @@ TEST_F(Tst_ImporterV0xa6, v0xa6_stafftext_tind_at_element_offset_28)
 // The compact ornament keeps its vertical placement as a SIGNED BYTE at element +9 and its forward
 // measure count at element +14, and both apply to every subtype, not just to staff text. Reading
 // the y from the inline s16 slot preserves only its sign, and reading the measure count from the
-// v0xC4 slot lands outside the element. See ENCORE_FORMAT.md §Ornament element.
+// v0xC4 slot lands outside the element. See ENCORE_FORMAT.md §6.8 Ornament.
 TEST_F(Tst_ImporterV0xa6, v0xa6_ornament_y_byte_and_measure_count)
 {
     // A dynamic (not a staff text) placed below the staff, spanning two measures forward.

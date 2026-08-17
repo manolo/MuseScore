@@ -57,7 +57,7 @@ struct EncInstrument {
     int nstaves   { 0 };
     int midiProgram { 0 };   // 1-indexed GM program (0 = not configured)
     // Signed chromatic offset from Encore's Staff Sheet "Key" field.
-    // 0=written, -12=octave lower, +12=octave higher. v0xC4 only.
+    // 0=written, -12=octave lower, +12=octave higher.
     qint8 keyTransposeSemitones { 0 };
     // Per-instrument tab tuning, from the last 8 bytes of this TK block (each track carries its own).
     EncTabTuning tabTuning;
@@ -92,9 +92,9 @@ struct EncLine {
     quint16 start        { 0 };
     quint8 measureCount { 0 };
     std::vector<EncLineStaffData> staffData;
-    // v0xA6 only: per-staff written key index (Encore key index 0-14), parsed directly
-    // from the 22-byte staff entries because v0xA6's header staffPerSystem and LINE staff
-    // layout differ from v0xC2/C4, which leaves staffData empty. See parsers-root.cpp.
+    // Per-staff written key index (Encore key index 0-14), filled only by the formats whose
+    // reader implements EncFormatReader::readLineStaffKeys, where the LINE block carries the
+    // keys and staffData stays empty.
     std::vector<quint8> staffKeys;
 
     bool read(QDataStream& ds, quint32 vs, int staffPerSystem);
@@ -182,14 +182,14 @@ QString findNextKnownMagic(QDataStream& ds);
 void addSpannerEnds(std::vector<EncMeasure>& measures);
 
 // TEXT block: N-th entry referenced by ORN tind byte. textOffset (from EncFormatReader) is the
-// per-entry text offset (14 for v0xC4/v0xC2, 0 for v0xA6). See ENCORE_FORMAT.md §TEXT block.
+// per-entry text offset (14 for v0xC4/v0xC2, 0 for v0xA6). See ENCORE_FORMAT.md §5.5 Text block.
 struct EncTextBlock {
     std::vector<QString> entries;
 
     bool read(QDataStream& ds, quint32 varSize, int textOffset = 14, bool hasRunHeader = true);
 };
 
-// WINI block: margins in points (1/72 inch). See ENCORE_FORMAT.md §WINI block.
+// WINI block: margins in points (1/72 inch). See ENCORE_FORMAT.md §5.8 Margins block (WINI).
 struct EncPageSetup {
     bool hasData      { false };
     qint32 top        { 0 };   // top margin in pts
@@ -202,7 +202,7 @@ struct EncPageSetup {
 };
 
 // PREC block: a Windows DEVMODE. Page size, orientation and notation scale.
-// See ENCORE_FORMAT.md §PREC block.
+// See ENCORE_FORMAT.md §5.7 Printer block (PREC).
 struct EncPrintSetup {
     bool hasData     { false };
     int orientation  { 0 };   // dmOrientation: 1=portrait, 2=landscape

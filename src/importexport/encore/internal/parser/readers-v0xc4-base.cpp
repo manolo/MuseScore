@@ -123,7 +123,7 @@ static constexpr qint64 ENTRY_TABLE_BASE = 194;
 // can be derived. Three sources, most trustworthy first: the spacing between two discovered TK
 // blocks; the distance from the table base to a single block whose magic names a later instrument;
 // and the span from the table base to the first PAGE/LINE/MEAS block divided by the instrument
-// count. See ENCORE_FORMAT.md §Instrument block.
+// count. See ENCORE_FORMAT.md §5.1 Instrument block.
 qint64 instrumentEntryStride(const std::vector<EncInstrument>& instruments, QDataStream& ds)
 {
     static constexpr qint64 kMinStride = 64;
@@ -166,7 +166,7 @@ void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& d
     // NAME_BASE=202 is the name position of instrument 0 in every compact-table layout; the step
     // differs (2158 for large-TK/~~~~-block files, 112 for no-~~~~-block compact files). The
     // COMPACT_NAME_BASE fallback fills names left unresolved by the primary probe.
-    // See ENCORE_FORMAT.md §Instrument block.
+    // See ENCORE_FORMAT.md §5.1 Instrument block.
     static constexpr qint64 NAME_BASE = 202;
     static constexpr qint64 NAME_STEP = 2158;
     static constexpr qint64 COMPACT_NAME_BASE = 314;
@@ -496,7 +496,7 @@ static void readMidiProgramsSmallTk(
 
 void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds, qint64 midiFromEntryEnd)
 {
-    // MIDI table offsets vary by layout. See ENCORE_FORMAT.md §Instrument block.
+    // MIDI table offsets vary by layout. See ENCORE_FORMAT.md §5.1 Instrument block.
     if (instruments.empty()) {
         return;
     }

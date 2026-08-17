@@ -57,7 +57,7 @@ ClefType encClef2MuseScore(EncClefType ct)
 }
 
 // Encore key byte is an index 0..14 into { C, F, Bb, Eb, Ab, Db, Gb, Cb, G, D, A, E, B, F#, C# }
-// mapping to fifths {0,-1,-2,-3,-4,-5,-6,-7,1,2,3,4,5,6,7}. See ENCORE_FORMAT.md §Key encoding.
+// mapping to fifths {0,-1,-2,-3,-4,-5,-6,-7,1,2,3,4,5,6,7}. See ENCORE_FORMAT.md §7.5 Keys.
 int encKeyToFifths(quint8 key)
 {
     static const int table[] = { 0, -1, -2, -3, -4, -5, -6, -7, 1, 2, 3, 4, 5, 6, 7 };
@@ -123,7 +123,7 @@ void addInitialTimeSig(MasterScore* score, int nstaves, Fraction ts, TimeSigType
 }
 
 // Common time is glyph 0x43 ('C') or 0x63 ('c'). Cut time has no confirmed glyph value yet,
-// so it falls through to NORMAL (numeric). See ENCORE_FORMAT.md §Time-signature glyph.
+// so it falls through to NORMAL (numeric). See ENCORE_FORMAT.md §5.4 Measure block (MEAS).
 TimeSigType encTimeSigGlyph2Type(quint8 glyph, Fraction ts)
 {
     if ((glyph == 0x43 || glyph == 0x63) && ts == Fraction(4, 4)) {
