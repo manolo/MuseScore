@@ -20,8 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Encore 3.x/4.x (v0xC2) reader: pitch/tuplet slot swap, tie-sender flag, dotted-eighth and
-// implied-tuplet fixups, and the two TEMPO/slur layout quirks that diverge from v0xC4.
+// Encore 3.x/4.x (v0xC2) reader: the older articulation numbering, implied-tuplet marking, and
+// the two TEMPO/slur layout quirks that diverge from v0xC4.
 
 #include "readers-v0xc2.h"
 #include "readers-v0xc4-base.h"
@@ -32,9 +32,6 @@
 #include "ticks.h"
 
 namespace mu::iex::enc {
-// v0xC2 stores the eighth of a dotted-eighth+sixteenth group as plain (rdur 120) instead of dotted
-// (180), placing the sixteenth at tick+120. Force the dot only when the measure is short by exactly
-// 60t (the amount the anomaly steals), otherwise a genuine 8th+16th would get a spurious dot.
 // v0xC2: mark consecutive notes/rests whose rdur/faceValue ratio identifies an implied tuplet.
 // Groups same-tick elements as chords before scanning, matching the grouping in
 // computeImpliedTupletMembers so the two passes agree on group boundaries.
