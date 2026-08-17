@@ -64,10 +64,10 @@ bool EncTie::read(QDataStream& ds)
     // The arc x-span is the authoritative forward-tie signal, overriding the +5 curvature byte.
     // arcX1<arcX2 is a real forward tie; arcX1==arcX2 is either an intra-chord decorative arc
     // (drop) or a cross-measure placeholder (keep, startFlag bit 7 distinguishes them). The pair
-    // sits two bytes lower before Encore 4.0, which is why the shorter 16-byte form carries it
+    // sits two bytes lower before format 3.07, which is why the shorter 16-byte form carries it
     // too. See ENCORE_FORMAT.md §TIE element.
     if (static_cast<int>(size) >= 18 + bodyShift) {
-        ds.skipRawData(3 + bodyShift);   // to offset +10, or +8 before Encore 4.0
+        ds.skipRawData(3 + bodyShift);   // to offset +10, or +8 before format 3.07
         // Both endpoints are uint16, read through the stream so the file's byte order applies.
         // Taking only their low byte silently yields zero on a big-endian file.
         ds >> arcX1 >> arcX2;
