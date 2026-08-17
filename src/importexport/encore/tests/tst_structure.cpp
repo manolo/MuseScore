@@ -1754,6 +1754,45 @@ TEST_F(Tst_Structure, coincident_placeholder_rest_dropped_note_keeps_beat)
 // staff size, so the title frame took the first page on its own and the music started on page 2.
 // The staff-size fit that pulls the first system back stopped at a fixed reduction that wide scores
 // always exceeded, which is exactly the shape of score that needs it.
+// MusicTime, Passport's smaller sibling of Encore, writes the same file under its own magic: MTIW on
+// Windows and MTIM on macOS, the second big-endian the way SCO5 is. Both state format 2.62 and the
+// compact 2.x geometry, so both must import through the same reader and produce the same music.
+// See ENCORE_FORMAT.md §The containers.
+TEST_F(Tst_Structure, musictime_containers_import_like_encore_2x)
+{
+    struct Case {
+        const char* file;
+        const char* label;
+    };
+    const Case cases[] = {
+        { "structure_musictime_windows.mus", "MTIW, the Windows container" },
+        { "structure_musictime_mac.mus", "MTIM, the macOS container, big-endian" },
+    };
+    for (const Case& c : cases) {
+        MasterScore* score = readEncoreScore(c.file);
+        ASSERT_NE(score, nullptr) << c.label << ": the file must be recognised";
+        muse::Ret ret = score->sanityCheck();
+        EXPECT_TRUE(ret) << c.label << ": " << ret.text();
+
+        std::vector<int> pitches;
+        for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+            if (!mb->isMeasure()) {
+                continue;
+            }
+            for (Segment* seg = toMeasure(mb)->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+                EngravingItem* e = seg->element(0);
+                if (e && e->isChord()) {
+                    for (const Note* n : toChord(e)->notes()) {
+                        pitches.push_back(n->pitch());
+                    }
+                }
+            }
+        }
+        EXPECT_EQ(pitches, (std::vector<int> { 60, 64 })) << c.label << ": both quarter notes must import";
+        delete score;
+    }
+}
+
 TEST_F(Tst_Structure, wide_score_first_system_shares_the_title_page)
 {
     MasterScore* score = readEncoreScore("structure_wide_score_first_page.enc");

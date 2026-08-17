@@ -178,6 +178,22 @@ I") reach the correct template ("Bandurria").
 
 **Template bracket clearing.** After `Staff::init(tmpl)` copies bracket data from the template, the importer explicitly clears brackets/spans on every staff to avoid spurious cross-part braces (e.g. accordion template carrying a brace that would span unrelated parts in multi-instrument scores).
 
+## MusicTime documents
+
+MusicTime files reach the same reader as Encore 2.x ones. `isReadableEncoreMagic` accepts `MTIW` and
+`MTIM` beside `SCOW` and `SCO5`, `EncHeader::readMagicAndVersion` treats `MTIM` as big-endian the way
+it treats `SCO5`, and `EncFormatReader::create` matches both by magic, since a macOS container has no
+version byte at `0x04`. Everything below that is unchanged: format 2.62 selects the compact geometry
+through the same path a format 2.50 file takes.
+
+The module registers the reader for `mus` beside `enc`, and the open dialog lists both under the
+Encore filter.
+
+**Open case.** Of the nine distinct MusicTime documents to hand, eight import clean and one, a 6/8
+tutorial score on three staves, comes out with six bars split into a 1/8 and a 7/8 measure. Compound
+meters are where this generation states a face value in beats rather than as an absolute note value,
+so that is the first place to look.
+
 ## Instrument routing
 
 `findEncoreInstrumentTemplate` (in `mappers-instruments.cpp`) combines name and MIDI program into a single score over every non-drumset template:
