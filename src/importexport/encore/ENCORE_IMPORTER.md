@@ -928,16 +928,13 @@ In v0xC2, the same byte is a layout/display field whose bit meanings are less pr
 When `rdur ≤ faceTicks` the note is plain (exact match) or shortened by multi-stream overlap; bit 0 in dotControl is then a spurious layout flag.
 This guard prevents false dotted notes on v0xC2 plain 16ths and 8ths whose `dotControl` happens to have bit 0 set (a real v0xC2 score, m28 staff 2: five plain notes were incorrectly promoted to dotted, overflowing the measure).
 
-**v0xC2 dotted-eighth anomaly (`fixDottedEighthPattern`, readers-v0xc2.cpp):** Encore stores the 16th companion of a dotted-8th+16th group at `tick+120` (= tick + faceTicks(8th)) instead of `tick+180` (= tick + dotted-8th).
-Detection: 8th with `rdur=120` has a 16th at `tick+120` with `rdur=60`.
-When detected, `EncNote::forceDotted` is set on the 8th; the emitter then forces `dots=1` directly, bypassing `computeDotCount` entirely.
+**The dotted-eighth pattern is not a v0xC2 anomaly.** A rule used to add a dot to an eighth followed
+by a sixteenth exactly 120 ticks later whenever the voice group came out 60 ticks short. Measured
+across the corpus that situation arises at the same rate in every generation, 0.35% of voice groups
+in format 4.20 against 0.33% in 3.05, and a conversion pair settles what it means: Encore's own
+Encore 5 resave keeps the bar just as short and keeps the dot bit exactly where the music is dotted.
+The bars are short because the voice is short, so the rule was inventing dots and was removed.
 
-**faceSum guard in `fixDottedEighthPattern`:** the 8th+16th@tick+120 binary pattern is ambiguous, it also appears in a genuine 8th followed by a 16th inside a fully-filled measure.
-Guard: only apply when `faceSum + 60 == durTicks` (the voice group is exactly 60t short, the amount the anomaly steals).
-When `faceSum == durTicks` (full measure) the fix is blocked.
-
-`EncNote::forceDotted` (elem-note.h): bool field set exclusively by `fixDottedEighthPattern`.
-In `emitters-note.cpp`, when `forceDotted=true` `dots=1` is assigned before `computeDotCount`, so the bit-0 fallback never runs for these notes.
 
 **Triplet `playbackDurTicks` does not override face value.** A `playbackDurTicks = 80` (triplet 8th in 240 tpqn) on a notated 16th must stay a 16th.
 The earlier code in `realDuration2DurationType` upgraded rdur=80 to `V_EIGHTH` regardless of the face value nibble; for a notated 16th with rdur=80 this misclassified the note as longer and pushed the remainder of the measure into a spurious second voice.
@@ -1131,17 +1128,10 @@ Adding a new Encore format version requires only a new `EncFormatReader` subclas
 
 ## v0xC2 size=24 pitch sub-variants
 
-The v0xC2 pitch-swap (`semiTonePitch = byte[+13]; byte[+13] = 0`) was introduced to handle notes where Encore stores pitch in the tuplet slot (+13).
-A second sub-variant exists in some Encore 4.x files where the pitch is already in the standard `semiTonePitch` slot (+15).
-
-The importer guards the swap with `if (en->tuplet > 0 && en->semiTonePitch == 0)` in `postProcessElement` (`readers-v0xc2.cpp`): the swap fires only when the pitch slot (+15) is empty.
-The discriminator is the pitch slot, not the tuplet slot.
-An earlier guard of `if (en->tuplet > 0)` was wrong for sub-variant B triplets: there the tuplet slot (+13) holds a genuine tuplet ratio (e.g. 0x32 = 3:2), so the swap copied the ratio byte into the pitch, importing every triplet note as MIDI 50 and discarding the ratio.
-With the corrected guard the pitch at +15 is preserved and the explicit tuplet byte survives so the 3:2 bracket is built.
-
-Without any guard, sub-variant B non-tuplet notes imported as MIDI note 0 (C-1), far below the staff.
-
-Exercised by `Tst_Notes.notes_v0c2_size24_semitone_pitch` and `Tst_Structure.old_format_v0c2_triplet_pitch_in_semitone`.
+A rule used to move the pitch out of the tuplet slot for v0xC2 notes in the post-4.0 layout, guarded
+on an empty pitch slot. It came from the period when the element body was read at one fixed offset
+for both generations. With the body offset selected by the format version, the condition never holds:
+across eleven million notes in the corpus it fires zero times, so the rule was removed.
 
 ## Multi-measure rest expansion when successor is not a note measure
 
