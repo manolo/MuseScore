@@ -70,6 +70,7 @@ bool EncFormatReader_V0xA6::postProcessElement(EncMeasureElem* elem,
                                                QDataStream& ds,
                                                qint64 rawElemStart) const
 {
+    EncFormatReader::postProcessElement(elem, ds, rawElemStart);
     if (EncRest* er = dynamic_cast<EncRest*>(elem)) {
         // The compact rest has neither field: +13 is its own duration and +14 the next element.
         if (er->size == kCompactRestSize) {
