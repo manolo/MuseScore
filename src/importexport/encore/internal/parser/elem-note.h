@@ -120,7 +120,7 @@ struct EncNote : EncMeasureElem {
 
     EncGraceType graceType() const;
     // grace1 bit 0x20 = small note (a grace or a cue). grace2 bit 0x01 = muted (playback off): the
-    // per-note Play switch, independent of size and of the v0xC2 small-note quirk.
+    // per-note Play switch, independent of size.
     bool isSmall() const { return grace1 & 0x20; }
     bool isMuted() const { return grace2 & 0x01; }
 
