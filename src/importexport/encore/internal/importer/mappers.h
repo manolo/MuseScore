@@ -104,6 +104,13 @@ const mu::engraving::InstrumentTemplate* findTemplateByMidi(int encMidiProgram0i
 // Strings, Muted Trumpet, Synth Bass, Voice Oohs, …).
 const mu::engraving::InstrumentTemplate* findTemplateByMidiFamily(int encMidiProgram0indexed);
 
+// Given a matched template, return one MuseScore lists in its own instrument panel. A template with
+// no track name is hidden there, and the staff properties dialog then shows a blank instrument, so
+// swap it for the named sibling that stands for it: same family, sound, written range and
+// transposition. Returns the input unchanged when it is already listed or has no such sibling.
+const mu::engraving::InstrumentTemplate* resolveListedTemplate(
+    const mu::engraving::InstrumentTemplate* tmpl);
+
 // Given a matched template, return its standard-notation or tablature sibling (e.g.
 // "Classical Guitar" <-> "Classical Guitar (tablature)"). Returns the input if it already
 // matches wantTab, or nullptr when no sibling exists. Siblings are matched by shared

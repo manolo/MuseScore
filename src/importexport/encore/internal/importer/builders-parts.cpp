@@ -110,7 +110,7 @@ static std::string midiProgramInfo(const EncInstrument& instr)
         return "MIDI program none";
     }
     std::string label = "MIDI program " + std::to_string(instr.midiProgram);
-    if (const InstrumentTemplate* gm = findTemplateByMidi(instr.midiProgram - 1)) {
+    if (const InstrumentTemplate* gm = resolveListedTemplate(findTemplateByMidi(instr.midiProgram - 1))) {
         label += " (" + gm->trackName.toStdString() + ")";
     }
     return label;
@@ -128,6 +128,7 @@ static void applyInstrumentOrFallback(Part* part, const InstrumentTemplate* tmpl
         ins.instrumentLabel().setAllowGroupName(false);
     };
     if (tmpl) {
+        tmpl = resolveListedTemplate(tmpl);
         Instrument ins = Instrument::fromTemplate(tmpl);
         setInstrName(ins);
         // A few generic templates carry no track name in instruments.xml (their UI name comes from

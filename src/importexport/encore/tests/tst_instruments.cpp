@@ -491,24 +491,27 @@ TEST_F(Tst_Instruments, instrument_empty_name_midi_resolves_to_cello)
 }
 
 // ===========================================================================
-// FIX: a matched template with no <trackName> (e.g. the bare "recorder"
-// template, whose UI name comes from muse_instruments, not instruments.xml)
-// must not leave the imported part with an empty track name. The importer
-// backfills the track name from the Encore instrument name so the mixer and
-// the Instruments panel show a name instead of a blank entry.
+// FIX: MIDI 75 ranks the bare "recorder" template first, and that template
+// carries no name in instruments.xml, so MuseScore keeps it out of its own
+// instrument list and the staff properties dialog shows a blank instrument.
+// The importer must land on the named sibling that stands for it (same
+// family, sound, written range and transposition), here Soprano Recorder.
 // ===========================================================================
-TEST_F(Tst_Instruments, instrument_recorder_midi75_keeps_track_name)
+TEST_F(Tst_Instruments, instrument_recorder_midi75_resolves_to_listed_template)
 {
     MasterScore* score = readEncoreScore("instruments_instr_recorder_midi75_trackname.enc");
     ASSERT_NE(score, nullptr);
     ASSERT_FALSE(score->parts().empty());
     const Instrument* inst = score->parts().front()->instrument();
     ASSERT_NE(inst, nullptr);
-    EXPECT_EQ(inst->id(), String(u"recorder"))
-        << "MIDI 75 must resolve to the recorder template via step5";
-    EXPECT_EQ(inst->trackName(), String(u"Recorder"))
-        << "recorder template has no trackName; importer must derive the sounding "
-        "instrument name from the template id, not from the Encore part label";
+    EXPECT_EQ(inst->id(), String(u"soprano-recorder"))
+        << "MIDI 75 ranks the unlisted 'recorder' template first; the import must move to its "
+        "listed sibling";
+    // What the staff properties dialog reads back: the template behind the instrument id.
+    const InstrumentTemplate* templ = searchTemplate(inst->id());
+    ASSERT_NE(templ, nullptr);
+    EXPECT_FALSE(templ->trackName.isEmpty())
+        << "an instrument whose template has no track name shows a blank name in the UI";
     EXPECT_EQ(inst->nameAsPlainText(), String(u"Txistu"))
         << "the Encore instrument name stays as the part long name";
     delete score;
