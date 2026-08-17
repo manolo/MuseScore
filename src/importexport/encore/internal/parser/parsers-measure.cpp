@@ -117,7 +117,7 @@ void computeElementDurations(
             }
         }
         qint16 dur = nextTick - elems[i]->tick;
-        // v0xA6 grace time-borrowing: grace notes shorten next note's gap; see ENCORE_FORMAT.md §v0xA6 grace note time-borrowing.
+        // v0xA6 grace time-borrowing: grace notes shorten next note's gap; see ENCORE_FORMAT.md §6.3 Note, Grace and cue notes.
         const EncNote* enCur = dynamic_cast<const EncNote*>(elems[i]);
         if (hasGraceTimeBorrowing && enCur && dur > 0) {
             const qint16 faceTicks = faceValue2ticks(enCur->faceValue);
@@ -160,7 +160,7 @@ void computeElementDurations(
 // and face value to the run's earliest tick, so downstream sees chord members instead of a split
 // chord. A run counts as one chord only within a small window of the anchor (capped at one notated
 // duration and at CHORD_STRUM_MAX_SPAN) so a long note never absorbs a genuine later note reusing
-// the column. Zero-xoffset notes are left untouched. See ENCORE_FORMAT.md §Chord column (xoffset).
+// the column. Zero-xoffset notes are left untouched. See ENCORE_FORMAT.md §7.7 The chord column.
 static void normalizeChordColumnTicks(std::vector<EncMeasureElem*>& elems)
 {
     // Observed strum spans reach ~30 ticks; the tightest sequential subdivision stays well above,

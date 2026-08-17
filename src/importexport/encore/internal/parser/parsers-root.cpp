@@ -36,7 +36,7 @@ namespace mu::iex::enc {
 // ---------------------------------------------------------------------------
 
 // WINI page-setup block: page margins in typographic points (1/72 inch). Layout and field offsets
-// in ENCORE_FORMAT.md §WINI block.
+// in ENCORE_FORMAT.md §5.8 Margins block (WINI).
 void EncPageSetup::read(QDataStream& ds, quint32 varSize)
 {
     if (varSize < 40) {
@@ -72,7 +72,7 @@ static int instrumentMagicIndex(const QString& magic)
     return (magic.at(2).digitValue() * 10) + magic.at(3).digitValue();
 }
 
-// Instrument entries sit in a fixed-stride table (see ENCORE_FORMAT.md §Instrument entry table), so
+// Instrument entries sit in a fixed-stride table (see ENCORE_FORMAT.md §5.1 Instrument block), so
 // which instrument a TK block describes is decided by WHERE it sits, not by the digits in its magic:
 // files exist whose seven entries are labelled TK00 TK01 TK02 TK04 TK04 TK05 TK06. Reorder the
 // blocks, discovered in file order, into their table slots, leaving a gap for any entry whose block
@@ -159,7 +159,7 @@ QString findNextKnownMagic(QDataStream& ds)
 // Unicode one; the fixed fields follow at the same relative offsets. Detect the variant by
 // trying both bases and keeping the one whose dmOrientation is a valid 1 (portrait) or 2
 // (landscape); range-check the rest so a wrong base or an unusual driver blob is ignored.
-// See ENCORE_FORMAT.md §PREC block.
+// See ENCORE_FORMAT.md §5.7 Printer block (PREC).
 static void parsePrecDevmode(const QByteArray& buf, EncPrintSetup& out)
 {
     auto s16 = [&](int off) -> int {
@@ -383,7 +383,7 @@ bool EncRoot::read(QDataStream& ds)
     // The format version at 0x28 selects the element body layout, and the reader has to know it
     // before the header is read (reading the header needs the reader). Peek it and restore the
     // cursor; 0x28 is the same offset in every format.
-    // See ENCORE_FORMAT.md §Version byte and release mapping.
+    // See ENCORE_FORMAT.md §1.7 Choosing a reader.
     quint16 formatVersion = 0;
     if (QIODevice* dev = ds.device()) {
         const qint64 saved = dev->pos();
@@ -417,8 +417,8 @@ bool EncRoot::read(QDataStream& ds)
             const qint64 lineContentStart = ds.device()->pos();
             EncLine line;
             line.read(ds, varSize, header.staffPerSystem);
-            // Some formats (v0xA6) store per-staff key indices in the LINE block rather than in
-            // staffData; let the format reader extract them. No-op for v0xC2/C4.
+            // Where the per-staff key indices live in the LINE block rather than in staffData,
+            // the reader extracts them: EncFormatReader::readLineStaffKeys.
             fmt->readLineStaffKeys(line, ds, lineContentStart);
             lines.push_back(std::move(line));
         } else if (nextId == "MEAS") {
@@ -457,10 +457,10 @@ bool EncRoot::read(QDataStream& ds)
         } else if (isInstrumentMagic(nextId)) {
             EncInstrument instr;
             instr.contentFilePos = ds.device()->pos();
-            // v0xA6: Key transposition is at content+42; read before EncInstrument::read.
-            // v0xC4 reads Key from outside the TK block in readInstrumentMeta instead.
+            // Formats that keep the Key transposition inside the TK block read it here:
+            // EncFormatReader::readKeyFromTKBlock. The others take it in readInstrumentMeta.
             fmt->readKeyFromTKBlock(instr, ds, ds.device()->pos());
-            // v0xC4: Encore 5.0.2 may use UTF-16 LE names; probe determines the encoding.
+            // Some files use UTF-16 LE names; the probe decides. See ENCORE_FORMAT.md §7.8 Text encoding.
             instr.read(ds, varSize, fmt->probeInstrumentEncoding());
             charsize = instr.charSize();
             // Each TK block carries its own 8-slot tab tuning just before the trailing 8-byte header
@@ -493,7 +493,7 @@ bool EncRoot::read(QDataStream& ds)
         }
     }
 
-    // Pad to instrumentCount: some v0xC4 files have fewer TK blocks than declared.
+    // Pad to instrumentCount: some files have fewer TK blocks than declared.
     while (static_cast<int>(instruments.size()) < header.instrumentCount) {
         instruments.emplace_back();
     }

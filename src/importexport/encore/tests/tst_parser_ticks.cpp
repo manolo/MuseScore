@@ -245,7 +245,7 @@ TEST(Tst_EncoreRhythm, dottedAdvance)
 }
 
 // SCO5 (macOS Encore 5) stores the PREC page setup as an NSPrintInfo XML plist, not a Windows DEVMODE;
-// parsePrecPlist extracts orientation, paper size and scale (no margins). See ENCORE_FORMAT.md §PREC block.
+// parsePrecPlist extracts orientation, paper size and scale (no margins). See ENCORE_FORMAT.md §5.7 Printer block (PREC).
 TEST(Tst_EncorePrecPlist, letter_portrait_scale_120)
 {
     const QByteArray plist

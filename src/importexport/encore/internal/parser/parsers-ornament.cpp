@@ -28,11 +28,11 @@
 namespace mu::iex::enc {
 bool EncOrnament::read(QDataStream& ds)
 {
-    const qint64 elemPos = ds.device()->pos();   // first byte after the type/voice byte; see ENCORE_FORMAT.md §Ornament subtypes
+    const qint64 elemPos = ds.device()->pos();   // first byte after the type/voice byte; see ENCORE_FORMAT.md §8.2 Ornament subtypes
     EncMeasureElem::read(ds);
     ds >> tipo;
     // Everything from +8 onward moved two bytes later at format 3.07; bodyShift folds the older
-    // layout into this one read. See ENCORE_FORMAT.md §Ornament element.
+    // layout into this one read. See ENCORE_FORMAT.md §6.8 Ornament.
     ds.skipRawData(4 + bodyShift);
     ds >> xoffset;
     ds.skipRawData(1);
@@ -52,14 +52,14 @@ bool EncOrnament::read(QDataStream& ds)
     ds >> tempo;
     // The text index has its own slot only in a long enough element; otherwise it shares the tempo
     // byte. The threshold moves with the body layout, so a pre-3.07 size-32 staff text still reaches
-    // its own slot. See ENCORE_FORMAT.md §Ornament subtypes.
+    // its own slot. See ENCORE_FORMAT.md §8.2 Ornament subtypes.
     if (static_cast<int>(size) >= 33 + bodyShift) {
         ds.skipRawData(1);
         ds >> tind;
     } else {
         tind = tempo;
     }
-    // The compact ornament keeps these three elsewhere. See ENCORE_FORMAT.md §Ornament element.
+    // The compact ornament keeps these three elsewhere. See ENCORE_FORMAT.md §6.8 Ornament.
     const qint64 elemStart = elemPos - 3;   // elemPos sits just past the type/voice byte, at +3
     if (tindOffset >= 0 && ornType() == EncOrnamentType::STAFFTEXT) {
         tind = byteAt(ds, elemStart + tindOffset);

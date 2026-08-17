@@ -43,7 +43,7 @@ struct EncLine;
 // File format versions, from header 0x28. The field is BCD with the major digit in the high byte
 // and the minor in the low, so the values compare in release order and an unseen one sorts into
 // place. It is the only version indicator the header carries: no date, no build stamp.
-// See ENCORE_FORMAT.md §Version byte and release mapping.
+// See ENCORE_FORMAT.md §1.3 The four generations.
 inline constexpr quint16 ENC_FORMAT_2_50 = 0x0250;   // Encore 2.x
 inline constexpr quint16 ENC_FORMAT_3_05 = 0x0305;   // Encore 3.x
 inline constexpr quint16 ENC_FORMAT_3_07 = 0x0307;   // the two-byte body shift starts here
@@ -63,7 +63,7 @@ bool skipToBlockEnd(QDataStream& ds, qint64 blockStartPos, qint64 declaredLen);
 // One byte at an absolute file offset, leaving the cursor where it was. Returns 0 past EOF.
 quint8 byteAt(QDataStream& ds, qint64 offset);
 
-// True for a plaintext container this build reads. See ENCORE_FORMAT.md §Magics and byte order.
+// True for a plaintext container this build reads. See ENCORE_FORMAT.md §1.2 The containers.
 bool isReadableEncoreMagic(const QString& magic);
 
 // Device position just past a MEAS element stream, clamped to deviceSize so an oversized varsize
@@ -80,7 +80,7 @@ void computeElementDurations(std::vector<EncMeasureElem*>& elems, int durTicks, 
 // EncFormatReader: per-format binary parsing strategy. Register a new version in EncFormatReader::create().
 struct EncFormatReader
 {
-    // Byte offset where element block begins in a MEAS block. See ENCORE_FORMAT.md §Known quirks.
+    // Byte offset where element block begins in a MEAS block. See ENCORE_FORMAT.md §8.1 Per-generation differences at a glance.
     virtual quint32 elemBlockOffset() const = 0;
 
     // Apply format-specific fixups; return true to drop the element (duplicate suppression).
@@ -109,13 +109,13 @@ struct EncFormatReader
     }
 
     // Byte offset where the file header ends; first block starts here.
-    // See ENCORE_FORMAT.md §Known quirks for per-version values.
+    // See ENCORE_FORMAT.md §8.1 Per-generation differences at a glance for per-version values.
     virtual qint64 headerEnd() const { return 0xC2; }
 
     // Bytes to add to every element body field from offset +8 onward. Format 3.07 inserted two
     // bytes there in every element type, so a file older than format 3.07 needs -2 while every
     // later generation needs 0. Fields at +5, +6 and +7 never move.
-    // See ENCORE_FORMAT.md §Version byte and release mapping.
+    // See ENCORE_FORMAT.md §1.3 The four generations.
     virtual int elementBodyShift() const { return 0; }
 
     // Read MIDI program, Key, and name metadata stored outside TK blocks.
@@ -131,17 +131,17 @@ struct EncFormatReader
 
     // Distance from the end of an instrument entry back to its per-staff MIDI program table.
     // The tail fields are laid out from the end of the entry, and v0xC2 keeps two fewer bytes
-    // there than v0xC4. See ENCORE_FORMAT.md §Instrument entry table.
+    // there than v0xC4. See ENCORE_FORMAT.md §5.1 Instrument block.
     virtual qint64 midiProgramFromEntryEnd() const { return 46; }
 
     // True when TK instrument names need UTF-16 probe.
     virtual bool probeInstrumentEncoding() const { return false; }
 
     // Header byte offset of the global staff-size selector (1-4). v0xC2/C4/C5 use 0x52;
-    // v0xA6 uses 0x8D. See ENCORE_FORMAT.md §Header.
+    // v0xA6 uses 0x8D. See ENCORE_FORMAT.md §4. The header.
     virtual qint64 scoreSizeOffset() const { return 0x52; }
 
-    // Reads Key transposition from TK content (v0xA6). See ENCORE_FORMAT.md §Instrument block.
+    // Reads Key transposition from TK content (v0xA6). See ENCORE_FORMAT.md §5.1 Instrument block.
     virtual void readKeyFromTKBlock(EncInstrument& /*instr*/,
                                     QDataStream& /*ds*/,
                                     qint64 /*contentStart*/) const {}
@@ -149,28 +149,28 @@ struct EncFormatReader
     // Reads per-staff written key indices from a LINE block into EncLine::staffKeys.
     // v0xA6 stores them in its 22-byte staff entries; other formats fill staffData during
     // EncLine::read and leave staffKeys empty. The override seeks within the stream and must
-    // restore the position before returning. See ENCORE_FORMAT.md §v0xA6 staff size and clef.
+    // restore the position before returning. See ENCORE_FORMAT.md §5.2 System block (LINE), Format 2.50 systems.
     virtual void readLineStaffKeys(EncLine& /*line*/,
                                    QDataStream& /*ds*/,
                                    qint64 /*lineContentStart*/) const {}
 
     // True when a slur's stored xoffset2 lives in a stale coordinate origin and the endpoint
     // must be anchored explicitly (to the target measure / next note) instead of by coordinate
-    // search. v0xC2 only. See ENCORE_FORMAT.md §Slur.
+    // search. v0xC2 only. See ENCORE_FORMAT.md §6.8 Ornament.
     virtual bool slurXoffset2Stale() const { return false; }
 
     // True when the file stores no importable document margins and a uniform 0.25" default is
     // preferred over MuseScore's A4-tuned defaults. SCO5 (macOS Encore 5) only.
     virtual bool usesUniformPageMargins() const { return false; }
 
-    // Format capability queries, see ENCORE_FORMAT.md §Known quirks for per-version details.
+    // Format capability queries, see ENCORE_FORMAT.md §8.1 Per-generation differences at a glance for per-version details.
     virtual bool hasGraceTimeBorrowing() const { return false; }  // v0xA6: grace borrows rdur from next note
     virtual const char* formatName() const { return "v0xC4"; }    // for logging
 
     // True when a chord's notes are recorded with staggered playback ticks (a per-chord "strum")
     // but share one notated horizontal column (the note xoffset byte). When set, a run of notes
     // sharing the same nonzero xoffset and face value is collapsed to one tick before duration
-    // computation so they form a single chord. See ENCORE_FORMAT.md §Chord column (xoffset).
+    // computation so they form a single chord. See ENCORE_FORMAT.md §7.7 The chord column.
     virtual bool clustersChordsByXoffset() const { return false; }
 
     // Called once per (staffIdx, voice) element group after computeElementDurations().
@@ -180,32 +180,32 @@ struct EncFormatReader
     virtual void postProcessVoiceGroup(std::vector<EncMeasureElem*>& /*elems*/,
                                        qint16 /*durTicks*/) const {}
     // Bytes to skip between kie (byte +10) and text. v0xC4=9 (text at +20), v0xC2=7 (text at +18).
-    // v0xA6 uses 0 (compact lyric: kie at +5, text at +6). See ENCORE_FORMAT.md §Lyric element.
+    // v0xA6 uses 0 (compact lyric: kie at +5, text at +6). See ENCORE_FORMAT.md §6.9 Lyric.
     virtual quint8 lyricTextGapAfterKie() const { return 9; }
 
     // Bytes from the cursor after the element header (size + rawStaff) to the kie byte. v0xC4/v0xC2
-    // use 5 (kie at element +10); v0xA6 uses 0 (kie at +5). See ENCORE_FORMAT.md §Lyric element.
+    // use 5 (kie at element +10); v0xA6 uses 0 (kie at +5). See ENCORE_FORMAT.md §6.9 Lyric.
     virtual quint8 lyricPreKieSkip() const { return 5; }
 
     // Byte offset of the text payload within a TEXT-block entry. v0xC4/v0xC2 use 14 (a per-entry
-    // header precedes the text); v0xA6 uses 0 (text starts at the entry). See ENCORE_FORMAT.md §TEXT block.
+    // header precedes the text); v0xA6 uses 0 (text starts at the entry). See ENCORE_FORMAT.md §5.5 Text block.
     virtual quint8 textBlockEntryTextOffset() const { return 14; }
 
     // True when a TEXT-block entry begins with Encore's rich-text run header: a uint16 run count,
     // a flags word, a run-offset table (run count * uint32), then a 6-byte descriptor before the
     // text. The text offset is then variable (14 is only the single-run case). v0xA6 has no such
-    // header. See ENCORE_FORMAT.md §TEXT block.
+    // header. See ENCORE_FORMAT.md §5.5 Text block.
     virtual bool textBlockEntryHasRunHeader() const { return true; }
 
     // Element-relative offset of a STAFFTEXT ornament's TEXT-entry index (tind), or -1 to use the
     // size-based location read inline. v0xA6 stores it at +28 in its compact ornament; other
-    // formats return -1. See ENCORE_FORMAT.md §Ornament element.
+    // formats return -1. See ENCORE_FORMAT.md §6.8 Ornament.
     virtual int staffTextTindOffset() const { return -1; }
 
     // Element-relative offset of the ornament's vertical placement, stored as a signed byte
     // (positive = above the staff, negative = below), or -1 when the format keeps it in the inline
     // s16 slot. v0xA6 stores it at +9 in its compact ornament and it applies to every subtype, not
-    // only to staff text. See ENCORE_FORMAT.md §Ornament element.
+    // only to staff text. See ENCORE_FORMAT.md §6.8 Ornament.
     virtual int ornamentYoffsetOffset() const { return -1; }
 
     // Element-relative offset of the ornament's forward measure count (spanner endpoint), or -1
@@ -215,7 +215,7 @@ struct EncFormatReader
     // An ornament subtype in the vocabulary the rest of the importer speaks. Format 3.07 renumbered
     // part of the articulation block, so a file older than format 3.07 states those subtypes six
     // higher and they reach the emitters as codes nothing recognises.
-    // See ENCORE_FORMAT.md §Ornament subtypes.
+    // See ENCORE_FORMAT.md §8.2 Ornament subtypes.
     virtual quint8 normalizeOrnamentSubtype(quint8 subtype) const { return subtype; }
 
     virtual ~EncFormatReader() = default;

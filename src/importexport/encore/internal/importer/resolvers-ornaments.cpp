@@ -68,7 +68,7 @@ static void resolveArpeggios(MasterScore* score,
 // unreliable (Encore may place it at durTicks or in voice 0 regardless of the note's real voice),
 // so the tick->measure->voice fallbacks try, in order: the exact (tick, track) segment; the last
 // chord on that track in the source measure; then any voice on that staff. Returns nullptr when no
-// chord is found. See ENCORE_FORMAT.md §Ornament element.
+// chord is found. See ENCORE_FORMAT.md §6.8 Ornament.
 static Chord* findChordForTremolo(MasterScore* score, const PendingOrnTremolo& pt)
 {
     // staffIdx/msVoice come from the file; reject an out-of-range staff before deriving tracks.
