@@ -83,8 +83,7 @@ protected:
 };
 
 // A tie can be recorded on the note alone: grace1 low nibble bit 0 marks the outgoing side, and a
-// few percent of such notes carry no TIE element at all. The flag is written by every generation,
-// so reading it only for v0xC2 lost those ties in Encore 4 and 5 files.
+// few percent of such notes carry no TIE element at all. The flag is written by every generation.
 // See ENCORE_FORMAT.md §The note's own tie flags.
 TEST_F(Tst_NotesTies, tie_flag_on_note_creates_tie_in_v0c4)
 {

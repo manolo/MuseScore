@@ -335,9 +335,7 @@ TEST_F(Tst_Grace, beamed_grace_group_stays_separate)
 ENC_SANITY_TEST(grace_notes, "notes_grace.enc")
 // A small note with no slash and no principal note to ornament is a cue: it keeps its full value,
 // draws small and, when the mute bit is set, stays silent. m1 holds a same-tick two-note chord
-// flagged 0x30/0x01: it must import as ONE small, silent chord of two notes. Before the fix the
-// grace path rolled the track's tick state back before handing the note to the normal path, so the
-// second note was never seen as a chord member and the chord split in two. m2 holds a lone slashed
+// flagged 0x30/0x01: it must import as ONE small, silent chord of two notes. m2 holds a lone slashed
 // note (0x20/0x04), a real grace, which must still import small.
 TEST_F(Tst_Grace, v0c2_cue_chord_keeps_members_and_size)
 {
