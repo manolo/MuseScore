@@ -53,7 +53,7 @@ bool EncNote::read(QDataStream& ds)
     EncMeasureElem::read(ds);
 
     ds >> faceValue >> grace1 >> grace2;
-    // Everything from +8 onward moved two bytes later in Encore 4.0; bodyShift folds the older
+    // Everything from +8 onward moved two bytes later at format 3.07; bodyShift folds the older
     // layout into this one read. See ENCORE_FORMAT.md §v0xC2 note.
     ds.skipRawData(2 + bodyShift);
     ds >> xoffset;

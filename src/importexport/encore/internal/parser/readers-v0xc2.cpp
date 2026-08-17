@@ -155,7 +155,7 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
     const char* formatName() const override { return "v0xC2"; }
     quint8 lyricTextGapAfterKie() const override { return 7; }
 
-    // Encore 4.0 inserted two bytes into every element body at offset +8, so a file written by an
+    // Format 3.07 inserted two bytes into every element body at offset +8, so a file written by an
     // earlier build keeps those fields two bytes lower. The format version is what separates the
     // two generations: the version byte is 0xC2 for both, and element sizes overlap between them.
     // See ENCORE_FORMAT.md §Version byte and release mapping.
@@ -169,8 +169,8 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
     // explicitly (forward measure-count / next note) instead of by coordinate search.
     bool slurXoffset2Stale() const override { return true; }
 
-    // Encore 4.0 moved five articulations down by six; the rest of the vocabulary stayed put.
-    // See ENCORE_FORMAT.md §The pre-Encore-4 articulation codes.
+    // Format 3.07 moved five articulations down by six; the rest of the vocabulary stayed put.
+    // See ENCORE_FORMAT.md §The older articulation codes.
     quint8 normalizeOrnamentSubtype(quint8 subtype) const override
     {
         if (m_formatVersion >= ENC_FORMAT_3_07) {
