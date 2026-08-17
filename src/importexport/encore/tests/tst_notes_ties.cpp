@@ -82,6 +82,39 @@ protected:
     void SetUp() override { setRootDir(ENC_DIR); }
 };
 
+// A tie can be recorded on the note alone: grace1 low nibble bit 0 marks the outgoing side, and a
+// few percent of such notes carry no TIE element at all. The flag is written by every generation,
+// so reading it only for v0xC2 lost those ties in Encore 4 and 5 files.
+// See ENCORE_FORMAT.md §The note's own tie flags.
+TEST_F(Tst_NotesTies, tie_flag_on_note_creates_tie_in_v0c4)
+{
+    MasterScore* score = readEncoreScore("notes_tie_flag_on_note.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    int tieCount = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Note* n : toChord(el)->notes()) {
+                if (n->tieFor()) {
+                    ++tieCount;
+                }
+            }
+        }
+    }
+    EXPECT_EQ(tieCount, 1) << "the flag on the note is the only record of this tie";
+    delete score;
+}
+
 TEST_F(Tst_NotesTies, tie_direction_fc_creates_tie)
 {
     MasterScore* score = readEncoreScore("notes_tie_dir_fc.enc");
