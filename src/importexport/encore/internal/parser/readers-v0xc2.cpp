@@ -35,46 +35,6 @@ namespace mu::iex::enc {
 // v0xC2 stores the eighth of a dotted-eighth+sixteenth group as plain (rdur 120) instead of dotted
 // (180), placing the sixteenth at tick+120. Force the dot only when the measure is short by exactly
 // 60t (the amount the anomaly steals), otherwise a genuine 8th+16th would get a spurious dot.
-static void fixDottedEighthPattern(std::vector<EncMeasureElem*>& elems, qint16 durTicks)
-{
-    int faceSum = 0;
-    for (const EncMeasureElem* e : elems) {
-        quint8 fv = 0;
-        if (const auto* en = dynamic_cast<const EncNote*>(e)) {
-            fv = en->faceValue & 0x0F;
-        } else if (const auto* er = dynamic_cast<const EncRest*>(e)) {
-            fv = er->faceValue & 0x0F;
-        }
-        faceSum += faceValue2ticks(fv);
-    }
-    if (faceSum + 60 != static_cast<int>(durTicks)) {
-        return;
-    }
-
-    for (size_t i = 0; i < elems.size(); ++i) {
-        EncNote* en = dynamic_cast<EncNote*>(elems[i]);
-        if (!en || (en->faceValue & 0x0F) != 4 || en->realDuration != 120) {
-            continue;
-        }
-        const qint16 targetTick = static_cast<qint16>(elems[i]->tick + 120);
-        for (size_t j = i + 1; j < elems.size(); ++j) {
-            if (elems[j]->tick > targetTick) {
-                break;
-            }
-            if (elems[j]->tick == targetTick) {
-                const EncNote* enNext = dynamic_cast<const EncNote*>(elems[j]);
-                if (enNext
-                    && (enNext->faceValue & 0x0F) == 5
-                    && enNext->realDuration == 60) {
-                    en->dotControl |= 1;   // kept for documentation; dot is forced via forceDotted
-                    en->forceDotted = true;
-                    break;
-                }
-            }
-        }
-    }
-}
-
 // v0xC2: mark consecutive notes/rests whose rdur/faceValue ratio identifies an implied tuplet.
 // Groups same-tick elements as chords before scanning, matching the grouping in
 // computeImpliedTupletMembers so the two passes agree on group boundaries.
@@ -221,23 +181,13 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
         }
         // Pre-4.0 files store the pitch at +13 and the tuplet at +11; elementBodyShift() already
         // put both in the right field, so the recovery below must not run and destroy the tuplet.
-        // For the post-4.0 layout some files still keep the pitch in the tuplet slot (+13) with
-        // +15 empty; swap it across. Discriminate by whether +15 is a plausible pitch (>= C0), not
-        // merely nonzero: a stray small flag there must not be read as MIDI 1.
-        // See ENCORE_FORMAT.md §Note element.
-        static constexpr quint8 kMinPlausiblePitch = 12; // C0; below this is not a MIDI note
-        if (elementBodyShift() == 0 && en->tuplet > 0 && en->semiTonePitch < kMinPlausiblePitch) {
-            en->semiTonePitch = en->tuplet;
-            en->tuplet = 0;
-        }
         // Decode tie-sender flag from grace1 low nibble (v0xC2 only).
         en->isTieSender = ((en->grace1 & 0x0F) == 1);
         return false;
     }
 
-    void postProcessVoiceGroup(std::vector<EncMeasureElem*>& elems, qint16 durTicks) const override
+    void postProcessVoiceGroup(std::vector<EncMeasureElem*>& elems, qint16) const override
     {
-        fixDottedEighthPattern(elems, durTicks);
         markImpliedTupletMembers(elems);
     }
 

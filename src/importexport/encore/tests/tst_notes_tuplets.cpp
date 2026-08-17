@@ -476,59 +476,6 @@ TEST_F(Tst_NotesTuplets, dotted_note_dotctrl_bit0_with_rdur_drift)
     delete score;
 }
 
-TEST_F(Tst_NotesTuplets, v0c2_dotted_eighth_detected_from_tick_pattern)
-{
-    // In v0xC2 the sixteenth of a dotted-eighth+sixteenth pair is stored at tick+plain-eighth, and the
-    // eighth's dotControl lacks the dotted bit. The E->S@tick+120 pattern must be detected and the eighth
-    // marked dotted, or the measure comes up short and generates a phantom rest.
-    MasterScore* score = readEncoreScore("notes_v0c2_dotted_eighth.enc");
-    ASSERT_NE(score, nullptr) << "Failed to load notes_v0c2_dotted_eighth.enc";
-    muse::Ret ret = score->sanityCheck();
-    EXPECT_TRUE(ret) << "v0xC2 dotted-eighth measure must pass sanityCheck: " << ret.text();
-
-    Measure* m = measureAt(score, 0);
-    ASSERT_NE(m, nullptr);
-    EXPECT_EQ(m->timesig(), Fraction(3, 4));
-
-    std::vector<Chord*> chords;
-    std::vector<Rest*> rests;
-    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
-        EngravingItem* e = s->element(0);
-        if (!e) {
-            continue;
-        }
-        if (e->isChord()) {
-            chords.push_back(toChord(e));
-        } else if (e->isRest()) {
-            Rest* r = toRest(e);
-            if (!r->isGap()) {
-                rests.push_back(r);
-            }
-        }
-    }
-
-    ASSERT_EQ(chords.size(), 3u) << "Must have exactly 3 chords (dotted-E, S, H); phantom rest signals unfixed bug";
-    EXPECT_EQ(rests.size(), 0u) << "No phantom rests: measure must fill 3/4 exactly";
-
-    // First chord: dotted eighth (bit-0 fallback applied by tick-pattern fix)
-    EXPECT_EQ(chords[0]->durationType().type(), DurationType::V_EIGHTH)
-        << "Note 0 base type must be eighth";
-    EXPECT_EQ(chords[0]->dots(), 1)
-        << "Note 0 must have 1 dot (v0xC2 tick-pattern fix sets dotControl bit 0)";
-
-    // Second chord: plain sixteenth
-    EXPECT_EQ(chords[1]->durationType().type(), DurationType::V_16TH);
-    EXPECT_EQ(chords[1]->dots(), 0);
-
-    // Third chord: plain half
-    EXPECT_EQ(chords[2]->durationType().type(), DurationType::V_HALF);
-    EXPECT_EQ(chords[2]->dots(), 0);
-
-    delete score;
-}
-
-// The dotted-eighth pattern fix must not fire in an already-full measure: the 8th+16th binary pattern is
-// ambiguous, so it only applies when faceSum + 60 == durTicks (measure short by an eighth's dot).
 TEST_F(Tst_NotesTuplets, v0c2_full_measure_eighth_plus_sixteenth_no_false_dot)
 {
     MasterScore* score = readEncoreScore("notes_v0c2_full_measure_no_false_dot.enc");

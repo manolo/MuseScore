@@ -2182,30 +2182,6 @@ def gen_v0c4_dotted_note():
 
 
 # ===========================================================================
-# notes_v0c2_dotted_eighth.enc
-# v0xC2 3/4 measure: dotted-eighth + sixteenth + half.
-#
-# In Encore v0xC2 the MIDI note-on for the sixteenth in a c·+s group is stored
-# at tick = tick_of_eighth + faceValue_ticks(eighth) = tick + 120, NOT at
-# tick + dotted_ticks = tick + 180.  This makes realDuration=120 for the
-# dotted eighth, identical to a plain eighth, so calcDotsSnap returns 0.
-# The dotControl byte (0x60) also lacks bit 0 (unlike v0xC4 which uses 0x1D).
-#
-# Without fix: plain eighth (120) + 16th (60) + half (480) = 660 ≠ 720 →
-#   a trailing 16th rest is generated to fill the measure.
-# With fix (E@tick → S@tick+120 → realDuration pattern): dotControl|=1 is set
-#   on the eighth → bit-0 fallback forces 1 dot → dotted eighth (180) + 16th
-#   (60) + half (480) = 720 → clean measure.
-# ===========================================================================
-def gen_v0c2_dotted_eighth():
-    e  = note_v0c2_ext(0,   0, 0, fv=4, pitch=67, grace1=0x10, dotControl=0x60)  # E@0
-    e += note_v0c2_ext(120, 0, 0, fv=5, pitch=62, grace1=0x10, dotControl=0x30)  # S@120
-    e += note_v0c2_ext(180, 0, 0, fv=2, pitch=67, grace1=0x00, dotControl=0x80)  # H@180
-    e += end_marker()
-    return assemble(0xC2, [(meas_hdr(3, 4), e)], fill_ts=(3, 4))
-
-
-# ===========================================================================
 # notes_rdur_snap.enc
 # v0xC4 4/4 measure: an 8th note at tick=0 with dotControl=0 (no hint) whose
 # MIDI realDuration is 211 ticks, exactly 1 tick away from dd8th=210.
@@ -13076,7 +13052,6 @@ if __name__=='__main__':
     write("notes_v0c2_near_simultaneous_chord.enc", gen_v0c2_near_simultaneous_chord())
     write("notes_tie.enc",          gen_v0c4_tie())
     write("notes_dotted_rest.enc",  gen_v0c4_dotted_rest())
-    write("notes_v0c2_dotted_eighth.enc", gen_v0c2_dotted_eighth())
     write("notes_dotted_note.enc",  gen_v0c4_dotted_note())
     write("notes_rdur_snap.enc",    gen_v0c4_rdur_snap())
     write("notes_sf_tiestart.enc",  gen_v0c4_sf_tiestart())
