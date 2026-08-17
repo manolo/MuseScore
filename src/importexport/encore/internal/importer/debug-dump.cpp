@@ -32,6 +32,7 @@
 #include <QString>
 
 #include "../parser/elem.h"
+#include "../parser/readers.h"
 #include "page-layout.h"
 
 #include "log.h"
@@ -42,25 +43,44 @@ void logEncRootInfo(const EncRoot& enc)
     const EncHeader& h = enc.header;
     const char* fmtName = enc.fmt ? enc.fmt->formatName() : "unknown";
 
-    // app version (0x28) -> Encore release. 592 = 2.x, 773 = 3.x, 775 = 4.0-4.2,
-    // 1056 = 4.5 and 5.x, split by the format-revision byte at 0x3E (1 = 4.5, 4 = 5.0).
-    const char* encVer;
-    if (h.chuVersio >= 1000) {
-        encVer = (h.formatRev >= 4) ? "Encore 5.x"
-                 : (h.formatRev >= 1) ? "Encore 4.5"
-                 : "Encore 4.5/5.x";
-    } else {
-        encVer = (h.chuVersio >= 775) ? "Encore 4.x"
-                 : (h.chuVersio >= 700) ? "Encore 3.x"
-                 : (h.chuVersio >= 500) ? "Encore 2.x"
-                 : "Encore (legacy)";
+    // Which program wrote the file: the magic is the only thing that names it.
+    // See ENCORE_FORMAT.md §1.2 The containers.
+    const char* product = (h.magic == "MTIW") ? "MusicTime, Windows"
+                          : (h.magic == "MTIM") ? "MusicTime, macOS"
+                          : (h.magic == "SCO5") ? "Encore, macOS"
+                          : (h.magic == "SCOW") ? "Encore, Windows"
+                          : "unknown container";
+
+    // The release, only as far as the format version and the revision byte can say it. The revision
+    // byte does not separate builds within the Encore 4 line, and no distribution in hand produces
+    // format 3.07, so those two say a range instead of a release.
+    // See ENCORE_FORMAT.md §1.3 The four generations and §1.6 The revision byte.
+    std::string release;
+    switch (h.chuVersio) {
+    case 0x0250: release = "Encore 2.5";
+        break;
+    case 0x0262: release = "MusicTime";
+        break;
+    case 0x0305: release = "Encore 3";
+        break;
+    case 0x0307: release = "between Encore 3 and 4, release not established";
+        break;
+    case 0x0420:
+        release = (h.formatRev == 4) ? "Encore 5.0"
+                  : (h.formatRev == 2) ? "macOS Encore 5"
+                  : (h.formatRev <= 1) ? "the Encore 4 line, 1997 to 2008"
+                  : "Encore 4.x or 5.x";
+        break;
+    default: release = "unlisted format version";
+        break;
     }
 
     LOGD() << "---- Encore file info ----";
-    LOGD() << "  Magic:" << h.magic.toStdString()
-           << "  Format:0x" << QString::number(h.chuMagio, 16).toUpper().toStdString()
-           << "(" << fmtName << ")  version=" << h.chuVersio
-           << " rev=" << static_cast<int>(h.formatRev) << "(" << encVer << ")";
+    LOGD() << "  Magic:" << h.magic.toStdString() << " (" << product << ")"
+           << "  format " << encFormatVersionString(h.chuVersio).toStdString()
+           << "  reader " << fmtName
+           << "  rev " << static_cast<int>(h.formatRev)
+           << " (" << release << ")";
     LOGD() << "  Lines:" << h.lineCount
            << "  Pages:" << h.pageCount
            << "  Instruments:" << h.instrumentCount
