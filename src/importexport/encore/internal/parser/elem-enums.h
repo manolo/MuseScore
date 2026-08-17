@@ -189,7 +189,7 @@ enum class EncGraceType : char {
     APPOGGIATURA  = 2
 };
 
-// See ENCORE_FORMAT.md §TITL block for header/footer alignment byte values.
+// See ENCORE_FORMAT.md §5.6 Title block (TITL) for header/footer alignment byte values.
 enum class EncTextAlign : quint8 {
     LEFT   = 0x04,
     CENTER = 0x06,

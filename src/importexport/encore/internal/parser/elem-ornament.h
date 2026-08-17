@@ -42,7 +42,7 @@ struct EncOrnament : EncMeasureElem {
     quint8 tind      { 0 };
     // Element-relative offsets for formats whose ornament does not follow the v0xC4 field order;
     // -1 means read the field inline. All three are set from EncFormatReader before read().
-    // v0xA6's compact ornament uses all of them. See ENCORE_FORMAT.md §Ornament element.
+    // v0xA6's compact ornament uses all of them. See ENCORE_FORMAT.md §6.8 Ornament.
     int tindOffset      { -1 };   // staff-text TEXT index
     int yByteOffset     { -1 };   // y as a signed byte, every subtype
     int measCountOffset { -1 };   // forward measure count, every subtype

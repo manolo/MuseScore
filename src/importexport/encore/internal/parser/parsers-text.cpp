@@ -51,12 +51,12 @@ bool EncHeader::read(QDataStream& ds, const EncFormatReader& fmt)
     ds.skipRawData(0x28 - 5);   // from +5 (just past the 5-byte magic) to the header fields at 0x28
     ds >> chuVersio >> nekon1 >> fiksa1 >> lineCount >> pageCount;
     ds >> instrumentCount >> staffPerSystem >> measureCount;   // cursor now at 0x36
-    // Format-revision byte at 0x3E distinguishes releases that share an app version:
-    // 1 = Encore 4.5, 4 = Encore 5.0 (both v0xC4 with chuVersio 1056). Meaningless for v0xA6.
+    // Format-revision byte at 0x3E. It is not a layout selector and nothing below branches on
+    // it; it is kept for the file report. See ENCORE_FORMAT.md §1.6 The revision byte.
     ds.skipRawData(0x3E - 0x36);
     ds >> formatRev;                                           // cursor now at 0x3F
-    // Global staff-size selector (1=small … 4=default). v0xC2/C4/C5 store it at 0x52;
-    // v0xA6 stores it at 0x8D (byte 0x52 is an unrelated field there). Offset from fmt.
+    // Global staff-size selector (1=small … 4=default), at the offset the reader gives:
+    // EncFormatReader::scoreSizeOffset().
     const qint64 szOff = fmt.scoreSizeOffset();
     if (fmt.headerEnd() > szOff) {
         ds.skipRawData(static_cast<int>(szOff - 0x3F));   // skip from 0x3F to the size byte
@@ -78,7 +78,7 @@ bool EncHeader::read(QDataStream& ds, const EncFormatReader& fmt)
 
 bool EncTextBlock::read(QDataStream& ds, quint32 varSize, int textOffset, bool hasRunHeader)
 {
-    // See ENCORE_FORMAT.md §TEXT block for layout. Entry N referenced by ORN tind byte (+32).
+    // See ENCORE_FORMAT.md §5.5 Text block for layout. Entry N referenced by ORN tind byte (+32).
     // varSize is untrusted; route every skip through skipBlock/skipToBlockEnd so a value above
     // INT_MAX cannot wrap negative in skipRawData(quint32) and desync the following magic scan.
     const qint64 startPos = ds.device()->pos();
@@ -117,7 +117,7 @@ bool EncTextBlock::read(QDataStream& ds, quint32 varSize, int textOffset, bool h
         }
         consumed += entrySize;
         // Payload text starts at a format-supplied offset; the rich-text run header pushes it
-        // further and its length must be derived, not fixed. See ENCORE_FORMAT.md §TEXT block.
+        // further and its length must be derived, not fixed. See ENCORE_FORMAT.md §5.5 Text block.
         int effTextOffset = textOffset;
         if (hasRunHeader && entrySize >= 4) {
             // The header carries two independent counts: a run-offset table count at +0 (uint32
@@ -136,14 +136,14 @@ bool EncTextBlock::read(QDataStream& ds, quint32 varSize, int textOffset, bool h
             }
         }
         // Payload text at effTextOffset, probe picks UTF-16 LE or Latin-1;
-        // see ENCORE_FORMAT.md §Encoding probe.
+        // see ENCORE_FORMAT.md §7.8 Text encoding.
         QString text;
         if (entrySize >= effTextOffset + 2) {
             const quint8 b0 = static_cast<quint8>(payload[effTextOffset]);
             const quint8 b1 = static_cast<quint8>(payload[effTextOffset + 1]);
             const bool isUtf16 = (b0 >= 0x20 && b0 < 0x7F && b1 == 0x00);
             // Decode the whole text region, then post-process: multi-line comments separate lines
-            // with U+0004 and terminate with a U+0000 null. See ENCORE_FORMAT.md §TEXT block.
+            // with U+0004 and terminate with a U+0000 null. See ENCORE_FORMAT.md §5.5 Text block.
             const int textBytes = entrySize - effTextOffset;
             if (textBytes > 0) {
                 if (isUtf16) {

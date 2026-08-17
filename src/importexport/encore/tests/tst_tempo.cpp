@@ -44,7 +44,7 @@ protected:
 };
 
 // Files can carry stale MEAS blocks past the rendered count; only the real ones must import.
-// See ENCORE_FORMAT.md §Header.
+// See ENCORE_FORMAT.md §4. The header.
 TEST_F(Tst_Tempo, v0c4_header_measure_count_truncates_ghost_measures)
 {
     MasterScore* score = readEncoreScore(
@@ -89,7 +89,7 @@ TEST_F(Tst_Tempo, swing_timing_file_no_crash)
 
 // Regression: older-layout v0xC2 tempo marks carry the beat unit in a different slot; without it
 // an "eighth = 240" mark in 6/8 was read as a dotted quarter and played 3x too fast.
-// See ENCORE_FORMAT.md §Note element (Tempo beat unit).
+// See ENCORE_FORMAT.md §6.8 Ornament.
 TEST_F(Tst_Tempo, v0c2_older_layout_tempo_beat_unit_at_plus26)
 {
     MasterScore* score = readEncoreScore("tempo_v0c2_eighth_beat_unit.enc");

@@ -21,7 +21,7 @@
  */
 
 // Text import: lyrics (syllable matching, verses, hyphen/melisma, encodings) and staff/rehearsal/tempo text,
-// including rich-text runs. See ENCORE_FORMAT.md §Lyric element and ENCORE_FORMAT.md §TEXT block.
+// including rich-text runs. See ENCORE_FORMAT.md §6.9 Lyric and ENCORE_FORMAT.md §5.5 Text block.
 
 #include <gtest/gtest.h>
 
@@ -646,7 +646,7 @@ TEST_F(Tst_Text, tempo_beat_unit_from_noto_overrides_compound_meter)
 }
 
 // v0xC2 stores a tempo mark's BPM in a different ORN slot than v0xC4, so reading the v0xC4 slot gets a
-// constant, not the real BPM. See ENCORE_FORMAT.md §Note element (Tempo beat unit).
+// constant, not the real BPM. See ENCORE_FORMAT.md §6.8 Ornament.
 TEST_F(Tst_Text, tempo_orn_v0c2_reads_bpm_from_offset_28)
 {
     MasterScore* score = readEncoreScore("text_tempo_orn_v0c2_bpm_offset.enc");
@@ -779,7 +779,7 @@ TEST_F(Tst_Text, header_footer_tokens_translated_to_mscore_macros)
 }
 
 // A STAFFTEXT's tind byte indexes into the TEXT block for its display string; the importer resolves the
-// StaffText via that index. See ENCORE_FORMAT.md §TEXT block.
+// StaffText via that index. See ENCORE_FORMAT.md §5.5 Text block.
 TEST_F(Tst_Text, staff_text_resolved_via_text_block)
 {
     MasterScore* score = readEncoreScore("text_staff_text.enc");
@@ -809,7 +809,7 @@ TEST_F(Tst_Text, staff_text_resolved_via_text_block)
 
 // A rich-text TEXT entry stores its text after a variable-length run header, so the text offset must be
 // derived from the run count; assuming the single-run offset resolves a multi-run entry to garbage.
-// See ENCORE_FORMAT.md §TEXT block.
+// See ENCORE_FORMAT.md §5.5 Text block.
 TEST_F(Tst_Text, staff_text_multirun_header)
 {
     MasterScore* score = readEncoreScore("text_staff_text_multirun.enc");
@@ -839,7 +839,7 @@ TEST_F(Tst_Text, staff_text_multirun_header)
 
 // A rich-text TEXT entry can carry more than one formatting descriptor (count at the header), so the text
 // offset must account for the descriptor count; assuming a single descriptor reads into a descriptor and
-// decodes garbage. See ENCORE_FORMAT.md §TEXT block.
+// decodes garbage. See ENCORE_FORMAT.md §5.5 Text block.
 TEST_F(Tst_Text, staff_text_two_descriptors_header)
 {
     MasterScore* score = readEncoreScore("text_staff_text_two_descriptors.enc");
@@ -1250,7 +1250,7 @@ TEST_F(Tst_Text, orn_tempo_equal_to_header_placed_at_measure_start)
 }
 
 // End-to-end v0xC2 6/8 lyric fixture exercising three fixes together: the shorter post-kie text gap so
-// syllables are not truncated (see ENCORE_FORMAT.md §Lyric element), lyrics-first matching, and a
+// syllables are not truncated (see ENCORE_FORMAT.md §6.9 Lyric), lyrics-first matching, and a
 // compound-meter encTicksPerQuarter (beatTicks * 2/3). All 56 syllables must import intact.
 
 static std::vector<String> collectAllLyrics(MasterScore* score)

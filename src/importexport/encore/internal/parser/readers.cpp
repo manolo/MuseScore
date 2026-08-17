@@ -129,7 +129,7 @@ std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 chuMagio, const 
 
     // An unknown version byte still places itself: the format version is ordered, so the file
     // reads as the newest generation it is not older than.
-    // See ENCORE_FORMAT.md §Version byte and release mapping.
+    // See ENCORE_FORMAT.md §1.5 The version byte, and where it disagrees.
     const char* readAs = nullptr;
     std::unique_ptr<EncFormatReader> reader;
     if (formatVersion < ENC_FORMAT_3_05) {

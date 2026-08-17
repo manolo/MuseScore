@@ -224,7 +224,7 @@ static bool applyPagePrintSetup(MasterScore* score, const EncPrintSetup& pr)
 
 // Display size (1-4) for an instrument: per-instrument staffSizeHint from the LINE staff entry,
 // falling back to the global header.scoreSize for files without LINE data.
-// See ENCORE_FORMAT.md §System block (LINE).
+// See ENCORE_FORMAT.md §5.2 System block (LINE).
 int staffDisplaySize(const EncRoot& enc, int instrIdx)
 {
     if (!enc.lines.empty()) {
@@ -259,7 +259,7 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps, bool pa
     // them in screen pixels at the monitor DPI (about 84-85 PPI on older hardware); the tell is
     // rightEdge/bottomEdge exceeding the page size in pts (e.g. 672 > A4 width 595). The pts case
     // recovers the page via detectPtsPageSize, the pixel case via detectWiniPageSize (DPI ratio).
-    // See ENCORE_FORMAT.md §WINI block.
+    // See ENCORE_FORMAT.md §5.8 Margins block (WINI).
     // Cap each margin to a fraction of the page so a misread WINI cannot produce an absurd margin,
     // while still allowing legitimately large margins (2"+ are common on A3/landscape).
     static constexpr double kMaxMarginFrac = 0.45;

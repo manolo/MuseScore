@@ -21,7 +21,7 @@
  */
 
 // Ornaments and articulations: trills, mordents, fermatas, breaths/caesuras, arpeggios, tremolos and the
-// articulation-byte mapping, plus their placement/anchoring. See ENCORE_FORMAT.md §Ornament element.
+// articulation-byte mapping, plus their placement/anchoring. See ENCORE_FORMAT.md §6.8 Ornament.
 
 #include <gtest/gtest.h>
 

@@ -65,7 +65,7 @@ static void markInnerGraces(std::vector<EncMeasureElem*>& elems)
 }
 
 // Maps the compact element bodies onto the fields the rest of the importer speaks.
-// See ENCORE_FORMAT.md §v0xA6 note and §v0xA6 rest.
+// See ENCORE_FORMAT.md §6.3 Note, The compact note and §v0xA6 rest.
 bool EncFormatReader_V0xA6::postProcessElement(EncMeasureElem* elem,
                                                QDataStream& ds,
                                                qint64 rawElemStart) const
@@ -169,7 +169,7 @@ void EncFormatReader_V0xA6::readLineStaffKeys(EncLine& line, QDataStream& ds, qi
 {
     // v0xA6 staffPerSystem reads 0 so staffData stays empty; parse the key out of each LINE staff
     // entry directly so initial key signatures import. The 0x0E 0xFC marker bounds the run.
-    // See ENCORE_FORMAT.md §v0xA6 staff size and clef.
+    // See ENCORE_FORMAT.md §5.2 System block (LINE), Format 2.50 systems.
     QIODevice* dev = ds.device();
     const qint64 savedPos = dev->pos();
     const qint64 entriesStart = lineContentStart + 14;

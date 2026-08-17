@@ -21,7 +21,7 @@
  */
 
 // Unit tests for the numeric chord decoding in EncChordSym::chordName() and EncMidiCc::read(),
-// exercised in isolation by building the parser structs directly. See ENCORE_FORMAT.md §CHORD symbol element.
+// exercised in isolation by building the parser structs directly. See ENCORE_FORMAT.md §6.10 Chord symbol.
 
 #include <gtest/gtest.h>
 
@@ -215,7 +215,7 @@ TEST(Tst_EncChordSym, empty_teksto_falls_through_to_numeric)
 
 // EncMidiCc inline MIDI Control Change events. read() is entered at d[3] (caller already consumed
 // tick + typeVoice), so the hand-built buffer starts at the size byte.
-// See ENCORE_FORMAT.md §MIDI control change (type 11).
+// See ENCORE_FORMAT.md §6.12 MIDI control change.
 TEST(Tst_EncMidiCc, decodes_controller_and_value)
 {
     QByteArray bytes;

@@ -26,7 +26,7 @@
 #include "readers.h"
 
 namespace mu::iex::enc {
-// Encore 2.x (v0xA6) format reader. See ENCORE_FORMAT.md §Known quirks.
+// Encore 2.x (v0xA6) format reader. See ENCORE_FORMAT.md §8.1 Per-generation differences at a glance.
 struct EncFormatReader_V0xA6 final : EncFormatReader
 {
     qint64 headerEnd() const override { return 0xA6; }
@@ -57,7 +57,7 @@ struct EncFormatReader_V0xA6 final : EncFormatReader
     quint8 lyricTextGapAfterKie() const override { return 0; }
     // TEXT entries carry no per-entry header. The compact ornament keeps three fields outside the
     // v0xC4 field order: the staff-text index at +28, a signed-byte y at +9 and the forward measure
-    // count at +14. See ENCORE_FORMAT.md §Ornament element.
+    // count at +14. See ENCORE_FORMAT.md §6.8 Ornament.
     quint8 textBlockEntryTextOffset() const override { return 0; }
     bool textBlockEntryHasRunHeader() const override { return false; }
     int staffTextTindOffset() const override { return 28; }

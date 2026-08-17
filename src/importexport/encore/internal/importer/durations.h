@@ -38,7 +38,7 @@ int calcDots(qint16 realDur, quint8 fv);
 int calcDotsSnap(qint16 dur, quint8 fv);
 mu::engraving::Fraction dottedAdvance(mu::engraving::DurationType durationType, int dots);
 
-// Dot-count computation for note/rest handlers. See ENCORE_FORMAT.md §Note element (dotControl).
+// Dot-count computation for note/rest handlers. See ENCORE_FORMAT.md §7.3 Dots.
 // When useBit0Fallback=true (notes only), bit 0 of dotControl is Encore's dotted flag.
 int computeDotCount(quint8 dotControl, qint16 realDuration, quint8 faceValue, bool useBit0Fallback = false);
 

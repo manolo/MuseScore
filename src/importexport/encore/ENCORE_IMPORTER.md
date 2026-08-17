@@ -146,7 +146,7 @@ Without the cap, a corrupt file can drive a scan of hundreds of megabytes.
 ## v0xC2 compact instrument-table reading
 
 v0xC2 files without TK blocks use a 112-byte-per-entry linear table for instrument names and MIDI programs.
-Two sub-layouts exist (see ENCORE_FORMAT.md §No-TK-block files).
+Two sub-layouts exist (see ENCORE_FORMAT.md §5.1 Instrument block, Files with no instrument blocks).
 The reader (`readers-v0xc4-base.cpp`) auto-detects which variant applies.
 
 **Detection logic (`readMidiProgramsNoTk`, `recoverMissingNames`):**
@@ -807,7 +807,7 @@ The ottava is created via `Factory::createOttava` and added with `score->addElem
 ## Multi-staff routing: staffWithin and out-of-range voice
 
 Encore encodes which staff of a multi-staff instrument an element belongs to using the high 2 bits of the element's staff byte (`staffWithin = staffByte >> 6`).
-See ENCORE_FORMAT.md §Multi-staff instruments for the format details.
+See ENCORE_FORMAT.md §6.2 Staff and voice for the format details.
 
 The importer handles this in two paths:
 
@@ -854,7 +854,7 @@ Example: `teksto="Am"` → `Am`.
 | Field    | Meaning                                                                            |
 |----------|------------------------------------------------------------------------------------|
 | `radiko` | Root: low nibble = name (0=C..6=B), high nibble = accidental (0=♮, 0x10=#, 0x20=b) |
-| `toniko` | Chord quality index 0-63 into `kChordQuality[]` (see ENCORE_FORMAT.md §CHORD symbol element) |
+| `toniko` | Chord quality index 0-63 into `kChordQuality[]` (see ENCORE_FORMAT.md §6.10 Chord symbol) |
 | `baso`   | Slash bass note, same encoding as `radiko`; active when `tipo & 0x02`              |
 
 `EncChordSym::chordName()` constructs the string `root + quality [+ "/" + bass]` and passes it to `setHarmony()`.
@@ -1479,7 +1479,7 @@ Global spatium is not changed.
 
 ## Page margins
 
-Page margins come from the optional WINI block. Its byte layout, the 40/42-byte `varsize` forms, the points-vs-screen-pixel unit variants, the page-size recovery heuristic and the rounding/display quirks are all described in ENCORE_FORMAT.md §WINI; this section records only the DOM-side behavior.
+Page margins come from the optional WINI block. Its byte layout, the 40/42-byte `varsize` forms, the points-vs-screen-pixel unit variants, the page-size recovery heuristic and the rounding/display quirks are all described in ENCORE_FORMAT.md §5.8 Margins block (WINI); this section records only the DOM-side behavior.
 
 `applyPageMargins` (`page-layout.cpp`) reads the parsed `EncPageSetup`. In the screen-pixel variant the paper size is not stored, so `detectWiniPageSize` matches the recovered page width against the standard `QPageSize` list (ISO A-series first, then Letter/Legal/B-series). On a match it updates `Sid::pageWidth` and `Sid::pageHeight` before the margins are computed, so the right/bottom margins derive from the correct paper size; when no size matches the current MuseScore page dimensions are kept.
 
@@ -1580,7 +1580,7 @@ tuplets", several tuplet shapes need special handling:
 
 ## Chord column clustering and stale-tick reconciliation
 
-Using the note `xoffset` column (see ENCORE_FORMAT.md §Chord column (xoffset)), the parser
+Using the note `xoffset` column (see ENCORE_FORMAT.md §7.7 The chord column), the parser
 (`normalizeChordColumnTicks`, `reconcileStaleNoteTicksByColumn` in `parsers-measure.cpp`) reconciles
 staggered playback ticks against the notated layout, per (staff, voice) group already sorted by
 tick:
@@ -1626,5 +1626,5 @@ notes purely by `xoffset` while leaving the playback tick unchanged will show th
   real rest: trust the face value when `faceTicks >= 30` (32nd or longer), and only drop rests whose
   face value is also very short (`faceTicks < 30`).
 - **Placeholder rest.** A voice may carry a redundant plain (non-tuplet) REST at the same tick as a
-  real note (see ENCORE_FORMAT.md §Voice field). Drop it, or the note is pushed after the rest and
+  real note (see ENCORE_FORMAT.md §6.2 Staff and voice). Drop it, or the note is pushed after the rest and
   the bar overflows. Same-tick tuplet members (a tuplet rest followed by a tuplet note) are kept.

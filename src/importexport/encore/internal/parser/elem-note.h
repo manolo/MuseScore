@@ -127,13 +127,13 @@ struct EncNote : EncMeasureElem {
     bool read(QDataStream& ds) override;
 };
 
-// A rest; mrestCount > 1 marks an Encore multi-measure rest (v0xC4) shown as one symbol.
+// A rest; mrestCount > 1 marks an Encore multi-measure rest shown as one symbol.
 struct EncRest : EncMeasureElem {
     quint8 faceValue  { 0 };
     quint8 tuplet     { 0 };
     quint8 dotControl { 0 };
-    // Multi-measure rest display count (v0xC4): > 1 means this one MEAS block spans that
-    // many empty measures. Only meaningful when it is the block's sole REST. See ENCORE_FORMAT.md §REST element.
+    // Multi-measure rest display count: > 1 means this one MEAS block spans that
+    // many empty measures. Only meaningful when it is the block's sole REST. See ENCORE_FORMAT.md §6.4 Rest.
     quint8 mrestCount { 1 };
     // Set by calculateRealDurations() Phase 4 for v0xC2 (same semantics as EncNote::isImpliedTupletMember).
     bool isImpliedTupletMember { false };
@@ -175,7 +175,7 @@ struct EncGenericElem : EncMeasureElem {
 };
 
 // Inline MIDI Control Change (EncElemType::MIDI_CC). Playback only, no notation: the importer
-// logs controller/value and drops it. See ENCORE_FORMAT.md §MIDI control change (type 11).
+// logs controller/value and drops it. See ENCORE_FORMAT.md §6.12 MIDI control change.
 struct EncMidiCc : EncMeasureElem {
     using EncMeasureElem::EncMeasureElem;
 

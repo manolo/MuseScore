@@ -115,7 +115,7 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
     // Format 3.07 inserted two bytes into every element body at offset +8, so a file written by an
     // earlier build keeps those fields two bytes lower. The format version is what separates the
     // two generations: the version byte is 0xC2 for both, and element sizes overlap between them.
-    // See ENCORE_FORMAT.md §Version byte and release mapping.
+    // See ENCORE_FORMAT.md §1.4 What changed at each boundary.
     int elementBodyShift() const override { return m_formatVersion < ENC_FORMAT_3_07 ? -2 : 0; }
 
     // v0xC2 instrument entries end two bytes earlier than v0xC4 ones, so their MIDI program
@@ -127,7 +127,7 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
     bool slurXoffset2Stale() const override { return true; }
 
     // Format 3.07 moved five articulations down by six; the rest of the vocabulary stayed put.
-    // See ENCORE_FORMAT.md §The older articulation codes.
+    // See ENCORE_FORMAT.md §7.6 Articulation bytes.
     quint8 normalizeOrnamentSubtype(quint8 subtype) const override
     {
         if (m_formatVersion >= ENC_FORMAT_3_07) {
@@ -150,7 +150,7 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
             orn->tipo = normalizeOrnamentSubtype(orn->tipo);
             // The forward slur span (0 = within measure, N = ends N bars later) is what anchors the
             // endpoint, since the xoffset2 coordinate is stale in this format. Marking it valid lets
-            // the post-pass anchor by measure count instead. See ENCORE_FORMAT.md §Slur.
+            // the post-pass anchor by measure count instead. See ENCORE_FORMAT.md §6.8 Ornament.
             //
             // elementBodyShift() has already pointed alMezuro at the right byte for the file's
             // generation, so the value read inline is the span in both. Only the trust flag differs
@@ -158,7 +158,7 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
             orn->alMezuroValid = (orn->tipo == static_cast<quint8>(EncOrnamentType::SLURSTART));
             // v0xC2 has two TEMPO layouts. New (v0xC4-style): beat-unit code at +28, BPM at +30.
             // Old: BPM at +28 (read into noto) with a constant in the +30 slot. Discriminate by
-            // whether +28 holds a valid beat-unit code (low 7 bits 0..6). See ENCORE_FORMAT.md §Ornament subtypes.
+            // whether +28 holds a valid beat-unit code (low 7 bits 0..6). See ENCORE_FORMAT.md §8.2 Ornament subtypes.
             if (orn->tipo == static_cast<quint8>(EncOrnamentType::TEMPO)) {
                 const quint8 beatUnitCode = orn->noto & 0x7F;
                 const bool validBeatUnit = (orn->noto != 0) && (beatUnitCode <= 6);

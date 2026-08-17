@@ -216,7 +216,7 @@ static Chord* firstChordOnStaffFrom(const Score* score, Measure* m, int staffIdx
 // this staff (any voice, since the slur ORN's encVoice is the arc position, not the note voice)
 // and return its xoffset. A grace note at that tick wins over a regular one (v0xC4 serializes the
 // regular note first, but the grace xoffset is the true arc-start reference). Returns -1 when no
-// start note is found. See ENCORE_FORMAT.md §Slur.
+// start note is found. See ENCORE_FORMAT.md §6.8 Ornament.
 static int findSlurStartNoteXoffset(const EncMeasure& startEncMeas, int staffIdx, int startEncTick,
                                     const std::array<int, 256>& lineSlotByRawByte)
 {
@@ -430,9 +430,9 @@ void resolveSlurs(BuildCtx& ctx)
     // the recompute in removeOrphanSlurs.
     std::set<const Spanner*> explicitSlurs;
 
-    // The v0xC2 slur measure-count (element +16) is unreliable: some files store noise or a
-    // count pointing past the last measure marks the whole file's field as junk, so every slur
-    // then resolves by the xoffset heuristic instead. See ENCORE_FORMAT.md §Slur.
+    // A forward count that reaches past the last measure cannot be a measure count, and one
+    // such slur condemns the file's whole field: every slur then resolves by the xoffset
+    // heuristic instead. See ENCORE_FORMAT.md §6.8 Ornament.
     bool v0c2SlurCountUnreliable = false;
     if (enc.fmt->slurXoffset2Stale()) {
         const int measCount = static_cast<int>(ctx.measuresByIdx.size());
@@ -470,7 +470,7 @@ void resolveSlurs(BuildCtx& ctx)
         Fraction endTick;
         bool resolved = false;
 
-        // v0xC2 reliable forward measure-count (element +16): Encore draws these as
+        // A trusted forward measure count: Encore draws these as
         // note-1-to-note-1 arcs between bar starts; xoffset2 is stale in this format, so anchor
         // explicitly to the downbeat chord of the target measure rather than guessing by
         // coordinate. v0xC4/SCO5 keep the xoffset2 heuristic (reliable there).

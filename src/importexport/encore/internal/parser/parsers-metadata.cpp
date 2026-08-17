@@ -41,7 +41,7 @@ bool EncInstrument::read(QDataStream& ds, quint32 vs, bool probeEncoding)
     // A big-endian read would mask to 0, skip the name-scan loop, and lose every instrument name.
     const quint32 sizeField = (ds.byteOrder() == QDataStream::BigEndian) ? qbswap(vs) : vs;
     offset = sizeField & 0xFFFF;
-    // Encoding probe overrides charSize(); see ENCORE_FORMAT.md §Encoding probe.
+    // Encoding probe overrides charSize(); see ENCORE_FORMAT.md §7.8 Text encoding.
     EncCharSize cs = charSize();
     if (probeEncoding) {
         const qint64 savedPos = ds.device()->pos();
@@ -90,7 +90,7 @@ bool EncInstrument::read(QDataStream& ds, quint32 vs, bool probeEncoding)
 
 bool EncLineStaffData::read(QDataStream& ds)
 {
-    // 30-byte staff entry; byte offsets and field meanings in ENCORE_FORMAT.md §LINE staff entry (30 bytes).
+    // 30-byte staff entry; byte offsets and field meanings in ENCORE_FORMAT.md §5.2 System block (LINE).
     ds.skipRawData(13);                         // bytes 0-12: visual layout
     ds >> staffSizeHint;                        // byte 13: display size (0=60% .. 3=100%)
     qint8 ct;
@@ -146,12 +146,12 @@ bool EncLine::read(QDataStream& ds, quint32 vs, int staffPerSystem)
 // Title block
 // ---------------------------------------------------------------------------
 
-// Read 30-byte prefix + text payload of one TITL line; layout in ENCORE_FORMAT.md §TITL block.
+// Read 30-byte prefix + text payload of one TITL line; layout in ENCORE_FORMAT.md §5.6 Title block (TITL).
 // Alignment lives at prefix+14; the text field is a fixed width per encoding.
 static constexpr int kTitlTextBytesOneByte = 66;
 static constexpr int kTitlTextBytesTwoByte = 1026;
 // In the one-byte layout the copyright entries carry a wider text field than every field before
-// them; in the two-byte layout all entries are the same width. See ENCORE_FORMAT.md §TITL block.
+// them; in the two-byte layout all entries are the same width. See ENCORE_FORMAT.md §5.6 Title block (TITL).
 static constexpr int kTitlCopyrightBytesOneByte = 130;
 
 // blockEnd bounds every read to the TITL block's declared end (startPos + varSize). A truncated

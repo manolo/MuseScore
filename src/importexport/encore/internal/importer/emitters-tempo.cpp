@@ -38,7 +38,7 @@
 namespace mu::iex::enc {
 // Decode the tempo mark's beat unit from the ORN `noto` field into display ticks (quarter=240).
 // Returns 0 when `noto` is unset or unrecognised (older formats store unrelated bytes here) so
-// the caller can fall back to the meter heuristic. See ENCORE_FORMAT.md §Ornament element.
+// the caller can fall back to the meter heuristic. See ENCORE_FORMAT.md §6.8 Ornament.
 int notoToBeatTicks(quint8 noto)
 {
     if (noto == 0) {

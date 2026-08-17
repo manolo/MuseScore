@@ -28,7 +28,7 @@
 namespace mu::iex::enc {
 // Chord quality suffixes indexed by toniko value (0-63): Encore's own chord palette in palette
 // order. Encore typography is mapped to what the MuseScore chord parser expects: augmented-fifth
-// "+5" becomes "#5", and "sus2,sus4" drops the comma. See ENCORE_FORMAT.md §CHORD symbol element.
+// "+5" becomes "#5", and "sus2,sus4" drops the comma. See ENCORE_FORMAT.md §6.10 Chord symbol.
 static const char* const kChordQuality[] = {
     "",            //  0: major (no suffix)
     "m",           //  1: minor
@@ -125,12 +125,12 @@ bool EncChordSym::read(QDataStream& ds)
     ds >> xoffset;
     ds.skipRawData(1);
     ds >> radiko >> baso;
-    // tipo bit 2 = draw a fretboard diagram above the symbol. See ENCORE_FORMAT.md §CHORD symbol element.
+    // tipo bit 2 = draw a fretboard diagram above the symbol. See ENCORE_FORMAT.md §6.10 Chord symbol.
     hasFretDiagram = (tipo & 0x04) != 0;
     const bool hasText = (tipo & 1);
     if (hasText) {
         // The name runs to the end of the element, which is why the size grows with it.
-        // See ENCORE_FORMAT.md §CHORD symbol element.
+        // See ENCORE_FORMAT.md §6.10 Chord symbol.
         teksto = readEncodedStringFixed(ds, static_cast<int>(size) - (14 + bodyShift));
     }
     // No trailing skip: the element loop reseeks to the element end after read().

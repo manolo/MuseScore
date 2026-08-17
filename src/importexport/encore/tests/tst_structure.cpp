@@ -214,7 +214,7 @@ TEST_F(Tst_Structure, key_sig_no_accidentals)
 
 // v0xA6 stores the key signature in the LINE staff entry, not where v0xC2/C4 keep it, and its
 // staffPerSystem reads 0; the key must still be read (A major = 3 sharps on every staff), not lost.
-// See ENCORE_FORMAT.md §System block (LINE).
+// See ENCORE_FORMAT.md §5.2 System block (LINE).
 TEST_F(Tst_Structure, key_sig_v0xa6_from_line_entry)
 {
     MasterScore* score = readEncoreScore("structure_v0xa6_key_signature.enc");
@@ -613,7 +613,7 @@ TEST_F(Tst_Structure, keychange_to_c_major_emitted)
 
 // ===========================================================================
 // v0xC2 stores the MIDI pitch in the tuplet field, not semiTonePitch; it must be swapped back on import.
-// See ENCORE_FORMAT.md §v0xC2 note (size 22 or 24).
+// See ENCORE_FORMAT.md §6.3 Note.
 TEST_F(Tst_Structure, old_format_v0c2_correct_pitches)
 {
     MasterScore* score = readEncoreScore("structure_v0c2_pitches.enc");
@@ -649,7 +649,7 @@ TEST_F(Tst_Structure, old_format_v0c2_correct_pitches)
 // Format 3.07 inserted two bytes into every element body at offset +8, so a file written by an
 // earlier build (app version 773) keeps every field from there on two bytes lower. Reading such a
 // file with the post-4.0 offsets takes the wrong byte for the pitch and never reaches the tie arc.
-// See ENCORE_FORMAT.md §Version byte and release mapping.
+// See ENCORE_FORMAT.md §1.5 The version byte, and where it disagrees.
 //
 // The fixture is an Encore 3.x file holding two half notes whose real pitch (C4, 60) sits at +13,
 // with a decoy 72 at +15 where the post-4.0 layout expects the pitch, plus a 16-byte tie whose arc
@@ -699,7 +699,7 @@ TEST_F(Tst_Structure, pre_encore4_element_body_offsets)
 // The third file is the combination that genuinely crosses the two version axes, a version byte of
 // 0xC4 with format 3.07: 996 files in the corpus and no fixture before this one. The reader comes
 // from the version byte and the geometry from the format version, so it is the case where the two
-// have to agree. See ENCORE_FORMAT.md §Version byte and release mapping.
+// have to agree. See ENCORE_FORMAT.md §1.5 The version byte, and where it disagrees.
 // ===========================================================================
 static void checkElementFamily(MasterScore* score, const char* what)
 {
@@ -763,7 +763,7 @@ TEST_F(Tst_Structure, element_family_reads_the_same_in_every_generation)
 // it is the only version indicator there. Because the values are ordered, a version byte this build
 // does not know still lands on the right layout: the reader is chosen by the highest known format
 // the file is not older than, rather than defaulting to the newest one.
-// See ENCORE_FORMAT.md §Version byte and release mapping.
+// See ENCORE_FORMAT.md §1.5 The version byte, and where it disagrees.
 TEST(Tst_EncoreFormatReader, unknown_version_byte_falls_back_on_the_format_version)
 {
     using namespace mu::iex::enc;
@@ -1757,7 +1757,7 @@ TEST_F(Tst_Structure, coincident_placeholder_rest_dropped_note_keeps_beat)
 // MusicTime, Passport's smaller sibling of Encore, writes the same file under its own magic: MTIW on
 // Windows and MTIM on macOS, the second big-endian the way SCO5 is. Both state format 2.62 and the
 // compact 2.x geometry, so both must import through the same reader and produce the same music.
-// See ENCORE_FORMAT.md §The containers.
+// See ENCORE_FORMAT.md §1.2 The containers.
 TEST_F(Tst_Structure, musictime_containers_import_like_encore_2x)
 {
     struct Case {

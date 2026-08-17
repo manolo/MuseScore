@@ -64,7 +64,7 @@ TEST_F(Tst_StaffSize, score_size3_sets_staff_scale_100pct)
 }
 
 // Encore 4.x staff size comes from the LINE staff entry byte, not the unrelated header field.
-// See ENCORE_FORMAT.md §System block (LINE). Regression guard: byte[13]=1 -> Size=2 -> 75%.
+// See ENCORE_FORMAT.md §5.2 System block (LINE). Regression guard: byte[13]=1 -> Size=2 -> 75%.
 TEST_F(Tst_StaffSize, enc4x_line_staff_size_hint_size2_sets_75pct)
 {
     MasterScore* score = readEncoreScore("importer_enc4x_line_size2_70pct.enc");
@@ -88,7 +88,7 @@ TEST_F(Tst_StaffSize, enc4x_line_staff_size_hint_size3_sets_100pct)
     delete score;
 }
 
-// v0xA6 has a single global staff size applied to every staff. See ENCORE_FORMAT.md §v0xA6 staff size and clef.
+// v0xA6 has a single global staff size applied to every staff. See ENCORE_FORMAT.md §5.2 System block (LINE), Format 2.50 systems.
 // Regression guard: size=1 must yield 60% (importer previously fell back to the default 130%).
 TEST_F(Tst_StaffSize, v0xa6_global_staff_size_from_header_0x8d)
 {
