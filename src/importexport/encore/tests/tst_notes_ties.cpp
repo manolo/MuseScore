@@ -22,7 +22,7 @@
 
 // TIE element import: the many direction/flag/arc-extent/source-position encodings that mark a real tie start,
 // consecutive-receiver matching, and a comprehensive all-features smoke fixture.
-// See ENCORE_FORMAT.md §TIE element and ENCORE_IMPORTER.md §TIE element handling.
+// See ENCORE_FORMAT.md §6.7 Tie and ENCORE_IMPORTER.md §TIE element handling.
 
 #include <gtest/gtest.h>
 
@@ -177,7 +177,7 @@ TEST_F(Tst_NotesTies, tie_direction_02_creates_tie)
 // little-endian file, where that byte is the significant one, and fails completely on a big-endian
 // SCO5 file, where it is always zero. Both endpoints then read equal, which the arc test classifies
 // as an intra-chord decorative arc, so every tie in a macOS Encore file is dropped.
-// See ENCORE_FORMAT.md §TIE element.
+// See ENCORE_FORMAT.md §6.7 Tie.
 //
 // The fixture is a big-endian SCO5 file with two half notes of the same pitch and a tie whose only
 // forward-tie signal is its arc span; both flag bytes are clear.

@@ -54,7 +54,7 @@ bool EncNote::read(QDataStream& ds)
 
     ds >> faceValue >> grace1 >> grace2;
     // Everything from +8 onward moved two bytes later at format 3.07; bodyShift folds the older
-    // layout into this one read. See ENCORE_FORMAT.md §v0xC2 note.
+    // layout into this one read. See ENCORE_FORMAT.md §6.3 Note.
     ds.skipRawData(2 + bodyShift);
     ds >> xoffset;
     ds.skipRawData(1);
@@ -66,7 +66,7 @@ bool EncNote::read(QDataStream& ds)
     ds.skipRawData(1);
     ds >> articulationDown;
     // The note grows by two bytes to hold one articulation and by four to hold both.
-    // See ENCORE_FORMAT.md §Note element.
+    // See ENCORE_FORMAT.md §6.3 Note.
     if (static_cast<int>(size) <= 24 + bodyShift) {
         articulationUp = 0;
     }

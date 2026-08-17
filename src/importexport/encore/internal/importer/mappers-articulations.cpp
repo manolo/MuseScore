@@ -30,7 +30,7 @@ namespace mu::iex::enc {
 std::vector<mu::engraving::SymId> encArticulation2SymIds(quint8 articByte)
 {
     using mu::engraving::SymId;
-    // Byte encodes one or two glyphs (e.g. 0x24=tenuto+staccato). See ENCORE_FORMAT.md §Articulation bytes.
+    // Byte encodes one or two glyphs (e.g. 0x24=tenuto+staccato). See ENCORE_FORMAT.md §7.6 Articulation bytes.
     switch (articByte) {
     // Trill/mordent: 0x04..0x07=trill, 0x08=turn, 0x09=wave(no MS equivalent),
     // 0x0A=inv-mordent(short),
