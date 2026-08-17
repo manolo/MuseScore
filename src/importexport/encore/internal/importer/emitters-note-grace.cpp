@@ -57,17 +57,21 @@ bool tryHandleGraceNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec,
 
     const auto trackKey = ec.trackKey;
 
-    // Roll back per-track tick state so the next note is not detected as a chord extension of this grace.
-    if (ec.savedPrevMidiTick >= 0) {
-        ctx.scratch.prevMidiTick[trackKey] = ec.savedPrevMidiTick;
-    } else {
-        ctx.scratch.prevMidiTick.erase(trackKey);
-    }
-    if (ec.hadLastChordPos) {
-        ctx.scratch.lastChordPos[trackKey] = ec.savedLastChordPos;
-    } else {
-        ctx.scratch.lastChordPos.erase(trackKey);
-    }
+    // Roll back per-track tick state so the next note is not detected as a chord extension of this
+    // grace. Only once the note is taken as a grace: a small note handed back to the normal path
+    // below is a cue, and rolling its tick back would keep the next same-tick note from joining it.
+    auto rollBackTickState = [&]() {
+        if (ec.savedPrevMidiTick >= 0) {
+            ctx.scratch.prevMidiTick[trackKey] = ec.savedPrevMidiTick;
+        } else {
+            ctx.scratch.prevMidiTick.erase(trackKey);
+        }
+        if (ec.hadLastChordPos) {
+            ctx.scratch.lastChordPos[trackKey] = ec.savedLastChordPos;
+        } else {
+            ctx.scratch.lastChordPos.erase(trackKey);
+        }
+    };
 
     // Each grace chord member is a separate note at the same tick, but the grace path rolls
     // prevMidiTick back so isChordExt never fires for the second member. Merge it into this
@@ -80,6 +84,7 @@ bool tryHandleGraceNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec,
         if (!(en->grace1 & 0x10)
             && gcIt != ctx.scratch.lastGraceChord.end() && gcIt->second && !gcIt->second->notes().empty()
             && tkIt != ctx.scratch.lastGraceTick.end() && tkIt->second == static_cast<int>(en->tick)) {
+            rollBackTickState();
             Note* member = Factory::createNote(gcIt->second);
             applyConcertPitch(member, en->semiTonePitch + ctx.staffPitchOffset[ec.staffIdx]);
             if (en->isMuted()) {
@@ -126,6 +131,7 @@ bool tryHandleGraceNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec,
     if (appoggiatura && !principalAtOrAfter && !contiguousNoteBefore) {
         return false;
     }
+    rollBackTickState();
 
     // grace-after only when a contiguous principal note precedes and nothing sits at/after the grace.
     Chord* precedingChord = nullptr;

@@ -482,6 +482,12 @@ staff+voice). A slash (`grace2 0x04`) is always a grace (acciaccatura); a no-sla
 - an appoggiatura (grace-BEFORE) when a principal note is co-located with or follows it;
 - a CUE (handed back to the normal note path, drawn small, full value) when it stands ALONE with no
   principal at, after, or contiguously before it.
+**Tick state on the cue fallback.** `tryHandleGraceNote` rolls the track's `prevMidiTick` and
+`lastChordPos` back so the next note is not read as a chord extension of a grace. That rollback
+belongs to the paths that really take the note as a grace: a small note handed back to the normal
+path as a cue keeps its measure time, so rolling its state back hid it from the chord-extension test
+and split a two-note cue chord into two single notes on consecutive beats.
+
 An acciaccatura with only silence before it (a percussion ruff after the last beat) is a grace-BEFORE
 the following principal, which via the cross-barline carry is the next bar's downbeat; it is written
 as consecutive grace figures (a beamed group), not at its sub-tick playback spacing. A beamed group

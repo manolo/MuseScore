@@ -39,7 +39,7 @@ EncGraceType EncNote::graceType() const
     // Decode the grace/cue flags; see ENCORE_FORMAT.md §Grace and cue notes. A no-slash small note
     // is reported APPOGGIATURA here; the emitter later reclassifies it as a cue when it stands alone
     // with no principal note to ornament.
-    if (!(grace1 & 0x20) || smallCueMuteSpurious) {
+    if (!(grace1 & 0x20)) {
         return EncGraceType::NORMAL;
     }
     if (grace2 & 0x04) {

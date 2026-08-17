@@ -333,13 +333,13 @@ TEST_F(Tst_Grace, beamed_grace_group_stays_separate)
 
 // Covers: grace note filtering (fv>=4 only), ACCIACCATURA
 ENC_SANITY_TEST(grace_notes, "notes_grace.enc")
-// In v0xC2 the small-note bit (grace1 0x20) also travels on ordinary full-value notes; only the
-// slash (grace2 0x04) marks a genuine small note. The mute bit (grace2 0x01) is NOT part of that
-// quirk: it is Encore's per-note Play switch and always means silent. m1 holds a same-tick two-note
-// chord flagged 0x30/0x01 (no slash): it must import as ONE chord of two full-size notes, not split
-// into two single notes with a member lost, and those notes must stay silent. m2 holds a lone
-// slashed note (0x20/0x04) that must still import small, proving the slash gate.
-TEST_F(Tst_Grace, v0c2_small_flag_on_normal_chord)
+// A small note with no slash and no principal note to ornament is a cue: it keeps its full value,
+// draws small and, when the mute bit is set, stays silent. m1 holds a same-tick two-note chord
+// flagged 0x30/0x01: it must import as ONE small, silent chord of two notes. Before the fix the
+// grace path rolled the track's tick state back before handing the note to the normal path, so the
+// second note was never seen as a chord member and the chord split in two. m2 holds a lone slashed
+// note (0x20/0x04), a real grace, which must still import small.
+TEST_F(Tst_Grace, v0c2_cue_chord_keeps_members_and_size)
 {
     MasterScore* score = readEncoreScore("importer_v0c2_small_flag_chord.enc");
     ASSERT_NE(score, nullptr);
@@ -357,9 +357,9 @@ TEST_F(Tst_Grace, v0c2_small_flag_on_normal_chord)
     }
     ASSERT_NE(chord, nullptr);
     EXPECT_EQ(chord->notes().size(), 2u) << "the two same-tick notes must form one chord, not split";
+    EXPECT_TRUE(chord->isSmall()) << "a cue chord is drawn small as a whole, head and stem";
     for (const Note* n : chord->notes()) {
-        EXPECT_FALSE(n->isSmall()) << "a 0x20 flag without the slash is not a small note in v0xC2";
-        EXPECT_FALSE(n->play()) << "the 0x01 mute flag is independent of note size and still silences";
+        EXPECT_FALSE(n->play()) << "the 0x01 mute flag silences the note whatever its size";
     }
 
     Measure* m2 = m1->nextMeasure();

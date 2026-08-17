@@ -1208,13 +1208,11 @@ def note_v0c2_grace(tick, voice, staffIdx, fv, pitch, grace1, grace2, xoff=0):
     return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)
 
 
-# In v0xC2 the small-note bit (grace1 0x20) and mute bit (grace2 0x01) travel together on ordinary
-# full-value notes; only the slash (grace2 0x04) marks a genuine small acciaccatura. Two measures:
+# A small note (grace1 0x20) with no slash and no principal note to ornament is a cue: full value,
+# drawn small, silent when the mute bit (grace2 0x01) is set. Two measures:
 #   m1: two same-tick, same-voice quarters at nearly-equal xoffsets (a chord) with grace1 0x30 /
-#       grace2 0x01 (no slash). Must import as ONE chord of two NORMAL, audible notes: not small,
-#       not muted, not split into two single notes (which lost a member before the fix).
-#   m2: a lone slashed quarter (grace1 0x20 / grace2 0x04). The slash marks a real grace, so it must
-#       still import SMALL, proving the slash gate preserves genuine graces.
+#       grace2 0x01. Must import as ONE small, silent chord of two notes, not split into two.
+#   m2: a lone slashed quarter (grace1 0x20 / grace2 0x04), a real grace, which must import SMALL.
 def gen_v0c2_small_flag_chord():
     m1  = note_v0c2_grace(0, 0, 0, fv=3, pitch=71, grace1=0x30, grace2=0x01, xoff=8)
     m1 += note_v0c2_grace(0, 0, 0, fv=3, pitch=74, grace1=0x70, grace2=0x01, xoff=6)
