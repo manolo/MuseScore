@@ -73,21 +73,11 @@ Encore began there, that line has always run ahead of Windows, and classic Mac O
 document by a four-character type code, which `SCOR` reads as. `SCO5` fits the same naming with a
 generation number in place of the letter. This is a hypothesis: no sample supports it `[assumed]`.
 
-**A container with no magic.** One document in the corpus, of 47554 bytes, begins `00 10 00 01`
-and is turned away for having no recognisable magic, yet everything below its header is this
-format: the standard `TAG` plus 32-bit length block framing, `LINE`, `MEAS`, `PREC`, `TITL`, `TEXT`
-and `FONT` blocks, the documented measure header, `LINE` staff entries of 22 bytes carrying the
-`0x0E 0xFC` marker, and an element stream that reads cleanly with the Encore 2.x geometry, notes of
-10, rests of 7, beams of 9 `[verified]`. Its own header is different: a record of big-endian 16-bit
-fields, with the system count at `0x0A` and the measure count at `0x36`, both confirmed against the
-blocks the file actually contains, and a preamble of several thousand bytes of font and printer
-configuration before the first block, with nothing pointing at where that block starts.
-
-A big-endian header over a little-endian body is what a Macintosh-derived format looks like once
-its contents have been byte-swapped, but this particular file is not a Macintosh one: its preamble
-names Windows printer ports and drivers of the early 1990s. An early Windows Encore, or a sibling
-product sharing the engine, both fit. One document is not enough to establish the preamble, so the
-container is recorded here and not read `[observed]`.
+**A file with no magic is not a container.** One document in the corpus begins `00 10 00 01`. It is
+not an unlisted container but a damaged Encore 2.x file: its first 4658 bytes were overwritten with
+Windows font and printer configuration, destroying the header, the instrument blocks, the page setup
+and all but the last two system definitions, while the measures behind them survived intact
+`[verified]`. Encore 4.5 and Encore 5.0 refuse it as well.
 
 **Encryption.** In a `ZBOT` / `ZBOP` / `ZBO6` container only the first 42 bytes decrypt with a
 known XOR key; beyond that the stream is algorithmically generated and unbroken `[observed]`. The
