@@ -494,6 +494,21 @@ TEST_F(Tst_Structure, page_size_from_prec_ansi_a3)
     delete score;
 }
 
+// An unlisted paper id sends the page size to the custom width and length fields, and some files
+// hold a stub there rather than a page: this fixture carries 25.4 x 25.4 mm, a one-inch square.
+// Laying a system out on it left the horizontal spacing pass with no room and it asserted, so a
+// size outside the range printable paper takes must be ignored and the default page kept.
+TEST_F(Tst_Structure, page_size_from_prec_stub_is_ignored)
+{
+    MasterScore* score = readEncoreScore("structure_prec_page_stub.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_GT(score->style().styleD(Sid::pageWidth), 3.0)
+        << "a one-inch square page must not be taken from PREC";
+    EXPECT_GT(score->style().styleD(Sid::pageHeight), 3.0)
+        << "a one-inch square page must not be taken from PREC";
+    delete score;
+}
+
 // Large WINI margins must survive import (they were previously clamped to a tiny 0.6" max). The px-to-inch
 // conversion uses an estimated dpi, so values are approximate; the invariant is that they are not clamped.
 TEST_F(Tst_Structure, page_margins_wini_large_not_clamped)
@@ -1810,3 +1825,4 @@ TEST_F(Tst_Structure, wide_score_first_system_shares_the_title_page)
     EXPECT_GE(music, 1) << "the first page holds the title frame AND the first system";
     delete score;
 }
+

@@ -192,6 +192,15 @@ bool precPageSizeInches(const EncPrintSetup& pr, double& wIn, double& hIn)
     } else {
         return false;
     }
+    // The paper fields are raw file values, and a few files carry a stub rather than a page: a
+    // one-inch square, a couple of millimetres, a number in the wrong unit. Laying a system out
+    // on one leaves the spacing pass with no room at all, so anything outside the range printable
+    // paper takes counts as no page size and the WINI heuristic or the MuseScore default decides.
+    static constexpr double kMinPageInches = 3.0;
+    static constexpr double kMaxPageInches = 60.0;
+    if (wIn < kMinPageInches || hIn < kMinPageInches || wIn > kMaxPageInches || hIn > kMaxPageInches) {
+        return false;
+    }
     if (pr.orientation == 2) {   // DMORIENT_LANDSCAPE
         std::swap(wIn, hIn);
     }
