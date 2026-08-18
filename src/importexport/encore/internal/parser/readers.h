@@ -146,13 +146,14 @@ struct EncFormatReader
                                     QDataStream& /*ds*/,
                                     qint64 /*contentStart*/) const {}
 
-    // Reads per-staff written key indices from a LINE block into EncLine::staffKeys.
-    // v0xA6 stores them in its 22-byte staff entries; other formats fill staffData during
-    // EncLine::read and leave staffKeys empty. The override seeks within the stream and must
-    // restore the position before returning. See ENCORE_FORMAT.md §5.2 System block (LINE), Format 2.50 systems.
-    virtual void readLineStaffKeys(EncLine& /*line*/,
-                                   QDataStream& /*ds*/,
-                                   qint64 /*lineContentStart*/) const {}
+    // Reads the per-staff key, clef and display size out of a LINE block into EncLine::staffKeys,
+    // staffClefs and staffSizes. v0xA6 keeps them in its 22-byte staff entries, which EncLine::read
+    // cannot walk; other formats fill staffData there and leave these three empty. The override
+    // seeks within the stream and must restore the position before returning.
+    // See ENCORE_FORMAT.md §5.2 System block (LINE), Format 2.50 systems.
+    virtual void readLineStaffEntries(EncLine& /*line*/,
+                                      QDataStream& /*ds*/,
+                                      qint64 /*lineContentStart*/) const {}
 
     // True when a slur's stored xoffset2 lives in a stale coordinate origin and the endpoint
     // must be anchored explicitly (to the target measure / next note) instead of by coordinate
