@@ -229,6 +229,25 @@ TEST_F(Tst_Structure, key_sig_v0xa6_from_line_entry)
     delete score;
 }
 
+// The same 22-byte staff entry carries the clef one byte before the key. It was never read, so
+// every staff of every Encore 2.x and MusicTime file opened in the treble clef its instrument
+// template happened to default to, whatever Encore drew. G, F and C on the fourth line here.
+// See ENCORE_FORMAT.md §5.2 System block (LINE), Format 2.50 systems.
+TEST_F(Tst_Structure, clefs_v0xa6_from_line_entry)
+{
+    MasterScore* score = readEncoreScore("structure_v0xa6_staff_clefs.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_GE(score->nstaves(), 3u);
+    const ClefType expected[3] = { ClefType::G, ClefType::F, ClefType::C4 };
+    for (size_t i = 0; i < 3; ++i) {
+        Staff* st = score->staff(i);
+        ASSERT_NE(st, nullptr);
+        EXPECT_EQ(st->clef(Fraction(0, 1)), expected[i])
+            << "v0xA6 staff " << i << " must take its clef from the LINE staff entry";
+    }
+    delete score;
+}
+
 TEST_F(Tst_Structure, key_sig_no_invalid_large_values)
 {
     // encKeyToFifths wrapping was broken before (key index 8 mapped to -248); verify -7..7 range.
