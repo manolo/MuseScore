@@ -926,11 +926,15 @@ def gen_v0xa6_basic():
 # content+52. Reproduces the on-disk v0xA6 instrument/header layout so the
 # v0xA6-specific MIDI and staff-size reads can be exercised.
 # ---------------------------------------------------------------------------
-def build_v0xa6(instruments, meas_list, staff_size=1, keyIndex=0, magic=b'SCOW', chu_versio=592, end='<'):
+def build_v0xa6(instruments, meas_list, staff_size=1, keyIndex=0, clefs=None, sizes=None,
+                channels=None, magic=b'SCOW', chu_versio=592, end='<'):
     """instruments: list of (name:str, midi_1indexed:int, key_signed:int).
     staff_size: global 1-4 selector at header 0x8D (1=60%, 2=75%, 3=100%, 4=130%).
     keyIndex: Encore key-signature index (0=C, 2=Bb, 9=D, 10=A, 11=E...) written at
-    offset 14 of every 22-byte LINE staff entry, the real v0xA6 key-signature location."""
+    offset 14 of every 22-byte LINE staff entry, the real v0xA6 key-signature location.
+    clefs/sizes: per-staff clef and 0-indexed display size, written at offsets 13 and 12 of the
+    same entry. channels: per-instrument 1-indexed MIDI channel, stored from zero at TK content+48,
+    the four bytes that precede the program in this generation."""
     n = len(instruments)
     hdr = bytearray(0xA6)
     hdr[0:4] = magic
@@ -951,6 +955,8 @@ def build_v0xa6(instruments, meas_list, staff_size=1, keyIndex=0, magic=b'SCOW',
         nm = name.encode('latin1')[:40]
         content[0:len(nm)] = nm                 # name, NUL-terminated by zero fill
         content[42] = key & 0xFF                # Key/octave transpose (content+42)
+        if channels and channels[i]:
+            content[48] = (channels[i] - 1) & 0xFF   # MIDI channel, stored from zero
         content[52] = midi & 0xFF               # MIDI program (content+52 == block+60)
         tk_magic = ('TK%02d' % i).encode('ascii')
         tks += tk_magic + struct.pack(end+'I', 64) + bytes(content)
@@ -960,9 +966,15 @@ def build_v0xa6(instruments, meas_list, staff_size=1, keyIndex=0, magic=b'SCOW',
     line = bytearray(14)
     struct.pack_into(end+'H', line, 10, 0)         # start
     line[12] = len(meas_list) & 0xFF            # measureCount
-    for _ in range(n):
+    for i in range(n):
         ent = bytearray(22)
+        if sizes:
+            ent[12] = sizes[i] & 0xFF
+        if clefs:
+            ent[13] = clefs[i] & 0xFF
         ent[14] = keyIndex & 0xFF
+        if clefs or sizes:
+            ent[15] = i & 0xFF          # staff index, written by the fixtures that exercise the entry
         ent[16] = 0x0E
         ent[17] = 0xFC
         line += ent
@@ -6495,7 +6507,7 @@ def gen_v0c4_name_split_on_separator():
     return pre + body + SKELETON_POST
 
 
-def _set_prec(post, paper, orient=1, scale=100, ansi=False):
+def _set_prec(post, paper, orient=1, scale=100, ansi=False, length=None, width=None):
     """Return SKELETON_POST with its PREC (DEVMODE) page fields overridden.
     The skeleton PREC is a Unicode DEVMODE (name 64 bytes); ansi=True instead replaces the
     block with a 32-byte-name ANSI DEVMODE so both parser variants are exercised."""
@@ -6515,6 +6527,10 @@ def _set_prec(post, paper, orient=1, scale=100, ansi=False):
     base = 64
     struct.pack_into('<h', post, c + base + 12, orient)
     struct.pack_into('<h', post, c + base + 14, paper)
+    if length is not None:
+        struct.pack_into('<h', post, c + base + 16, length)
+    if width is not None:
+        struct.pack_into('<h', post, c + base + 18, width)
     struct.pack_into('<h', post, c + base + 20, scale)
     return bytes(post)
 
@@ -12752,7 +12768,7 @@ _ENC4_LEGACY_TK_END = 194 + 2158              # the skeleton's TK00 entry is 215
 _ENC4_PAGE_LINE = SKELETON_PRE[_ENC4_LEGACY_TK_END:]
 
 
-def _enc4_entry(magic4, name, entry_size, declared_varsize=112, midi=None,
+def _enc4_entry(magic4, name, entry_size, declared_varsize=112, midi=None, channel=None,
           midi_from_end=46, latin1=True):
     """One Encore 4 instrument entry: 8-byte block header + (entry_size - 8) content.
 
@@ -12763,9 +12779,12 @@ def _enc4_entry(magic4, name, entry_size, declared_varsize=112, midi=None,
     content = bytearray(entry_size - 8)
     nb = (name.encode('latin1') if latin1 else name.encode('utf-16-le')) + (b'\x00' if latin1 else b'\x00\x00')
     content[:len(nb)] = nb
+    off = len(content) - midi_from_end
     if midi is not None:
-        off = len(content) - midi_from_end
         content[off:off + 8] = bytes([midi & 0xFF]) * 8
+    if channel is not None:
+        # the eight per-voice channels sit immediately before the program table, stored from zero
+        content[off - 8:off] = bytes([(channel - 1) & 0xFF]) * 8
     head = magic4 + (struct.pack('<I', declared_varsize) if magic4 != b'\x00\x00\x00\x00' else b'\x00' * 4)
     return bytes(head) + bytes(content)
 
@@ -13014,6 +13033,158 @@ def gen_tk_magic_digits_unreliable():
                         b''.join(note_v0c4(0, 0, i, 1, 60 + i) for i in range(STAVES))
                         + end_marker())
     return bytes(hdr) + entries + line + meas + SKELETON_POST
+
+
+# ===========================================================================
+# structure_volta_short_last_measure.enc
+# A repeat whose 2nd ending is the last measure and holds one quarter of a 4/4
+# bar. With the irregular-measure strategy that measure shrinks, so the end of
+# the score moves before the tick the bracket was built with and the bracket is
+# left without an end element. It must follow the measure instead.
+# ===========================================================================
+def gen_v0c4_volta_short_last_measure():
+    full = (note_v0c4(0,   0, 0, fv=3, pitch=60)
+            + note_v0c4(240, 0, 0, fv=3, pitch=62)
+            + note_v0c4(480, 0, 0, fv=3, pitch=64)
+            + note_v0c4(720, 0, 0, fv=3, pitch=65)
+            + end_marker())
+    short = note_v0c4(0, 0, 0, fv=3, pitch=67) + end_marker()
+    h0 = bytearray(meas_hdr(4, 4))
+    h0[0x0C] = 2                                    # repeat start
+    h1 = bytearray(meas_hdr(4, 4, barTypeEnd=4))
+    h1[0x0F] = 0x01                                 # 1st ending, repeat end
+    h2 = bytearray(meas_hdr(4, 4))
+    h2[0x0F] = 0x02                                 # 2nd ending, one quarter only
+    plain = bytes(meas_hdr(4, 4))
+    custom = [(plain, full), (plain, full), (plain, full),
+              (bytes(h0), full), (bytes(h1), full), (bytes(h2), short)]
+    return assemble(0xC4, custom, fill_ts=(4, 4))
+
+
+# ===========================================================================
+# structure_prec_page_stub.enc
+# PREC with an unlisted paper id, so the page size falls back to the custom
+# width and length, which here hold a 25.4 x 25.4 mm square. Laying a system
+# out on that leaves the spacing pass with no room, so it must be ignored.
+# ===========================================================================
+def gen_v0c4_prec_page_stub():
+    pre = _patch_tk00('PrecStub'.encode('utf-16-le') + b'\x00\x00')
+    body = meas_block(meas_hdr(4, 4), end_marker())
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + _set_prec(SKELETON_POST, paper=283, length=254, width=254)
+
+
+# ===========================================================================
+# structure_v0xa6_staff_clefs.enc
+# The 22-byte staff entry of the compact generation carries the clef one byte
+# before the key. Three staves in G, F and C on the fourth line.
+# ===========================================================================
+def gen_v0xa6_staff_clefs():
+    m = _meas_a6([(0, 0, 0, 4, 0), (0, 0, 1, 4, 0), (0, 0, 2, 4, 0)])
+    return build_v0xa6([('Vz1', 74, 0), ('Vz2', 43, 0), ('Vz3', 43, 0)], [m], clefs=[0, 1, 3])
+
+
+# ===========================================================================
+# structure_v0xa6_per_staff_size.enc
+# The same entry opens with the display size, counted from zero, so this
+# generation has a size per staff like the later ones. The four staves carry
+# 0, 1, 2 and 3 against a header byte of 1, and the entries must win.
+# ===========================================================================
+def gen_v0xa6_per_staff_size():
+    m = _meas_a6([(0, 0, 0, 4, 0), (0, 0, 1, 4, 0), (0, 0, 2, 4, 0), (0, 0, 3, 4, 0)])
+    return build_v0xa6([('Vz1', 74, 0), ('Vz2', 74, 0), ('Vz3', 74, 0), ('Vz4', 74, 0)], [m],
+                       staff_size=1, sizes=[0, 1, 2, 3])
+
+
+# ===========================================================================
+# notes_notehead_without_drumset.enc
+# The face-value nibbles on an ordinary pitched staff: no percussion clef, so
+# no drumset is attached and the head has to stand on its own.
+# ===========================================================================
+def gen_v0c4_notehead_without_drumset():
+    e = (note_v0c4(0,   0, 0, fv=(0 << 4) | 3, pitch=60)
+         + note_v0c4(240, 0, 0, fv=(3 << 4) | 3, pitch=62)
+         + note_v0c4(480, 0, 0, fv=(4 << 4) | 3, pitch=64)
+         + note_v0c4(720, 0, 0, fv=(1 << 4) | 3, pitch=65)
+         + end_marker())
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+# ===========================================================================
+# notes_v0xa6_notehead_cross.enc
+# The compact generation draws a cross where the later ones draw a square, so
+# nibble 3 must not come out as the drumset square here.
+# ===========================================================================
+def gen_v0xa6_notehead_cross():
+    m = _meas_a6([(0, 0, 0, (0 << 4) | 3, 0), (240, 0, 0, (3 << 4) | 3, 2)], tsNum=4, tsDen=4)
+    return build_v0xa6([('Melody', 74, 0)], [m])
+
+
+# ===========================================================================
+# instruments_drumset_name_vs_program.enc
+# Two names that both score against a percussion template. The first carries a
+# pitched GM program and must stay pitched; the second carries none, so the
+# name is all there is and it must still become percussion.
+# ===========================================================================
+def gen_v0xa6_drumset_name_vs_program():
+    m = _meas_a6([(0, 0, 0, 4, 0), (0, 0, 1, 4, 0)])
+    return build_v0xa6([('Slap Ucillee', 37, 0), ('Congas', 0, 0)], [m])
+
+
+# ===========================================================================
+# instruments_v0xa6_percussion_channel.enc
+# Encore keeps a MIDI channel per staff and channel 10 is the one General MIDI
+# reserves for percussion. Neither instrument here carries a program: only the
+# one on that channel becomes a drumset, and it keeps its own clef byte.
+# ===========================================================================
+def gen_v0xa6_percussion_channel():
+    m = _meas_a6([(0, 0, 0, (3 << 4) | 3, 0), (240, 0, 0, (3 << 4) | 3, 2),
+                  (0, 0, 1, (0 << 4) | 3, 0), (240, 0, 1, (0 << 4) | 3, 2)], tsNum=4, tsDen=4)
+    return build_v0xa6([('sizzle', 0, 0), ('Melody', 0, 0)], [m], staff_size=3,
+                       clefs=[1, 0], sizes=[2, 2], channels=[10, 3])
+
+
+# ===========================================================================
+# instruments_v0xc4_percussion_channel.enc
+# The same channel table in the Encore 4 entry layout, where it precedes the
+# eight-slot program table.
+# ===========================================================================
+def gen_v0c4_percussion_channel():
+    e0 = _enc4_entry(b'TK00', 'ritmo',  242, channel=10)
+    e1 = _enc4_entry(b'TK01', 'Flauta', 242, midi=74, channel=2)
+    return _enc4_build([e0, e1], 2)
+
+
+# ===========================================================================
+# structure_scor_container.enc
+# A container magic of SCOR rather than SCOW. Everything below it is the
+# ordinary layout of its generation, so it must open like any other file.
+# ===========================================================================
+def gen_scor_container():
+    e = (note_v0c4(0,   0, 0, fv=3, pitch=60)
+         + note_v0c4(240, 0, 0, fv=3, pitch=62)
+         + end_marker())
+    data = bytearray(assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4)))
+    data[0:4] = b'SCOR'
+    return bytes(data)
+
+
+# ===========================================================================
+# structure_musictime_3_07.mus
+# MusicTime in the middle generation rather than the compact one: version byte
+# 0xC2, format 3.07 and the element geometry that goes with it. Read with the
+# compact geometry its four notes come out as one or none.
+# ===========================================================================
+def gen_musictime_3_07():
+    e = (note_v0c2_size24(0,   0, 0, fv=3, pitch=60, artic=0)
+         + note_v0c2_size24(240, 0, 0, fv=3, pitch=62, artic=0)
+         + note_v0c2_size24(480, 0, 0, fv=3, pitch=64, artic=0)
+         + note_v0c2_size24(720, 0, 0, fv=3, pitch=65, artic=0)
+         + end_marker())
+    data = bytearray(set_version(assemble(0xC2, [(meas_hdr(4, 4), e)], fill_ts=(4, 4)),
+                                 ENC_FORMAT_3_07))
+    data[0:4] = b'MTIW'
+    return bytes(data)
 
 
 if __name__=='__main__':
@@ -13459,4 +13630,15 @@ if __name__=='__main__':
     write("notes_tuplet_flat_group_not_nested.enc",         gen_tuplet_flat_group_not_nested())
     write("structure_wide_score_first_page.enc",            gen_wide_score_first_page())
     write("text_copyright_lines_one_byte.enc",              gen_copyright_lines_one_byte())
+    write("structure_volta_short_last_measure.enc",       gen_v0c4_volta_short_last_measure())
+    write("structure_prec_page_stub.enc",                  gen_v0c4_prec_page_stub())
+    write("structure_v0xa6_staff_clefs.enc",               gen_v0xa6_staff_clefs())
+    write("structure_v0xa6_per_staff_size.enc",            gen_v0xa6_per_staff_size())
+    write("notes_notehead_without_drumset.enc",            gen_v0c4_notehead_without_drumset())
+    write("notes_v0xa6_notehead_cross.enc",                gen_v0xa6_notehead_cross())
+    write("instruments_drumset_name_vs_program.enc",       gen_v0xa6_drumset_name_vs_program())
+    write("instruments_v0xa6_percussion_channel.enc",      gen_v0xa6_percussion_channel())
+    write("instruments_v0xc4_percussion_channel.enc",      gen_v0c4_percussion_channel())
+    write("structure_scor_container.enc",                  gen_scor_container())
+    write("structure_musictime_3_07.mus",                  gen_musictime_3_07())
     print("Done.")
