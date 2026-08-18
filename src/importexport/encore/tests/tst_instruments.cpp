@@ -1561,3 +1561,28 @@ TEST_F(Tst_Instruments, midi_read_back_from_entry_end_when_declared_size_oversho
     EXPECT_EQ(inst->channel(0)->program(), 21) << "GM 22 (Accordion) sits 46 bytes before the entry end";
     delete score;
 }
+
+// A name that scores against a percussion template is not enough on its own: a pitched GM program
+// outvotes it. "Slap Ucillee" on Acoustic Bass used to import as the percussion instrument "Slap",
+// which then forced a percussion clef over the bass clef the file carried, while "Congas" with no
+// program behind it must still be recognised by name alone.
+TEST_F(Tst_Instruments, drumset_by_name_yields_to_a_pitched_program)
+{
+    MasterScore* score = readEncoreScore("instruments_drumset_name_vs_program.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_GE(score->parts().size(), size_t(2));
+
+    const Instrument* pitched = score->parts().at(0)->instrument();
+    ASSERT_NE(pitched, nullptr);
+    EXPECT_EQ(pitched->drumset(), nullptr)
+        << "an instrument on a pitched GM program must not become percussion by name, got "
+        << pitched->trackName().toStdString();
+
+    const Instrument* percussion = score->parts().at(1)->instrument();
+    ASSERT_NE(percussion, nullptr);
+    EXPECT_NE(percussion->drumset(), nullptr)
+        << "\"Congas\" with no program must still be recognised by name, got "
+        << percussion->trackName().toStdString();
+    delete score;
+}
+
