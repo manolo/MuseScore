@@ -508,9 +508,19 @@ Notes that Encore draws in one vertical column share an `xoffset`, described in 
 
 The face value nibble is authoritative for the notated duration. The playback duration is never used to lengthen a note's visible value; it is consulted only to flag the note as a tuplet member.
 
-Dots are resolved by `computeDotCount` in priority order: treat `dotControl` as a tick value, then snap the real duration to a dotted multiple within one tick, then fall back to bit 0 of `dotControl`.
+Dots are resolved by `computeDotCount` in priority order: treat `dotControl` as a tick value, then snap the real duration to a dotted multiple within one tick, then fall back to bit 0 of `dotControl`. That fallback is guarded to fire only when the real duration exceeds the plain face value, since a note whose duration is its face value has nothing to add a dot to without lengthening the bar.
 
-The fallback exists for v0xC2, where that byte is a layout field rather than the dot count it is in v0xC4, and where bit 0 appears on plain notes as often as on dotted ones. It is therefore guarded: it fires only when the real duration exceeds the plain face value. When the real duration is at or below the face value the note is plain, or shortened by a stream overlap, and bit 0 is a spurious layout flag. Without the guard a real v0xC2 score promoted five plain notes to dotted in one bar and overflowed it.
+**The durations are a reconstruction, and the note states the count itself.** The low two bits of the layout byte are the dot count Encore draws, and ENCORE_FORMAT.md §7.3 measures it against the durations. The importer derives dots from the durations because they carry the triple dots the two-bit field cannot express and because they need no per-note trust. Where the stated count is the only witness, `EncMeasure::restoreHintedDots` in the parser puts it back, and the next section describes the arithmetic that makes that safe.
+
+Making the stated count the primary source, with the durations as the fallback, would be the truer reading of the format. It is not what the importer does today: measured against the corpus it would change roughly 380 further notes, mostly ones the durations dot and the count does not, and that is its own change with its own validation round.
+
+**A dot the durations cannot see.** Dotting a note that already has neighbours does not move them in Encore: the drawn figure grows and every note-on stays where it was, so the bar's face values come up short by exactly the dot and every duration in the voice reads as plain. `restoreHintedDots` runs per staff and voice, right after the durations are computed, and puts those dots back, lengthening the notes and moving everything past them, notes and annotations alike, so the stored ticks line up with the notation and a mark anchored by tick keeps its note.
+
+It acts only when the arithmetic closes: the written durations the group already produces, plus what the stated dots would add, must come to exactly the bar. Exactly, not merely within it: room alone lets a spurious bit dot a plain note, which is what `Tst_Notes.v0c2_plain_sixteenth_with_spurious_dotctrl_bit0_no_dot` and `Tst_Grace.trailing_grace_does_not_dot_preceding_note` pin down. That is what separates this case from the other reason a stated dot goes missing, which is that Encore lets the **last** note of a bar be written longer than the space left and clips its playback to what remains. Acting on one of those would push content into a bar that is already full, and in a score of many staves it would stretch a bar the others fill exactly. Measured over the corpus, outside tuplets, the rule applies to eleven notes and declines thirty four, twenty five of them last notes of their voice.
+
+A group carrying an explicit tuplet is left alone entirely. The ratio rescales everything the group writes and the tuplet passes own that arithmetic, so comparing a stated dot against unscaled face values there would be comparing two different units.
+
+Covered by `Tst_Notes.v0c4_dotted_hint_fills_bar` and its v0xC2 twin, each with a control bar whose count is zero and which must stay short.
 
 **Dotted values that are not integers must not match.** For some face values the theoretical dotted duration is fractional in the 960-tick grid: a triple-dotted 16th is 112.5 ticks, which integer division truncates to 112, and a live-recorded note whose measured gap happens to be 112 would match it. `calcDots` and `calcDotsSnap` therefore skip a threshold whenever the dotted value is not exactly representable. The affected face values are the 16th at three dots, the 32nd at two and three, and the 64th and 128th at all three. A unit test and `Tst_Notes.rdur112_16th_note_not_triple_dotted` cover it.
 
@@ -597,7 +607,7 @@ Left unhandled, the combination of a spurious pre-grace rest, an inner grace rea
 
 Both were measured against the corpus and found to be inventing music, and both are recorded here so they are not reintroduced.
 
-**A dot on an eighth followed by a sixteenth.** A rule added one whenever the voice group came out 60 ticks short. Across the corpus that situation arises at the same rate in every generation, 0.35% of voice groups in format 4.20 against 0.33% in 3.05, and a conversion pair settles it: Encore's own re-save keeps the bar just as short and keeps the dot bit exactly where the music is dotted. The bars are short because the voice is short.
+**A dot on an eighth followed by a sixteenth.** A rule added one whenever the voice group came out 60 ticks short. It read the surrounding shape and never the note's own dot count, and that shape arises at the same rate in every generation, 0.35% of voice groups in format 4.20 against 0.33% in 3.05, so it was inventing dots. What replaced it is §6.1: the count the note states, acted on only when it explains the shortfall exactly.
 
 **A pitch moved out of the tuplet slot** for v0xC2 notes in the later layout, guarded on an empty pitch slot. It dates from when the element body was read at one fixed offset for both generations. With the body offset selected by the format version the condition never holds: across eleven million notes in the corpus it fires zero times.
 ---
@@ -635,7 +645,7 @@ Resolution is deferred to a post-pass, because the ornament may not sit on a tic
 
 There is one correction on top. If the chord resolved this way begins a tie back, the tremolo belongs on the note the tie starts from: Encore writes the ornament after the tied-from note, so the stream cursor lands on the continuation chord. The pass walks back through the tie and attaches it there. Without that, the tremolo appears on the shorter continuation instead of the longer note that carries it.
 
-Subtype `0xBE` appears rarely, on quarter notes at measure starts, always with the byte at +14 set to `0xF4`. Its meaning is not decoded and it is ignored.
+Subtype `0xBE` is the accent, and it is anchored by tick like the other attached marks, which is why anything that moves a note has to move its ornaments with it.
 
 ## 7.3 Trills
 
@@ -886,7 +896,9 @@ Everything here is a deliberate omission, and each one is recorded so the next r
 
 **MIDI control change** events are decoded for the log and never emitted, §7.9. They are playback data with no notation.
 
-**Ornament subtype `0xBE`** is not decoded, §7.2, and neither are the articulation bytes with no MuseScore equivalent unless the option in §9 is on.
+**The articulation bytes with no MuseScore equivalent** are dropped unless the option in §9 is on.
+
+**A dot the note states but the durations contradict** stays as the durations have it, §6.1. That is 380 notes in the corpus, against the 76 the importer does put back.
 
 **The word "Coda"** is not imported because it is not in the file, §4.8.
 

@@ -49,12 +49,7 @@ static void markImpliedTupletMembers(std::vector<EncMeasureElem*>& elems)
     int i = 0;
     while (i < n) {
         EncMeasureElem* first = chords[i][0];
-        quint8 fv = 0;
-        if (auto* en = dynamic_cast<EncNote*>(first)) {
-            fv = en->faceValue & 0x0F;
-        } else if (auto* er = dynamic_cast<EncRest*>(first)) {
-            fv = er->faceValue & 0x0F;
-        }
+        const quint8 fv = first->faceValue4();
         if (fv < 4) {
             ++i;
             continue;
@@ -68,12 +63,7 @@ static void markImpliedTupletMembers(std::vector<EncMeasureElem*>& elems)
         bool allMatch = true;
         for (int k = 1; k < actualN; ++k) {
             EncMeasureElem* ek = chords[i + k][0];
-            quint8 fvk = 0;
-            if (auto* en = dynamic_cast<EncNote*>(ek)) {
-                fvk = en->faceValue & 0x0F;
-            } else if (auto* er = dynamic_cast<EncRest*>(ek)) {
-                fvk = er->faceValue & 0x0F;
-            }
+            const quint8 fvk = ek->faceValue4();
             int nk = 0;
             if (fvk < 4 || detectImpliedTuplet(ek->realDuration, fvk, nk) != actualN || nk != normalN) {
                 allMatch = false;
