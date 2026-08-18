@@ -1586,3 +1586,49 @@ TEST_F(Tst_Instruments, drumset_by_name_yields_to_a_pitched_program)
     delete score;
 }
 
+// Encore keeps a MIDI channel per staff, and channel 10 is the one General MIDI reserves for
+// percussion: a staff sent there plays as drums whatever program it carries, which is how a file
+// marks a percussion part that names no instrument at all. Both instruments here carry no program,
+// and only the one on channel 10 becomes percussion, keeping the clef its staff entry gives it.
+TEST_F(Tst_Instruments, percussion_channel_selects_a_drumset)
+{
+    MasterScore* score = readEncoreScore("instruments_v0xa6_percussion_channel.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_GE(score->parts().size(), size_t(2));
+
+    const Instrument* perc = score->parts().at(0)->instrument();
+    ASSERT_NE(perc, nullptr);
+    EXPECT_NE(perc->drumset(), nullptr)
+        << "a staff on the percussion channel must become a drumset, got "
+        << perc->trackName().toStdString();
+
+    const Instrument* pitched = score->parts().at(1)->instrument();
+    ASSERT_NE(pitched, nullptr);
+    EXPECT_EQ(pitched->drumset(), nullptr)
+        << "a staff on an ordinary channel must stay pitched, got "
+        << pitched->trackName().toStdString();
+
+    Staff* st = score->staff(0);
+    ASSERT_NE(st, nullptr);
+    EXPECT_EQ(st->clef(Fraction(0, 1)), ClefType::PERC)
+        << "a staff carrying a drum map reads by instrument, not by pitch, so it takes the "
+        "percussion clef even where the file writes an ordinary one";
+    delete score;
+}
+
+// The same channel table in the Encore 4 entry layout, where it precedes the eight-slot program
+// table. The first instrument plays on the percussion channel and names no program, the second is
+// an ordinary flute; only the first becomes a drumset.
+TEST_F(Tst_Instruments, percussion_channel_in_the_encore4_entry)
+{
+    MasterScore* score = readEncoreScore("instruments_v0xc4_percussion_channel.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_GE(score->parts().size(), size_t(2));
+    EXPECT_NE(score->parts().at(0)->instrument()->drumset(), nullptr)
+        << "the percussion channel must select a drumset here too, got "
+        << score->parts().at(0)->instrument()->trackName().toStdString();
+    EXPECT_EQ(score->parts().at(1)->instrument()->drumset(), nullptr)
+        << "an instrument on an ordinary channel must stay pitched, got "
+        << score->parts().at(1)->instrument()->trackName().toStdString();
+    delete score;
+}

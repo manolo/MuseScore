@@ -151,6 +151,12 @@ bool EncFormatReader_V0xA6::readInstrumentMeta(std::vector<EncInstrument>& instr
         if (prg >= 1 && prg <= 128) {
             instr.midiProgram = static_cast<int>(prg);
         }
+        // The channels sit immediately before the program byte, one per voice, four of them in
+        // this generation against the eight of the later ones. The first is the staff's channel.
+        const quint8 chan = byteAt(ds, instr.contentFilePos + 48);
+        if (chan < 16) {
+            instr.midiChannel = static_cast<int>(chan) + 1;
+        }
     }
     return true;
 }
