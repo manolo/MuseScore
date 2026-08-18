@@ -165,9 +165,9 @@ Three cases where the file offers more than it means.
 
 ## 2.6 When a file cannot be read
 
-`encoreLoadErrorMessage` produces what the user sees, and it decrypts first for the same reason the import path does: on an encrypted file the interesting header is the one underneath, so the message describes the real document and not the wrapper.
+`encoreLoadErrorMessage` produces what the user sees. It reads a short head of the file and compares it against the opening signatures of the few other programs whose documents arrive under these extensions, Finale among them, since `.mus` was never Encore's alone.
 
-It then says one of three things. A recognisable Encore header that would not parse reports the format version and suggests re-saving from Encore. A header that matches nothing known says the file is not an Encore file at all. An unreadable or empty file falls into the first branch with a zero version.
+It then says one of two things. When a signature matches, the message names that program and suggests exporting from it as MusicXML, which is the only route that leads anywhere. Otherwise it says the file is not a recognisable Encore document and suggests re-saving it from Encore, which also covers a truncated or empty file.
 
 The rule the message rests on is ENCORE_FORMAT.md §1.2: the magic is the whole test. There is no fallback signature and no recovery, because the byte order, the header layout and the position of the first block all follow from it.
 
