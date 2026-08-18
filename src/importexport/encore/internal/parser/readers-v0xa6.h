@@ -51,6 +51,12 @@ struct EncFormatReader_V0xA6 final : EncFormatReader
 
     void readLineStaffEntries(EncLine& line, QDataStream& ds, qint64 lineContentStart) const override;
 
+    // This generation draws a cross where the later ones draw a square: a MusicTime score whose
+    // percussion staves carry nibble 3 throughout opens in Encore with crosses on every note.
+    // Only that value is measured; the rest are assumed to follow the listed vocabulary.
+    // See ENCORE_FORMAT.md §6.4 Note.
+    quint8 canonicalNoteHeadNibble(quint8 nibble) const override { return nibble == 3 ? 4 : nibble; }
+
     bool hasGraceTimeBorrowing() const override { return true; }
     // Compact lyric: kie byte immediately after rawStaff (+5), text at +6, no gap.
     quint8 lyricPreKieSkip() const override { return 0; }
