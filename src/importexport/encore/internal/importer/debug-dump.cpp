@@ -54,13 +54,13 @@ void logEncRootInfo(const EncRoot& enc)
 
     // The release, only as far as the format version and the revision byte can say it. The revision
     // byte does not separate builds within the Encore 4 line, and no distribution in hand produces
-    // format 3.07, so those two say a range instead of a release.
-    // See ENCORE_FORMAT.md §1.3 The four generations and §1.6 The revision byte.
+    // format 3.07, so those two say a range instead of a release. The releases below are Encore's:
+    // MusicTime moves through the same format versions, so a version alone cannot name one of its
+    // releases. See ENCORE_FORMAT.md §1.3 The four generations and §1.6 The revision byte.
+    const bool isMusicTime = (h.magic == "MTIW" || h.magic == "MTIM");
     std::string release;
-    switch (h.chuVersio) {
+    switch (isMusicTime ? 0 : h.chuVersio) {
     case 0x0250: release = "Encore 2.5";
-        break;
-    case 0x0262: release = "MusicTime";
         break;
     case 0x0305: release = "Encore 3";
         break;
@@ -72,7 +72,7 @@ void logEncRootInfo(const EncRoot& enc)
                   : (h.formatRev <= 1) ? "the Encore 4 line, 1997 to 2008"
                   : "Encore 4.x or 5.x";
         break;
-    default: release = "unlisted format version";
+    default: release = "release not established";
         break;
     }
 
