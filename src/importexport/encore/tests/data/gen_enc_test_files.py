@@ -212,10 +212,14 @@ def assemble(chuMagio, custom_list, fill_ts=(4,4), text_override=None):
 # ---------------------------------------------------------------------------
 # Note / rest / ornament element builders
 # ---------------------------------------------------------------------------
-def note_v0c4(tick, voice, staffIdx, fv, pitch, tuplet=0):
-    """28-byte v0xC4 note (size=28 from elemStart)."""
+def note_v0c4(tick, voice, staffIdx, fv, pitch, tuplet=0, layout=0):
+    """28-byte v0xC4 note (size=28 from elemStart).
+
+    `layout` writes the layout byte at element +14 (d[11]); its low two bits are the
+    dot count (see ENCORE_FORMAT.md 6.3 and 7.3). 0x1d is the value real files carry
+    on a dotted eighth."""
     d = bytearray(25)
-    d[0]=28; d[1]=staffIdx&0x3F; d[2]=fv; d[10]=tuplet; d[12]=pitch
+    d[0]=28; d[1]=staffIdx&0x3F; d[2]=fv; d[10]=tuplet; d[11]=layout&0xFF; d[12]=pitch
     return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)
 
 def note_v0c4_xoff(tick, voice, staffIdx, fv, pitch, xoff):
@@ -405,10 +409,13 @@ def rest_v0c2(tick, voice, staffIdx, fv):
     return struct.pack('<H', tick) + bytes([(8 << 4) | (voice & 0xF)]) + bytes(d)
 
 
-def note_v0c2(tick, voice, staffIdx, fv, pitch):
-    """22-byte v0xC2 note. Pitch at d[10]=elemStart+13 (tuplet field)."""
+def note_v0c2(tick, voice, staffIdx, fv, pitch, layout=0):
+    """22-byte v0xC2 note. Pitch at d[10]=elemStart+13 (tuplet field).
+
+    `layout` writes the layout byte, which sits at element +12 (d[9]) in this
+    generation; its low two bits are the dot count (see ENCORE_FORMAT.md 6.3 and 7.3)."""
     d = bytearray(19)
-    d[0]=22; d[1]=staffIdx&0x3F; d[2]=fv; d[10]=pitch
+    d[0]=22; d[1]=staffIdx&0x3F; d[2]=fv; d[9]=layout&0xFF; d[10]=pitch
     return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)
 
 def note_v0c2_size24(tick, voice, staffIdx, fv, pitch, artic):
@@ -11729,6 +11736,45 @@ def gen_v0c4_underfill_irregular_sparse_with_empty_staff():
     return pre + body + SKELETON_POST
 
 
+def _dotted_hint_measures(note, orn):
+    """Two 3/4 bars that differ only in the dot count stated by their first note.
+
+    Both hold an eighth at 0, a sixteenth at 120 and a half at 180, which is what
+    Encore writes for a DOTTED eighth: the note-on positions carry no dot, so the
+    face values sum to 660 against a bar of 720. Bar 0 is the control, its layout
+    byte 0x1c states zero dots and the music really is an undotted eighth. Bar 1
+    carries 0x1d, which states one, the value real files show on a dotted eighth,
+    and must import as one, which fills the bar exactly.
+    """
+    # The accent rides on the last note, anchored by the tick that note is stored at. Restoring the
+    # dot moves that note later, so the anchor has to move with it or the accent lands on the
+    # sixteenth. Real files show exactly this pair.
+    control  = note(0,   0, 0, 4, 60, layout=0x1c)
+    control += note(120, 0, 0, 5, 62)
+    control += note(180, 0, 0, 2, 64)
+    control += orn(180, 0, 0, tipo=0xBE, xoffset=45)
+    control += end_marker()
+
+    dotted  = note(0,   0, 0, 4, 60, layout=0x1d)
+    dotted += note(120, 0, 0, 5, 62)
+    dotted += note(180, 0, 0, 2, 64)
+    dotted += orn(180, 0, 0, tipo=0xBE, xoffset=45)
+    dotted += end_marker()
+    return [(meas_hdr(3, 4), control), (meas_hdr(3, 4), dotted)]
+
+
+def gen_v0c4_dotted_hint_fills_bar():
+    return assemble(0xC4, _dotted_hint_measures(note_v0c4, ornament_v0c4), fill_ts=(3, 4))
+
+
+def gen_v0c2_dotted_hint_fills_bar():
+    # Written with layout=False: apply_encore_layout assumes the 4.20 body, where +12 is the staff
+    # position and +13 the tuplet slot. On a 3.05 note those two bytes are the dot count and the
+    # pitch, so the pass would overwrite both and the fixture would lose what it is testing.
+    return set_version(assemble(0xC2, _dotted_hint_measures(note_v0c2, ornament_v0c4), fill_ts=(3, 4)),
+                       ENC_FORMAT_3_05)
+
+
 def _clef_elem(tick, voice, staffIdx, clef_type):
     # CLEF change element, size=16. Encore renders the clef from this 16-byte
     # form (a 6-byte one is read by the importer but never drawn). Layout:
@@ -13597,6 +13643,8 @@ if __name__=='__main__':
     write("ornaments_v0c4_grace_after_main_slur_to_main.enc", gen_v0c4_grace_after_main_slur_to_main())
     write("ornaments_v0c4_grace_slur_to_main_coloc.enc", gen_v0c4_grace_slur_to_main_coloc())
     write("rest_dotted_before_notes.enc", gen_v0c4_rest_dotted_before_notes())
+    write("notes_v0c4_dotted_hint_fills_bar.enc",          gen_v0c4_dotted_hint_fills_bar())
+    write("notes_v0c2_dotted_hint_fills_bar.enc",          gen_v0c2_dotted_hint_fills_bar(), layout=False)
     write("tuplet_4to3_quadruplet.enc", gen_v0c4_4to3_quadruplet())
     write("instruments_abbreviated_name_bandurr.enc",      gen_v0c4_instr_abbreviated_name_bandurr())
     write("instruments_compact_no_tk_midi_oboe.enc",       gen_v0c4_instr_compact_no_tk_midi_oboe())

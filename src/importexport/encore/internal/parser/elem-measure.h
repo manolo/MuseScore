@@ -63,6 +63,8 @@ struct EncMeasure {
     // pitch-bearing REST elements (voice bit 0x8) that must be read as notes. See parsers-measure.cpp.
     bool read(QDataStream& ds, const quint32 vs, const struct EncFormatReader& fmt, bool pureTabFile = false);
     void calculateRealDurations(bool hasGraceTimeBorrowing, const struct EncFormatReader& fmt);
+    // Give back the dots the note-on positions do not carry, for one (staff, voice) group.
+    void restoreHintedDots(std::vector<EncMeasureElem*>& elems, int staffIdx, int voice);
     // Snap a note whose MIDI tick drifted back to the tick of its xoffset column.
     void reconcileStaleNoteTicksByColumn();
 };

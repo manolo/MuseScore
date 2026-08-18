@@ -624,7 +624,7 @@ The note carries a face value, a MIDI pitch, grace and tie flags, an optional tu
 
 **The notehead names are not the same in every generation**, in the way the articulation codes are not either. The list above is the one the 3.05 and later files use. In format 2.50 and 2.62 the value 3 is a cross rather than a square: a MusicTime score whose percussion staves carry nibble 3 on every note, against nibble 0 on its pitched staves, opens in Encore with crosses throughout `[verified]`. The other values of that generation have not been sampled, so a reader should treat the rest of the list as the same until a file says otherwise.
 
-**Byte `+14` is not a dot count.** In every generation it is a layout byte whose bit 0 is an unreliable dotted hint that also appears set on plain notes, with values such as `0x28`, `0x30`, `0x39` and `0x60` on plain eighths and sixteenths `[observed]`. Dots come from the duration instead; see 7.3.
+**The low two bits of byte `+14` are the dot count**, 0, 1 or 2, and the rest of the byte is layout. The count is what Encore draws and what its own MusicXML export writes, and it holds in every generation `[verified]`. It never states 3: a triple-dotted note carries 0 there and is only visible in the durations, see 7.3.
 
 The 4.20 layout, a 28-byte note:
 
@@ -679,7 +679,7 @@ This is why a size-based test on `+15` appears to work and is still wrong. In a 
 
 Measured across the corpus: on 3.05 size-24 notes the byte at `+22` holds an articulation value in 99.8% of cases; on 3.07 the same byte never does, while `+24` is one in 95.7% of size-26 notes and `+26` in 100% of size-28 notes. A note at its base length has no slot at all, so reading one there yields an unrelated byte.
 
-A layout byte of `0xC0` is characteristic of size-24 notes in the 3.07 generation, a flag with bit 0 clear, so not dotted.
+A layout byte of `0xC0` is characteristic of size-24 notes in the 3.07 generation; its low two bits are clear, so the note carries no dot.
 
 ### The compact note, format 2.50
 
@@ -736,7 +736,7 @@ A slur can begin on a grace note stored at the same tick as its parent chord, si
 | `+5`   | 1    | face value, same encoding as a note                     |
 | `+10`  | 1    | x-offset                                                |
 | `+13`  | 1    | tuplet, same encoding as a note                         |
-| `+14`  | 1    | layout byte, bit 0 an unreliable dotted hint            |
+| `+14`  | 1    | layout byte, low two bits the dot count                 |
 | `+15`  | 1    | multi-measure rest count, only when the size exceeds 15 |
 
 When the count at `+15` is above 1, the single measure block stands for that many consecutive empty display measures, which Encore draws as one symbol with the count above it. Multi-staff files emit one rest per staff, all carrying the same count.
@@ -1032,9 +1032,19 @@ In compound and simple meters where one beat is an eighth, 6/8, 8/8 and 12/8, En
 
 ## 7.3 Dots
 
-The dot count is not in the bytes: the layout byte at `+14` is not a count and its bit 0 is an unreliable hint, as 6.3 describes. Dots come from the sounding duration against the face value: one dot when the duration is 3/2 of the face ticks, two when it is 7/4, three when it is 15/8.
+The dot count is stated twice, and the two statements are almost always the same one. A note carries it in the low two bits of the layout byte at `+14`, described in 6.3, and it also falls out of the sounding duration against the face value: one dot when the duration is 3/2 of the face ticks, two when it is 7/4, three when it is 15/8.
 
-Bit 0 of the layout byte carries the dot in every generation at much the same rate, around 5% of notes in format 3.05 and 8% in 4.20, so it is a hint worth using where the durations are ambiguous `[verified]`. A sixteenth whose note-on sits a plain eighth after the note before it is not evidence of a dot: that spacing is what an undotted eighth followed by a sixteenth looks like, and it occurs at the same rate in every generation.
+**The stated count and the durations agree on 99.89% of the notes whose duration is an exact plain or dotted multiple** `[verified]`. Where they part company the stated count is the one Encore draws, since it is the field the program reads, and the durations are a reconstruction.
+
+The disagreements are worth knowing, and two of Encore's editing habits account for most of them.
+
+**A dot added later does not move what follows.** Put a dot on a note that already has neighbours and Encore lengthens the drawn figure without shifting their positions, so the bar's face values come up short by exactly that dot while every note-on stays where it was. Eleven notes in the corpus are in that state, all of them in the middle of a voice `[verified]`.
+
+**The last note of a bar may be longer than the space left.** Encore accepts any figure there and clips its playback to whatever remains, so a bar can display a dotted half after a quarter rest in 3/4 and still lay out normally; fill the bar first and the program refuses the note instead `[verified]`. Twenty five notes state a dot on the last note of a voice whose face value already fills the space, which is this and not a dot the durations lost.
+
+The rest are ordinary. In 272 notes the durations show a dot the count does not state, which is a gap standing where a rest was not written, and 90 are triple-dotted by duration, which the two-bit field cannot express at all.
+
+A spacing is never evidence on its own. A sixteenth whose note-on sits a plain eighth after the note before it is what an undotted eighth followed by a sixteenth looks like, and it occurs at the same rate in every generation, so a reader that infers a dot from that shape is inventing one.
 
 ## 7.4 Tuplets
 
