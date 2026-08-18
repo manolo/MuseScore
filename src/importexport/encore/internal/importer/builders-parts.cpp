@@ -262,8 +262,13 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         if (!tmpl) {
             tryStep(MatchStep::NameMidiScore, tryNameMidiScore(instr, encMidi, encKey, isRhythm));
         }
-        // Step 3: name scoring over drumset templates.
-        if (!nameTooShort) {
+        // Step 3: name scoring over drumset templates. A pitched GM program outvotes a name that
+        // merely resembles a percussion instrument: "Slap Ucillee" on Acoustic Bass is a bass and
+        // "Con." on Piano is a piano, however well they score against Slap and Congas, and the file
+        // draws both on a pitched clef. A name with no program behind it, or a percussive one, still
+        // reaches this step, which is where "Congas" and "Maracas" are recognised.
+        const bool pitchedProgram = (instr.midiProgram > 0 && instr.midiProgram < GM_PERC_FIRST);
+        if (!nameTooShort && !pitchedProgram) {
             tryStep(MatchStep::DrumsetName, findDrumsetTemplate(instr.name));
         }
         // Step 4: generic percussion keywords.
