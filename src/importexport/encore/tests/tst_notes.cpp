@@ -2385,3 +2385,66 @@ ENC_SANITY_TEST_NOTES(corrupted_elements,         "notes_corrupted.enc")
 
 // Covers: explicit 3:2 triplets, 3/4 time sig, multi-measure
 ENC_SANITY_TEST_NOTES(explicit_triplets_3_4,      "notes_triplets.enc")
+
+// The notehead nibble belongs to the note, not to the drumset. On a staff with no drumset behind
+// it the head used to be dropped, so a cross or a diamond came out as an ordinary head, and the
+// square came out as a drumset symbol with nothing to draw. Same four nibbles as above, on an
+// ordinary pitched staff.
+TEST_F(Tst_Notes, notehead_nibbles_on_a_staff_without_drumset)
+{
+    MasterScore* score = readEncoreScore("notes_notehead_without_drumset.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    ASSERT_EQ(score->parts().at(0)->instrument()->drumset(), nullptr)
+        << "the fixture must stay pitched for this test to mean anything";
+
+    std::vector<Note*> notes;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* e = s->element(0);
+            if (e && e->isChord()) {
+                for (Note* n : toChord(e)->notes()) {
+                    notes.push_back(n);
+                }
+            }
+        }
+    }
+    ASSERT_GE(notes.size(), 4u);
+    EXPECT_EQ(notes[0]->headGroup(), NoteHeadGroup::HEAD_NORMAL) << "nibble 0 is an ordinary head";
+    EXPECT_EQ(notes[1]->headGroup(), NoteHeadGroup::HEAD_LA) << "nibble 3 must draw a square";
+    EXPECT_EQ(notes[2]->headGroup(), NoteHeadGroup::HEAD_CROSS) << "nibble 4 must draw a cross";
+    EXPECT_EQ(notes[3]->headGroup(), NoteHeadGroup::HEAD_DIAMOND) << "nibble 1 must draw a diamond";
+    delete score;
+}
+
+// The notehead vocabulary is not the same in every generation. The compact one draws a cross where
+// the later ones draw a square, so a MusicTime or Encore 2.x file whose percussion staves carry
+// nibble 3 must come out with crosses, which is what Encore shows for those files.
+TEST_F(Tst_Notes, notehead_nibble3_is_a_cross_in_the_compact_generation)
+{
+    MasterScore* score = readEncoreScore("notes_v0xa6_notehead_cross.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::vector<Note*> notes;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* e = s->element(0);
+            if (e && e->isChord()) {
+                for (Note* n : toChord(e)->notes()) {
+                    notes.push_back(n);
+                }
+            }
+        }
+    }
+    ASSERT_GE(notes.size(), 2u);
+    EXPECT_EQ(notes[0]->headGroup(), NoteHeadGroup::HEAD_NORMAL) << "nibble 0 is an ordinary head";
+    EXPECT_EQ(notes[1]->headGroup(), NoteHeadGroup::HEAD_CROSS)
+        << "nibble 3 must draw a cross in the compact generation, not the square of the later ones";
+    delete score;
+}
