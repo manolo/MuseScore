@@ -32,6 +32,7 @@ void resolveAll(BuildCtx& ctx)
     resolveSlurs(ctx);
     resolveHairpins(ctx);
     resolveOrnaments(ctx);
+    resolveVoltas(ctx);
     resolveFingeringAndBowing(ctx);
     resolveOttavas(ctx);
 }
