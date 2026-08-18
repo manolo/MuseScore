@@ -1845,3 +1845,47 @@ TEST_F(Tst_Structure, wide_score_first_system_shares_the_title_page)
     delete score;
 }
 
+// A container magic of SCOR rather than SCOW. Everything below it is the ordinary layout of its
+// generation, so the file must open like any other; it used to be turned away as unrecognised.
+TEST_F(Tst_Structure, scor_container_opens)
+{
+    MasterScore* score = readEncoreScore("structure_scor_container.enc");
+    ASSERT_NE(score, nullptr) << "a SCOR container must be read like any other Encore file";
+    int notes = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* e = s->element(0);
+            if (e && e->isChord()) {
+                notes += static_cast<int>(toChord(e)->notes().size());
+            }
+        }
+    }
+    EXPECT_EQ(notes, 2) << "the two notes of the fixture must import";
+    delete score;
+}
+
+// MusicTime moves through the same generations Encore does: this document is the middle one, not
+// the compact one, and its container must not decide otherwise. Read with the compact geometry
+// its four notes come out as one or none.
+TEST_F(Tst_Structure, musictime_middle_generation_reads_by_format_version)
+{
+    MasterScore* score = readEncoreScore("structure_musictime_3_07.mus");
+    ASSERT_NE(score, nullptr);
+    int notes = 0;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* e = s->element(0);
+            if (e && e->isChord()) {
+                notes += static_cast<int>(toChord(e)->notes().size());
+            }
+        }
+    }
+    EXPECT_EQ(notes, 4) << "all four notes must import, which needs the geometry of format 3.07";
+    delete score;
+}
