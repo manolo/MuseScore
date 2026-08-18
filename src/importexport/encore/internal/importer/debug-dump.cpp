@@ -43,12 +43,13 @@ void logEncRootInfo(const EncRoot& enc)
     const EncHeader& h = enc.header;
     const char* fmtName = enc.fmt ? enc.fmt->formatName() : "unknown";
 
-    // Which program wrote the file: the magic is the only thing that names it.
-    // See ENCORE_FORMAT.md §1.2 The containers.
+    // Which program wrote the file, as far as the magic says it: both programs write containers of
+    // this family, so one of them names neither. See ENCORE_FORMAT.md §1.2 The containers.
     const char* product = (h.magic == "MTIW") ? "MusicTime, Windows"
                           : (h.magic == "MTIM") ? "MusicTime, macOS"
                           : (h.magic == "SCO5") ? "Encore, macOS"
                           : (h.magic == "SCOW") ? "Encore, Windows"
+                          : (h.magic == "SCOR") ? "Encore or MusicTime, Windows"
                           : "unknown container";
 
     // The release, only as far as the format version and the revision byte can say it. The revision
