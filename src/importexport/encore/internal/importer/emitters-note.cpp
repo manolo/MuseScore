@@ -583,10 +583,13 @@ static void fixNoteHeadImmune(Note* note, const EncNote* en, Drumset* ds)
     note->setFixedLine(drumLine);
 }
 
-static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
+static void configureNoteHeadForDrumset(Note* note, const EncNote* en, const EncFormatReader* fmt)
 {
     Drumset* ds = note->part()->instrument()->drumset();
-    const int nibble = fvHigh(en->faceValue) & 0xF;
+    // The generations name the noteheads differently, so the reader translates its own vocabulary
+    // into the one this function knows: EncFormatReader::canonicalNoteHeadNibble.
+    const quint8 rawNibble = fvHigh(en->faceValue) & 0xF;
+    const int nibble = fmt ? fmt->canonicalNoteHeadNibble(rawNibble) : rawNibble;
 
     // faceValue high nibble=7: slash notehead in Encore's rhythm-staff notation.
     if (nibble == 7) {
@@ -606,7 +609,10 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
     }
     // faceValue high nibble=3: square notehead (Encore bass drum notation).
     if (nibble == 3) {
-        note->setHeadGroup(NoteHeadGroup::HEAD_CUSTOM);
+        // The square itself is a drumset symbol, so a staff with no drumset behind it has nothing
+        // to draw and MuseScore falls back to a glyph that is not a square at all. The shape-note
+        // square is the closest head that stands on its own, and it is what such a staff gets.
+        note->setHeadGroup(ds ? NoteHeadGroup::HEAD_CUSTOM : NoteHeadGroup::HEAD_LA);
         if (ds) {
             if (!ds->isValid(note->pitch())) {
                 DrumInstrument di;
@@ -656,8 +662,10 @@ static void configureNoteHeadForDrumset(Note* note, const EncNote* en)
             }
             // Set the drumset default notehead (used when the note is not fixed).
             ds->drum(note->pitch()).notehead = nhg;
-            note->setHeadGroup(nhg);
         }
+        // The head Encore drew belongs to the note, not to the drumset: a cross or a diamond on a
+        // staff that carries no drumset was dropped here and came out as an ordinary head.
+        note->setHeadGroup(nhg);
         if (nibble != 0) {
             fixNoteHeadImmune(note, en, ds);
         }
@@ -759,7 +767,7 @@ void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         note->setPlay(false);
     }
 
-    configureNoteHeadForDrumset(note, en);
+    configureNoteHeadForDrumset(note, en, ctx.enc.fmt.get());
     applyFingeringsFromArtic(ec, note, en);
     completePendingTie(ctx, ec, en, note);
     applyNoteArticulations(ctx, note, chord, en, track, mc);
