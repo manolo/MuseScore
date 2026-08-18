@@ -165,10 +165,12 @@ void EncFormatReader_V0xA6::readKeyFromTKBlock(EncInstrument& instr,
     }
 }
 
-void EncFormatReader_V0xA6::readLineStaffKeys(EncLine& line, QDataStream& ds, qint64 lineContentStart) const
+void EncFormatReader_V0xA6::readLineStaffEntries(EncLine& line, QDataStream& ds, qint64 lineContentStart) const
 {
-    // v0xA6 staffPerSystem reads 0 so staffData stays empty; parse the key out of each LINE staff
-    // entry directly so initial key signatures import. The 0x0E 0xFC marker bounds the run.
+    // This generation reports zero staves per system and writes 22-byte staff entries, so
+    // EncLine::read walks nothing and staffData stays empty. Read the entries here: each one opens
+    // with the display size, then the clef, then the written key, then the staff index, and the
+    // 0x0E 0xFC marker two bytes later bounds the run.
     // See ENCORE_FORMAT.md §5.2 System block (LINE), Format 2.50 systems.
     QIODevice* dev = ds.device();
     const qint64 savedPos = dev->pos();
@@ -184,6 +186,8 @@ void EncFormatReader_V0xA6::readLineStaffKeys(EncLine& line, QDataStream& ds, qi
         if (buf[16] != 0x0E || buf[17] != 0xFC) {
             break;
         }
+        line.staffSizes.push_back(buf[12]);
+        line.staffClefs.push_back(static_cast<EncClefType>(static_cast<qint8>(buf[13])));
         line.staffKeys.push_back(buf[14]);
     }
     dev->seek(savedPos);
