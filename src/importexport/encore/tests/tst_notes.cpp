@@ -1865,6 +1865,71 @@ TEST_F(Tst_Notes, rdur112_16th_note_not_triple_dotted)
     delete score;
 }
 
+// Encore writes a dotted note's neighbours at their undotted note-on positions, so a 3/4 bar holding a
+// dotted eighth, a sixteenth and a half stores ticks 0, 120 and 180 and its face values sum to 660
+// against a bar of 720. The dot is then stated only by the note itself, in the low two bits of its
+// layout byte. The bar must come out full with the eighth dotted, and the neighbouring bar, which has
+// the same shape but states no dots, must stay as it is: the count is the evidence, never the shape.
+// See ENCORE_FORMAT.md 7.3 Dots.
+static void checkDottedHintFillsBar(MasterScore* score, const char* file)
+{
+    ASSERT_NE(score, nullptr) << file;
+
+    Measure* control = measureAt(score, 0);
+    ASSERT_NE(control, nullptr);
+    Segment* cs = control->first(SegmentType::ChordRest);
+    ASSERT_NE(cs, nullptr);
+    ASSERT_TRUE(cs->element(0) && cs->element(0)->isChord());
+    EXPECT_EQ(toChord(cs->element(0))->dots(), 0)
+        << file << ": this bar states no dots, so the eighth must stay undotted";
+
+    Measure* dotted = measureAt(score, 1);
+    ASSERT_NE(dotted, nullptr);
+    Segment* ds = dotted->first(SegmentType::ChordRest);
+    ASSERT_NE(ds, nullptr);
+    ASSERT_TRUE(ds->element(0) && ds->element(0)->isChord());
+    Chord* first = toChord(ds->element(0));
+    EXPECT_EQ(first->durationType(), DurationType::V_EIGHTH) << file;
+    EXPECT_EQ(first->dots(), 1) << file << ": the layout byte states one dot on this eighth";
+    EXPECT_EQ(dotted->ticks(), Fraction(3, 4))
+        << file << ": with the dot restored the bar is exactly full and must not be shrunk";
+
+    // The accent is anchored by the tick of the half note, which the restored dot pushes later.
+    int accents = 0;
+    Chord* accented = nullptr;
+    for (Segment* s = dotted->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        Chord* c = toChord(el);
+        if (!c->articulations().empty()) {
+            ++accents;
+            accented = c;
+        }
+    }
+    EXPECT_EQ(accents, 1) << file;
+    ASSERT_NE(accented, nullptr) << file;
+    EXPECT_EQ(accented->durationType(), DurationType::V_HALF)
+        << file << ": the accent must follow the note it was written on, not stay on the tick";
+}
+
+TEST_F(Tst_Notes, v0c4_dotted_hint_fills_bar)
+{
+    const char* file = "notes_v0c4_dotted_hint_fills_bar.enc";
+    MasterScore* score = readEncoreScore(file);
+    checkDottedHintFillsBar(score, file);
+    delete score;
+}
+
+TEST_F(Tst_Notes, v0c2_dotted_hint_fills_bar)
+{
+    const char* file = "notes_v0c2_dotted_hint_fills_bar.enc";
+    MasterScore* score = readEncoreScore(file);
+    checkDottedHintFillsBar(score, file);
+    delete score;
+}
+
 // Two explicit RESTs at the same tick (voices routing to the same MuseScore voice) must not both advance
 // cumTick: the second is a duplicate at an already-filled position, or subsequent notes shift by an eighth.
 TEST_F(Tst_Notes, dual_explicit_rests_same_tick_no_cumtick_drift)
