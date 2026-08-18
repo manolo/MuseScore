@@ -77,6 +77,7 @@ static String humanizeTemplateId(const String& id)
 enum class MatchStep {
     None,
     PercClef,       // PERC clef or GM percussive range -> drumset
+    PercChannel,    // the General MIDI percussion channel -> drumset
     NameMidiScore,  // name+MIDI score match
     DrumsetName,    // name scoring over drumset templates
     PercKeyword,    // generic percussion keyword in the name -> drumset
@@ -90,6 +91,7 @@ static const char* matchStepLabel(MatchStep step)
     switch (step) {
     case MatchStep::None:          return "";
     case MatchStep::PercClef:      return "PERC clef";
+    case MatchStep::PercChannel:   return "percussion channel";
     case MatchStep::NameMidiScore: return "name+MIDI score";
     case MatchStep::DrumsetName:   return "drumset name";
     case MatchStep::PercKeyword:   return "perc keyword";
@@ -255,6 +257,14 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
     static constexpr int GM_PERC_FIRST = 113;
     if (isPercByClef || instr.midiProgram >= GM_PERC_FIRST) {
         tryStep(MatchStep::PercClef, searchTemplate(String(u"drumset")));
+    }
+
+    // Step 1b: the staff plays on the General MIDI percussion channel, which is what Encore sends
+    // for a drum part and what makes it play as percussion there whatever program it carries, if
+    // any. See ENCORE_FORMAT.md §5.1 Instrument block.
+    static constexpr int GM_PERC_CHANNEL = 10;
+    if (instr.midiChannel == GM_PERC_CHANNEL) {
+        tryStep(MatchStep::PercChannel, searchTemplate(String(u"drumset")));
     }
 
     // Steps 2-4: name-based matching (skipped in MidiOnly mode).
