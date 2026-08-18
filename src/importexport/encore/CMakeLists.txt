@@ -90,6 +90,7 @@ target_sources(iex_encore PRIVATE
     internal/importer/resolvers-slur.cpp
     internal/importer/resolvers-hairpin.cpp
     internal/importer/resolvers-ornaments.cpp
+    internal/importer/resolvers-volta.cpp
     internal/importer/resolvers-fingering.cpp
     internal/importer/resolvers-ottava.cpp
     internal/importer/import.h

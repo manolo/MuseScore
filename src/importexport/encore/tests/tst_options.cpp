@@ -443,6 +443,33 @@ TEST_F(Tst_Options, firstMeasure_pickup_irregular_volta_at_barline)
     delete score;
 }
 
+// Regression: structure_volta_short_last_measure.enc ends on a 2nd ending that holds one quarter
+// in a 4/4 bar. The irregular-measure strategy shrinks that last measure, so the end of the score
+// moves before the tick the bracket was built with: the bracket lost its end element, laid out
+// against nothing and could not be written at all. It must end on the measure, whatever that
+// measure ends up lasting.
+TEST_F(Tst_Options, volta_follows_a_shortened_last_measure)
+{
+    EncImportOptions opts;
+    opts.underfillMeasureStrategy = UnderfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("structure_volta_short_last_measure.enc", opts);
+    ASSERT_NE(score, nullptr);
+
+    Measure* last = score->lastMeasure();
+    ASSERT_NE(last, nullptr);
+    EXPECT_LT(last->ticks(), Fraction(4, 4))
+        << "the fixture's last measure must be shortened for this test to mean anything";
+
+    Volta* v2 = findVolta(score, String(u"2."));
+    ASSERT_NE(v2, nullptr) << "score must contain a '2.' volta";
+    EXPECT_EQ(v2->tick2(), last->endTick())
+        << "Volta '2.' must end where the shortened last measure ends, got "
+        << v2->tick2().ticks() << " against " << last->endTick().ticks();
+    EXPECT_NE(v2->startElement(), nullptr) << "Volta '2.' must keep a start element";
+    EXPECT_NE(v2->endElement(), nullptr) << "Volta '2.' must keep an end element";
+    delete score;
+}
+
 // ===========================================================================
 // importUnsupportedArticulationsAsText
 // ornaments_open_string_and_stick.enc: note 1 = 0x46 (open string, mapped),
