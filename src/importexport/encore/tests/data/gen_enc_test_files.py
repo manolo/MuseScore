@@ -11763,6 +11763,27 @@ def _dotted_hint_measures(note, orn):
     return [(meas_hdr(3, 4), control), (meas_hdr(3, 4), dotted)]
 
 
+def gen_v0c4_accent_at_note_end_tick():
+    """An accent stored at the tick where its note ENDS, which is where Encore puts it when the
+    note is the last of the bar.
+
+    Bar 0 is 3/4 with five eighths, so the last one runs from 480 to 600 and nothing starts at 600.
+    The accent sits at 600 with an xoffset just past that note's, which is the only thing that says
+    which note it belongs to. Bar 1 holds one quarter and must stay clean: the bug sent the accent
+    forward to it, taking it out of bar 0 and into the next measure.
+    """
+    NOTE_XOFFS = [11, 31, 51, 71, 91]
+    first = b''
+    for i, xo in enumerate(NOTE_XOFFS):
+        first += note_v0c4_xoff(tick=i * 120, voice=0, staffIdx=0, fv=4, pitch=60 + i, xoff=xo)
+    first += ornament_v0c4(600, 0, 0, tipo=0xBE, xoffset=99)
+    first += end_marker()
+
+    second = note_v0c4_xoff(tick=0, voice=0, staffIdx=0, fv=3, pitch=72, xoff=12)
+    second += end_marker()
+    return assemble(0xC4, [(meas_hdr(3, 4), first), (meas_hdr(3, 4), second)], fill_ts=(3, 4))
+
+
 def gen_v0c4_dotted_hint_fills_bar():
     return assemble(0xC4, _dotted_hint_measures(note_v0c4, ornament_v0c4), fill_ts=(3, 4))
 
@@ -13643,6 +13664,7 @@ if __name__=='__main__':
     write("ornaments_v0c4_grace_after_main_slur_to_main.enc", gen_v0c4_grace_after_main_slur_to_main())
     write("ornaments_v0c4_grace_slur_to_main_coloc.enc", gen_v0c4_grace_slur_to_main_coloc())
     write("rest_dotted_before_notes.enc", gen_v0c4_rest_dotted_before_notes())
+    write("ornaments_accent_at_note_end_tick.enc",         gen_v0c4_accent_at_note_end_tick(), layout=False)
     write("notes_v0c4_dotted_hint_fills_bar.enc",          gen_v0c4_dotted_hint_fills_bar())
     write("notes_v0c2_dotted_hint_fills_bar.enc",          gen_v0c2_dotted_hint_fills_bar(), layout=False)
     write("tuplet_4to3_quadruplet.enc", gen_v0c4_4to3_quadruplet())

@@ -207,13 +207,26 @@ static void applyPendingBowings(BuildCtx& ctx, MasterScore* score)
         } else {
             Measure* m = score->tick2measure(pb.tick);
             if (m) {
+                const int ownStaff = static_cast<int>(pb.track / VOICES);
                 Segment* seg = m->findSegment(SegmentType::ChordRest, pb.tick);
                 if (seg) {
                     // ORN is always voice 0; scan all voices of own staff before sibling.
-                    const int ownStaff = static_cast<int>(pb.track / VOICES);
                     c = firstChordVoiceAt(score, seg, ownStaff, useTrack);
                     if (!c) {
                         c = firstChordVoiceAt(score, seg, ownStaff + 1, useTrack);
+                    }
+                }
+                if (!c) {
+                    // A mark on the last note of a bar is stored at the tick where that note ends, so
+                    // nothing starts there. Walk back to the note sounding at that tick, within this
+                    // measure: crossing the barline would hand the mark to the wrong note.
+                    for (Segment* s = m->first(SegmentType::ChordRest); s && s->tick() < pb.tick;
+                         s = s->next(SegmentType::ChordRest)) {
+                        track_idx_t prevTrack = pb.track;
+                        if (Chord* prev = firstChordVoiceAt(score, s, ownStaff, prevTrack)) {
+                            c = prev;
+                            useTrack = prevTrack;
+                        }
                     }
                 }
             }
