@@ -188,7 +188,7 @@ Three fields look authoritative and are not.
 
 - **The digits in a `TK` magic.** They usually name the instrument the block describes, but files exist whose seven consecutive blocks read `TK00 TK01 TK02 TK04 TK04 TK05 TK06`, skipping an index and repeating another, and others that zero an entire block header so it vanishes from a magic scan `[observed]`. What a block describes is decided by where it sits in the entry table, not by its digits.
 - **The size a `TK` block declares.** Encore 4 saves routinely declare 112 whatever the entry really measures, and Encore 5 files with 2158-byte entries still declare 112 `[observed]`. Section 5.1 derives the real stride from the file.
-- **The measure count in the header.** It is the number of measures Encore *displays*. A file can carry extra measure blocks left from earlier edits; only the first `0x34` of them are real. One file rendered 36 measures while holding 56 blocks `[observed]`.
+- **The measure count in the header.** It is the number of measures Encore *displays*. A file can carry extra measure blocks left from earlier edits; only the first `0x34` of them are real. A file has been seen rendering barely two thirds of the blocks it held `[observed]`.
 
 ## 2.3 The encrypted wrapper
 
@@ -668,7 +668,7 @@ Sizes 22 and 24 are not two variants of one layout: they are the two sides of th
 | options           | `+18` | `+20`          |
 | accidental glyph  | `+19` | `+21`          |
 
-Verified by converting a 3.05 file in Encore 4.5 and matching the streams: over 374 paired notes the x-offset, tuplet and layout bytes agree at the 3.05 offsets in 374 cases of 374, and at the 3.07 offsets in at most 9 `[verified]`.
+Verified by converting a 3.05 file in Encore 4.5 and matching the streams: across every paired note the x-offset, tuplet and layout bytes agree at the 3.05 offsets, and at the 3.07 offsets they agree in a couple of percent `[verified]`.
 
 This is why a size-based test on `+15` appears to work and is still wrong. In a 22-byte note `+15` is the low byte of the playback duration, usually small, while `+13` is the real pitch, so reading the pitch that way recovers it. But the tuplet at `+11` is then never read at all, which is exactly what makes a format 3.05 score look as though it has no explicit tuplets.
 
@@ -887,7 +887,7 @@ The offsets above are the 3.07 layout. A 3.05 ornament, of size 14, 26, 32 or 36
 | tempo BPM              | `+28` | `+30`          |
 | staff-text entry index | `+30` | `+32`          |
 
-Each of the first six was verified against a 4.5 conversion in 11 of 11 paired ornaments, against 0 of 11 at the later offsets `[verified]`.
+Each of the first six was verified against a 4.5 conversion in every paired ornament, and in none of them at the later offsets `[verified]`.
 
 **The compact ornament, format 2.50**, declares sizes 5, 12 and 15 in a slot of twice that, and does not follow the field order above at all. Its layout was established by converting a file in Encore 4.5 and matching the streams `[verified]`:
 
@@ -1042,13 +1042,13 @@ The dot count is stated twice, and the two statements are almost always the same
 
 The disagreements are worth knowing, and two of Encore's editing habits account for most of them.
 
-**A dot added later does not move what follows.** Put a dot on a note that already has neighbours and Encore lengthens the drawn figure without shifting their positions, so the bar's face values come up short by exactly that dot while every note-on stays where it was. Eleven notes in the corpus are in that state, all of them in the middle of a voice `[verified]`.
+**A dot added later does not move what follows.** Put a dot on a note that already has neighbours and Encore lengthens the drawn figure without shifting their positions, so the bar's face values come up short by exactly that dot while every note-on stays where it was. Well under one note in ten thousand is in that state, and always in the middle of a voice `[verified]`.
 
-**The last note of a bar may be longer than the space left.** Encore accepts any figure there and clips its playback to whatever remains, so a bar can display a dotted half after a quarter rest in 3/4 and still lay out normally; fill the bar first and the program refuses the note instead `[verified]`. Twenty five notes state a dot on the last note of a voice whose face value already fills the space, which is this and not a dot the durations lost.
+**The last note of a bar may be longer than the space left.** Encore accepts any figure there and clips its playback to whatever remains, so a bar can display a dotted half after a quarter rest in 3/4 and still lay out normally; fill the bar first and the program refuses the note instead `[verified]`. A stated dot on the last note of a voice whose face value already fills the space is this, and not a dot the durations lost.
 
-The habit is common rather than exceptional: in 9022 voice groups of the corpus, spread over 114 files, the last note is drawn longer than its space by at least a 32nd `[verified]`. Two hundred and nine of those owe the excess to a stated dot and the rest to a face value that never fitted, a whole note in the last two beats being the usual shape. A reader that wants the page to match Encore's has to keep the figure and give the bar the room; one that wants the playback to match has to fit the note to the space. The two cannot both be had, since a written duration in most notation models is the time it occupies.
+The habit is common rather than exceptional: in about one voice group in sixteen, spread over a quarter of the corpus's files, the last note is drawn longer than its space by at least a 32nd `[verified]`. A few percent of those owe the excess to a stated dot and the rest to a face value that never fitted, a whole note in the last two beats being the usual shape. A reader that wants the page to match Encore's has to keep the figure and give the bar the room; one that wants the playback to match has to fit the note to the space. The two cannot both be had, since a written duration in most notation models is the time it occupies.
 
-The rest are ordinary. In 272 notes the durations show a dot the count does not state, which is a gap standing where a rest was not written, and 90 are triple-dotted by duration, which the two-bit field cannot express at all.
+The rest are ordinary. The largest group of them is a duration showing a dot the count does not state, which is a gap standing where a rest was not written, and the next is a note triple-dotted by duration, which the two-bit field cannot express at all.
 
 A spacing is never evidence on its own. A sixteenth whose note-on sits a plain eighth after the note before it is what an undotted eighth followed by a sixteenth looks like, and it occurs at the same rate in every generation, so a reader that infers a dot from that shape is inventing one.
 
@@ -1279,7 +1279,7 @@ The table above is the vocabulary from format 3.07 on. **A file older than that 
 
 | 3.05 and older | 3.07 and later | Meaning       | Evidence                               |
 |----------------|----------------|---------------|----------------------------------------|
-| `0xC4`         | `0xBE`         | accent        | 745 of 767 cases are 3.05 `[verified]` |
+| `0xC4`         | `0xBE`         | accent        | 97% of cases are 3.05 `[verified]`     |
 | `0xCE`         | `0xC8`         | tenuto        | conversion pair, 1 for 1 `[verified]`  |
 | `0xCF`         | `0xC9`         | staccato      | conversion pair, 5 for 5 `[verified]`  |
 | `0xD2`         | `0xCC`         | fermata above | two conversion pairs `[verified]`      |
@@ -1287,7 +1287,7 @@ The table above is the vocabulary from format 3.07 on. **A file older than that 
 
 The accent is the one whose two spellings collide, because `0xC4` is a genuine up bow from 3.07 on. So the mapping must be scoped by format version and not by the version byte, which reads `0xC2` for both generations.
 
-The rest of the vocabulary did not move. In a conversion pair whose two halves hold the same ornaments, the accent at its later code, the breath mark, the tempo mark, the staff text and the slur all keep their codes, and only the one articulation changes. Corpus-wide the same picture holds: across 3216 files of format 3.05 there is not one staccato at `0xC9`, the most common articulation in every other generation, while `0xCF` is the most common code in that range.
+The rest of the vocabulary did not move. In a conversion pair whose two halves hold the same ornaments, the accent at its later code, the breath mark, the tempo mark, the staff text and the slur all keep their codes, and only the one articulation changes. Corpus-wide the same picture holds: across the format 3.05 files there is not one staccato at `0xC9`, the most common articulation in every other generation, while `0xCF` is the most common code in that range.
 
 Codes `0xC0`, `0xC1`, `0xC2` and `0xCA` also occur in 3.05 and are absent or rare later. They are probably the same block shifted, which would make them the fingerings and the up bow, but no conversion pair covers them and they are left as stated.
 
