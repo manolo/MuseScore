@@ -1164,3 +1164,61 @@ TEST_F(Tst_Options, overfull_note_recut_to_tied_chain)
         delete score;
     }
 }
+
+// Encore lets the last note of a bar be drawn longer than the space left and clips its playback to
+// what remains: a 3/4 bar whose first seven notes fill 600 of its 720 ticks ends with a quarter that
+// states one dot, so 360 are drawn where 120 fit. Which of the two the import keeps is the overfull
+// strategy's decision, and the importer used to make it silently by cutting the note to the gap.
+TEST_F(Tst_Options, overfill_irregular_keeps_the_figure_of_an_over_long_last_note)
+{
+    EncImportOptions opts;
+    opts.overfillMeasureStrategy = OverfillStrategy::IrregularMeasure;
+    MasterScore* score = readEncoreScoreWithOpts("notes_last_note_longer_than_space.enc", opts);
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m = score->firstMeasure() ? score->firstMeasure()->nextMeasure() : nullptr;
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->ticks(), Fraction(4, 4)) << "the bar grows from 3/4 until the drawn figure fits";
+
+    Chord* last = nullptr;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        if (s->element(0) && s->element(0)->isChord()) {
+            last = toChord(s->element(0));
+        }
+    }
+    ASSERT_NE(last, nullptr);
+    EXPECT_EQ(last->durationType(), DurationType::V_QUARTER);
+    EXPECT_EQ(last->dots(), 1) << "the note keeps the figure Encore prints";
+
+    delete score;
+}
+
+// The same bar under the strategy that keeps bar lengths standard: the note is fitted to the space
+// it has, which is what Encore plays, and the bar stays 3/4.
+TEST_F(Tst_Options, overfill_truncate_fits_an_over_long_last_note_to_its_space)
+{
+    EncImportOptions opts;
+    opts.overfillMeasureStrategy = OverfillStrategy::Truncate;
+    MasterScore* score = readEncoreScoreWithOpts("notes_last_note_longer_than_space.enc", opts);
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    Measure* m = score->firstMeasure() ? score->firstMeasure()->nextMeasure() : nullptr;
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->ticks(), Fraction(3, 4)) << "the bar keeps its nominal length";
+
+    Chord* last = nullptr;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        if (s->element(0) && s->element(0)->isChord()) {
+            last = toChord(s->element(0));
+        }
+    }
+    ASSERT_NE(last, nullptr);
+    EXPECT_EQ(last->actualTicks(), Fraction(1, 8)) << "and the note lasts the 120 ticks Encore plays";
+    EXPECT_EQ(last->dots(), 0);
+
+    delete score;
+}
