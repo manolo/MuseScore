@@ -1749,6 +1749,50 @@ TEST_F(Tst_Ornaments, trill_simple_tipo_b6_places_ornament_trill)
 
     delete score;
 }
+// An accent on the last note of a bar is stored at the tick where that note ENDS, so nothing starts
+// there. It belongs to the note sounding at that tick, and its xoffset says so: 99 against the 91 of
+// the fifth eighth. Reading "no note here" as "this mark belongs to the next measure" took the
+// accent out of its own bar and hung it on the first chord of the following one.
+TEST_F(Tst_Ornaments, accent_at_note_end_tick_stays_on_its_note)
+{
+    MasterScore* score = readEncoreScore("ornaments_accent_at_note_end_tick.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    auto accentsOn = [](EngravingItem* el) {
+        int n = 0;
+        if (el && el->isChord()) {
+            for (Articulation* a : toChord(el)->articulations()) {
+                if (a->symId() == SymId::articAccentAbove || a->symId() == SymId::articAccentBelow) {
+                    ++n;
+                }
+            }
+        }
+        return n;
+    };
+
+    Measure* m0 = score->firstMeasure();
+    ASSERT_NE(m0, nullptr);
+    Chord* last = nullptr;
+    for (Segment* s = m0->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        if (s->element(0) && s->element(0)->isChord()) {
+            last = toChord(s->element(0));
+        }
+    }
+    ASSERT_NE(last, nullptr);
+    EXPECT_EQ(accentsOn(last), 1) << "the accent belongs to the note that sounds at its tick";
+
+    Measure* m1 = m0->nextMeasure();
+    ASSERT_NE(m1, nullptr);
+    Segment* firstOfNext = m1->first(SegmentType::ChordRest);
+    ASSERT_NE(firstOfNext, nullptr);
+    EXPECT_EQ(accentsOn(firstOfNext->element(0)), 0)
+        << "and must not travel to the next measure";
+
+    delete score;
+}
+
 TEST_F(Tst_Ornaments, accent_orn_attaches_to_nonzero_voice)
 {
     // Single-staff file: note C4 in voice=1 at tick=0, ORN 0xBE at voice=0.
