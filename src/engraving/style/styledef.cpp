@@ -76,6 +76,7 @@ const std::array<StyleDef::StyleValue, size_t(Sid::STYLES)> StyleDef::styleValue
     styleDef(lyricsMinTopDistance,                       1.0_sp),
     styleDef(lyricsMinBottomDistance,                    1.5_sp),
     styleDef(lyricsMinDistance,                          0.25_sp),
+    styleDef(lyricsWordSpacing,                          Spatium(0.5)),
     styleDef(lyricsLineHeight,                           1.0),
     styleDef(lyricsDashMinLength,                        0.4_sp),
     styleDef(lyricsDashMaxLength,                        0.6_sp),

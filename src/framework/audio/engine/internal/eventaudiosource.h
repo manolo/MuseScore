@@ -38,8 +38,8 @@ class EventAudioSource : public ITrackAudioInput, public muse::Contextable, publ
 public:
     using OnOffStreamEventsReceived = std::function<void (const TrackId)>;
 
-    explicit EventAudioSource(const TrackId trackId, const mpe::PlaybackData& playbackData, OnOffStreamEventsReceived onOffStreamReceived,
-                              const muse::modularity::ContextPtr& iocCtx);
+    explicit EventAudioSource(const TrackId trackId, const std::string& trackName, const mpe::PlaybackData& playbackData,
+                              OnOffStreamEventsReceived onOffStreamReceived, const muse::modularity::ContextPtr& iocCtx);
 
     ~EventAudioSource() override;
 
@@ -85,6 +85,7 @@ private:
     void restoreSynthCtx(const SynthCtx& ctx);
 
     TrackId m_trackId = -1;
+    std::string m_hostTrackName;
     mpe::PlaybackData m_playbackData;
     synth::ISynthesizerPtr m_synth = nullptr;
     AudioInputParams m_params;

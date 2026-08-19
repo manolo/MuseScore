@@ -34,6 +34,7 @@
 /* ============================================== */
 /* Import Export Modules                          */
 /* ============================================== */
+#cmakedefine MUE_BUILD_IMPEXP_ENCORE_MODULE ${MUE_BUILD_IMPEXP_ENCORE_MODULE})
 #cmakedefine MUE_BUILD_IMPEXP_BB_MODULE ${MUE_BUILD_IMPEXP_BB_MODULE})
 #cmakedefine MUE_BUILD_IMPEXP_BWW_MODULE ${MUE_BUILD_IMPEXP_BWW_MODULE})
 #cmakedefine MUE_BUILD_IMPEXP_CAPELLA_MODULE ${MUE_BUILD_IMPEXP_CAPELLA_MODULE})

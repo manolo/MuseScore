@@ -1900,7 +1900,7 @@ void ProjectActionsController::printScore()
 async::Promise<io::path_t> ProjectActionsController::selectScoreOpeningFile() const
 {
     std::string allExt = "*.mscz *.mxl *.musicxml *.xml *.mid *.midi *.kar *.md *.mgu *.sgu *.cap *.capx "
-                         "*.ove *.scw *.bmw *.bww *.gtp *.gp3 *.gp4 *.gp5 *.gpx *.gp *.ptb *.mei *.mnx *.json *.tef *.mscx *.mscs *.mscz~";
+                         "*.ove *.scw *.bmw *.bww *.gtp *.gp3 *.gp4 *.gp5 *.gpx *.gp *.ptb *.mei *.mnx *.json *.tef *.mscx *.mscs *.mscz~ *.enc *.mus";
 
     std::vector<std::string> filter { muse::trc("project", "All supported files") + " (" + allExt + ")",
                                       muse::trc("project", "MuseScore files") + " (*.mscz)",
@@ -1910,6 +1910,7 @@ async::Promise<io::path_t> ProjectActionsController::selectScoreOpeningFile() co
                                       muse::trc("project", "MuseData files") + " (*.md)",
                                       muse::trc("project", "Capella files") + " (*.cap *.capx)",
                                       muse::trc("project", "BB files (experimental)") + " (*.mgu *.sgu)",
+                                      muse::trc("project", "Encore files") + " (*.enc *.mus)",
                                       muse::trc("project", "Overture / Score Writer files (experimental)") + " (*.ove *.scw)",
                                       muse::trc("project", "Bagpipe Music Writer files (experimental)") + " (*.bmw *.bww)",
                                       muse::trc("project", "Guitar Pro files") + " (*.gtp *.gp3 *.gp4 *.gp5 *.gpx *.gp)",

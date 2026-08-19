@@ -32,6 +32,11 @@
 #include "global/io/ioretcodes.h"
 #include "global/io/devtools/allzerosfilecorruptor.h"
 
+#include "engraving/editing/undo.h"
+
+#include "engraving/dom/masterscore.h"
+#include "engraving/dom/excerpt.h"
+#include "engraving/engravingproject.h"
 #include "engraving/compat/engravingcompat.h"
 #include "engraving/dom/excerpt.h"
 #include "engraving/dom/masterscore.h"
@@ -199,6 +204,30 @@ Ret NotationProject::doLoad(const muse::io::path_t& path, const OpenParams& open
     if (!openParams.stylePath.empty()) {
         muse::io::File styleFile(openParams.stylePath);
         m_engravingProject->masterScore()->loadStyle(styleFile);
+        if (!openParams.stylePartsFilter.empty()) {
+            // stylePartsFilter: only apply to matching excerpts
+            mu::engraving::MStyle loadedStyle;
+            if (styleFile.open(muse::io::IODevice::ReadOnly)) {
+                loadedStyle.read(&styleFile, false);
+                styleFile.close();
+            }
+            bool negateFilter = openParams.stylePartsFilter.at(0) == u'!';
+            QString filterPattern = QString::fromStdU16String(
+                negateFilter ? openParams.stylePartsFilter.mid(1).toStdU16String()
+                : openParams.stylePartsFilter.toStdU16String());
+            QRegularExpression filterRegex(QRegularExpression::wildcardToRegularExpression(filterPattern));
+            for (mu::engraving::Excerpt* excerpt : m_engravingProject->masterScore()->excerpts()) {
+                if (excerpt->excerptScore()) {
+                    QString excerptName = excerpt->name();
+                    bool matches = filterRegex.match(excerptName).hasMatch();
+                    if (negateFilter ? !matches : matches) {
+                        excerpt->excerptScore()->setStyle(loadedStyle, false);
+                    }
+                }
+            }
+        } else {
+            m_engravingProject->masterScore()->loadStyle(styleFile);
+        }
     }
 
     mu::engraving::compat::EngravingCompat::doPreLayoutCompatIfNeeded(m_engravingProject->masterScore());
@@ -297,10 +326,18 @@ Ret NotationProject::doImport(const muse::io::path_t& path, const OpenParams& op
 
     io::path_t stylePath = openParams.stylePath.empty() ? notationConfiguration()->styleFileImportPath() : openParams.stylePath;
 
-    // Load style if present
+    // Load style if present - read into MStyle for reuse (to support stylePartsFilter)
+    mu::engraving::MStyle loadedStyle;
+    bool styleLoaded = false;
     if (!stylePath.empty()) {
         muse::io::File styleFile(stylePath);
-        score->loadStyle(styleFile);
+        if (styleFile.open(muse::io::IODevice::ReadOnly)) {
+            styleLoaded = loadedStyle.read(&styleFile, false);
+            styleFile.close();
+        }
+        if (styleLoaded && openParams.stylePartsFilter.empty()) {
+            score->setStyle(loadedStyle, false);
+        }
     }
 
     // Init ChordList
@@ -323,6 +360,24 @@ Ret NotationProject::doImport(const muse::io::path_t& path, const OpenParams& op
         score = original->unrollRepeats();
         delete original;
         m_engravingProject->setMasterScore(score);
+    }
+
+    // Apply style to excerpts (parts) if style was specified and filter is active
+    if (styleLoaded && !openParams.stylePartsFilter.empty()) {
+        bool negateFilter = openParams.stylePartsFilter.at(0) == u'!';
+        QString filterPattern = QString::fromStdU16String(
+            negateFilter ? openParams.stylePartsFilter.mid(1).toStdU16String()
+            : openParams.stylePartsFilter.toStdU16String());
+        QRegularExpression filterRegex(QRegularExpression::wildcardToRegularExpression(filterPattern));
+        for (mu::engraving::Excerpt* excerpt : score->excerpts()) {
+            if (excerpt->excerptScore()) {
+                QString excerptName = excerpt->name();
+                bool matches = filterRegex.match(excerptName).hasMatch();
+                if (negateFilter ? !matches : matches) {
+                    excerpt->excerptScore()->setStyle(loadedStyle, false);
+                }
+            }
+        }
     }
 
     // Setup audio settings
@@ -392,7 +447,7 @@ Ret NotationProject::loadTemplate(const ProjectCreateOptions& projectOptions)
 {
     TRACEFUNC;
 
-    Ret ret = load(projectOptions.templatePath);
+    Ret ret = load(projectOptions.templatePath, OpenParams {});
 
     if (ret) {
         setPath(projectOptions.title.isEmpty() ? scoreDefaultTitle() : projectOptions.title);
