@@ -11763,6 +11763,32 @@ def _dotted_hint_measures(note, orn):
     return [(meas_hdr(3, 4), control), (meas_hdr(3, 4), dotted)]
 
 
+def gen_v0c4_last_note_drawn_longer_than_its_space():
+    """A 3/4 bar whose last note is drawn longer than the space left, which Encore allows.
+
+    Seven notes fill 600 of the bar's 720 ticks, then a quarter at 600 states one dot in its layout
+    byte, so Encore draws 360 where 120 remain and clips the playback to the 120. What the importer
+    does with it is the user's choice: the expand-measure strategy keeps the figure and grows the
+    bar, the others fit it to the space.
+    """
+    lead  = note_v0c4(0,   0, 0, fv=3, pitch=60)
+    lead += note_v0c4(240, 0, 0, fv=3, pitch=62)
+    lead += note_v0c4(480, 0, 0, fv=3, pitch=64)
+    lead += end_marker()
+
+    e  = note_v0c4(0,   0, 0, fv=4, pitch=60)
+    e += note_v0c4(120, 0, 0, fv=5, pitch=62)
+    e += note_v0c4(180, 0, 0, fv=5, pitch=64)
+    e += note_v0c4(240, 0, 0, fv=4, pitch=65)
+    e += note_v0c4(360, 0, 0, fv=5, pitch=67)
+    e += note_v0c4(420, 0, 0, fv=5, pitch=69)
+    e += note_v0c4(480, 0, 0, fv=4, pitch=71)
+    e += note_v0c4(600, 0, 0, fv=3, pitch=72, layout=0x1d)   # quarter stating one dot
+    e += end_marker()
+    # A full bar leads, so the one under test is never read as a pickup.
+    return assemble(0xC4, [(meas_hdr(3, 4), lead), (meas_hdr(3, 4), e)], fill_ts=(3, 4))
+
+
 def gen_v0c4_accent_at_note_end_tick():
     """An accent stored at the tick where its note ENDS, which is where Encore puts it when the
     note is the last of the bar.
@@ -13665,6 +13691,7 @@ if __name__=='__main__':
     write("ornaments_v0c4_grace_slur_to_main_coloc.enc", gen_v0c4_grace_slur_to_main_coloc())
     write("rest_dotted_before_notes.enc", gen_v0c4_rest_dotted_before_notes())
     write("ornaments_accent_at_note_end_tick.enc",         gen_v0c4_accent_at_note_end_tick(), layout=False)
+    write("notes_last_note_longer_than_space.enc",         gen_v0c4_last_note_drawn_longer_than_its_space())
     write("notes_v0c4_dotted_hint_fills_bar.enc",          gen_v0c4_dotted_hint_fills_bar())
     write("notes_v0c2_dotted_hint_fills_bar.enc",          gen_v0c2_dotted_hint_fills_bar(), layout=False)
     write("tuplet_4to3_quadruplet.enc", gen_v0c4_4to3_quadruplet())
