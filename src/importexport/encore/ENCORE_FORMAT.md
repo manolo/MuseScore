@@ -1046,6 +1046,8 @@ The disagreements are worth knowing, and two of Encore's editing habits account 
 
 **The last note of a bar may be longer than the space left.** Encore accepts any figure there and clips its playback to whatever remains, so a bar can display a dotted half after a quarter rest in 3/4 and still lay out normally; fill the bar first and the program refuses the note instead `[verified]`. Twenty five notes state a dot on the last note of a voice whose face value already fills the space, which is this and not a dot the durations lost.
 
+The habit is common rather than exceptional: in 9022 voice groups of the corpus, spread over 114 files, the last note is drawn longer than its space by at least a 32nd `[verified]`. Two hundred and nine of those owe the excess to a stated dot and the rest to a face value that never fitted, a whole note in the last two beats being the usual shape. A reader that wants the page to match Encore's has to keep the figure and give the bar the room; one that wants the playback to match has to fit the note to the space. The two cannot both be had, since a written duration in most notation models is the time it occupies.
+
 The rest are ordinary. In 272 notes the durations show a dot the count does not state, which is a gap standing where a rest was not written, and 90 are triple-dotted by duration, which the two-bit field cannot express at all.
 
 A spacing is never evidence on its own. A sixteenth whose note-on sits a plain eighth after the note before it is what an undotted eighth followed by a sixteenth looks like, and it occurs at the same rate in every generation, so a reader that infers a dot from that shape is inventing one.

@@ -351,6 +351,32 @@ static int statedExtra(const EncMeasureElem* e)
 // account for the group's shortfall exactly, not merely fit in it: room alone would let a spurious
 // bit dot a plain note, which the two tests named in ENCORE_IMPORTER.md 6.1 pin down.
 // See ENCORE_FORMAT.md 7.3 Dots for the two habits this tells apart.
+// Encore lets the LAST note of a bar be drawn longer than the space left and clips its playback to
+// what remains, so a bar with 120 ticks free can end in a dotted quarter. The face value survives
+// that on its own, being authoritative for the notation, but the dots do not: they are stated in the
+// layout byte and no duration in the bar shows them. Restore them and let the importer's overfull
+// strategy decide what the bar does about it, which is the question that option exists to answer.
+void EncMeasure::keepStatedFigureOfLastNote(std::vector<EncMeasureElem*>& elems)
+{
+    if (elems.empty()) {
+        return;
+    }
+    for (const EncMeasureElem* e : elems) {
+        // A tuplet rescales the group and the tuplet passes own that arithmetic.
+        if (e->inTuplet()) {
+            return;
+        }
+    }
+    auto* en = dynamic_cast<EncNote*>(elems.back());
+    if (!en) {
+        return;
+    }
+    const int stated = dottedTicks(faceValue2ticks(en->faceValue4()), en->dotControl & 0x03);
+    if (stated > en->realDuration) {
+        en->realDuration = static_cast<qint16>(stated);
+    }
+}
+
 void EncMeasure::restoreHintedDots(std::vector<EncMeasureElem*>& elems, int staffIdx, int voice)
 {
     int writtenSum = 0;
@@ -423,6 +449,7 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, const EncFor
         }
         computeElementDurations(elems, durTicks, hasGraceTimeBorrowing, boundaries);
         restoreHintedDots(elems, key.first, key.second);
+        keepStatedFigureOfLastNote(elems);
         fmt.postProcessVoiceGroup(elems, durTicks);
     }
 
