@@ -858,6 +858,8 @@ Type 5, variable size, and the busiest element in the format: it covers hairpins
 | `+30`  | 2    | tempo BPM                                            |
 | `+32`  | 1    | staff-text entry index, when the size is at least 33 |
 
+**A mark attached to a note does not always carry that note's tick.** An accent, a bow or a similar mark on the **last** note of a bar is stored at the tick where that note ends, so nothing starts there: a bar of five eighths carries its accent at 600 while the note it belongs to begins at 480 `[verified]`. The x-offset settles it, since it sits a few pixels past the note's own, 99 against 91 in that bar. A reader that takes an empty tick as a mark belonging elsewhere loses it.
+
 **Tempo beat unit.** The low seven bits are the note value, 0 whole, 1 half, 2 quarter, 3 eighth and so on, and bit `0x80` marks it dotted, so `0x02` is a quarter and `0x82` a dotted quarter. A value of 0, or an out-of-range byte from an older generation, means no explicit unit.
 
 **Tempo BPM** sits at `+30` expressed in that unit, with one exception: older `0xC2` files store the BPM directly at `+28` and leave a constant unrelated byte, observed as `0x34`, in the `+30` slot `[observed]`. Tell them apart by `+28`: a valid beat-unit code means the BPM is at `+30`, otherwise `+28` is itself the BPM. In that older layout the per-mark beat unit is at `+26`, which matters in compound meters.
