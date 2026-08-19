@@ -6,6 +6,8 @@ This document describes how MuseScore turns an Encore file into a score. The byt
 
 Chapters 1 and 2 are the ones to read first: they describe the two layers and the path a file takes through them. After that the order follows the score being built, from the staves down to the marks attached to a note, so a reader looking for one subject can jump straight to its chapter.
 
+Two shorter documents sit beside these and are not repeated here either: [ENCORE_CORPUS.md](ENCORE_CORPUS.md) counts what real files are, which programs wrote them and when, and answers the questions the encrypted container raises; [ENCORE_READERS.md](ENCORE_READERS.md) covers how a reader is chosen per generation, what has been proven about that choice, and where the reading is still untested.
+
 Paths are relative to `src/importexport/encore`. A name in code font is a symbol in that tree unless it is said to be a MuseScore one. Encore's own field names are the ones ENCORE_FORMAT.md uses.
 
 Two words recur and are worth fixing here. A **generation** is a version of the format, named by the offset its header ends at: v0xA6 for Encore 2.x, v0xC2 for Encore 3.x and 4.x, v0xC4 for Encore 5.x, with SCO5 as the big-endian Macintosh container of the last one. A **track key** is the pair of staff index and voice that the importer accumulates time against, and it is the unit almost every per-voice rule works on.
