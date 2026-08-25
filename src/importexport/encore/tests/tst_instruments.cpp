@@ -848,6 +848,40 @@ TEST_F(Tst_Instruments, oversized_varsize_key_read_from_entry)
     delete score;
 }
 
+TEST_F(Tst_Instruments, total_size_tk_midi_read_from_other_generation_distance)
+{
+    // Same file as the key test above: the tables sit 44 bytes before the entry end, so the usual
+    // position 46 falls inside the channel run. Reading the program there returns the channel
+    // number (1), which resolves to Grand Piano; the program at the confirmed table is 75.
+    MasterScore* score = readEncoreScore("instruments_total_size_tk_key_not_from_channel_run.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    const Instrument* inst = score->parts()[0]->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(inst->id(), String(u"soprano-recorder"))
+        << "Program 75 sits at the confirmed table; reading the channel run instead gives 1, a piano";
+    delete score;
+}
+
+TEST_F(Tst_Instruments, small_tk_tables_are_not_borrowed_from_the_next_entry)
+{
+    // Instrument 0 keeps no per-staff table, and the position its declared size points at falls
+    // inside instrument 1, which does keep one. With the stride measured between the two blocks
+    // that position is known to be outside instrument 0, so it must not be read: instrument 0 has
+    // no program and lands on the Grand Piano fallback rather than on instrument 1's program 90.
+    MasterScore* score = readEncoreScore("instruments_small_tk_no_cross_entry_tables.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_GE(static_cast<int>(score->parts().size()), 2)
+        << "File declares 2 instruments; both must appear as parts";
+    const Instrument* inst0 = score->parts()[0]->instrument();
+    ASSERT_NE(inst0, nullptr);
+    EXPECT_EQ(inst0->id(), String(u"grand-piano"))
+        << "An instrument with no table of its own must not take the next instrument's program";
+    delete score;
+}
+
+// An empty name on a real TK block is authoritative: the importer must fall back to "Part N" rather than
+// probe the formula offset (where unrelated bytes would produce a garbage name).
 TEST_F(Tst_Instruments, tk_empty_name_is_authoritative_not_recovered)
 {
     MasterScore* score = readEncoreScore("instruments_tk_empty_name_authoritative.enc");
