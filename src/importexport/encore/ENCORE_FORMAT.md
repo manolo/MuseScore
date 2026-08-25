@@ -317,15 +317,15 @@ One per instrument, carrying the name, the MIDI program and the Key transpositio
 2. failing that, the distance from 194 to a single block naming instrument `n > 0`, divided by `n`;
 3. failing that, the span from 194 to the first `PAGE`, `LINE` or `MEAS` block, divided by the instrument count.
 
-Observed sizes are 2158 for Encore 5.0 files, 242 for Encore 4.x files with version byte `0xC4`, and 112 for `0xC2` files `[observed]`. Every entry begins with its name eight bytes in, whether or not it carries a magic, so an instrument whose header was zeroed is still named at `194 + n * entrySize + 8`.
+Observed sizes are 2158 for Encore 5.0 files, 242 for Encore 4.x files with version byte `0xC4`, and 112 for `0xC2` files `[observed]`. The Encore 4 example files write `0x70000000`, which is not a size at all: only the low 16 bits are read, so it masks to zero `[verified]`. A size of zero, or one larger than the stride measured between two blocks, says nothing about the layout, and the entry has to decide. Every entry begins with its name eight bytes in, whether or not it carries a magic, so an instrument whose header was zeroed is still named at `194 + n * entrySize + 8`.
 
 **MIDI program and Key.** Key is a signed byte in semitones matching Encore's "Key" dropdown, 0 meaning it sounds as written and -12 an octave lower, with a range of about -33 to +24; Encore shifts every pitch by it at playback. MIDI program is a 1-indexed General MIDI number. The layout depends on the block size:
 
 | Layout      | Detection                    | MIDI program at       | Key at                |
 |-------------|------------------------------|-----------------------|-----------------------|
-| large       | size > 250                   | `2278 + n * 2158`     | `2255 + n * 2158`     |
-| small, 5.x  | size <= 250, stride size + 8 | `content + size + 76` | `content + size + 53` |
-| 4.x total   | size <= 250, stride size     | `content + 60`        | `content + 42`        |
+| large       | size > 250                   | `2278 + n * 2158`     | 23 ahead of the program table |
+| small, 5.x  | size <= 250, stride size + 8 | `content + size + 76` | 23 ahead of the program table |
+| 4.x total   | size <= 250, stride size     | `content + 60`, or from the entry end | 23 ahead of the program table |
 | format 2.50 | `0xA6`, size 64              | `content + 52`        | `content + 42`        |
 
 `content` is the block start plus eight, and `n` is the instrument's sequential index. The layout names are used in the notes below.
@@ -333,7 +333,11 @@ Observed sizes are 2158 for Encore 5.0 files, 242 for Encore 4.x files with vers
 - In the **large** layout the table sits after the instrument blocks. The program byte is equivalently 2084 bytes into the entry, which is how to find it when the size field claims 112 on a file whose entries really measure 2158 `[verified]`.
 - The size alone cannot tell the layouts apart, so the derived entry size decides: an entry of 2000 bytes or more uses the large offsets `[verified]`.
 - A small-layout offset that computes past the end of the entry means the size overstated the content. The per-staff table is then found from the entry's end instead: it finishes 46 bytes before it with version byte `0xC4` and 44 bytes before it with `0xC2`, the two differing only in how many bytes follow the tables `[verified]`.
-- The **Encore 4.x total** variant stores the total block size, header included, so the stride equals the size rather than size plus eight, and the content is size minus eight bytes. Its offsets match the 2.50 layout `[verified]`.
+- The **Encore 4.x total** variant stores the total block size, header included, so the stride equals the size rather than size plus eight, and the content is size minus eight bytes. Entries short enough that the tables fall back inside the content keep the 2.50 offsets `[verified]`. The 242-byte entries Encore 4.5.x writes keep both tables near the end of the entry instead, at the distances the notes below describe `[verified]`.
+- In every layout of the `0xC2` and `0xC4` generations the Key sits 23 bytes ahead of the program table, so whatever locates that table locates the Key `[verified]`. A Key looked for at a fixed offset inside the content instead lands in the padding that follows the name, reads as zero, and leaves a transposing part sounding and spelled at concert pitch. Only format 2.50 spaces the two fields differently, by 10.
+- The distance from the entry end is not settled by the version byte: entries of 242 bytes with version byte `0xC4` keep the program table 46 bytes before the end, while 112-byte entries of either version keep it 44 `[verified]`. Two bytes short of the table is inside the channel run, and the byte 23 ahead of that spot reads as a plausible +1 semitone, so a reader that trusts one distance alone invents transpositions on the files that use the other.
+- What confirms a candidate position is the channel table that ends exactly where the program table begins: every byte of that run is a channel, below 16, and the last of them is not the program value `[verified]`. A position two bytes inside the channel run fails the last test, and the arbitrary bytes an absolute offset lands on in a file that keeps no table there fail the range test. Requiring the run to be uniform as well is too strict: a staff usually repeats one channel across its voices, but not always.
+- A staff with no program at all, which is how percussion is often stored, leaves nothing to confirm, so its Key can only come from the layout's fixed position or stay unread. That is the one place a Key present in the file goes unread, and it is the safer half of the trade: the bytes that would yield it also yield invented transpositions on files whose tables sit elsewhere.
 - In **format 2.50** each block is 64 bytes with 56 of content. The MIDI byte is at content `+52`, not `+60` as in the total-size variant `[verified]`, and the Key byte at content `+42` is octave-only in practice.
 
 **The MIDI channels** sit immediately before the program, one byte per voice of the staff, stored from zero so the value 9 is the channel Encore's Staff Sheet shows as 10. The table holds eight entries from format 3.05 on and four in 2.50, matching the voices each generation allows, and a staff normally repeats one channel across all of them; the first entry is the staff's channel. Reading it back from the program byte works in every layout above, the large table included, and the values behave as channels do: 0 to 15, one per instrument, ascending through a score `[observed]`.
@@ -348,10 +352,12 @@ Some `0xC4` files and many `0xC2` files carry none, and the metadata lives in a 
 
 | Sub-layout | Detection                | Name at        | MIDI at         | Key at          |
 |------------|--------------------------|----------------|-----------------|-----------------|
-| `0xC4`     | block <= 2278, no `~~~~` | `202 + n*112`  | `390 + n*276`   | 367, one only   |
+| `0xC4`     | block <= 2278, no `~~~~` | `202 + n*112`  | `390 + n*276`   | `367 + n*112`   |
 | large      | first block > 2278       | `202 + n*2158` | `2278 + n*2158` | `2255 + n*2158` |
 | `0xC2` A   | `~~~~` present           | `314 + k*112`  | `374 + k*112`   | ,               |
 | `0xC2` B   | no `~~~~`, block <= 2278 | `202 + n*112`  | `262 + n*112`   | ,               |
+
+Every instrument in this table carries its own Key, 23 bytes ahead of its program entry, and not only the first one `[verified]`. As in the instrument blocks, a Key is taken from a position only where the channel run confirms a program table there, since these are absolute offsets and a file that keeps no table at one of them holds arbitrary bytes.
 
 In variant A the entry table starts at 281, with the name field at `+33` and the MIDI field at `+93`. Some instruments also have an explicit primary block at `202 + n * 2158`, marked by printable ASCII at that offset, and such an instrument's MIDI byte is 60 bytes past it. In variant B the table starts at 176, with the name field at `+26` and the MIDI field at `+86`, giving the bases 202 and 262, and every instrument is in that one linear table. The name offset for instrument 0 is 202 in every compact layout; the step between names is 2158 when the first block lies beyond 2278 and 112 otherwise.
 

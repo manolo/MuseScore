@@ -4978,6 +4978,96 @@ def gen_v0c4_total_size_tk_two_instrs():
 
 
 # ===========================================================================
+# instruments_total_size_tk_key_from_entry_end.enc
+# Two TK blocks in Encore 4.x total-block-size format with the entry size a
+# real Encore 4.5.x save uses (varSize = 242 = whole block), so the per-staff
+# tables sit near the end of the entry: the program table 46 bytes before the
+# entry end and the key transposition 23 bytes before that, i.e. 69 bytes
+# before the entry end.  TK00: MIDI=66 key=-9, TK01: MIDI=67 key=-14.
+# Verifies the key is anchored to the program table rather than read from a
+# fixed position inside the content, which lands in the name padding and
+# leaves the score in concert pitch.
+# ===========================================================================
+def gen_v0c4_total_size_tk_key_from_entry_end():
+    VARSIZE       = 242            # total block size (8-byte header + 234-byte content)
+    CONTENT       = VARSIZE - 8
+    MIDI_FROM_END = 46             # program table, measured back from the entry end
+    KEY_FROM_END  = MIDI_FROM_END + 23
+    TK_START      = 194
+
+    header = bytearray(SKELETON_PRE[:TK_START])
+    header[0x32] = 2
+
+    def make_tk(idx, name_str, midi_1idx, key_semitones):
+        magic   = 'TK{:02d}'.format(idx).encode('ascii')
+        content = bytearray(CONTENT)
+        nb      = name_str.encode('ascii') + b'\x00'
+        content[:len(nb)] = nb
+        content[CONTENT - MIDI_FROM_END] = midi_1idx & 0xFF
+        content[CONTENT - KEY_FROM_END]  = key_semitones & 0xFF
+        return bytes(magic) + struct.pack('<I', VARSIZE) + bytes(content)
+
+    tk00 = make_tk(0, 'AltoSax', 66, -9)     # Eb alto saxophone
+    tk01 = make_tk(1, 'TenorSax', 67, -14)   # Bb tenor saxophone
+
+    LEGACY_TK_END = 194 + 8 + 2158
+    page_line     = SKELETON_PRE[LEGACY_TK_END:]
+
+    pre  = bytes(header) + tk00 + tk01 + page_line
+    e    = end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
+# ===========================================================================
+# instruments_total_size_tk_key_not_from_channel_run.enc
+# Two TK blocks in total-block-size format whose entries are 112 bytes and
+# keep their per-staff tables at the other generation's distance from the
+# entry end, 44 rather than 46: the channel run covers position 46, so a key
+# taken 23 bytes ahead of it picks up an unrelated byte, planted here as +1
+# semitone.  The key really sits 23 bytes ahead of the table, holding -3.
+# The entry is 130 bytes so that the table falls on no other known position.
+# ===========================================================================
+def gen_v0c4_total_size_tk_key_not_from_channel_run():
+    VARSIZE       = 130
+    CONTENT       = VARSIZE - 8
+    CHANNELS_FROM_END = 52         # eight channel bytes, covering the usual program position
+    PROGRAM_FROM_END  = 44         # the program table really starts here
+    TRAP_FROM_END     = 69         # what the program-table anchor would read as a key
+    KEY_IN_CONTENT    = 42         # the position that holds the key in these entries
+    TK_START      = 194
+
+    header = bytearray(SKELETON_PRE[:TK_START])
+    header[0x32] = 2
+
+    def make_tk(idx, name_str, channel, midi_1idx):
+        magic   = 'TK{:02d}'.format(idx).encode('ascii')
+        content = bytearray(CONTENT)
+        nb      = name_str.encode('ascii') + b'\x00'
+        content[:len(nb)] = nb
+        for v in range(8):
+            content[CONTENT - CHANNELS_FROM_END + v] = channel
+            content[CONTENT - PROGRAM_FROM_END + v]  = midi_1idx & 0xFF
+        content[CONTENT - TRAP_FROM_END] = 1
+        content[CONTENT - PROGRAM_FROM_END - 23] = (-3) & 0xFF
+        content[KEY_IN_CONTENT] = 0
+        return bytes(magic) + struct.pack('<I', VARSIZE) + bytes(content)
+
+    tk00 = make_tk(0, 'InstrA', 1, 75)
+    tk01 = make_tk(1, 'InstrB', 1, 75)
+
+    LEGACY_TK_END = 194 + 8 + 2158
+    page_line     = SKELETON_PRE[LEGACY_TK_END:]
+
+    pre  = bytes(header) + tk00 + tk01 + page_line
+    e    = end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
+# ===========================================================================
 # instruments_instr_perc_clef_drumset.enc
 # Instrument with a non-percussion name ("Pandeiro") but EncClefType::PERC
 # on its first staff. The primary detection path (clef check) must route it
@@ -5696,6 +5786,65 @@ def gen_v0c4_no_tk_blocks_midi_key():
     body = meas_block(meas_hdr(4, 4), e)
     body += b''.join(empty_meas(4, 4) for _ in range(5))
     return bytes(pre) + body + SKELETON_POST
+
+
+# ===========================================================================
+# instruments_no_tk_compact_table_two_instrs.enc
+# No TK block magic, two instruments, and the compact per-staff table: the
+# programs sit at 390 + n*112 behind their channel runs, the keys 23 bytes
+# ahead of them.  Both instruments must get their key, not just the first.
+# ===========================================================================
+def gen_v0c4_no_tk_compact_table_two_instrs():
+    PROG_BASE, PROG_STEP, VOICES = 390, 112, 8
+    pre = bytearray(SKELETON_PRE[:194])
+    pre[0x32] = 2
+    while len(pre) < PROG_BASE + PROG_STEP + 8:
+        pre.extend(b'\x00' * 64)
+    for n, (prog, key) in enumerate(((66, -2), (67, -9))):
+        off = PROG_BASE + n * PROG_STEP
+        for v in range(VOICES):
+            pre[off - VOICES + v] = 1          # channel run
+            pre[off + v] = prog
+        pre[off - 23] = key & 0xFF
+    LEGACY_TK_END = 194 + 8 + 2158
+    pre += SKELETON_PRE[LEGACY_TK_END:]        # PAGE and LINE, well before offset 2278
+    e = note_v0c4(0, 0, 0, fv=3, pitch=60) + end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return bytes(pre) + body + SKELETON_POST
+
+
+# ===========================================================================
+# instruments_oversized_varsize_key_from_entry_end.enc
+# A 242-byte TK block whose declared size is 0x70000000, as Encore 4 writes
+# it, so the size says nothing about the layout: it masks to zero and exceeds
+# the block.  The per-staff tables sit at the usual distance from the entry
+# end, and the key 23 bytes ahead of them.
+# ===========================================================================
+def gen_v0c4_oversized_varsize_key_from_entry_end():
+    STRIDE, MIDI_FROM_END, VOICES = 242, 46, 8
+    header = bytearray(SKELETON_PRE[:194])
+    header[0x32] = 1
+
+    def make_tk(idx, name_str, midi_1idx, key_semitones):
+        content = bytearray(STRIDE - 8)
+        nb = name_str.encode('ascii') + b'\x00'
+        content[:len(nb)] = nb
+        prog = len(content) - MIDI_FROM_END
+        for v in range(VOICES):
+            content[prog - VOICES + v] = 2
+            content[prog + v] = midi_1idx & 0xFF
+        content[prog - 23] = key_semitones & 0xFF
+        return 'TK{:02d}'.format(idx).encode('ascii') + struct.pack('<I', 0x70000000) + bytes(content)
+
+    LEGACY_TK_END = 194 + 8 + 2158
+    page_line = SKELETON_PRE[LEGACY_TK_END:]
+    page_line = page_line[page_line.index(b'LINE'):]   # LINE right after the entry, as Encore writes it
+    pre = bytes(header) + make_tk(0, 'Bass', 34, -12) + page_line
+    e = end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
 
 
 def gen_v0c4_rdur_80_stays_16th():
@@ -13410,6 +13559,10 @@ if __name__=='__main__':
     write("instruments_small_tk_key6.enc",               gen_v0c4_small_tk_key6())
     write("instruments_small_tk_midi49.enc",            gen_v0c4_small_tk_midi49())
     write("instruments_total_size_tk_two_instrs.enc",   gen_v0c4_total_size_tk_two_instrs())
+    write("instruments_total_size_tk_key_from_entry_end.enc", gen_v0c4_total_size_tk_key_from_entry_end())
+    write("instruments_total_size_tk_key_not_from_channel_run.enc", gen_v0c4_total_size_tk_key_not_from_channel_run())
+    write("instruments_no_tk_compact_table_two_instrs.enc", gen_v0c4_no_tk_compact_table_two_instrs())
+    write("instruments_oversized_varsize_key_from_entry_end.enc", gen_v0c4_oversized_varsize_key_from_entry_end())
     write("instruments_tk_empty_name_authoritative.enc", gen_v0c4_tk_empty_name_authoritative())
     write("instruments_instr_perc_clef_drumset.enc",    gen_v0c4_instr_perc_clef_drumset())
     write("instruments_instr_drums_name_drumset.enc",   gen_v0c4_instr_drums_name_drumset())
