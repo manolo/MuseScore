@@ -137,7 +137,7 @@ void buildMeasures(BuildCtx& ctx)
         ctx.encToMsIdx.push_back(msIdxCounter);
 
         for (int di = 0; di < displayCount; ++di) {
-            Measure* measure = Factory::createMeasure(score->dummy()->system());
+            Measure* measure = Factory::createMeasure(score);
             measure->setTick(Fraction::fromTicks(currentTick));
 
             // Case A: timeSig[0] != timeSig[1], pickup with explicit shorter sig; shorten now.

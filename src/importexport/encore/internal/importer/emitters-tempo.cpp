@@ -164,7 +164,6 @@ void applyMeasureBpmMarks(BuildCtx& ctx)
             tt->setXmlText(tempoXmlText(displayBpm, displayBeatTicks));
             tt->setFollowText(true);
             seg->add(tt);
-            score->setTempo(measTick, BeatsPerSecond(bps));
         }
         lastBpm = bpm;
     }
