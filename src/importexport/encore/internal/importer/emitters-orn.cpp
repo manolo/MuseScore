@@ -136,7 +136,6 @@ static void handleStaffTextOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
         if (tempoBps > 0.0) {
             tt2->setTempo(BeatsPerSecond(tempoBps));
             tt2->setFollowText(true);
-            score->setTempo(elemTick, BeatsPerSecond(tempoBps));
         }
         if (placeBelow) {
             tt2->setPlacement(mu::engraving::PlacementV::BELOW);
@@ -215,7 +214,6 @@ static void handleTempoOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
         tt2->setXmlText(tempoXmlText(static_cast<int>(eo->tempo), displayBeatTicks));
         tt2->setFollowText(true);
         seg->add(tt2);
-        score->setTempo(seg->tick(), BeatsPerSecond(bps));
     }
 }
 

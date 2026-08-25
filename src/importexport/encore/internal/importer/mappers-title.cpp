@@ -104,7 +104,7 @@ void addTitleFrame(MasterScore* score, const EncTitle& titleBlock)
         return;
     }
 
-    VBox* vbox = Factory::createTitleVBox(score->dummy()->system());
+    VBox* vbox = Factory::createTitleVBox(score);
     vbox->setNext(score->first());
     score->measures()->add(vbox);
 
