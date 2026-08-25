@@ -80,8 +80,9 @@ void dissolveTuplet(Tuplet* t)
             de->setTuplet(nullptr);
         }
     }
-    if (EngravingItem* parent = t->parentItem()) {
-        parent->remove(t);
+    EngravingObject* parent = t->parent();
+    if (parent && parent->isEngravingItem()) {
+        toEngravingItem(parent)->remove(t);
     }
     delete t;
 }
