@@ -5847,6 +5847,43 @@ def gen_v0c4_oversized_varsize_key_from_entry_end():
     return pre + body + SKELETON_POST
 
 
+# ===========================================================================
+# instruments_small_tk_no_cross_entry_tables.enc
+# Two 112-byte TK blocks, so the stride is measured between them.  Instrument 0
+# keeps no per-staff table of its own, and the position the 5.x formula points
+# at for it (content + size + 76) falls inside instrument 1, where this file
+# does keep a table.  Instrument 0 must not borrow it: with no table of its own
+# it has no program, and falls back to Grand Piano.
+# ===========================================================================
+def gen_v0c4_small_tk_no_cross_entry_tables():
+    VARSIZE, VOICES = 112, 8
+    TK_START = 194
+    CROSS_IN_NEXT = 84          # where instrument 0's 5.x formula lands inside instrument 1
+
+    header = bytearray(SKELETON_PRE[:TK_START])
+    header[0x32] = 2
+
+    def make_tk(idx, name_str, table_at=None, prog=0):
+        content = bytearray(VARSIZE - 8)
+        nb = name_str.encode('ascii') + b'\x00'
+        content[:len(nb)] = nb
+        if table_at is not None:                      # channel run then program, inside the content
+            for v in range(VOICES):
+                content[table_at - 8 - 8 + v] = 1
+                content[table_at - 8 + v] = prog
+        return 'TK{:02d}'.format(idx).encode('ascii') + struct.pack('<I', VARSIZE) + bytes(content)
+
+    tk00 = make_tk(0, 'NoTable')
+    tk01 = make_tk(1, 'HasTable', table_at=CROSS_IN_NEXT, prog=90)
+
+    LEGACY_TK_END = 194 + 8 + 2158
+    pre = bytes(header) + tk00 + tk01 + SKELETON_PRE[LEGACY_TK_END:]
+    e = end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
 def gen_v0c4_rdur_80_stays_16th():
     # 1/16 face value, 80 raw ticks apart so calculateRealDurations writes
     # rdur=80 on the first note (the old triplet table would upgrade to V_EIGHTH).
@@ -13563,6 +13600,7 @@ if __name__=='__main__':
     write("instruments_total_size_tk_key_not_from_channel_run.enc", gen_v0c4_total_size_tk_key_not_from_channel_run())
     write("instruments_no_tk_compact_table_two_instrs.enc", gen_v0c4_no_tk_compact_table_two_instrs())
     write("instruments_oversized_varsize_key_from_entry_end.enc", gen_v0c4_oversized_varsize_key_from_entry_end())
+    write("instruments_small_tk_no_cross_entry_tables.enc", gen_v0c4_small_tk_no_cross_entry_tables())
     write("instruments_tk_empty_name_authoritative.enc", gen_v0c4_tk_empty_name_authoritative())
     write("instruments_instr_perc_clef_drumset.enc",    gen_v0c4_instr_perc_clef_drumset())
     write("instruments_instr_drums_name_drumset.enc",   gen_v0c4_instr_drums_name_drumset())
