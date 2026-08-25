@@ -27,6 +27,8 @@
 
 #include <QDataStream>
 
+#include <initializer_list>
+
 #include "elem.h"
 #include "parsers-encoding.h"
 #include "log.h"
@@ -46,6 +48,8 @@ static int readMidiByteAt(QDataStream& ds, qint64 off)
     return (prg >= 1 && prg <= 128) ? static_cast<int>(prg) : 0;
 }
 
+static constexpr qint64 VOICES_PER_STAFF = 8;
+
 // The MIDI channels sit immediately before the program byte, one per voice of the staff, eight of
 // them from format 3.05 on, and a staff normally carries the same channel on every voice. The first
 // one is the staff's channel, and it is read whether or not the program byte holds anything: a
@@ -53,7 +57,6 @@ static int readMidiByteAt(QDataStream& ds, qint64 off)
 // shows it. See ENCORE_FORMAT.md §5.1 Instrument block.
 static void readChannelBeforeMidi(QDataStream& ds, qint64 midiOff, EncInstrument& instr)
 {
-    static constexpr qint64 VOICES_PER_STAFF = 8;
     const qint64 off = midiOff - VOICES_PER_STAFF;
     if (off < 0 || !ds.device()->seek(off)) {
         return;
@@ -600,112 +603,130 @@ void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds, 
     }
 }
 
-static void readKeyTranspositionsNoTk(std::vector<EncInstrument>& instruments, QDataStream& ds, qint64 firstBlockOff)
+// The distances the two generations keep between the program table and the entry end; a file can
+// carry either, whatever its version byte says.
+static constexpr qint64 MIDI_FROM_ENTRY_END_305 = 46;
+static constexpr qint64 MIDI_FROM_ENTRY_END_300 = 44;
+
+// True when off begins a per-staff program table: the channel table ends right there, one entry per
+// voice, so every byte of the run before a program is a channel, below 16, and the last of them is
+// not the program value itself. That rejects both a position two bytes inside the channel run and
+// the arbitrary bytes an absolute offset can land on. See ENCORE_FORMAT.md §5.1 Instrument block.
+static bool programTableStartsAt(QDataStream& ds, qint64 off)
 {
-    static constexpr qint64 LT_BASE = 2278, LT_STEP = 2158, KEY_OFF = -23;
-    static constexpr qint64 CMP_BASE = 390;
-    const bool useLargeTk = (firstBlockOff > LT_BASE);
-    if (useLargeTk) {
-        for (size_t n = 0; n < instruments.size(); ++n) {
-            const qint64 off = LT_BASE + KEY_OFF + static_cast<qint64>(n) * LT_STEP;
-            if (off < 0 || off >= static_cast<qint64>(ds.device()->size())) {
-                continue;
-            }
-            qint8 sv;
-            if (readKeyByteAt(ds, off, sv)) {
-                instruments[n].keyTransposeSemitones = sv;
-            }
+    static constexpr int MIDI_CHANNELS = 16;
+    const int prg = readMidiByteAt(ds, off);
+    if (!prg || off < VOICES_PER_STAFF || !ds.device()->seek(off - VOICES_PER_STAFF)) {
+        return false;
+    }
+    quint8 ch = 0;
+    for (qint64 v = 0; v < VOICES_PER_STAFF; ++v) {
+        ds >> ch;
+        if (ch >= MIDI_CHANNELS) {
+            return false;
         }
-    } else {
-        if (instruments.size() != 1) {
-            return;
+    }
+    return static_cast<int>(ch) != prg;
+}
+
+// Absolute offset of the per-staff program table: the first of the positions the layouts put it at
+// that a channel run confirms, or -1. See ENCORE_FORMAT.md §5.1 Instrument block.
+static qint64 programTableOffset(QDataStream& ds, std::initializer_list<qint64> candidates)
+{
+    for (const qint64 off : candidates) {
+        if (programTableStartsAt(ds, off)) {
+            return off;
         }
-        const qint64 off = CMP_BASE + KEY_OFF;
-        if (off >= static_cast<qint64>(ds.device()->size())) {
-            return;
-        }
-        qint8 sv;
-        if (readKeyByteAt(ds, off, sv)) {
-            instruments[0].keyTransposeSemitones = sv;
-        }
+    }
+    return -1;
+}
+
+// The key sits KEY_BEFORE_MIDI ahead of the program table, so it follows wherever that table is.
+// A staff with no program leaves nothing to confirm; fallback is then the layout's fixed position,
+// or -1 to read nothing.
+static void readKeyFromTable(EncInstrument& instr, QDataStream& ds, qint64 table, qint64 fallback)
+{
+    static constexpr qint64 KEY_BEFORE_MIDI = 23;
+    const qint64 off = table >= 0 ? table - KEY_BEFORE_MIDI : fallback;
+    if (off < 0 || off >= static_cast<qint64>(ds.device()->size())) {
+        return;
+    }
+    qint8 sv = 0;
+    if (readKeyByteAt(ds, off, sv)) {
+        instr.keyTransposeSemitones = sv;
     }
 }
 
-static void readKeyTranspositionsSmallTk(std::vector<EncInstrument>& instruments, QDataStream& ds)
+// No-TK layout: one linear table, either at the large-entry positions or at the compact ones.
+static void readKeyTranspositionsNoTk(std::vector<EncInstrument>& instruments, QDataStream& ds, qint64 firstBlockOff)
 {
-    // Standard Encore 5.x: key is 23 bytes before the MIDI position
-    //   (KEY_OFF = -23 from MIDI base = 76-23 = 53 bytes past content end).
-    // Encore 4.x total-size variant: key at content[42] (matches v0xA6 TK layout).
-    static constexpr qint64 KEY_AFTER_CONTENT = 76 - 23;   // = 53 (standard 5.x)
-    static constexpr qint64 KEY_IN_CONTENT    = 42;         // Encore 4.x total-size variant
+    static constexpr qint64 LT_BASE = 2278, LT_STEP = 2158;
+    static constexpr qint64 CMP_BASE = 390, CMP_STEP = 112;
+    // Which of the two tables the file uses follows from where its first block starts; an absolute
+    // offset tried against the other layout can land in measure data and pass for a table there.
+    const bool useLargeTk = (firstBlockOff > LT_BASE);
+    for (size_t n = 0; n < instruments.size(); ++n) {
+        const qint64 idx = static_cast<qint64>(n);
+        const qint64 table = useLargeTk ? LT_BASE + idx * LT_STEP : CMP_BASE + idx * CMP_STEP;
+        const qint64 fallback = useLargeTk || instruments.size() == 1 ? table - 23 : -1;
+        readKeyFromTable(instruments[n], ds, programTableOffset(ds, { table }), fallback);
+    }
+}
+
+// SmallTK layout (0 < offset <= 250). The distance from the entry end is not settled by the version
+// byte: a file can carry either generation's, and a misdeclared size moves the content end.
+static void readKeyTranspositionsSmallTk(std::vector<EncInstrument>& instruments, QDataStream& ds,
+                                         qint64 entryStride, qint64 midiFromEntryEnd)
+{
+    static constexpr qint64 MIDI_AFTER_CONTENT = 76, MIDI_IN_CONTENT = 60;
+    static constexpr qint64 KEY_AFTER_CONTENT = MIDI_AFTER_CONTENT - 23;
+    static constexpr qint64 KEY_IN_CONTENT = 42;
     const bool totalSizeFmt = isTotalBlockSizeTkFmt(instruments);
+    // A size of 112 on entries that really measure 2158 leaves the entry large; the stride says so
+    // only when it came from the spacing between two blocks.
+    const bool largeEntry = instruments.size() >= 2 && entryStride >= LARGE_ENTRY_MIN;
+
     for (auto& instr : instruments) {
         if (instr.contentFilePos < 0) {
             continue;
         }
-        const qint64 off = totalSizeFmt
-                           ? instr.contentFilePos + KEY_IN_CONTENT
-                           : instr.contentFilePos + static_cast<qint64>(instr.offset) + KEY_AFTER_CONTENT;
-        if (off < 0 || off >= static_cast<qint64>(ds.device()->size())) {
-            continue;
-        }
-        qint8 sv;
-        if (readKeyByteAt(ds, off, sv)) {
-            instr.keyTransposeSemitones = sv;
-        }
+        const qint64 afterContent = instr.contentFilePos + static_cast<qint64>(instr.offset);
+        const qint64 entryEnd = entryStride > 0 ? instr.contentFilePos - 8 + entryStride : -1;
+        const qint64 fallback = totalSizeFmt ? instr.contentFilePos + KEY_IN_CONTENT
+                                : afterContent + KEY_AFTER_CONTENT;
+        readKeyFromTable(instr, ds, programTableOffset(ds, {
+                    largeEntry ? instr.contentFilePos - 8 + LARGE_ENTRY_MIDI : -1,
+                    entryEnd >= 0 ? entryEnd - midiFromEntryEnd : -1,
+                    entryEnd >= 0 ? entryEnd - MIDI_FROM_ENTRY_END_305 : -1,
+                    entryEnd >= 0 ? entryEnd - MIDI_FROM_ENTRY_END_300 : -1,
+                    afterContent + MIDI_AFTER_CONTENT,
+                    instr.contentFilePos + MIDI_IN_CONTENT,
+                }), fallback);
     }
 }
 
-static void readKeyTranspositionsCompact(std::vector<EncInstrument>& instruments, QDataStream& ds)
-{
-    if (instruments.size() != 1) {
-        return;
-    }
-    static constexpr qint64 MIDI_BASE = 390, KEY_OFF = -23;
-    const qint64 off = MIDI_BASE + KEY_OFF;
-    if (off >= static_cast<qint64>(ds.device()->size())) {
-        return;
-    }
-    qint8 sv;
-    if (readKeyByteAt(ds, off, sv)) {
-        instruments[0].keyTransposeSemitones = sv;
-    }
-}
-
-void readKeyTranspositions(std::vector<EncInstrument>& instruments, QDataStream& ds)
+void readKeyTranspositions(std::vector<EncInstrument>& instruments, QDataStream& ds,
+                           qint64 midiFromEntryEnd)
 {
     if (instruments.empty()) {
         return;
     }
-    const bool noTkBlocks = (instruments[0].contentFilePos < 0);
-    if (noTkBlocks) {
-        const qint64 firstBlockOff = findFirstBlockOffset(ds, /*includePageBlock=*/ true);
-        readKeyTranspositionsNoTk(instruments, ds, firstBlockOff);
+    if (instruments[0].contentFilePos < 0) {
+        readKeyTranspositionsNoTk(instruments, ds, findFirstBlockOffset(ds, /*includePageBlock=*/ true));
         return;
     }
-    const bool compact = (instruments[0].offset == 0);
-    const bool tkBased = (instruments[0].offset > 250);
-
-    if (compact) {
-        readKeyTranspositionsCompact(instruments, ds);
+    // A size of zero is Encore 4's 0x70000000 masked to 16 bits: it says nothing, and with blocks
+    // present the entry decides, as it does for every small layout.
+    if (instruments[0].offset <= 250) {
+        readKeyTranspositionsSmallTk(instruments, ds, instrumentEntryStride(instruments, ds), midiFromEntryEnd);
         return;
     }
-
-    if (!tkBased) {
-        readKeyTranspositionsSmallTk(instruments, ds);
-        return;
-    }
-
-    static constexpr qint64 PRG_BASE = 2278, PRG_STEP = 2158, KEY_OFF = -23;
+    static constexpr qint64 PRG_BASE = 2278, PRG_STEP = 2158;
     for (size_t n = 0; n < instruments.size(); ++n) {
-        const qint64 off = PRG_BASE + KEY_OFF + static_cast<qint64>(n) * PRG_STEP;
-        if (off < 0 || off >= static_cast<qint64>(ds.device()->size())) {
-            continue;
-        }
-        qint8 sv;
-        if (readKeyByteAt(ds, off, sv)) {
-            instruments[n].keyTransposeSemitones = sv;
-        }
+        const qint64 fixed = PRG_BASE + static_cast<qint64>(n) * PRG_STEP;
+        readKeyFromTable(instruments[n], ds, programTableOffset(ds, {
+                    instruments[n].contentFilePos - 8 + LARGE_ENTRY_MIDI, fixed,
+                }), fixed - 23);
     }
 }
 } // namespace
@@ -716,7 +737,7 @@ bool EncFormatReader_V0xC4Base::readInstrumentMeta(std::vector<EncInstrument>& i
 {
     recoverMissingNames(instruments, ds);
     readMidiPrograms(instruments, ds, midiProgramFromEntryEnd());
-    readKeyTranspositions(instruments, ds);
+    readKeyTranspositions(instruments, ds, midiProgramFromEntryEnd());
     return true;
 }
 } // namespace mu::iex::enc

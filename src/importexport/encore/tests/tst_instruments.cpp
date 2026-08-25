@@ -783,8 +783,71 @@ TEST_F(Tst_Instruments, total_size_tk_midi_read_from_content_offset)
     delete score;
 }
 
-// An empty name on a real TK block is authoritative: the importer must fall back to "Part N" rather than
-// probe the formula offset (where unrelated bytes would produce a garbage name).
+TEST_F(Tst_Instruments, total_size_tk_key_read_from_entry_end)
+{
+    // Encore 4.5.x TK varSize is the TOTAL block size, and its entries are long enough that the
+    // per-staff tables sit near the entry end: the program table 46 bytes before it and the key
+    // transposition 23 bytes before that. Reading the key from a fixed position inside the content
+    // lands in the name padding, so both parts came in at concert pitch (chromatic 0).
+    MasterScore* score = readEncoreScore("instruments_total_size_tk_key_from_entry_end.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_GE(static_cast<int>(score->parts().size()), 2)
+        << "File declares 2 instruments; both must appear as parts";
+    const Instrument* inst0 = score->parts()[0]->instrument();
+    const Instrument* inst1 = score->parts()[1]->instrument();
+    ASSERT_NE(inst0, nullptr);
+    ASSERT_NE(inst1, nullptr);
+    EXPECT_EQ(inst0->transpose().chromatic, -9)
+        << "Key=-9 sits 69 bytes before the entry end in the total-size layout";
+    EXPECT_EQ(inst1->transpose().chromatic, -14)
+        << "Key=-14 sits 69 bytes before the entry end in the total-size layout";
+    delete score;
+}
+
+TEST_F(Tst_Instruments, total_size_tk_key_read_from_other_generation_distance)
+{
+    // These entries keep their per-staff tables at the other generation's distance from the entry
+    // end, 44 rather than 46, so the channel run covers position 46. The key must come from 23
+    // bytes ahead of the real table (-3), not from 23 ahead of the channel run, where the file
+    // holds an unrelated +1.
+    MasterScore* score = readEncoreScore("instruments_total_size_tk_key_not_from_channel_run.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_GE(static_cast<int>(score->parts().size()), 2)
+        << "File declares 2 instruments; both must appear as parts";
+    EXPECT_EQ(score->parts()[0]->instrument()->transpose().chromatic, -3)
+        << "Key must follow the program table, wherever the entry keeps it";
+    EXPECT_EQ(score->parts()[1]->instrument()->transpose().chromatic, -3)
+        << "Key must follow the program table, wherever the entry keeps it";
+    delete score;
+}
+
+TEST_F(Tst_Instruments, no_tk_compact_table_reads_key_for_every_instrument)
+{
+    // No TK blocks and the compact per-staff table: every instrument's key sits 23 bytes ahead of
+    // its own program table, not only the first one's.
+    MasterScore* score = readEncoreScore("instruments_no_tk_compact_table_two_instrs.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_GE(static_cast<int>(score->parts().size()), 2)
+        << "File declares 2 instruments; both must appear as parts";
+    EXPECT_EQ(score->parts()[0]->instrument()->transpose().chromatic, -2);
+    EXPECT_EQ(score->parts()[1]->instrument()->transpose().chromatic, -9)
+        << "The second instrument's key must be read too, at 390 + 112 - 23";
+    delete score;
+}
+
+TEST_F(Tst_Instruments, oversized_varsize_key_read_from_entry)
+{
+    // The declared block size is 0x70000000, as Encore 4 writes it: it masks to zero and exceeds
+    // the block, so it says nothing about the layout and the entry decides. Trusting it sends the
+    // read to the compact table of a file that has none.
+    MasterScore* score = readEncoreScore("instruments_oversized_varsize_key_from_entry_end.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->parts().empty());
+    EXPECT_EQ(score->parts()[0]->instrument()->transpose().chromatic, -12)
+        << "Key must come from the entry, 23 bytes ahead of its program table";
+    delete score;
+}
+
 TEST_F(Tst_Instruments, tk_empty_name_is_authoritative_not_recovered)
 {
     MasterScore* score = readEncoreScore("instruments_tk_empty_name_authoritative.enc");
