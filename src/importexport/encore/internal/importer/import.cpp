@@ -389,7 +389,7 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     // at -1; that makes Part::midiPort() index m_midiMapping[-1] and crash on a
     // straight-to-MusicXML export.
     score->rebuildMidiMapping();
-    score->setUpTempoMap();
+    score->updateTicksAndTimeSigMap();
     score->doLayout();
 
     if (ctx.opts.mergeVoices) {
