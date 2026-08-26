@@ -904,10 +904,14 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
     // that beat); placing it would push later content forward and inflate the bar. Drop it.
     // Not while a tuplet is open: a member's stored tick is the rounding of a position that is not
     // a whole number of Encore ticks, so it can sit a tick or two before the exact one the members
-    // emitted so far add up to, and dropping it would leave the group a member short.
+    // emitted so far add up to, and dropping it would leave the group a member short. Nor when the
+    // rest is the member that opens a bracket, where no tuplet is open yet to say so: a note played
+    // shorter than it is written leaves every stored tick after it early, and the first member can
+    // then arrive a whole beat behind the position the notes so far add up to.
     const bool voiceInTuplet = ctx.scratch.tuplets.count(trackKey)
                                && ctx.scratch.tuplets.at(trackKey).inTuplet();
-    if (!isChordExt && et == EncElemType::REST && !voiceInTuplet
+    const bool bracketMember = mc.validTupletGroupMember.count(e) > 0;
+    if (!isChordExt && et == EncElemType::REST && !voiceInTuplet && !bracketMember
         && ctx.scratch.cumTick.count(trackKey)
         && Fraction(static_cast<int>(e->tick), kEncWholeTicks) < ctx.scratch.cumTick.at(trackKey)) {
         return;
