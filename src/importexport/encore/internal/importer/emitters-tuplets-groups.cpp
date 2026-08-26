@@ -217,16 +217,38 @@ static void processSegmentOverrides(
     }
 }
 
+// The member that opens a group can lose its byte as readily as one inside it. Then the marked run
+// that follows is one member short of whole groups, and the unmarked note is exactly the one
+// missing, so it belongs to the group it appears to precede.
+static bool opensGroupOneShort(
+    const std::vector<std::vector<const EncMeasureElem*> >& chords, int i, int n,
+    int actualN, int normalN, Fraction baseLen)
+{
+    int marked = 0;
+    for (int j = i + 1; j < n; ++j) {
+        int aj = 0, nj = 0;
+        getExplicit(chords[j], aj, nj);
+        if (aj != actualN || nj != normalN || getFaceValue(chords[j]) != baseLen) {
+            break;
+        }
+        ++marked;
+    }
+    return marked > 0 && ((marked + 1) % actualN) == 0;
+}
+
 // Sandwich heuristic: a note whose tup byte is missing/mismatched still belongs to the current
 // bracket when the NEXT note matches the ratio, the orphan's face value equals baseLen, and it sits
 // at the expected advance tick after the previous member (v0xC4 live recording occasionally drops
-// the byte). i must be inside an open group (faceSum > 0) with a valid previous and next chord.
+// the byte). Either it sits inside an open group (faceSum > 0), or it opens the next one.
 static bool isSandwichOrphan(
     const std::vector<std::vector<const EncMeasureElem*> >& chords, int i, int n,
     int actualN, int normalN, Fraction baseLen, Fraction faceSum)
 {
-    if (!(faceSum > Fraction(0, 1) && i + 1 < n
-          && !chords[i].empty() && !chords[i - 1].empty())) {
+    if (!(i > 0 && i + 1 < n && !chords[i].empty() && !chords[i - 1].empty())) {
+        return false;
+    }
+    if (faceSum <= Fraction(0, 1)
+        && !opensGroupOneShort(chords, i, n, actualN, normalN, baseLen)) {
         return false;
     }
     int a3 = 0, n3 = 0;
@@ -502,6 +524,13 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                         if (isSandwichOrphan(chords, i, n, actualN, normalN, baseLen, faceSum)) {
                             a2 = actualN;
                             n2 = normalN;
+                            if (overrideRatios && faceSum <= Fraction(0, 1)) {
+                                // Opening the group: the tracker holds no live ratio to inherit,
+                                // so state the one the group carries.
+                                for (const EncMeasureElem* eo : chords[i]) {
+                                    (*overrideRatios)[eo] = { actualN, normalN };
+                                }
+                            }
                         } else {
                             break;
                         }
