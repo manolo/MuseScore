@@ -1919,3 +1919,31 @@ TEST_F(Tst_Structure, notes_in_columns_apart_are_not_one_chord)
         EXPECT_EQ(c->tuplet()->ratio(), Fraction(3, 2)) << "three in the time of two";
     }
 }
+
+// A note played six ticks before the barline has its position stored as a sixteen-bit value six
+// below zero. Read as unsigned it is the largest position in the bar, so the note that opens the
+// measure sorts to the end of it: a rest takes the downbeat, everything slides forward and the last
+// note is cut to fit what is left.
+TEST_F(Tst_Structure, a_tick_wrapped_before_the_barline_opens_the_measure)
+{
+    MasterScore* score = readEncoreScore("notes_tick_wrapped_before_barline.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->ticks(), Fraction(3, 4)) << "the bar must stay the length its signature states";
+
+    std::vector<ChordRest*> crs;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChordRest()) {
+            crs.push_back(toChordRest(el));
+        }
+    }
+    ASSERT_EQ(crs.size(), 5u) << "five notes, nothing dropped and nothing added to fill";
+    EXPECT_TRUE(crs.front()->isChord()) << "the anticipated note opens the bar, not a rest";
+    EXPECT_EQ(crs.front()->actualTicks(), Fraction(3, 8)) << "and keeps its dotted quarter";
+    EXPECT_EQ(toChord(crs.front())->notes().front()->pitch(), 70);
+}
