@@ -11693,6 +11693,32 @@ def gen_v0c4_tie_start_recut_at_barline():
     return assemble(0xC4, [(meas_hdr(2, 4), e1), (meas_hdr(2, 4), e2)], fill_ts=(2, 4))
 
 
+# ===========================================================================
+# notes_dotted_note_between_tuplet_members.enc
+# The shape a played-in bar turned out to have: a triplet eighth, then a dotted
+# eighth carrying no tuplet byte, then a run of marked triplet eighths.  Encore
+# draws the dot, so the dot is part of what the note is worth, and a dotted
+# eighth is not the eighth the bracket is built from: it takes half a slot more.
+# A reader that compares bare face values lets it into the bracket, scales it by
+# the ratio anyway, and then lays the next member on top of its tail, which
+# leaves the bar a triplet eighth over its signature with the overrun sitting in
+# the middle rather than past the barline, where no later pass looks for it.
+# ===========================================================================
+def gen_v0c4_dotted_note_between_tuplet_members():
+    TUP = 0x32                       # three in the time of two
+    FV_8TH, FV_Q, FV_16TH = 4, 3, 5
+    e  = note_v0c4(0, 0, 0, fv=FV_8TH, pitch=62, tuplet=TUP)
+    e += note_v0c4_dotctrl(80, 0, 0, fv=FV_8TH, pitch=57, dotControl=1)   # dotted, unmarked
+    e += note_v0c4(260, 0, 0, fv=FV_8TH, pitch=65, tuplet=TUP)
+    e += note_v0c4(340, 0, 0, fv=FV_8TH, pitch=65, tuplet=TUP)
+    e += note_v0c4(420, 0, 0, fv=FV_8TH, pitch=61, tuplet=TUP)
+    e += rest_v0c4(540, 0, 0, fv=FV_Q)
+    e += rest_v0c4(780, 0, 0, fv=FV_8TH)
+    e += rest_v0c4(900, 0, 0, fv=FV_16TH)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
 def gen_v0c4_nonuplet_missing_marker():
     TUP = 0x98               # nine in the time of eight
     FV_16TH = 5
@@ -13710,6 +13736,7 @@ if __name__=='__main__':
     write("notes_nonuplet_missing_marker.enc",     gen_v0c4_nonuplet_missing_marker(), layout=False)
     write("notes_tuplet_group_opens_unmarked.enc", gen_v0c4_tuplet_group_opens_unmarked(), layout=False)
     write("notes_tie_start_recut_at_barline.enc", gen_v0c4_tie_start_recut_at_barline(), layout=False)
+    write("notes_dotted_note_between_tuplet_members.enc", gen_v0c4_dotted_note_between_tuplet_members(), layout=False)
     write("notes_tie_across_trimmed_overflow.enc", gen_v0c4_tie_across_trimmed_overflow(), layout=False)
     write("instruments_tk_empty_name_authoritative.enc", gen_v0c4_tk_empty_name_authoritative())
     write("instruments_instr_perc_clef_drumset.enc",    gen_v0c4_instr_perc_clef_drumset())
