@@ -2621,6 +2621,46 @@ TEST_F(Tst_Notes, a_dotted_note_does_not_take_a_plain_slot_of_a_tuplet)
     EXPECT_EQ(dotted->actualTicks(), Fraction(3, 16)) << "keeping the value the dot gives it";
 }
 
+// A dotted eighth and three sixteenths, all marked, filling the room of a quarter as a triplet.
+// The dot belongs to the member and the ratio scales it; the value the bracket is built from is the
+// plain eighth, which no member of the group actually is. Dropping the dot slides everything after
+// it, and building the bracket on the dotted value leaves it never closing.
+TEST_F(Tst_Notes, a_bracket_member_keeps_its_dot)
+{
+    MasterScore* score = readEncoreScore("notes_dotted_tuplet_member.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->ticks(), Fraction(3, 4)) << "the bar must stay the length its signature states";
+
+    const Tuplet* bracket = nullptr;
+    const ChordRest* dotted = nullptr;
+    int members = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChordRest()) {
+            continue;
+        }
+        const ChordRest* cr = toChordRest(el);
+        if (const Tuplet* t = cr->tuplet()) {
+            bracket = t;
+            ++members;
+            if (cr->dots() > 0 && !dotted) {
+                dotted = cr;
+            }
+        }
+    }
+    ASSERT_NE(bracket, nullptr) << "the four must form a bracket";
+    EXPECT_EQ(bracket->ratio(), Fraction(3, 2)) << "three in the time of two";
+    EXPECT_EQ(members, 4) << "a dotted eighth and three sixteenths";
+    ASSERT_NE(dotted, nullptr) << "the dotted member must keep its dot";
+    EXPECT_EQ(dotted->actualTicks(), Fraction(1, 8)) << "a dotted eighth at three in the time of two";
+    EXPECT_EQ(bracket->ticks(), Fraction(1, 4)) << "the bracket fills the quarter it sits in";
+}
+
 TEST_F(Tst_Notes, notehead_nibbles_on_a_staff_without_drumset)
 {
     MasterScore* score = readEncoreScore("notes_notehead_without_drumset.enc");

@@ -11719,6 +11719,34 @@ def gen_v0c4_dotted_note_between_tuplet_members():
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
 
+# ===========================================================================
+# notes_dotted_tuplet_member.enc
+# A 3/4 bar whose middle beat holds a triplet of the mixed kind Encore writes
+# freely: a dotted eighth and three sixteenths, every one of them marked, in the
+# room of a quarter.  Written they come to three eighths, which is exactly what a
+# bracket of three in the time of two is built to hold, and sounding they come to
+# the quarter they occupy.  Two readings lose it.  Dropping the dot because the
+# note carries a ratio makes the first member an eighth, and everything after it
+# slides.  Taking the dotted value as the value the bracket is built from makes
+# the bracket three dotted eighths long, and it never closes.  The bar around it
+# is plain, an eighth rest and an eighth before, two eighths after, so nothing
+# but the triplet can be blamed for the bar coming out wrong.
+# ===========================================================================
+def gen_v0c4_dotted_tuplet_member():
+    TUP = 0x32                       # three in the time of two
+    FV_8TH, FV_16TH = 4, 5
+    e  = rest_v0c4(0, 0, 0, fv=FV_8TH)
+    e += note_v0c4(120, 0, 0, fv=FV_8TH, pitch=67)
+    e += note_v0c4(240, 0, 0, fv=FV_8TH, pitch=67, tuplet=TUP, layout=1)   # dotted, and marked
+    e += note_v0c4(360, 0, 0, fv=FV_16TH, pitch=67, tuplet=TUP)
+    e += note_v0c4(400, 0, 0, fv=FV_16TH, pitch=67, tuplet=TUP)
+    e += note_v0c4(440, 0, 0, fv=FV_16TH, pitch=67, tuplet=TUP)
+    e += note_v0c4(480, 0, 0, fv=FV_8TH, pitch=67)
+    e += note_v0c4(600, 0, 0, fv=FV_8TH, pitch=67)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(3, 4), e)], fill_ts=(3, 4))
+
+
 def gen_v0c4_nonuplet_missing_marker():
     TUP = 0x98               # nine in the time of eight
     FV_16TH = 5
@@ -13737,6 +13765,7 @@ if __name__=='__main__':
     write("notes_tuplet_group_opens_unmarked.enc", gen_v0c4_tuplet_group_opens_unmarked(), layout=False)
     write("notes_tie_start_recut_at_barline.enc", gen_v0c4_tie_start_recut_at_barline(), layout=False)
     write("notes_dotted_note_between_tuplet_members.enc", gen_v0c4_dotted_note_between_tuplet_members(), layout=False)
+    write("notes_dotted_tuplet_member.enc", gen_v0c4_dotted_tuplet_member(), layout=False)
     write("notes_tie_across_trimmed_overflow.enc", gen_v0c4_tie_across_trimmed_overflow(), layout=False)
     write("instruments_tk_empty_name_authoritative.enc", gen_v0c4_tk_empty_name_authoritative())
     write("instruments_instr_perc_clef_drumset.enc",    gen_v0c4_instr_perc_clef_drumset())
