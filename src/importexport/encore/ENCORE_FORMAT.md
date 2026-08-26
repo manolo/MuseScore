@@ -1066,6 +1066,10 @@ A tuplet is stated one of two ways.
 
 **Explicitly**, in a byte packing the two counts, the actual in the high nibble and the normal in the low, so `0x32` is 3:2 and `0x54` is 5:4.
 
+The byte is not always on every member. Encore draws the numeral between the members of a group rather than on each one, and it stores them the same way: a group of nine can carry the byte on eight of its members, leaving one interior member at zero. Such a member is enclosed by marked ones, and a bracket cannot hold time that is not its own, so enclosure is what identifies it rather than the byte `[verified]`.
+
+A member's stored tick is a rounding, and the rounding can fall backwards. Nine sixteenths in the time of eight advance by 53 and a third Encore ticks, which is not a whole number, so a member can sit a tick or two before the position the members before it add up to. A reader that compares a stored tick against its own running total, to discard a rest as already covered, will discard a genuine member of a group and leave the bracket short `[verified]`.
+
 **Implicitly**, by duration alone: a run whose sounding durations sit at a constant fraction of their face values is a tuplet of that ratio, and its tuplet byte reads zero. It is uncommon, and equally so in every generation: runs of three such notes occur in between one and three files in a thousand, whether the file is format 3.05 or 4.20 `[verified]`. A single note at a tuplet ratio proves nothing, since a note-on can drift; only a full run does.
 
 So it is the ordinary case before 4.20 and vanishes afterwards, which reads as the tuplet byte becoming reliable rather than as two different notations. A reader that trusts the byte alone loses those groups entirely.

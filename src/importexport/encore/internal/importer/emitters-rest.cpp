@@ -100,6 +100,13 @@ void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         if (actualNr == 0 && (er->faceValue & 0x0F) >= 4 && impliedGroupMember.count(e)) {
             actualNr = detectImpliedTuplet(er->realDuration, er->faceValue, normalNr);
         }
+        // Sandwich orphan, as in the note path: a rest whose tuplet byte is missing but which the
+        // group scan validated as a member joins the open bracket with its ratio. Encore leaves the
+        // byte off some members, and a rest dropped from the bracket leaves the group a member short.
+        if (actualNr == 0 && tt.inTuplet() && !tt.groupFull() && validTupletGroupMember.count(e)) {
+            actualNr = tt.actualN;
+            normalNr = tt.normalN;
+        }
         if (actualNr > 0 && normalNr > 0) {
             if (tt.groupFull()) {
                 closeTupletWithFill(tt, trackKey);

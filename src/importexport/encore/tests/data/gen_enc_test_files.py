@@ -11606,6 +11606,37 @@ def gen_v0c4_tie_partial_chord_source_position():
     e += end_marker()
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
+# ===========================================================================
+# notes_nonuplet_missing_marker.enc
+# Nine sixteenths in the time of eight (tuplet byte 0x98), four notes then five
+# rests, filling half of a 4/4 bar, with two quarter rests after.  Encore leaves
+# the tuplet byte off one interior member, the first rest, exactly as it does in
+# the wild: nine members, eight marks.  The unmarked one is enclosed by marked
+# members, so it belongs to the bracket.  Its stored tick is also the rounding of
+# 4 x 53.33, which lands a tick before the exact position the members so far add
+# up to, so a reader comparing raw ticks against the running total sees it as
+# redundant and drops it.  Either mistake leaves the group a member short and the
+# bar over a third too long.
+# ===========================================================================
+def gen_v0c4_nonuplet_missing_marker():
+    TUP = 0x98               # nine in the time of eight
+    FV_16TH = 5
+    ticks = [0, 53, 106, 159, 212, 272, 325, 378, 431]
+    elems = b''
+    for i, t in enumerate(ticks):
+        if i < 4:
+            elems += note_v0c4(tick=t, voice=0, staffIdx=0, fv=FV_16TH,
+                               pitch=60 + 3 * i, tuplet=TUP)
+        else:
+            # the fifth member is the one Encore leaves unmarked
+            elems += rest_v0c4_tup(tick=t, voice=0, staffIdx=0, fv=FV_16TH,
+                                   tuplet=0 if i == 4 else TUP)
+    elems += rest_v0c4(tick=484, voice=0, staffIdx=0, fv=3)
+    elems += rest_v0c4(tick=724, voice=0, staffIdx=0, fv=3)
+    elems += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), elems)], fill_ts=(4, 4))
+
+
 def gen_v0c4_tuplet_9_4_nontuplet():
     """9 quarter notes in a [9:4] nontuplet bracket filling one 4/4 measure."""
     ticks   = [i * 107 for i in range(9)]
@@ -13601,6 +13632,7 @@ if __name__=='__main__':
     write("instruments_no_tk_compact_table_two_instrs.enc", gen_v0c4_no_tk_compact_table_two_instrs())
     write("instruments_oversized_varsize_key_from_entry_end.enc", gen_v0c4_oversized_varsize_key_from_entry_end())
     write("instruments_small_tk_no_cross_entry_tables.enc", gen_v0c4_small_tk_no_cross_entry_tables())
+    write("notes_nonuplet_missing_marker.enc",     gen_v0c4_nonuplet_missing_marker(), layout=False)
     write("instruments_tk_empty_name_authoritative.enc", gen_v0c4_tk_empty_name_authoritative())
     write("instruments_instr_perc_clef_drumset.enc",    gen_v0c4_instr_perc_clef_drumset())
     write("instruments_instr_drums_name_drumset.enc",   gen_v0c4_instr_drums_name_drumset())
