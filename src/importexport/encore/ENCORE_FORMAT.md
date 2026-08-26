@@ -1060,6 +1060,10 @@ The rest are ordinary. The largest group of them is a duration showing a dot the
 
 A spacing is never evidence on its own. A sixteenth whose note-on sits a plain eighth after the note before it is what an undotted eighth followed by a sixteenth looks like, and it occurs at the same rate in every generation, so a reader that infers a dot from that shape is inventing one.
 
+### 7.3.1 Durations past the barline
+
+A note can be written with a value longer than the room left in its measure, and Encore stores it as written. It does not sound as written: playback runs a measure for the time its signature states and then moves on, so the note stops at the barline. A whole note in a 2/4 bar sounds for two beats `[verified]`. The stored duration is the figure the engraver chose, and the barline is what bounds the sound.
+
 ## 7.4 Tuplets
 
 A tuplet is stated one of two ways.

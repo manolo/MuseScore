@@ -11618,6 +11618,28 @@ def gen_v0c4_tie_partial_chord_source_position():
 # redundant and drops it.  Either mistake leaves the group a member short and the
 # bar over a third too long.
 # ===========================================================================
+# ===========================================================================
+# notes_tie_across_trimmed_overflow.enc
+# The shape a real score turned out to have, twice over: two 6/8 bars, each
+# holding a single whole note, tied to each other.  A whole note is 960 Encore
+# ticks and the bar has room for 720, so each is trailing overflow and the pass
+# that makes the bar fit removes the second one.  The tie was built while the
+# music was emitted, so it is left pointing at a note that no longer exists,
+# and the pitch spelling pass walks tied notes afterwards and dies on it.
+# ===========================================================================
+def gen_v0c4_tie_across_trimmed_overflow():
+    m1  = tie_v0c4(  0, 0, 0, startFlag=0x80)
+    m1 += note_v0c4( 0, 0, 0, fv=1, pitch=69)     # whole note in a 6/8 bar
+    m1 += end_marker()
+    m2  = note_v0c4( 0, 0, 0, fv=1, pitch=69)     # the note the tie ends on, removed as overflow
+    m2 += end_marker()
+    data = assemble(0xC4, [(meas_hdr(6, 8, beatTicks=360), m1),
+                           (meas_hdr(6, 8, beatTicks=360), m2)], fill_ts=(6, 8))
+    # The staff transposes, as it did in the score this came from. That is what puts the pitch
+    # spelling pass over the tied notes, which is where a tie outliving its notes is followed.
+    return _patch_key_transpose(data, 0, -2)
+
+
 def gen_v0c4_nonuplet_missing_marker():
     TUP = 0x98               # nine in the time of eight
     FV_16TH = 5
@@ -13633,6 +13655,7 @@ if __name__=='__main__':
     write("instruments_oversized_varsize_key_from_entry_end.enc", gen_v0c4_oversized_varsize_key_from_entry_end())
     write("instruments_small_tk_no_cross_entry_tables.enc", gen_v0c4_small_tk_no_cross_entry_tables())
     write("notes_nonuplet_missing_marker.enc",     gen_v0c4_nonuplet_missing_marker(), layout=False)
+    write("notes_tie_across_trimmed_overflow.enc", gen_v0c4_tie_across_trimmed_overflow(), layout=False)
     write("instruments_tk_empty_name_authoritative.enc", gen_v0c4_tk_empty_name_authoritative())
     write("instruments_instr_perc_clef_drumset.enc",    gen_v0c4_instr_perc_clef_drumset())
     write("instruments_instr_drums_name_drumset.enc",   gen_v0c4_instr_drums_name_drumset())
