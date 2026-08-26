@@ -2693,6 +2693,41 @@ TEST_F(Tst_Notes, a_bracket_opening_rest_survives_a_tick_left_behind)
     EXPECT_EQ(all.size(), 8u) << "a half, three members and four sixteenths, nothing added to fill";
 }
 
+// A triplet of sixty-fourths, part of an ornamental flourish. A sixty-fourth is fifteen ticks
+// written and ten inside a triplet, so its recorded length falls under the threshold that marks a
+// note as a MIDI tie-continuation artifact, and all three members were thrown away: the bar came up
+// short by a value that cannot be written, and the flourish was gone from the score.
+TEST_F(Tst_Notes, sixtyfourths_in_a_bracket_are_not_midi_artifacts)
+{
+    MasterScore* score = readEncoreScore("notes_sixtyfourth_bracket_not_artifact.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->ticks(), Fraction(4, 4)) << "the bar must stay the length its signature states";
+
+    std::vector<ChordRest*> members;
+    int notes = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChordRest()) {
+            continue;
+        }
+        if (el->isChord()) {
+            ++notes;
+        }
+        if (toChordRest(el)->tuplet()) {
+            members.push_back(toChordRest(el));
+        }
+    }
+    ASSERT_EQ(members.size(), 3u) << "the three sixty-fourths must survive";
+    EXPECT_EQ(members.front()->tuplet()->ratio(), Fraction(3, 2)) << "three in the time of two";
+    EXPECT_EQ(members.front()->durationType().type(), DurationType::V_64TH) << "written as sixty-fourths";
+    EXPECT_EQ(notes, 10) << "every note of the bar is written, flourish included";
+}
+
 TEST_F(Tst_Notes, notehead_nibbles_on_a_staff_without_drumset)
 {
     MasterScore* score = readEncoreScore("notes_notehead_without_drumset.enc");
