@@ -11780,6 +11780,34 @@ def gen_v0c4_columns_apart_not_one_chord():
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
 
+# ===========================================================================
+# notes_bracket_opening_rest_behind_fill.enc
+# The shape three scores turned out to share: a half note, then a triplet of
+# eighths opening with a rest, then four sixteenths, which comes to the bar
+# exactly.  The half was played at half its written value, so every stored tick
+# after it stands a beat early: the triplet's opening rest carries tick 240 while
+# the notes written before it already account for 480.  A reader that drops a rest
+# sitting behind the position its voice has reached, which is the right thing for
+# the redundant rests Encore writes on a filled beat, loses the member that opens
+# the bracket.  The bar is then a triplet eighth short of its signature, and since
+# that is not a value anything can be written as, the residue comes out as a chain
+# of ever smaller rests while another rest papers over the hole in the middle.
+# ===========================================================================
+def gen_v0c4_bracket_opening_rest_behind_fill():
+    TUP = 0x32                       # three in the time of two
+    FV_H, FV_8TH, FV_16TH = 2, 4, 5
+    e  = note_v0c4(0, 0, 0, fv=FV_H, pitch=70)
+    e += rest_v0c4_tup(240, 0, 0, fv=FV_8TH, tuplet=TUP)   # opens the bracket, tick left behind
+    e += note_v0c4(336, 0, 0, fv=FV_8TH, pitch=67, tuplet=TUP)
+    e += note_v0c4(409, 0, 0, fv=FV_8TH, pitch=69, tuplet=TUP)
+    e += note_v0c4(476, 0, 0, fv=FV_16TH, pitch=70)
+    e += note_v0c4(558, 0, 0, fv=FV_16TH, pitch=69)
+    e += note_v0c4(618, 0, 0, fv=FV_16TH, pitch=67)
+    e += note_v0c4(678, 0, 0, fv=FV_16TH, pitch=65)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
 def gen_v0c4_nonuplet_missing_marker():
     TUP = 0x98               # nine in the time of eight
     FV_16TH = 5
@@ -13812,6 +13840,7 @@ if __name__=='__main__':
     write("notes_dotted_note_between_tuplet_members.enc", gen_v0c4_dotted_note_between_tuplet_members(), layout=False)
     write("notes_dotted_tuplet_member.enc", gen_v0c4_dotted_tuplet_member(), layout=False)
     write("notes_columns_apart_not_one_chord.enc", gen_v0c4_columns_apart_not_one_chord(), layout=False)
+    write("notes_bracket_opening_rest_behind_fill.enc", gen_v0c4_bracket_opening_rest_behind_fill(), layout=False)
     write("notes_tie_across_trimmed_overflow.enc", gen_v0c4_tie_across_trimmed_overflow(), layout=False)
     write("instruments_tk_empty_name_authoritative.enc", gen_v0c4_tk_empty_name_authoritative())
     write("instruments_instr_perc_clef_drumset.enc",    gen_v0c4_instr_perc_clef_drumset())
