@@ -79,6 +79,16 @@ inline const EncLineStaffData* lineStaffDataAt(const EncRoot& enc, int idx)
     return &enc.lines[0].staffData[static_cast<size_t>(idx)];
 }
 
+// A tie whose start note is written and whose end is still to come. The note is kept with the
+// track and tick it was written at, because the passes that make an overfull measure fit can remove
+// a chord after its tie was registered, and a bare pointer would then be dangling. The position
+// lets the note be found again instead of trusting the pointer.
+struct PendingTie {
+    mu::engraving::Note* note = nullptr;
+    mu::engraving::track_idx_t track = 0;
+    mu::engraving::Fraction tick;
+};
+
 struct PendingSlur {
     Fraction startTick;
     track_idx_t track;
@@ -294,7 +304,7 @@ struct BuildCtx
         std::map<std::pair<int, int>, TupletTracker> innerTuplets {};
 
         // Pending tie-start notes, persists across measures. key=(staffIdx, voice, pitch).
-        std::map<std::tuple<int, int, int>, Note*> pendingTieNote {};
+        std::map<std::tuple<int, int, int>, PendingTie> pendingTieNote {};
 
         // Accumulated written position per (staffIdx, msVoice).
         std::map<std::pair<int, int>, Fraction> cumTick {};
