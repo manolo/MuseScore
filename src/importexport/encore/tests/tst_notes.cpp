@@ -2528,6 +2528,38 @@ TEST_F(Tst_Notes, nonuplet_keeps_the_member_whose_marker_is_missing)
     EXPECT_EQ(inTuplet, 9) << "every member belongs to the bracket, marked or not";
 }
 
+// Six sixteenths in the time of four, two triplet groups, with the tuplet byte missing on the
+// member that opens the second group, and that member given a plain sixteenth's room so every one
+// after it sits late. Read literally the six span a quarter and a sixteenth instead of a quarter,
+// the bar overflows, and the staves that were exactly full get stretched into corruption with it.
+TEST_F(Tst_Notes, tuplet_keeps_the_member_whose_marker_is_missing_at_the_group_start)
+{
+    MasterScore* score = readEncoreScore("notes_tuplet_group_opens_unmarked.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->ticks(), Fraction(4, 4)) << "the bar must stay the length its signature states";
+
+    std::set<const Tuplet*> brackets;
+    int inTuplet = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChordRest()) {
+            continue;
+        }
+        if (const Tuplet* t = toChordRest(el)->tuplet()) {
+            brackets.insert(t);
+            ++inTuplet;
+            EXPECT_EQ(t->ratio(), Fraction(3, 2)) << "three in the time of two";
+        }
+    }
+    EXPECT_EQ(inTuplet, 6) << "every member belongs to a bracket, marked or not";
+    EXPECT_EQ(brackets.size(), 2u) << "the six members form two groups of three";
+}
+
 TEST_F(Tst_Notes, notehead_nibbles_on_a_staff_without_drumset)
 {
     MasterScore* score = readEncoreScore("notes_notehead_without_drumset.enc");
