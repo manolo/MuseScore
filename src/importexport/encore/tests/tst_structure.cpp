@@ -1889,3 +1889,33 @@ TEST_F(Tst_Structure, musictime_middle_generation_reads_by_format_version)
     EXPECT_EQ(notes, 4) << "all four notes must import, which needs the geometry of format 3.07";
     delete score;
 }
+
+// A triplet whose three members stand in three notated columns a few pixels apart, the last two
+// recorded five ticks apart because the strokes were played by hand. Grouping by tick proximity
+// swallows the third column into the second and leaves the bracket a member short, which takes the
+// bar under its signature and gets papered over with overlapping rests. The column is what says
+// these are three events.
+TEST_F(Tst_Structure, notes_in_columns_apart_are_not_one_chord)
+{
+    MasterScore* score = readEncoreScore("notes_columns_apart_not_one_chord.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->ticks(), Fraction(4, 4)) << "the bar must stay the length its signature states";
+
+    std::vector<const Chord*> members;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChord() && toChord(el)->tuplet()) {
+            members.push_back(toChord(el));
+        }
+    }
+    ASSERT_EQ(members.size(), 3u) << "three columns, three members of the bracket";
+    for (const Chord* c : members) {
+        EXPECT_EQ(c->notes().size(), 1u) << "each column holds its own note, not a chord of them";
+        EXPECT_EQ(c->tuplet()->ratio(), Fraction(3, 2)) << "three in the time of two";
+    }
+}
