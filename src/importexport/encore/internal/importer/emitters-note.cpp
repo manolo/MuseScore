@@ -71,8 +71,12 @@ static bool isMidiArtifact(const EncNote* en,
     const quint8 safeFv = fvLow(en->faceValue);
     int fvBase = faceValue2ticks(safeFv);
     if (fvBase <= 15) {
+        // A note written this short sounds this short: a sixty-fourth is fifteen ticks written and
+        // ten inside a triplet, so any ordinary gate puts it under the threshold. What tells it from
+        // an artifact is that a complete bracket counts it as one of its members.
         bool bypass = mc.isTieStartAt(ec.staffIdx, ec.voice, (int)ec.e->tick)
-                      || isChordExt;
+                      || isChordExt
+                      || mc.validTupletGroupMember.count(ec.e) > 0;
         if (!bypass) {
             if ((en->grace1 & 0x0F) == 1) {
                 filteredSenders.insert({ ec.staffIdx, ec.voice, (int)en->semiTonePitch });
