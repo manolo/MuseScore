@@ -94,6 +94,18 @@ static Fraction getFaceValue(const std::vector<const EncMeasureElem*>& grp)
     return td.fraction();
 }
 
+// The value a bracket is built from: the member's face value with its dots left off. A dot extends
+// a value rather than being one, and a bracket states how many of a plain value fit in the room of
+// fewer, so a dotted member says nothing about which value that is.
+static Fraction getBaseValue(const std::vector<const EncMeasureElem*>& grp)
+{
+    if (grp.empty()) {
+        return Fraction(0, 1);
+    }
+    const DurationType dt = faceValue2DurationType(fvLow(grp[0]->faceValueByte()));
+    return dt == DurationType::V_INVALID ? Fraction(0, 1) : TDuration(dt).fraction();
+}
+
 // Actual Encore-tick duration of chord at index k.
 // = fv_ticks x (nn/an) for explicit tup, = fv_ticks for plain note.
 static int actualDurEnc(int k,
@@ -513,7 +525,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                 // Explicit: accumulate faceSum; close when faceSum >= threshold.
                 // No-downdate rule: baseLen only shrinks when faceSum still fits the new threshold,
                 // allowing mixed-duration brackets like {Q,E}/3:2 or {Q,Q,8,8}/3:2.
-                Fraction baseLen = getFaceValue(chords[i]);
+                Fraction baseLen = getBaseValue(chords[i]);
                 if (baseLen <= Fraction(0, 1)) {
                     ++i;
                     continue;
@@ -547,7 +559,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     const Fraction fv_i = getFaceValue(chords[i]);
                     if (fv_i > Fraction(0, 1) && fv_i < baseLen) {
                         const Fraction newThreshold = fv_i * actualN;
-                        if (faceSum <= newThreshold) {
+                        if (faceSum + fv_i <= newThreshold) {
                             // Record where the inner group starts (= the downdating note).
                             innerGroupStartIdx = i;
                             innerBaseLen       = fv_i;
@@ -578,7 +590,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     seenCompleteGroup  = true;
                     // Reset for next group.
                     if (i < n) {
-                        baseLen         = getFaceValue(chords[i]);
+                        baseLen         = getBaseValue(chords[i]);
                         threshold       = baseLen * actualN;
                         originalBaseLen = baseLen;
                     }

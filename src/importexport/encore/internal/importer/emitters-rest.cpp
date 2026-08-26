@@ -131,7 +131,7 @@ void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
             rest->setTuplet(tt.currentTuplet);
             tt.currentTuplet->add(rest);
 
-            tt.faceTicks += TDuration(dt).fraction();
+            tt.faceTicks += dottedAdvance(dt, dots);
         } else {
             if (tt.groupFull()) {
                 closeTupletWithFill(tt, trackKey);
@@ -144,7 +144,7 @@ void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         // When capped, also update the rest's ticks so actualTicks() matches the cumTick advance
         // (avoids sanityCheck overshoot).
         Fraction advance = tt.inTuplet()
-                           ? TDuration(dt).fraction() * Fraction(tt.normalN, tt.actualN)
+                           ? dottedAdvance(dt, dots) * Fraction(tt.normalN, tt.actualN)
                            : dottedAdvance(dt, dots);
         // Mirror the note path (advanceCumulativeTick): never cut a tuplet member here (a tuplet is
         // atomic, resolved whole in fitOverfullMeasure) and skip the cap for IrregularMeasure so
