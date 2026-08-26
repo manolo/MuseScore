@@ -2661,6 +2661,38 @@ TEST_F(Tst_Notes, a_bracket_member_keeps_its_dot)
     EXPECT_EQ(bracket->ticks(), Fraction(1, 4)) << "the bracket fills the quarter it sits in";
 }
 
+// A triplet of eighths opening with a rest, after a half note that was played at half its written
+// value so every stored tick behind it stands a beat early. The rest arrives with a tick the notes
+// already written account for, and dropping it there, which is right for the redundant rests Encore
+// writes on a filled beat, costs the bracket the member that opens it.
+TEST_F(Tst_Notes, a_bracket_opening_rest_survives_a_tick_left_behind)
+{
+    MasterScore* score = readEncoreScore("notes_bracket_opening_rest_behind_fill.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->ticks(), Fraction(4, 4)) << "the bar must stay the length its signature states";
+
+    std::vector<ChordRest*> all, members;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChordRest()) {
+            continue;
+        }
+        all.push_back(toChordRest(el));
+        if (toChordRest(el)->tuplet()) {
+            members.push_back(toChordRest(el));
+        }
+    }
+    ASSERT_EQ(members.size(), 3u) << "the bracket keeps all three members";
+    EXPECT_TRUE(members.front()->isRest()) << "and the rest is the one that opens it";
+    EXPECT_EQ(members.front()->tuplet()->ratio(), Fraction(3, 2)) << "three in the time of two";
+    EXPECT_EQ(all.size(), 8u) << "a half, three members and four sixteenths, nothing added to fill";
+}
+
 TEST_F(Tst_Notes, notehead_nibbles_on_a_staff_without_drumset)
 {
     MasterScore* score = readEncoreScore("notes_notehead_without_drumset.enc");
