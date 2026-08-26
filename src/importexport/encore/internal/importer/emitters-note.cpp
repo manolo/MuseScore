@@ -149,6 +149,28 @@ static void applyFingeringsFromArtic(const NoteElemCtx& ec,
     }
 }
 
+// Confirm a pending tie-start note is still in the score, by finding the chord that now sits at
+// the position it was written at and looking for the very note there. The stored pointer is only
+// ever compared, so a chord removed in between cannot be followed into freed memory.
+static Note* stillInScore(const BuildCtx& ctx, const PendingTie& pending)
+{
+    if (!pending.note) {
+        return nullptr;
+    }
+    const Measure* m = ctx.score->tick2measure(pending.tick);
+    const Segment* seg = m ? m->findSegment(SegmentType::ChordRest, pending.tick) : nullptr;
+    const EngravingItem* el = seg ? seg->element(pending.track) : nullptr;
+    if (!el || !el->isChord()) {
+        return nullptr;
+    }
+    for (Note* n : toChord(el)->notes()) {
+        if (n == pending.note) {
+            return n;
+        }
+    }
+    return nullptr;
+}
+
 static void completePendingTie(BuildCtx& ctx,
                                const NoteElemCtx& ec,
                                const EncNote* en,
@@ -157,7 +179,13 @@ static void completePendingTie(BuildCtx& ctx,
     auto tieKey = std::make_tuple(ec.staffIdx, ec.voice, (int)en->semiTonePitch);
     auto it = ctx.scratch.pendingTieNote.find(tieKey);
     if (it != ctx.scratch.pendingTieNote.end()) {
-        Note* startNote = it->second;
+        Note* startNote = stillInScore(ctx, it->second);
+        if (!startNote) {
+            // The chord that started the tie was removed while the measure was made to fit, so the
+            // stored pointer is dead. Only its value was compared above, never followed.
+            ctx.scratch.pendingTieNote.erase(it);
+            return;
+        }
         // The format has no tie-end, so a tie-start is matched to a later note by (staff, voice,
         // pitch); accept only when the receiver is the first chord after the start on that track
         // (intervening chords void the tie, rests are skipped), else it jumps across measures to
@@ -196,7 +224,8 @@ static void registerTieStartIfApplicable(BuildCtx& ctx,
     bool hasTieStart = mc.isTieStartAt(ec.staffIdx, ec.voice, (int)ec.e->tick, (int)en->position)
                        || en->isTieSender;
     if (hasTieStart) {
-        ctx.scratch.pendingTieNote[{ ec.staffIdx, ec.voice, (int)en->semiTonePitch }] = note;
+        ctx.scratch.pendingTieNote[{ ec.staffIdx, ec.voice, (int)en->semiTonePitch }]
+            = { note, note->track(), note->chord() ? note->chord()->tick() : Fraction(0, 1) };
     }
 }
 

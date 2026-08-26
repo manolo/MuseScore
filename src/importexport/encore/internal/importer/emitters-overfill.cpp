@@ -104,6 +104,28 @@ static void detachSpannersAt(ChordRest* cr)
         score->removeSpanner(s);
         delete s;
     }
+    // Ties are not in the spanner map: they hang off the notes. A tie left pointing at a note that
+    // is about to be freed is followed later by the pitch spelling pass, which walks tied notes and
+    // dies on it, so both directions go with the chord.
+    if (!cr->isChord()) {
+        return;
+    }
+    for (Note* n : toChord(cr)->notes()) {
+        if (Tie* t = n->tieFor()) {
+            if (Note* end = t->endNote()) {
+                end->setTieBack(nullptr);
+            }
+            n->setTieFor(nullptr);
+            delete t;
+        }
+        if (Tie* t = n->tieBack()) {
+            if (Note* start = t->startNote()) {
+                start->setTieFor(nullptr);
+            }
+            n->setTieBack(nullptr);
+            delete t;
+        }
+    }
 }
 
 // Collect the ordered ChordRests of one track in a measure and their total actual ticks.

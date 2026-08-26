@@ -2455,6 +2455,48 @@ ENC_SANITY_TEST_NOTES(explicit_triplets_3_4,      "notes_triplets.enc")
 // it the head used to be dropped, so a cross or a diamond came out as an ordinary head, and the
 // square came out as a drumset symbol with nothing to draw. Same four nibbles as above, on an
 // ordinary pitched staff.
+// Two 6/8 bars each holding a whole note, tied to each other. A whole note does not fit in 6/8, so
+// making the bar fit removes the second one, and the tie built while the music was emitted is left
+// pointing at a note that is gone. Nothing here dereferences that pointer: the endpoints are
+// compared against the notes the score still holds, because following a freed note is exactly the
+// crash this guards against, and a use after free does not fault reliably enough to test for.
+TEST_F(Tst_Notes, no_tie_outlives_the_notes_it_joins)
+{
+    MasterScore* score = readEncoreScore("notes_tie_across_trimmed_overflow.enc");
+    ASSERT_NE(score, nullptr);
+
+    std::set<const EngravingItem*> liveNotes;
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+            for (track_idx_t tr = 0; tr < score->ntracks(); ++tr) {
+                EngravingItem* el = s->element(tr);
+                if (el && el->isChord()) {
+                    for (Note* n : toChord(el)->notes()) {
+                        liveNotes.insert(n);
+                    }
+                }
+            }
+        }
+    }
+
+    int dangling = 0;
+    for (const EngravingItem* item : liveNotes) {
+        const Note* n = toNote(item);
+        if (const Tie* t = n->tieFor()) {
+            if (t->endElement() && !liveNotes.count(t->endElement())) {
+                ++dangling;
+            }
+        }
+        if (const Tie* t = n->tieBack()) {
+            if (t->startElement() && !liveNotes.count(t->startElement())) {
+                ++dangling;
+            }
+        }
+    }
+    EXPECT_EQ(dangling, 0) << "a tie kept an endpoint the score no longer holds";
+    delete score;
+}
+
 // Nine sixteenths in the time of eight, with the tuplet byte missing on one interior member, which
 // is how Encore stores them: nine members, eight marks. The unmarked member is enclosed by marked
 // ones so it belongs to the bracket, and its stored tick is the rounding of a position that is not
