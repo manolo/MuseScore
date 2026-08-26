@@ -2455,6 +2455,37 @@ ENC_SANITY_TEST_NOTES(explicit_triplets_3_4,      "notes_triplets.enc")
 // it the head used to be dropped, so a cross or a diamond came out as an ordinary head, and the
 // square came out as a drumset symbol with nothing to draw. Same four nibbles as above, on an
 // ordinary pitched staff.
+// Nine sixteenths in the time of eight, with the tuplet byte missing on one interior member, which
+// is how Encore stores them: nine members, eight marks. The unmarked member is enclosed by marked
+// ones so it belongs to the bracket, and its stored tick is the rounding of a position that is not
+// a whole number of Encore ticks, landing just before the running total of the members before it.
+// Losing it leaves the bracket a member short and the bar a third too long.
+TEST_F(Tst_Notes, nonuplet_keeps_the_member_whose_marker_is_missing)
+{
+    MasterScore* score = readEncoreScore("notes_nonuplet_missing_marker.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    const Tuplet* tuplet = nullptr;
+    int inTuplet = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (!el || !el->isChordRest()) {
+            continue;
+        }
+        if (const Tuplet* t = toChordRest(el)->tuplet()) {
+            tuplet = t;
+            ++inTuplet;
+        }
+    }
+    ASSERT_NE(tuplet, nullptr) << "the nine sixteenths must form a tuplet";
+    EXPECT_EQ(tuplet->ratio(), Fraction(9, 8)) << "nine in the time of eight";
+    EXPECT_EQ(inTuplet, 9) << "every member belongs to the bracket, marked or not";
+}
+
 TEST_F(Tst_Notes, notehead_nibbles_on_a_staff_without_drumset)
 {
     MasterScore* score = readEncoreScore("notes_notehead_without_drumset.enc");

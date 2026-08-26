@@ -895,7 +895,12 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
     }
     // A REST before its voice's already-filled position is redundant (a chord or earlier rest covers
     // that beat); placing it would push later content forward and inflate the bar. Drop it.
-    if (!isChordExt && et == EncElemType::REST
+    // Not while a tuplet is open: a member's stored tick is the rounding of a position that is not
+    // a whole number of Encore ticks, so it can sit a tick or two before the exact one the members
+    // emitted so far add up to, and dropping it would leave the group a member short.
+    const bool voiceInTuplet = ctx.scratch.tuplets.count(trackKey)
+                               && ctx.scratch.tuplets.at(trackKey).inTuplet();
+    if (!isChordExt && et == EncElemType::REST && !voiceInTuplet
         && ctx.scratch.cumTick.count(trackKey)
         && Fraction(static_cast<int>(e->tick), kEncWholeTicks) < ctx.scratch.cumTick.at(trackKey)) {
         return;
@@ -913,10 +918,9 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
     // but only under Truncate: the other strategies keep them for the post-pass to resolve. An open
     // tuplet is never dropped here so the whole tuplet lands intact. See ENCORE_IMPORTER.md
     // §Overfull measures.
-    const bool inOpenTuplet = ctx.scratch.tuplets.count(trackKey) && ctx.scratch.tuplets.at(trackKey).inTuplet();
     if (isNoteOrRest && !isChordExt && ctx.scratch.cumTick[trackKey] >= measure->ticks()
         && ctx.opts.overfillMeasureStrategy == OverfillStrategy::Truncate
-        && !inOpenTuplet) {
+        && !voiceInTuplet) {
         return;
     }
 
