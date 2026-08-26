@@ -2592,6 +2592,35 @@ TEST_F(Tst_Notes, tie_survives_its_start_chord_being_rebuilt_at_the_barline)
     EXPECT_EQ(tieStart->tieFor()->endNote()->pitch(), tieStart->pitch());
 }
 
+// A dotted eighth carrying no tuplet byte, sitting between marked triplet eighths. The dot is part
+// of what the note is worth, so it is not the eighth the bracket is built from and cannot take one
+// of its slots: reading the bare face value lets it in, scales it by the ratio, and lays the next
+// member on top of its tail, leaving the bar over its signature in the middle instead of past the
+// barline, where the passes that make a bar fit would have found it.
+TEST_F(Tst_Notes, a_dotted_note_does_not_take_a_plain_slot_of_a_tuplet)
+{
+    MasterScore* score = readEncoreScore("notes_dotted_note_between_tuplet_members.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->ticks(), Fraction(4, 4)) << "the bar must stay the length its signature states";
+
+    const ChordRest* dotted = nullptr;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isChordRest() && toChordRest(el)->dots() > 0) {
+            dotted = toChordRest(el);
+            break;
+        }
+    }
+    ASSERT_NE(dotted, nullptr) << "the dotted note must survive as a dotted note";
+    EXPECT_EQ(dotted->tuplet(), nullptr) << "and must not have been taken into the bracket";
+    EXPECT_EQ(dotted->actualTicks(), Fraction(3, 16)) << "keeping the value the dot gives it";
+}
+
 TEST_F(Tst_Notes, notehead_nibbles_on_a_staff_without_drumset)
 {
     MasterScore* score = readEncoreScore("notes_notehead_without_drumset.enc");
