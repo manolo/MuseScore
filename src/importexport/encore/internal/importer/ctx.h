@@ -79,14 +79,14 @@ inline const EncLineStaffData* lineStaffDataAt(const EncRoot& enc, int idx)
     return &enc.lines[0].staffData[static_cast<size_t>(idx)];
 }
 
-// A tie whose start note is written and whose end is still to come. The note is kept with the
-// track and tick it was written at, because the passes that make an overfull measure fit can remove
-// a chord after its tie was registered, and a bare pointer would then be dangling. The position
-// lets the note be found again instead of trusting the pointer.
+// A tie whose start note is written and whose end is still to come. The start is remembered by
+// where it was written and what pitch it holds, never by pointer: the passes that make an overfull
+// measure fit can remove the chord after the tie was registered, and an address the allocator has
+// since reused would answer to a pointer comparison as though the note were still there.
 struct PendingTie {
-    mu::engraving::Note* note = nullptr;
     mu::engraving::track_idx_t track = 0;
     mu::engraving::Fraction tick;
+    int pitch = -1;
 };
 
 struct PendingSlur {

@@ -2560,6 +2560,38 @@ TEST_F(Tst_Notes, tuplet_keeps_the_member_whose_marker_is_missing_at_the_group_s
     EXPECT_EQ(brackets.size(), 2u) << "the six members form two groups of three";
 }
 
+// A chord of half notes starting on the second beat of a 2/4 bar states more length than the bar
+// has room for, so the pass that makes the bar fit rewrites it as a tied chain: the chord is
+// removed and built again at the same beat. The tie start was registered before that happened, and
+// only the upper pitch continues into the next bar, so recognising the start by anything other than
+// where it is and what pitch it holds ties two different pitches together.
+TEST_F(Tst_Notes, tie_survives_its_start_chord_being_rebuilt_at_the_barline)
+{
+    MasterScore* score = readEncoreScore("notes_tie_start_recut_at_barline.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    Note* tieStart = nullptr;
+    for (Measure* m = score->firstMeasure(); m && !tieStart; m = m->nextMeasure()) {
+        for (Segment* s = m->first(SegmentType::ChordRest); s && !tieStart; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Note* n : toChord(el)->notes()) {
+                if (n->tieFor()) {
+                    tieStart = n;
+                    break;
+                }
+            }
+        }
+    }
+    ASSERT_NE(tieStart, nullptr) << "the tie must survive the chord being rebuilt";
+    ASSERT_NE(tieStart->tieFor()->endNote(), nullptr) << "and reach the note it ties to";
+    EXPECT_EQ(tieStart->tieFor()->endNote()->pitch(), tieStart->pitch());
+}
+
 TEST_F(Tst_Notes, notehead_nibbles_on_a_staff_without_drumset)
 {
     MasterScore* score = readEncoreScore("notes_notehead_without_drumset.enc");

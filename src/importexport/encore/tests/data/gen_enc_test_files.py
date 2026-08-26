@@ -11669,34 +11669,6 @@ def gen_v0c4_tuplet_group_opens_unmarked():
 
 
 # ===========================================================================
-# notes_tuplet_group_opens_unmarked.enc
-# The shape a real score turned out to have: six sixteenths in the time of four,
-# written as two triplet groups, of which Encore marks five members and leaves
-# the byte off the one that opens the second group.  That member is also given a
-# plain sixteenth's room, sixty ticks instead of forty, so every member after it
-# sits twenty ticks late and the bar holds twenty more than its signature allows.
-# The same figure appears again later in the bar that this came from, fully
-# marked, which is what says the unmarked reading is the file's slip and not a
-# different rhythm.  Read literally the six members span a quarter and a
-# sixteenth, the bar overflows, and the staves that were exactly full get
-# stretched into corruption along with it.
-# ===========================================================================
-def gen_v0c4_tuplet_group_opens_unmarked():
-    TUP = 0x32                       # three in the time of two
-    FV_16TH, FV_Q, FV_H = 5, 3, 2
-    e  = rest_v0c4_tup(0, 0, 0, fv=FV_16TH, tuplet=TUP)
-    e += note_v0c4(40, 0, 0, fv=FV_16TH, pitch=81, tuplet=TUP)
-    e += note_v0c4(80, 0, 0, fv=FV_16TH, pitch=78, tuplet=TUP)
-    e += note_v0c4(120, 0, 0, fv=FV_16TH, pitch=75, tuplet=0)     # opens the second group, unmarked
-    e += note_v0c4(180, 0, 0, fv=FV_16TH, pitch=78, tuplet=TUP)   # and every member after it is late
-    e += note_v0c4(220, 0, 0, fv=FV_16TH, pitch=75, tuplet=TUP)
-    e += note_v0c4(260, 0, 0, fv=FV_Q, pitch=71)
-    e += rest_v0c4(500, 0, 0, fv=FV_H)
-    e += end_marker()
-    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
-
-
-# ===========================================================================
 # notes_tie_start_recut_at_barline.enc
 # A 2/4 bar holding a quarter, then a two-note chord of half notes carrying a tie
 # start, so the chord begins on the second beat and states more length than the
@@ -13737,6 +13709,7 @@ if __name__=='__main__':
     write("instruments_small_tk_no_cross_entry_tables.enc", gen_v0c4_small_tk_no_cross_entry_tables())
     write("notes_nonuplet_missing_marker.enc",     gen_v0c4_nonuplet_missing_marker(), layout=False)
     write("notes_tuplet_group_opens_unmarked.enc", gen_v0c4_tuplet_group_opens_unmarked(), layout=False)
+    write("notes_tie_start_recut_at_barline.enc", gen_v0c4_tie_start_recut_at_barline(), layout=False)
     write("notes_tie_across_trimmed_overflow.enc", gen_v0c4_tie_across_trimmed_overflow(), layout=False)
     write("instruments_tk_empty_name_authoritative.enc", gen_v0c4_tk_empty_name_authoritative())
     write("instruments_instr_perc_clef_drumset.enc",    gen_v0c4_instr_perc_clef_drumset())

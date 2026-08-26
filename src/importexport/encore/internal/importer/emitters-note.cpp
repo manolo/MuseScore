@@ -149,14 +149,11 @@ static void applyFingeringsFromArtic(const NoteElemCtx& ec,
     }
 }
 
-// Confirm a pending tie-start note is still in the score, by finding the chord that now sits at
-// the position it was written at and looking for the very note there. The stored pointer is only
-// ever compared, so a chord removed in between cannot be followed into freed memory.
-static Note* stillInScore(const BuildCtx& ctx, const PendingTie& pending)
+// Find the note a pending tie starts from: the chord that now sits where the tie was registered,
+// and in it the note of the pitch that was written there. A chord removed or replaced in between
+// simply fails to answer, which is the same result as before but reached without a stale pointer.
+static Note* tieStartNote(const BuildCtx& ctx, const PendingTie& pending)
 {
-    if (!pending.note) {
-        return nullptr;
-    }
     const Measure* m = ctx.score->tick2measure(pending.tick);
     const Segment* seg = m ? m->findSegment(SegmentType::ChordRest, pending.tick) : nullptr;
     const EngravingItem* el = seg ? seg->element(pending.track) : nullptr;
@@ -164,7 +161,7 @@ static Note* stillInScore(const BuildCtx& ctx, const PendingTie& pending)
         return nullptr;
     }
     for (Note* n : toChord(el)->notes()) {
-        if (n == pending.note) {
+        if (n->pitch() == pending.pitch) {
             return n;
         }
     }
@@ -179,10 +176,10 @@ static void completePendingTie(BuildCtx& ctx,
     auto tieKey = std::make_tuple(ec.staffIdx, ec.voice, (int)en->semiTonePitch);
     auto it = ctx.scratch.pendingTieNote.find(tieKey);
     if (it != ctx.scratch.pendingTieNote.end()) {
-        Note* startNote = stillInScore(ctx, it->second);
+        Note* startNote = tieStartNote(ctx, it->second);
         if (!startNote) {
-            // The chord that started the tie was removed while the measure was made to fit, so the
-            // stored pointer is dead. Only its value was compared above, never followed.
+            // The chord that started the tie is no longer there: the measure was made to fit and
+            // took it away. Nothing to tie from.
             ctx.scratch.pendingTieNote.erase(it);
             return;
         }
@@ -225,7 +222,7 @@ static void registerTieStartIfApplicable(BuildCtx& ctx,
                        || en->isTieSender;
     if (hasTieStart) {
         ctx.scratch.pendingTieNote[{ ec.staffIdx, ec.voice, (int)en->semiTonePitch }]
-            = { note, note->track(), note->chord() ? note->chord()->tick() : Fraction(0, 1) };
+            = { note->track(), note->chord() ? note->chord()->tick() : Fraction(0, 1), note->pitch() };
     }
 }
 
