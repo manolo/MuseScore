@@ -11808,6 +11808,85 @@ def gen_v0c4_bracket_opening_rest_behind_fill():
     return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
 
 
+# ===========================================================================
+# notes_sixtyfourth_bracket_not_artifact.enc
+# An ornamental flourish written the way three scores wrote it: a triplet of
+# sixty-fourths and a thirty-second, together a sixteenth, tucked between a
+# sixteenth rest and four plain sixteenths.  A sixty-fourth is fifteen ticks
+# written and ten inside a triplet, so its recorded length falls under the
+# fifteen that marks a note as a MIDI tie-continuation artifact, and all three
+# members get thrown away.  The bar is then short of its signature by a value
+# that cannot be written, so the residue comes out as a run of ever smaller
+# rests, and the flourish is gone from the score entirely.
+# ===========================================================================
+def gen_v0c4_sixtyfourth_bracket_not_artifact():
+    TUP = 0x32                       # three in the time of two
+    FV_H, FV_8TH, FV_16TH, FV_32ND, FV_64TH = 2, 4, 5, 6, 7
+    e  = note_v0c4(0, 0, 0, fv=FV_H, pitch=73)
+    e += note_v0c4(480, 0, 0, fv=FV_8TH, pitch=73)
+    e += rest_v0c4(600, 0, 0, fv=FV_16TH)
+    e += note_v0c4(660, 0, 0, fv=FV_64TH, pitch=74, tuplet=TUP)
+    e += note_v0c4(670, 0, 0, fv=FV_64TH, pitch=76, tuplet=TUP)
+    e += note_v0c4(680, 0, 0, fv=FV_64TH, pitch=74, tuplet=TUP)
+    e += note_v0c4(690, 0, 0, fv=FV_32ND, pitch=74)
+    e += note_v0c4(720, 0, 0, fv=FV_16TH, pitch=73)
+    e += note_v0c4(780, 0, 0, fv=FV_16TH, pitch=71)
+    e += note_v0c4(840, 0, 0, fv=FV_16TH, pitch=69)
+    e += note_v0c4(900, 0, 0, fv=FV_16TH, pitch=73)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+# ===========================================================================
+# notes_sixtyfourth_bracket_not_artifact.enc
+# An ornamental flourish written the way three scores wrote it: a triplet of
+# sixty-fourths and a thirty-second, together a sixteenth, tucked between a
+# sixteenth rest and four plain sixteenths.  A sixty-fourth is fifteen ticks
+# written and ten inside a triplet, so its recorded length falls under the
+# fifteen that marks a note as a MIDI tie-continuation artifact, and all three
+# members get thrown away.  The bar is then short of its signature by a value
+# that cannot be written, so the residue comes out as a run of ever smaller
+# rests, and the flourish is gone from the score entirely.
+# ===========================================================================
+def gen_v0c4_sixtyfourth_bracket_not_artifact():
+    TUP = 0x32                       # three in the time of two
+    FV_H, FV_8TH, FV_16TH, FV_32ND, FV_64TH = 2, 4, 5, 6, 7
+    e  = note_v0c4(0, 0, 0, fv=FV_H, pitch=73)
+    e += note_v0c4(480, 0, 0, fv=FV_8TH, pitch=73)
+    e += rest_v0c4(600, 0, 0, fv=FV_16TH)
+    e += note_v0c4(660, 0, 0, fv=FV_64TH, pitch=74, tuplet=TUP)
+    e += note_v0c4(670, 0, 0, fv=FV_64TH, pitch=76, tuplet=TUP)
+    e += note_v0c4(680, 0, 0, fv=FV_64TH, pitch=74, tuplet=TUP)
+    e += note_v0c4(690, 0, 0, fv=FV_32ND, pitch=74)
+    e += note_v0c4(720, 0, 0, fv=FV_16TH, pitch=73)
+    e += note_v0c4(780, 0, 0, fv=FV_16TH, pitch=71)
+    e += note_v0c4(840, 0, 0, fv=FV_16TH, pitch=69)
+    e += note_v0c4(900, 0, 0, fv=FV_16TH, pitch=73)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+# ===========================================================================
+# notes_tick_wrapped_before_barline.enc
+# A 3/4 bar whose opening note was played six ticks before the barline, so its
+# position is stored as 0xFFFA, six below zero read as a signed sixteen-bit
+# number.  Read as unsigned it is the largest position in the measure, and the
+# note that opens the bar sorts to the end of it: everything after slides one
+# place forward, a rest takes the downbeat, and the last note is cut to fit what
+# is left.  The rest of the bar is stored plainly and comes to the signature
+# exactly, so nothing but that one position can be blamed.
+# ===========================================================================
+def gen_v0c4_tick_wrapped_before_barline():
+    FV_Q, FV_8TH, FV_16TH = 3, 4, 5
+    e  = note_v0c4(0xFFFA, 0, 0, fv=FV_Q, pitch=70, layout=1)   # dotted quarter, six ticks early
+    e += note_v0c4(354, 0, 0, fv=FV_8TH, pitch=69)
+    e += note_v0c4(474, 0, 0, fv=FV_16TH, pitch=70)
+    e += note_v0c4(534, 0, 0, fv=FV_16TH, pitch=68)
+    e += note_v0c4(594, 0, 0, fv=FV_8TH, pitch=66)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(3, 4), e)], fill_ts=(3, 4))
+
+
 def gen_v0c4_nonuplet_missing_marker():
     TUP = 0x98               # nine in the time of eight
     FV_16TH = 5
@@ -13841,6 +13920,7 @@ if __name__=='__main__':
     write("notes_dotted_tuplet_member.enc", gen_v0c4_dotted_tuplet_member(), layout=False)
     write("notes_columns_apart_not_one_chord.enc", gen_v0c4_columns_apart_not_one_chord(), layout=False)
     write("notes_bracket_opening_rest_behind_fill.enc", gen_v0c4_bracket_opening_rest_behind_fill(), layout=False)
+    write("notes_sixtyfourth_bracket_not_artifact.enc", gen_v0c4_sixtyfourth_bracket_not_artifact(), layout=False)
     write("notes_tie_across_trimmed_overflow.enc", gen_v0c4_tie_across_trimmed_overflow(), layout=False)
     write("instruments_tk_empty_name_authoritative.enc", gen_v0c4_tk_empty_name_authoritative())
     write("instruments_instr_perc_clef_drumset.enc",    gen_v0c4_instr_perc_clef_drumset())
