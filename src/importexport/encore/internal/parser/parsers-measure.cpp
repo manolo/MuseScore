@@ -265,6 +265,15 @@ bool EncMeasure::read(QDataStream& ds, const quint32 vs, const EncFormatReader& 
         const quint8 tp = typeVoice >> 4;
         const quint8 vo = typeVoice & 0x0F;
 
+        // A note played a hair before the barline is stored with its tick wrapped past the top of the
+        // sixteen-bit field, so it reads as an enormous position and sorts to the end of the measure
+        // instead of the start of it. No measure comes near that value, so the upper half of the
+        // range is always a position before the bar. Only the ones inside the drift window are put
+        // on the downbeat: further back than that the whole voice was recorded early, which is a
+        // different thing and not ours to move. See ENCORE_FORMAT.md 7.1.
+        if (tick >= 0x8000 && (0x10000 - static_cast<int>(tick)) <= 2 * CHORD_CLUSTER_THRESHOLD) {
+            tick = 0;
+        }
         auto elem = createMeasureElement(tick, tp, vo, fmt, pureTabFile);
         elem->bodyShift = static_cast<qint8>(fmt.elementBodyShift());
 

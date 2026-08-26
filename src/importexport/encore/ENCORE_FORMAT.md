@@ -1008,6 +1008,8 @@ Type 11, always 12 bytes, stored for playback only and carrying no notation.
 
 An element carries a tick, its position within the measure, and a face value, which is the notehead and the written duration. Neither is the sounding length. The face value is what the note is drawn as, and it is wrong whenever the note is dotted, tied into, or part of a tuplet. The playback duration some generations store at `+16` is a recording artefact: it diverges from the notated value for live-recorded music, and the last note of a tuplet ending at a barline often has one far shorter than its face value, because Encore truncates playback at the barline.
 
+**A tick can stand before the measure it is stored in.** The field is sixteen bits and a note played ahead of the barline wraps past the top of it, so a position six ticks early reads as 65530. No measure comes near that value, so the upper half of the range is always a position before the bar, and read as an unsigned number it turns the note that opens the measure into the last one in it. The near ones, within the timing drift that also decides what counts as one chord, are a note played a hair early and belong on the downbeat. Further back the whole voice was recorded early, a run of them arriving at a steady spacing, and moving those would collapse the run onto one position `[verified]`.
+
 The sounding duration of an element is the gap from its own tick to the tick of the next element **in the same voice on the same staff**, bounded by:
 
 - **the end of the measure**, for the last element of a voice, using the measure's total ticks;
