@@ -67,8 +67,12 @@ struct EncMeasureElem {
     virtual quint8 faceValueByte() const { return 0; }
     virtual bool impliedTupletMember() const { return false; }
 
+    // Raw layout byte carrying the dot count in its low two bits; 0 for elements without one.
+    virtual quint8 dotControlByte() const { return 0; }
     // The written duration, as a face value nibble; 0 for elements that carry none.
     quint8 faceValue4() const { return faceValueByte() & 0x0F; }
+    // Dots the element is drawn with, which are part of its written value, not a decoration.
+    quint8 dotCount() const { return dotControlByte() & 0x03; }
     // True when the element carries an explicit tuplet ratio, actual against normal.
     bool inTuplet() const { return (tupletByte() >> 4) >= 2 && (tupletByte() & 0x0F) >= 1; }
 
@@ -119,6 +123,7 @@ struct EncNote : EncMeasureElem {
 
     quint8 tupletByte() const override { return tuplet; }
     quint8 faceValueByte() const override { return faceValue; }
+    quint8 dotControlByte() const override { return dotControl; }
     bool impliedTupletMember() const override { return isImpliedTupletMember; }
     int actualNotes() const { return tuplet >> 4; }
     int normalNotes() const { return tuplet & 0x0F; }
@@ -147,6 +152,7 @@ struct EncRest : EncMeasureElem {
 
     quint8 tupletByte() const override { return tuplet; }
     quint8 faceValueByte() const override { return faceValue; }
+    quint8 dotControlByte() const override { return dotControl; }
     bool impliedTupletMember() const override { return isImpliedTupletMember; }
     int actualNotes() const { return tuplet >> 4; }
     int normalNotes() const { return tuplet & 0x0F; }
