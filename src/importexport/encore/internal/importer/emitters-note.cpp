@@ -325,7 +325,7 @@ static void attachChordToTuplet(
                 DurationType baseLenDt = dt;
                 if (partialEndGroup.count(e)) {
                     Fraction rem3 = measure->ticks() - ctx.scratch.cumTick[trackKey];
-                    Fraction fullAdv = TDuration(dt).fraction() * Fraction(normalN, 1);
+                    Fraction fullAdv = dottedAdvance(dt, dots) * Fraction(normalN, 1);
                     if (fullAdv > rem3 && rem3 > Fraction(0, 1)) {
                         Fraction baseFrac = Fraction(rem3.numerator(),
                                                      rem3.denominator() * normalN).reduced();
@@ -355,7 +355,7 @@ static void attachChordToTuplet(
             if (innerTt.inTuplet()) {
                 chord->setTuplet(innerTt.currentTuplet);
                 innerTt.currentTuplet->add(chord);
-                innerTt.faceTicks += TDuration(dt).fraction();
+                innerTt.faceTicks += dottedAdvance(dt, dots);
             }
             if (isInnerLast && innerTt.inTuplet()) {
                 innerTt.closeTuplet();
@@ -371,16 +371,16 @@ static void attachChordToTuplet(
             // No-downdate: only lower fullFaceSum when smaller fv arrives and current tally still fits the new threshold.
             // {Q,E}/3:2: before E, faceTicks=Q≤3E → update; {Q,Q,8,8}/3:2: faceTicks=2Q>3E → skip.
             if (tt.actualN > 0 && tt.fullFaceSum > Fraction(0, 1)) {
-                const Fraction thisFace = TDuration(dt).fraction();
+                const Fraction thisFace = dottedAdvance(dt, dots);
                 const Fraction currentBaseLen = tt.fullFaceSum / tt.actualN;
                 if (thisFace > Fraction(0, 1) && thisFace < currentBaseLen) {
                     const Fraction newThreshold = thisFace * tt.actualN;
-                    if (tt.faceTicks <= newThreshold) {
+                    if (tt.faceTicks + thisFace <= newThreshold) {
                         tt.fullFaceSum = newThreshold;
                     }
                 }
             }
-            tt.faceTicks += TDuration(dt).fraction();
+            tt.faceTicks += dottedAdvance(dt, dots);
         }
     } else {
         auto& innerTt2 = ctx.scratch.innerTuplets[trackKey];
@@ -429,7 +429,7 @@ static bool advanceCumulativeTick(
         }
         const int innerAN = niAdv ? niAdv->innerActualN : (innerTtAdv.inTuplet() ? innerTtAdv.actualN : preACheck);
         const int innerNN = niAdv ? niAdv->innerNormalN : (innerTtAdv.inTuplet() ? innerTtAdv.normalN : preNCheck);
-        Fraction innerAdv = TDuration(dt).fraction()
+        Fraction innerAdv = dottedAdvance(dt, dots)
                             * Fraction(innerNN, innerAN);
         if (tt.inTuplet()) {
             advance = innerAdv * Fraction(tt.normalN, tt.actualN);
@@ -437,7 +437,7 @@ static bool advanceCumulativeTick(
             advance = innerAdv;
         }
     } else if (tt.inTuplet()) {
-        advance = TDuration(dt).fraction() * Fraction(tt.normalN, tt.actualN);
+        advance = dottedAdvance(dt, dots) * Fraction(tt.normalN, tt.actualN);
     } else {
         advance = dottedAdvance(dt, dots);
     }
@@ -456,7 +456,7 @@ static bool advanceCumulativeTick(
                 chord->setTicks(cappedFace.fraction());
                 chord->setDots(0);
                 // Re-sync faceTicks: the original dt may have been larger.
-                tt.faceTicks -= TDuration(dt).fraction();
+                tt.faceTicks -= dottedAdvance(dt, dots);
                 tt.faceTicks += cappedFace.fraction();
             }
         }
@@ -472,7 +472,7 @@ static bool advanceCumulativeTick(
     // Inner-group notes: advance innerTt.placedTicks by the singly-nested advance so closeTuplet() sees the correct inner span.
     auto& innerTtFin = ctx.scratch.innerTuplets[trackKey];
     if (isInnerMember && innerTtFin.inTuplet()) {
-        const Fraction innerOnlyAdv = TDuration(dt).fraction()
+        const Fraction innerOnlyAdv = dottedAdvance(dt, dots)
                                       * Fraction(innerTtFin.normalN, innerTtFin.actualN);
         innerTtFin.placedTicks += innerOnlyAdv;
     }
@@ -525,18 +525,20 @@ static bool resolveNoteDuration(
                 dt = dtBeat;
             }
         }
-        dots = 0;
+        // A member of a bracket can be dotted: the dot is part of the value the ratio then scales,
+        // and Encore's own played duration agrees with the dotted reading wherever one appears.
+        dots = e->dotCount();
         // Partial measure-end groups: reduce dt when the tuplet advance overshoots remaining space.
         if (partialEndGroup.count(e)) {
             const auto& ttX = ctx.scratch.tuplets[trackKey];
             if (ttX.inTuplet() && dt != DurationType::V_INVALID) {
-                Fraction adv = TDuration(dt).fraction()
+                Fraction adv = dottedAdvance(dt, dots)
                                * Fraction(ttX.normalN, ttX.actualN);
                 Fraction rem = measure->ticks() - ctx.scratch.cumTick[trackKey];
                 while (adv > rem && rem > Fraction(0, 1)
                        && dt < DurationType::V_128TH) {
                     dt  = static_cast<DurationType>(static_cast<int>(dt) + 1);
-                    adv = TDuration(dt).fraction()
+                    adv = dottedAdvance(dt, dots)
                           * Fraction(ttX.normalN, ttX.actualN);
                 }
             }
