@@ -868,24 +868,31 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
 
     // Near-simultaneous notes (< CHORD_MIDI_THRESHOLD) extend the chord; same Encore voice required.
     constexpr int CHORD_MIDI_THRESHOLD = 2 * CHORD_CLUSTER_THRESHOLD;  // = 8
-    // Two notes close in time but in different notated columns (xoffset) are sequential events, not
-    // one chord: a chord's members share a column (a few pixels of notehead offset at most), so only
-    // a gap >= COLUMN_SEPARATION_MIN marks a genuine column change. Only for formats that store the
-    // column (see EncFormatReader::clustersChordsByXoffset).
-    constexpr int COLUMN_SEPARATION_MIN = 8;
+    // Where the format stores the notated column, the column decides. A chord's members stand in the
+    // same one to the pixel in all but a fraction of a percent of chords, so an equal column makes
+    // one chord however far apart the recorded ticks are. Different columns are sequential events,
+    // even a pixel apart, which is how close they come on a dense staff; the only exception is a
+    // pair sharing a tick exactly, where a notehead nudged aside to clear a second still reads as
+    // one chord. Formats that store no column (see EncFormatReader::clustersChordsByXoffset) fall
+    // back to the tick alone.
+    constexpr int NOTEHEAD_NUDGE_MAX = 8;
     const bool columnAware = ctx.enc.fmt && ctx.enc.fmt->clustersChordsByXoffset();
-    const bool differentColumn = columnAware && e->xoffset != 0
-                                 && ctx.scratch.prevXoffset.count(trackKey)
-                                 && ctx.scratch.prevXoffset.at(trackKey) != 0
-                                 && std::abs(ctx.scratch.prevXoffset.at(trackKey) - static_cast<int>(e->xoffset))
-                                 >= COLUMN_SEPARATION_MIN;
-    bool isChordExt = isNoteOrRest && !differentColumn
+    const bool haveColumns = columnAware && e->xoffset != 0
+                             && ctx.scratch.prevXoffset.count(trackKey)
+                             && ctx.scratch.prevXoffset.at(trackKey) != 0;
+    const int columnGap = haveColumns
+                          ? std::abs(ctx.scratch.prevXoffset.at(trackKey) - static_cast<int>(e->xoffset))
+                          : 0;
+    const int chordTickGap = ctx.scratch.prevMidiTick.count(trackKey)
+                             ? (int)e->tick - (int)ctx.scratch.prevMidiTick.at(trackKey) : -1;
+    bool isChordExt = isNoteOrRest
                       && ctx.scratch.prevMidiTick.count(trackKey)
                       && ctx.scratch.prevEncVoice.count(trackKey)
                       && ctx.scratch.prevEncVoice.at(trackKey) == voice
-                      && (int)e->tick - (int)ctx.scratch.prevMidiTick.at(trackKey) >= 0
-                      && (int)e->tick - (int)ctx.scratch.prevMidiTick.at(trackKey)
-                      < CHORD_MIDI_THRESHOLD;
+                      && chordTickGap >= 0
+                      && chordTickGap < CHORD_MIDI_THRESHOLD
+                      && (!haveColumns || columnGap == 0
+                          || (chordTickGap == 0 && columnGap < NOTEHEAD_NUDGE_MAX));
     // REST-REST dedup: two Encore voices routing to the same MuseScore voice at the same tick; the
     // second REST would double-advance cumTick.
     if (!isChordExt && et == EncElemType::REST

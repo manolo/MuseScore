@@ -230,6 +230,13 @@ def note_v0c4_xoff(tick, voice, staffIdx, fv, pitch, xoff):
     struct.pack_into('<H', d, 7, xoff & 0xFFFF)
     return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)
 
+def note_v0c4_xoff_tup(tick, voice, staffIdx, fv, pitch, xoff, tuplet=0):
+    """28-byte v0xC4 note stating both its notated column (+10) and a tuplet ratio (+13)."""
+    d = bytearray(25)
+    d[0]=28; d[1]=staffIdx&0x3F; d[2]=fv; d[10]=tuplet; d[12]=pitch
+    d[7]=xoff & 0xFF; d[8]=(xoff >> 8) & 0xFF
+    return struct.pack('<H',tick)+bytes([(9<<4)|(voice&0xF)])+bytes(d)
+
 def note_v0c4_perc(tick, voice, staffIdx, fv, pitch, position=0):
     """28-byte v0xC4 note with percussion position byte (element+12 = d[9])."""
     d = bytearray(25)
@@ -11747,6 +11754,32 @@ def gen_v0c4_dotted_tuplet_member():
     return assemble(0xC4, [(meas_hdr(3, 4), e)], fill_ts=(3, 4))
 
 
+# ===========================================================================
+# notes_columns_apart_not_one_chord.enc
+# The shape a live-recorded drum bar turned out to have: a triplet whose three
+# members stand in three columns five pixels apart, the last two recorded five
+# ticks apart because the strokes were played by hand.  A reader that groups by
+# tick proximity swallows the third column into the second, leaving the bracket a
+# member short.  The columns are what Encore draws, and they say plainly that
+# these are three events: a chord's members share a column to the pixel, while on
+# a staff this dense two columns come as close as a few pixels.  Losing the member
+# leaves the bar short of its signature by a triplet sixteenth, and the hole then
+# gets papered over with rests that overlap the notes around them.
+# ===========================================================================
+def gen_v0c4_columns_apart_not_one_chord():
+    TUP = 0x32                       # three in the time of two
+    FV_16TH, FV_Q, FV_8TH = 5, 3, 4
+    e  = note_v0c4_xoff_tup(0, 0, 0, fv=FV_16TH, pitch=60, xoff=20, tuplet=TUP)
+    e += note_v0c4_xoff_tup(40, 0, 0, fv=FV_16TH, pitch=64, xoff=25, tuplet=TUP)
+    e += note_v0c4_xoff_tup(45, 0, 0, fv=FV_16TH, pitch=67, xoff=30, tuplet=TUP)
+    e += rest_v0c4(120, 0, 0, fv=FV_Q)
+    e += rest_v0c4(360, 0, 0, fv=FV_Q)
+    e += rest_v0c4(600, 0, 0, fv=FV_Q)
+    e += rest_v0c4(840, 0, 0, fv=FV_8TH)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
 def gen_v0c4_nonuplet_missing_marker():
     TUP = 0x98               # nine in the time of eight
     FV_16TH = 5
@@ -12808,6 +12841,7 @@ def apply_encore_layout(data):
         # collect note/rest elements; track per (rawStaff, voice) for dots
         groups = {}
         max_xpos = 0
+        _chord_col = {}          # (staff, voice) -> (tick of the column's first note, its x)
         slurs = []                  # flat SLURSTART ORNs needing a curve
         # accidental in effect this measure, per (rawStaff, staff position):
         # an accidental carries to later same-line notes until the barline.
@@ -12847,6 +12881,17 @@ def apply_encore_layout(data):
                     xp = _enc_xpos(tick)
                     if typ == 9 and (out[i + 6] & 0x20):   # grace -> left of its main note
                         xp = max(2, xp - _GRACE_XPOS_OFFSET)
+                    else:
+                        # Encore draws the notes of one chord in a single column, whatever their
+                        # recorded ticks. A note landing within the chord window of the last one
+                        # on its own staff and voice is one of its members, so it takes that
+                        # column rather than a column of its own computed from its tick.
+                        key = (out[i + 4] & 0x3F, out[i + 2] & 0x0F)
+                        last = _chord_col.get(key)
+                        if last is not None and 0 <= tick - last[0] < 8:
+                            xp = last[1]
+                        else:
+                            _chord_col[key] = (tick, xp)
                     _wr16(out, i + 10, xp)
                 max_xpos = max(max_xpos, _rd16(out, i + 10))
                 # Rests carry a staff position at +12 too. Left at 0 they sit
@@ -13766,6 +13811,7 @@ if __name__=='__main__':
     write("notes_tie_start_recut_at_barline.enc", gen_v0c4_tie_start_recut_at_barline(), layout=False)
     write("notes_dotted_note_between_tuplet_members.enc", gen_v0c4_dotted_note_between_tuplet_members(), layout=False)
     write("notes_dotted_tuplet_member.enc", gen_v0c4_dotted_tuplet_member(), layout=False)
+    write("notes_columns_apart_not_one_chord.enc", gen_v0c4_columns_apart_not_one_chord(), layout=False)
     write("notes_tie_across_trimmed_overflow.enc", gen_v0c4_tie_across_trimmed_overflow(), layout=False)
     write("instruments_tk_empty_name_authoritative.enc", gen_v0c4_tk_empty_name_authoritative())
     write("instruments_instr_perc_clef_drumset.enc",    gen_v0c4_instr_perc_clef_drumset())

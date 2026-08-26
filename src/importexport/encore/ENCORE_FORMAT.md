@@ -1183,7 +1183,8 @@ The note x-offset at `+10` is the notated horizontal column. It exists from form
 
 - Every member of one chord shares the same non-zero column, and successive chords occupy distinct ones. A zero means no stored column.
 - The layout runs strictly left to right, so the column increases with tick, and it is aligned across the staves of a system: notes on the same beat share a column across staves.
-- Adjacent columns lie at least a small distance apart, around eight pixels in observed files, while a chord's members share one give or take a notehead `[observed]`.
+- **A chord's members share the column to the pixel**, in all but a fraction of a percent of chords, measured over both later generations. Adjacent columns are not reliably far apart, though: on a dense staff they come as close as a single pixel, and a distance of five is ordinary. So the column separates chords from sequences by being equal or not, and a distance too small to mean anything is still a distance `[verified]`.
+- The one place the two readings meet is a pair of notes stored at the very same tick with columns a few pixels apart, which is a notehead nudged aside to clear a second in the same chord `[observed]`.
 - **The notes of one chord are not always stored at the same tick.** A chord recorded live, or given a strum, keeps its members at staggered playback ticks, with drift up to a sizeable fraction of the note value, while still sharing one column `[observed]`. This is why the gap rule in 7.1 skips near-simultaneous members.
 - A note whose column matches an earlier beat but whose tick is later is a stale-tick artefact, left when the note was moved in Encore and kept its old playback tick. Encore draws it at the column's beat.
 
