@@ -45,6 +45,7 @@ set(MODULE_TEST_SRC
     ${CMAKE_CURRENT_LIST_DIR}/tst_grace.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tst_text.cpp
     ${CMAKE_CURRENT_LIST_DIR}/tst_census.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tst_digest.cpp
 )
 
 set(MODULE_TEST_LINK
