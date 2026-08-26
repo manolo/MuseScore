@@ -76,14 +76,22 @@ static void getImplied(const std::vector<const EncMeasureElem*>& grp,
 }
 
 // Face value as Fraction for the first element of a chord group.
+// The written value of an element, dots included. A dotted note is a value of its own: it takes
+// half a slot more than the bare face value, so reading it as undotted lets it into a bracket whose
+// slot it then overruns, and the member after it is laid on top of its tail.
 static Fraction getFaceValue(const std::vector<const EncMeasureElem*>& grp)
 {
     if (grp.empty()) {
         return Fraction(0, 1);
     }
     const quint8 fv = fvLow(grp[0]->faceValueByte());
-    return faceValue2DurationType(fv) == DurationType::V_INVALID ? Fraction(0, 1)
-           : TDuration(faceValue2DurationType(fv)).fraction();
+    const DurationType dt = faceValue2DurationType(fv);
+    if (dt == DurationType::V_INVALID) {
+        return Fraction(0, 1);
+    }
+    TDuration td(dt);
+    td.setDots(grp[0]->dotCount());
+    return td.fraction();
 }
 
 // Actual Encore-tick duration of chord at index k.
