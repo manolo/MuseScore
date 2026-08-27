@@ -33,6 +33,8 @@ void buildParts(BuildCtx& ctx);
 void buildMeasures(BuildCtx& ctx);
 void buildInitialSignatures(BuildCtx& ctx);
 void emitMeasures(BuildCtx& ctx);
+// Last word on the length of every bar; see emitters-fill.cpp.
+void guaranteeAllMeasures(BuildCtx& ctx);
 // Post-pass applying the tablature import mode: Separate keeps buildParts' independent tab staves,
 // Linked merges each tab staff into its adjacent matching notation staff as a linked clone, and
 // Ignore drops tab staves. Runs after notes are emitted and resolved, before final layout.

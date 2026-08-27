@@ -296,6 +296,18 @@ void reconcileMeasureLength(BuildCtx& ctx, Measure* measure, Fraction measTick, 
     fitOverfullMeasure(ctx, measure);
 }
 
+// Runs before the marks are resolved: taking an element away is only safe while nothing is anchored
+// to it. See ENCORE_IMPORTER.md §4.1.
+void guaranteeAllMeasures(BuildCtx& ctx)
+{
+    if (ctx.opts.overfillMeasureStrategy == OverfillStrategy::IrregularMeasure) {
+        return;
+    }
+    for (mu::engraving::Measure* m = ctx.score->firstMeasure(); m; m = m->nextMeasure()) {
+        guaranteeMeasureLength(ctx, m);
+    }
+}
+
 // Extend the measure to the maximum voice content (IrregularMeasure behavior), shifting
 // later measures and pending hairpins, and filling short voices with a visible rest.
 // Used by the IrregularMeasure strategy and as the Stretch fallback when a tuplet cannot
@@ -338,6 +350,63 @@ void extendMeasureIrregular(BuildCtx& ctx, Measure* measure)
 // with a rest. Guarantees no measure has wrong total duration.
 // Exception: IrregularMeasure overfill extends the measure to the maximum voice
 // content instead of truncating, preserving all notes and their spanner endpoints.
+// True when plain note values can measure the length exactly, which they can iff it is dyadic.
+static bool isWritableLength(const Fraction& f)
+{
+    const Fraction r = f.reduced();
+    return r.numerator() >= 0 && (r.denominator() & (r.denominator() - 1)) == 0;
+}
+
+// Last word on the length of a bar: trim past the barline, walk the boundary back to a writable
+// length, fill. See ENCORE_IMPORTER.md §4.1.
+void guaranteeMeasureLength(BuildCtx& ctx, Measure* measure)
+{
+    const bool makeGap = (ctx.opts.underfillMeasureStrategy != UnderfillStrategy::VisibleRests);
+    const Fraction mLen = measure->ticks();
+    const Fraction measTick = measure->tick();
+
+    const int nStaves = static_cast<int>(ctx.score->nstaves());
+    for (int si = 0; si < nStaves; ++si) {
+        for (voice_idx_t v = 0; v < VOICES; ++v) {
+            const track_idx_t tr = static_cast<track_idx_t>(si * VOICES + v);
+            std::vector<ChordRest*> crs;
+            Fraction sum = collectVoice(measure, tr, crs);
+            if (sum == mLen || (crs.empty() && v != 0)) {
+                continue;
+            }
+            // A bracket member is removed, never the bracket dissolved: dissolving lengthens the
+            // members in place and the sum stops being the room they occupy.
+            auto dropLast = [&]() {
+                if (crs.empty()) {
+                    return false;
+                }
+                ChordRest* last = crs.back();
+                const Fraction was = last->actualTicks();
+                detachSpannersAt(last);
+                if (last->tuplet()) {
+                    last->tuplet()->remove(last);
+                    last->setTuplet(nullptr);
+                }
+                crs.pop_back();
+                Segment* lseg = last->segment();
+                lseg->remove(last);
+                delete last;
+                sum -= was;
+                return true;
+            };
+            int guard = 256;
+            while (sum > mLen && guard-- > 0 && dropLast()) {
+            }
+            guard = 256;
+            while (sum < mLen && !isWritableLength(mLen - sum) && guard-- > 0 && dropLast()) {
+            }
+            if (sum < mLen && isWritableLength(mLen - sum)) {
+                addGapRests(measure, measTick + sum, mLen - sum, tr, makeGap);
+            }
+        }
+    }
+}
+
 void capMeasureLength(BuildCtx& ctx, Measure* measure)
 {
     const bool makeGap = (ctx.opts.underfillMeasureStrategy != UnderfillStrategy::VisibleRests);

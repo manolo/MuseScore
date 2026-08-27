@@ -356,6 +356,11 @@ It runs five steps, and the order is load-bearing.
 
 MuseScore's own check has to sit between the underfull fill and the corrections, because it assumes the voices it inspects are already coherent.
 
+**A bar comes out a bar, whatever the file says.** Some bars cannot be written at all. A hand-played drum figure can hold five thirty-seconds across a hundred Encore ticks, which is five forty-eighths of a whole, and a bracket always spans a plain value times its member count, so the three in that denominator cannot be written however the numeral is chosen. The strategies of the previous section read the file and try to keep what it says; behind them a last pass guarantees only that every voice adds up to its bar, because a voice that does not is a corrupt score whatever the file meant. It trims content past the barline, then walks the boundary back until the room left is a length plain figures can measure, then fills that room. That second step is the one that matters: a third of a beat is not such a length, and a rest chain chasing it only lays down ever smaller rests, a sixty-fourth then a two-hundred-and-fifty-sixth, and leaves the bar wrong anyway.
+
+Two details of it are deliberate. It removes a bracket member rather than dissolving the bracket, because dissolving gives the members back their plain lengths without moving them, so they overrun what follows and the sum of the lengths stops being the room they occupy: taking things off the end cannot then fix a collision in the middle. And it sweeps the whole score right after the bars are emitted, not later, because taking an element away is only safe before the marks and spanners are resolved: afterwards something is anchored to it, and a pointer left behind takes the layout down, intermittently, which is worse than the bar it was meant to fix.
+
+
 ## 4.2 Pickup detection
 
 Encore does not flag a pickup measure, so it is inferred from the first one, in two cases.

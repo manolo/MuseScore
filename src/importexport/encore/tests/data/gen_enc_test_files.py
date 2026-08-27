@@ -11891,6 +11891,43 @@ def gen_v0c4_measure_repeat_after_pickup():
                            (meas_hdr(4, 4), m3), (meas_hdr(4, 4), m4)], fill_ts=(4, 4))
 
 
+# ===========================================================================
+# notes_bar_that_cannot_be_written.enc
+# A 2/4 bar of the kind a hand-played drum track produces: five thirty-seconds
+# marked three in the time of two, then two eighth rests marked the same, twice
+# over.  It comes to 520 Encore ticks where the bar holds 480, and no notation
+# fits it: the run of five occupies 100 ticks, which is 5/48 of a whole, and a
+# bracket always spans a plain value times its member count, so the 3 in that
+# denominator cannot be written however the numeral is chosen.  What the import
+# has to guarantee is not the notation but the bar: a voice that does not add up
+# to its signature is a corrupt score whatever the file meant.  Left alone the
+# room at the end comes to a third of a beat, which no plain figure measures, so
+# the residue used to come out as a run of ever smaller rests, 1/64 then 1/256
+# then 1/1024, with the bar still wrong at the end of it.
+# ===========================================================================
+def gen_v0c4_bar_that_cannot_be_written():
+    TUP = 0x32                       # three in the time of two
+    FV_32ND, FV_8TH, FV_Q = 6, 4, 3
+    pre = bytearray(set_chumagio(0xC4))
+    pre[0x32] = 2   # two instruments: the second holds the bar exactly
+    pre = bytes(pre)
+    e = b''
+    for half in (0, 260):
+        for k in range(5):
+            e += note_v0c4(half + k * 20, 0, 0, fv=FV_32ND, pitch=38, tuplet=TUP)
+        e += rest_v0c4_tup(half + 100, 0, 0, fv=FV_8TH, tuplet=TUP)
+        e += rest_v0c4_tup(half + 180, 0, 0, fv=FV_8TH, tuplet=TUP)
+    # The second staff holds the bar exactly, as the other eleven do in the score this came from.
+    # Without one the bar itself is stretched to the single voice's content and the question the
+    # fixture asks disappears.
+    e += note_v0c4(0, 0, 1, fv=FV_Q, pitch=60)
+    e += note_v0c4(240, 0, 1, fv=FV_Q, pitch=62)
+    e += end_marker()
+    body  = meas_block(meas_hdr(2, 4), e)
+    body += b''.join(empty_meas(2, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
 def gen_v0c4_nonuplet_missing_marker():
     TUP = 0x98               # nine in the time of eight
     FV_16TH = 5
@@ -13927,6 +13964,7 @@ if __name__=='__main__':
     write("notes_sixtyfourth_bracket_not_artifact.enc", gen_v0c4_sixtyfourth_bracket_not_artifact(), layout=False)
     write("notes_tick_wrapped_before_barline.enc", gen_v0c4_tick_wrapped_before_barline(), layout=False)
     write("ornaments_measure_repeat_after_pickup.enc", gen_v0c4_measure_repeat_after_pickup(), layout=False)
+    write("notes_bar_that_cannot_be_written.enc", gen_v0c4_bar_that_cannot_be_written(), layout=False)
     write("notes_tie_across_trimmed_overflow.enc", gen_v0c4_tie_across_trimmed_overflow(), layout=False)
     write("instruments_tk_empty_name_authoritative.enc", gen_v0c4_tk_empty_name_authoritative())
     write("instruments_instr_perc_clef_drumset.enc",    gen_v0c4_instr_perc_clef_drumset())

@@ -91,7 +91,7 @@ void dissolveTuplet(Tuplet* t)
 // is removed or moved. Segment::remove() would otherwise call score()->undo() to null the
 // spanner's start/end, leaving a dangling spanner that crashes layout. Done up front here so
 // no such undo fires. (Ties live on notes, not in the spanner map, so they are unaffected.)
-static void detachSpannersAt(ChordRest* cr)
+void detachSpannersAt(ChordRest* cr)
 {
     Score* score = cr->score();
     std::vector<Spanner*> toRemove;
