@@ -22,6 +22,8 @@
 
 // Queue Encore LYRIC elements and attach syllables to the nearest chords in a measure.
 
+#include <algorithm>
+
 #include "emitters-internal.h"
 
 #include "../parser/ticks.h"
@@ -77,10 +79,10 @@ void enqueueLyric(BuildCtx& ctx, const EncLyric* el, track_idx_t track)
 // note loop accumulates durations, not Encore ticks, so the relationship is not proportional).
 // Notes are routed with the SAME logic as the note loop (routeElementStaffVoice); keying by raw
 // encStaff instead put grand-staff notes on the wrong staff and reversed the syllables.
-static std::map<int, std::vector<int> > buildEncNoteTicksByStaff(
+static std::map<int, std::vector<std::pair<int, int> > > buildEncNoteTicksByStaff(
     BuildCtx& ctx, const MeasEmitCtx& mc, const EncMeasure& encMeas)
 {
-    std::map<int, std::vector<int> > encNoteTicksByStaff;
+    std::map<int, std::vector<std::pair<int, int> > > encNoteTicksByStaff;   // staff -> [(tick, column)]
     for (const auto& elem : encMeas.elements) {
         const EncMeasureElem* e = elem.get();
         if (e->type != static_cast<quint8>(EncElemType::NOTE)) {
@@ -96,8 +98,8 @@ static std::map<int, std::vector<int> > buildEncNoteTicksByStaff(
         }
         auto& tickList = encNoteTicksByStaff[routed->staffIdx];
         const int t = static_cast<int>(e->tick);
-        if (tickList.empty() || tickList.back() != t) {
-            tickList.push_back(t);
+        if (tickList.empty() || tickList.back().first != t) {
+            tickList.emplace_back(t, static_cast<int>(static_cast<const EncNote*>(e)->xoffset));
         }
     }
     return encNoteTicksByStaff;
@@ -106,11 +108,17 @@ static std::map<int, std::vector<int> > buildEncNoteTicksByStaff(
 // Pair each ChordRest on chordTrack with an Encore tick. The kth chord takes the kth Encore note
 // tick (positional assignment), which is more accurate than a cumTick conversion (see
 // buildEncNoteTicksByStaff); rests do not consume a note tick.
-static std::vector<std::pair<int, ChordRest*> > buildCrTickPairs(
+struct CrAnchor {
+    int encTick = 0;
+    int column = 0;         // where the note is written; zero when unknown, as in format 2.50
+    ChordRest* cr = nullptr;
+};
+
+static std::vector<CrAnchor> buildCrTickPairs(
     Measure* measure, const Fraction& measTick, const EncMeasure& encMeas,
-    track_idx_t chordTrack, const std::vector<int>* noteTickList)
+    track_idx_t chordTrack, const std::vector<std::pair<int, int> >* noteTickList)
 {
-    std::vector<std::pair<int, ChordRest*> > crTickPairs;
+    std::vector<CrAnchor> crTickPairs;
     size_t noteTickIdx = 0;
     for (Segment* s = measure->first(SegmentType::ChordRest);
          s; s = s->next(SegmentType::ChordRest)) {
@@ -119,9 +127,12 @@ static std::vector<std::pair<int, ChordRest*> > buildCrTickPairs(
             continue;
         }
         int segEncTick;
+        int segColumn = 0;
         ChordRest* cr = toChordRest(el);
         if (cr->isChord() && noteTickList && noteTickIdx < noteTickList->size()) {
-            segEncTick = (*noteTickList)[noteTickIdx++];
+            segEncTick = (*noteTickList)[noteTickIdx].first;
+            segColumn = (*noteTickList)[noteTickIdx].second;
+            ++noteTickIdx;
         } else {
             // Rest, or note list exhausted: estimate from the measure's beat grid.
             const Fraction relTick = s->tick() - measTick;
@@ -129,7 +140,7 @@ static std::vector<std::pair<int, ChordRest*> > buildCrTickPairs(
             segEncTick = (relTick.numerator() * durTicks)
                          / std::max(1, relTick.denominator());
         }
-        crTickPairs.emplace_back(segEncTick, cr);
+        crTickPairs.push_back({ segEncTick, segColumn, cr });
     }
     return crTickPairs;
 }
@@ -139,7 +150,7 @@ static std::vector<std::pair<int, ChordRest*> > buildCrTickPairs(
 // When preferNotAfter is set, notes at/before encTick win over later notes regardless of
 // distance, and ties break to the closest (the threshold pass); otherwise the closest by
 // absolute distance wins (the rest/last-resort fallback passes).
-static int findBestCr(const std::vector<std::pair<int, ChordRest*> >& pairs,
+static int findBestCr(const std::vector<CrAnchor>& pairs,
                       const std::vector<bool>& consumed, int encTick,
                       bool wantChord, int maxDelta, bool preferNotAfter)
 {
@@ -150,21 +161,41 @@ static int findBestCr(const std::vector<std::pair<int, ChordRest*> >& pairs,
         if (consumed[ni]) {
             continue;
         }
-        const bool ok = wantChord ? pairs[ni].second->isChord() : pairs[ni].second->isRest();
+        const bool ok = wantChord ? pairs[ni].cr->isChord() : pairs[ni].cr->isRest();
         if (!ok) {
             continue;
         }
-        const int delta = std::abs(pairs[ni].first - encTick);
+        const int delta = std::abs(pairs[ni].encTick - encTick);
         if (delta > maxDelta) {
             continue;
         }
-        const bool isAfter = (pairs[ni].first > encTick);
+        const bool isAfter = (pairs[ni].encTick > encTick);
         if (bestIdx < 0
             || (preferNotAfter && !isAfter && bestIsAfter)
             || ((!preferNotAfter || isAfter == bestIsAfter) && delta < bestDelta)) {
             bestDelta = delta;
             bestIdx = static_cast<int>(ni);
             bestIsAfter = isAfter;
+        }
+    }
+    return bestIdx;
+}
+
+// The column a syllable is written at is the column of the note that sings it, and it holds where
+// the stored tick does not. See ENCORE_FORMAT.md 6.9.
+static int findBestCrByColumn(const std::vector<CrAnchor>& pairs, const std::vector<bool>& consumed,
+                              int column, int maxDelta)
+{
+    int bestIdx = -1;
+    int bestDelta = INT_MAX;
+    for (size_t ni = 0; ni < pairs.size(); ++ni) {
+        if (consumed[ni] || pairs[ni].column <= 0 || !pairs[ni].cr->isChord()) {
+            continue;
+        }
+        const int delta = std::abs(pairs[ni].column - column);
+        if (delta <= maxDelta && delta < bestDelta) {
+            bestDelta = delta;
+            bestIdx = static_cast<int>(ni);
         }
     }
     return bestIdx;
@@ -179,7 +210,8 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
     const EncMeasure& encMeas = *mc.encMeas;
     const Fraction measTick = mc.measTick;
 
-    std::map<int, std::vector<int> > encNoteTicksByStaff = buildEncNoteTicksByStaff(ctx, mc, encMeas);
+    std::map<int, std::vector<std::pair<int, int> > > encNoteTicksByStaff
+        = buildEncNoteTicksByStaff(ctx, mc, encMeas);
 
     // matchThreshold: half a beat in Encore ticks.
     const int beatTicksVal = encMeas.beatTicks ? static_cast<int>(encMeas.beatTicks) : 240;
@@ -286,22 +318,34 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
             }
         }
 
-        const std::vector<int>* noteTickList = nullptr;
+        const std::vector<std::pair<int, int> >* noteTickList = nullptr;
         {
             auto it = encNoteTicksByStaff.find(lyStaffIdx);
             if (it != encNoteTicksByStaff.end() && !it->second.empty()) {
                 noteTickList = &it->second;
             }
         }
-        std::vector<std::pair<int, ChordRest*> > crTickPairs
+        std::vector<CrAnchor> crTickPairs
             = buildCrTickPairs(measure, measTick, encMeas, chordTrack, noteTickList);
+
+        // Syllables are sung left to right, and the column is where each one is written; the order
+        // they happen to be stored in is not. See ENCORE_FORMAT.md 6.9.
+        std::stable_sort(entries.begin(), entries.end(),
+                         [](const PendingLyric& a, const PendingLyric& b) { return a.xoffset < b.xoffset; });
 
         std::vector<bool> crConsumed(crTickPairs.size(), false);
         for (const auto& pl : entries) {
+            // Pass 0: the chord written in the same column, which is what the syllable sits under.
+            const int kColumnSlack = 6;
+            int bestIdx = pl.xoffset > 0
+                          ? findBestCrByColumn(crTickPairs, crConsumed, pl.xoffset, kColumnSlack)
+                          : -1;
             // Pass 1: nearest chord within the threshold, preferring notes at/before the lyric
             // tick so a slightly-misaligned lyric does not grab a later note just for proximity.
-            int bestIdx = findBestCr(crTickPairs, crConsumed, pl.encTick,
+            if (bestIdx < 0) {
+                bestIdx = findBestCr(crTickPairs, crConsumed, pl.encTick,
                                      /*wantChord*/ true, matchThreshold, /*preferNotAfter*/ true);
+            }
             // Pass 2: nearest rest.
             if (bestIdx < 0) {
                 bestIdx = findBestCr(crTickPairs, crConsumed, pl.encTick,
@@ -317,7 +361,7 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
                 continue;
             }
             crConsumed[bestIdx] = true;
-            ChordRest* c = crTickPairs[bestIdx].second;
+            ChordRest* c = crTickPairs[bestIdx].cr;
             Lyrics* ly = Factory::createLyrics(c);
             ly->setTrack(chordTrack);
             ly->setVerse(lyVerseNo);

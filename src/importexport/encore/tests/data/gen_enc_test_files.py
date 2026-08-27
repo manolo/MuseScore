@@ -4723,6 +4723,26 @@ def gen_v0c4_lyrics_accent_first_letter():
 
 
 # ===========================================================================
+# text_lyrics_column_says_which_note.enc
+# Four quarters in columns 12, 36, 90 and 130. Their syllables are stored in
+# the reverse order, two of them at tick 0 and the first one carrying a stale
+# tick that points at the last note, which is how a real save comes out.
+# Matching by tick reads the phrase as "con flor yer"; the anchor byte holds
+# each note's column to the unit and gets it right.
+# ===========================================================================
+def gen_v0c4_lyrics_column_says_which_note():
+    e  = note_v0c4_xoff(  0, 0, 0, 3, 60, 12)
+    e += note_v0c4_xoff(240, 0, 0, 3, 62, 36)
+    e += note_v0c4_xoff(480, 0, 0, 3, 64, 90)
+    e += note_v0c4_xoff(720, 0, 0, 3, 65, 130)
+    e += lyric_v0c4(  0, 0, 0, 'flor', kie=90)
+    e += lyric_v0c4(  0, 0, 0, 'con', kie=36)
+    e += lyric_v0c4(700, 0, 0, 'yer', kie=12)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+# ===========================================================================
 # ornaments_accent_sibling_no_spillover.enc
 # BUG FIX: ACCENT ORN (0xBE) on staff 0 whose notes are in voice=3 must NOT
 # redirect to staff 1.  Without fix: resolver checks track=staffBase+0 (voice=0),
@@ -13962,6 +13982,7 @@ if __name__=='__main__':
     write("text_lyrics_hyphen_across_barline.enc", gen_v0c4_lyrics_hyphen_across_barline())
     write("text_lyrics_latin1.enc",          gen_v0c4_lyrics_latin1())
     write("text_lyrics_accent_first_letter.enc", gen_v0c4_lyrics_accent_first_letter())
+    write("text_lyrics_column_says_which_note.enc", gen_v0c4_lyrics_column_says_which_note(), layout=False)
     write("instruments_instr_bass_midi_tiebreak.enc",   gen_v0c4_instr_bass_midi_tiebreak())
     write("instruments_instr_percussion_drumset.enc",   gen_v0c4_instr_percussion_drumset())
     write("instruments_small_tk_key6.enc",               gen_v0c4_small_tk_key6())
