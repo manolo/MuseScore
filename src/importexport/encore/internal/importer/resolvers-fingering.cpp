@@ -208,7 +208,21 @@ static void applyPendingBowings(BuildCtx& ctx, MasterScore* score)
             Measure* m = score->tick2measure(pb.tick);
             if (m) {
                 const int ownStaff = static_cast<int>(pb.track / VOICES);
-                Segment* seg = m->findSegment(SegmentType::ChordRest, pb.tick);
+                // Nothing starts on a barline. A mark stored there and not marked as belonging to
+                // the next measure is on the note that ENDS there, the last one of the measure
+                // before, so that is where to look: the chord that begins after the barline is a
+                // different note and taking it moves the mark out of its own bar.
+                if (pb.tick == m->tick() && m->prevMeasure()) {
+                    for (Segment* s = m->prevMeasure()->first(SegmentType::ChordRest); s;
+                         s = s->next(SegmentType::ChordRest)) {
+                        track_idx_t prevTrack = pb.track;
+                        if (Chord* prev = firstChordVoiceAt(score, s, ownStaff, prevTrack)) {
+                            c = prev;
+                            useTrack = prevTrack;
+                        }
+                    }
+                }
+                Segment* seg = c ? nullptr : m->findSegment(SegmentType::ChordRest, pb.tick);
                 if (seg) {
                     // ORN is always voice 0; scan all voices of own staff before sibling.
                     c = firstChordVoiceAt(score, seg, ownStaff, useTrack);
@@ -218,9 +232,13 @@ static void applyPendingBowings(BuildCtx& ctx, MasterScore* score)
                 }
                 if (!c) {
                     // A mark on the last note of a bar is stored at the tick where that note ends, so
-                    // nothing starts there. Walk back to the note sounding at that tick, within this
-                    // measure: crossing the barline would hand the mark to the wrong note.
-                    for (Segment* s = m->first(SegmentType::ChordRest); s && s->tick() < pb.tick;
+                    // nothing starts there. Walk back to the note sounding at that tick. When that
+                    // tick is the barline itself the note lives in the measure before, which is where
+                    // the search has to go: the mark belongs to the note that ends there, never to
+                    // whatever begins after it.
+                    Measure* look = (pb.tick == m->tick() && m->prevMeasure()) ? m->prevMeasure() : m;
+                    for (Segment* s = look->first(SegmentType::ChordRest);
+                         s && (look != m || s->tick() < pb.tick);
                          s = s->next(SegmentType::ChordRest)) {
                         track_idx_t prevTrack = pb.track;
                         if (Chord* prev = firstChordVoiceAt(score, s, ownStaff, prevTrack)) {
