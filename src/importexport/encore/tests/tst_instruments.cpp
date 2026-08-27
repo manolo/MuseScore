@@ -804,6 +804,39 @@ TEST_F(Tst_Instruments, total_size_tk_key_read_from_entry_end)
     delete score;
 }
 
+// The per-staff tables are runs of one byte per voice, and that shape is what proves one is there.
+// Demanding a program byte that differs from the channels throws out two real tables: a staff with
+// no instrument assigned, whose program is zero, and one whose channel number happens to equal its
+// program. Their keys went unread: in the corpus that cost a laud and a guitar their octave.
+TEST_F(Tst_Instruments, key_read_from_a_table_its_run_shape_proves)
+{
+    MasterScore* score = readEncoreScore("instruments_key_from_run_shaped_table.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_GE(static_cast<int>(score->parts().size()), 2);
+    const Instrument* inst0 = score->parts()[0]->instrument();
+    const Instrument* inst1 = score->parts()[1]->instrument();
+    ASSERT_NE(inst0, nullptr);
+    ASSERT_NE(inst1, nullptr);
+    EXPECT_EQ(inst0->transpose().chromatic, -9) << "a channel run with no program still places the table";
+    EXPECT_EQ(inst1->transpose().chromatic, -14) << "channel and program being one number does not unplace it";
+    delete score;
+}
+
+// A staff with neither channel nor program leaves a stretch of zeros where its tables belong, and
+// zeros prove nothing. What places them is the distance measured on a sibling entry, since the
+// tables sit the same distance into every entry of a file.
+TEST_F(Tst_Instruments, key_placed_by_the_distance_a_sibling_entry_proves)
+{
+    MasterScore* score = readEncoreScore("instruments_key_from_a_sibling_measured_table.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_GE(static_cast<int>(score->parts().size()), 2);
+    const Instrument* inst1 = score->parts()[1]->instrument();
+    ASSERT_NE(inst1, nullptr);
+    EXPECT_EQ(inst1->transpose().chromatic, -5)
+        << "the second entry proves nothing on its own; the first says where to look";
+    delete score;
+}
+
 TEST_F(Tst_Instruments, total_size_tk_key_read_from_other_generation_distance)
 {
     // These entries keep their per-staff tables at the other generation's distance from the entry

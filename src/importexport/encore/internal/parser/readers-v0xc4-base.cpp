@@ -484,11 +484,23 @@ static constexpr qint64 MIDI_FROM_ENTRY_END_300 = 44;
 // voice, so every byte of the run before a program is a channel, below 16, and the last of them is
 // not the program value itself. That rejects both a position two bytes inside the channel run and
 // the arbitrary bytes an absolute offset can land on. See ENCORE_FORMAT.md §5.1 Instrument block.
-static bool programTableStartsAt(QDataStream& ds, qint64 off)
+// A staff carries its channel run whether or not an instrument is assigned to it, and a staff whose
+// channel number happens to equal its program number carries both the same. What tells a table from
+// a stretch of one repeated value is the run structure itself, so three proofs are offered, ranked
+// below because the weaker ones also match more.
+enum class TableProof {
+    Program,        // a program names an instrument and the channels differ from it
+    ValueRun,       // the program repeats once per voice, whatever the channels hold
+    ChannelRun,     // no program named, and the channel run is all there is
+};
+
+static bool programTableStartsAt(QDataStream& ds, qint64 off, TableProof proof)
 {
     static constexpr int MIDI_CHANNELS = 16;
-    const int prg = readMidiByteAt(ds, off);
-    if (!prg || off < VOICES_PER_STAFF || !ds.device()->seek(off - VOICES_PER_STAFF)) {
+    static constexpr int MIDI_PROGRAMS = 128;
+    const qint64 span = VOICES_PER_STAFF + (proof == TableProof::ValueRun ? VOICES_PER_STAFF : 1);
+    if (off < VOICES_PER_STAFF || off - VOICES_PER_STAFF + span > ds.device()->size()
+        || !ds.device()->seek(off - VOICES_PER_STAFF)) {
         return false;
     }
     quint8 ch = 0;
@@ -498,16 +510,36 @@ static bool programTableStartsAt(QDataStream& ds, qint64 off)
             return false;
         }
     }
-    return static_cast<int>(ch) != prg;
+    quint8 prg = 0;
+    ds >> prg;
+    if (prg > MIDI_PROGRAMS) {
+        return false;
+    }
+    if (proof == TableProof::ValueRun) {
+        if (prg == 0 && ch == 0) {
+            return false;       // a stretch of zeros says nothing either way
+        }
+        for (qint64 v = 1; v < VOICES_PER_STAFF; ++v) {
+            quint8 next = 0;
+            ds >> next;
+            if (next != prg) {
+                return false;
+            }
+        }
+        return true;
+    }
+    return proof == TableProof::Program ? (prg != 0 && ch != prg) : (prg == 0 && ch != prg);
 }
 
 // Absolute offset of the per-staff program table: the first of the positions the layouts put it at
 // that a channel run confirms, or -1. See ENCORE_FORMAT.md §5.1 Instrument block.
 static qint64 programTableOffset(QDataStream& ds, std::initializer_list<qint64> candidates)
 {
-    for (const qint64 off : candidates) {
-        if (programTableStartsAt(ds, off)) {
-            return off;
+    for (const TableProof proof : { TableProof::Program, TableProof::ValueRun, TableProof::ChannelRun }) {
+        for (const qint64 off : candidates) {
+            if (programTableStartsAt(ds, off, proof)) {
+                return off;
+            }
         }
     }
     return -1;
@@ -566,8 +598,11 @@ static void readMidiProgramsSmallTk(
                                                  strideMeasured, largeEntry);
         if (table >= 0) {
             readChannelBeforeMidi(ds, table, instr);
-            instr.midiProgram = readMidiByteAt(ds, table);
-            continue;
+            // A table naming no program leaves the search below to run as it always did.
+            if (const int prg = readMidiByteAt(ds, table)) {
+                instr.midiProgram = prg;
+                continue;
+            }
         }
         const qint64 afterContent = instr.contentFilePos + static_cast<qint64>(instr.offset) + MIDI_AFTER_CONTENT;
         // A varSize that overstates the content makes the standard offset land past the entry, where
@@ -722,15 +757,33 @@ static void readKeyTranspositionsSmallTk(std::vector<EncInstrument>& instruments
     // A size of 112 on entries that really measure 2158 leaves the entry large; the stride says so
     // only when it came from the spacing between two blocks.
     const bool largeEntry = strideMeasured && entryStride >= LARGE_ENTRY_MIN;
-    for (auto& instr : instruments) {
+    // The tables sit the same distance into every entry of a file, so one entry that proves where
+    // they are speaks for the ones whose own region proves nothing: a staff with neither channel nor
+    // program is a stretch of zeros, and its key is still where its siblings keep theirs.
+    std::vector<qint64> tables(instruments.size(), -1);
+    qint64 provedDistance = -1;
+    for (size_t n = 0; n < instruments.size(); ++n) {
+        if (instruments[n].contentFilePos < 0) {
+            continue;
+        }
+        tables[n] = smallTkProgramTable(instruments[n], ds, entryStride, midiFromEntryEnd,
+                                        strideMeasured, largeEntry);
+        if (tables[n] >= 0 && provedDistance < 0) {
+            provedDistance = tables[n] - instruments[n].contentFilePos;
+        }
+    }
+    for (size_t n = 0; n < instruments.size(); ++n) {
+        EncInstrument& instr = instruments[n];
         if (instr.contentFilePos < 0) {
             continue;
         }
         const qint64 fallback = totalSizeFmt
                                 ? instr.contentFilePos + KEY_IN_CONTENT
                                 : instr.contentFilePos + static_cast<qint64>(instr.offset) + KEY_AFTER_CONTENT;
-        readKeyFromTable(instr, ds, smallTkProgramTable(instr, ds, entryStride, midiFromEntryEnd,
-                                                        strideMeasured, largeEntry), fallback);
+        const qint64 table = tables[n] >= 0 || provedDistance < 0
+                             ? tables[n]
+                             : instr.contentFilePos + provedDistance;
+        readKeyFromTable(instr, ds, table, fallback);
     }
 }
 
