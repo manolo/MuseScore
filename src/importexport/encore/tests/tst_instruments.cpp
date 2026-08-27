@@ -837,6 +837,42 @@ TEST_F(Tst_Instruments, key_placed_by_the_distance_a_sibling_entry_proves)
     delete score;
 }
 
+// A score whose staves were never assigned an instrument holds no channel and no program anywhere,
+// so nothing proves where the tables sit and there is no sibling to measure either. The keys are
+// still 23 bytes ahead of where this layout keeps the tables, counted back from the entry end.
+TEST_F(Tst_Instruments, key_read_where_nothing_at_all_is_assigned)
+{
+    MasterScore* score = readEncoreScore("instruments_key_when_nothing_is_assigned.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_GE(static_cast<int>(score->parts().size()), 2);
+    const Instrument* inst0 = score->parts()[0]->instrument();
+    const Instrument* inst1 = score->parts()[1]->instrument();
+    ASSERT_NE(inst0, nullptr);
+    ASSERT_NE(inst1, nullptr);
+    EXPECT_EQ(inst0->transpose().chromatic, -9);
+    EXPECT_EQ(inst1->transpose().chromatic, -14);
+    delete score;
+}
+
+// Encore 4 writes a fixed-stride entry table and marks only some entries with a TK magic. Where the
+// first is unmarked the file was taken for one with no blocks at all, and read at the absolute
+// positions of two other layouts: the name came back as whatever text the page blocks spell, and the
+// program and the key as nothing. Where the one magic sits proves the stride, and that places all
+// three fields of every entry.
+TEST_F(Tst_Instruments, entries_read_at_the_stride_the_file_proves)
+{
+    MasterScore* score = readEncoreScore("instruments_table_the_file_measures_itself.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_GE(static_cast<int>(score->parts().size()), 2);
+    ASSERT_GE(static_cast<int>(score->parts().size()), 3);
+    EXPECT_EQ(score->parts()[1]->longName(), String(u"TenorSax"))
+        << "the unmarked entry names itself, rather than the word planted at the formula position";
+    const Instrument* inst1 = score->parts()[1]->instrument();
+    ASSERT_NE(inst1, nullptr);
+    EXPECT_EQ(inst1->transpose().chromatic, -14) << "and carries its key where its marked sibling does";
+    delete score;
+}
+
 TEST_F(Tst_Instruments, total_size_tk_key_read_from_other_generation_distance)
 {
     // These entries keep their per-staff tables at the other generation's distance from the entry
