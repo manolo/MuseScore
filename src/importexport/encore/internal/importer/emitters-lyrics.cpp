@@ -331,15 +331,39 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
         // Syllables are sung left to right, and the column is where each one is written; the order
         // they happen to be stored in is not. See ENCORE_FORMAT.md 6.9.
         std::stable_sort(entries.begin(), entries.end(),
-                         [](const PendingLyric& a, const PendingLyric& b) { return a.xoffset < b.xoffset; });
+                         [](const PendingLyric& a, const PendingLyric& b) {
+            if (a.xoffset != b.xoffset) {
+                return a.xoffset < b.xoffset;
+            }
+            if (a.encTick != b.encTick) {
+                return a.encTick < b.encTick;
+            }
+            // A pair written at one place is a correction and the syllable it replaced, and which of
+            // them is stored first does not survive a re-save, so it cannot decide. The fuller text
+            // is taken as the one sung, and goes on the first verse.
+            if (a.text.size() != b.text.size()) {
+                return a.text.size() > b.text.size();
+            }
+            return a.text < b.text;
+        });
 
         std::vector<bool> crConsumed(crTickPairs.size(), false);
+        // Where the syllable before this one went, and from what: a pair that shares both belongs to
+        // one note. See ENCORE_FORMAT.md 6.9.
+        int lastIdx = -1, lastTick = -1, lastColumn = -1;
         for (const auto& pl : entries) {
             // Pass 0: the chord written in the same column, which is what the syllable sits under.
             const int kColumnSlack = 6;
             int bestIdx = pl.xoffset > 0
                           ? findBestCrByColumn(crTickPairs, crConsumed, pl.xoffset, kColumnSlack)
                           : -1;
+            // Pass 0b: a syllable written at the same tick and column as the one before is the
+            // leftover of a correction, and belongs to the note that one took, stacked under it.
+            bool stacked = false;
+            if (bestIdx < 0 && lastIdx >= 0 && pl.encTick == lastTick && pl.xoffset == lastColumn) {
+                bestIdx = lastIdx;
+                stacked = true;
+            }
             // Pass 1: nearest chord within the threshold, preferring notes at/before the lyric
             // tick so a slightly-misaligned lyric does not grab a later note just for proximity.
             if (bestIdx < 0) {
@@ -364,7 +388,14 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
             ChordRest* c = crTickPairs[bestIdx].cr;
             Lyrics* ly = Factory::createLyrics(c);
             ly->setTrack(chordTrack);
-            ly->setVerse(lyVerseNo);
+            int verse = lyVerseNo;
+            if (stacked) {
+                while (std::any_of(c->lyrics().begin(), c->lyrics().end(),
+                                   [verse](const Lyrics* l) { return l && l->verse() == verse; })) {
+                    ++verse;
+                }
+            }
+            ly->setVerse(verse);
             ly->setXmlText(pl.text);
             LyricsSyllabic syll = LyricsSyllabic::SINGLE;
             if (pl.hyphenBefore && pl.hyphenAfter) {
@@ -377,6 +408,9 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
             ly->setSyllabic(syll);
             c->add(ly);
             ctx.scratch.lastAttachedLyric[lyTrack] = ly;
+            lastIdx = bestIdx;
+            lastTick = pl.encTick;
+            lastColumn = pl.xoffset;
         }
         // Lyric ticks are measure-relative; unmatched leftovers cannot anchor in a
         // later measure, so discard them.
