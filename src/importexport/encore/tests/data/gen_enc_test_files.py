@@ -5111,6 +5111,60 @@ def gen_v0c4_key_from_run_shaped_table():
 
 
 # ===========================================================================
+# instruments_unmarked_table_of_ten.enc
+# Ten entries of 242 bytes with no TK magic anywhere, which is how a band
+# score comes out of some Encore 4 versions. Choosing between the two known
+# layouts by where the first block falls reads this as a table of ten entries
+# of 2158 bytes: the first name is found, the rest of the probes walk into the
+# music, and the programs and keys are looked for at absolute positions that
+# hold other things. The span from the table base to the first block divides
+# by the instrument count and says what the entries measure.
+# ===========================================================================
+def gen_v0c4_unmarked_table_of_ten():
+    STRIDE        = 242
+    CONTENT       = STRIDE - 8
+    MIDI_FROM_END = 46
+    KEY_FROM_END  = MIDI_FROM_END + 23
+    VOICES        = 8
+    TK_START      = 194
+    NAMES = ['Corneta', 'Trompeta 1', 'Trompeta 2', 'Trombon 1', 'Trombon 2',
+             'Bombardino', 'Tuba', 'Cajas', 'Bombos', 'Platos']
+
+    header = bytearray(SKELETON_PRE[:TK_START])
+    header[0x32] = len(NAMES)
+
+    def make_entry(name_str, channel, program, key_semitones):
+        content = bytearray(CONTENT)
+        nb      = name_str.encode('ascii') + b'\x00'
+        content[:len(nb)] = nb
+        table = CONTENT - MIDI_FROM_END
+        content[table - VOICES:table] = bytes([channel]) * VOICES
+        content[table:table + VOICES]  = bytes([program]) * VOICES
+        content[CONTENT - KEY_FROM_END] = key_semitones & 0xFF
+        return bytes(8) + bytes(content)          # no TK magic at all
+
+    entries = b''
+    for i, nm in enumerate(NAMES):
+        # The brass carry a program and no key; the last three are percussion on channel 9.
+        if i < 7:
+            entries += make_entry(nm, 0, 49 if i == 0 else 0, 0)
+        else:
+            entries += make_entry(nm, 9, 0, -3)
+
+    LEGACY_TK_END = 194 + 8 + 2158
+    tail          = SKELETON_PRE[LEGACY_TK_END:]
+    # A real table butts against the first block, which is what its span has to divide by.
+    first_magic   = min(i for i in (tail.find(m) for m in (b'PAGE', b'LINE', b'MEAS')) if i >= 0)
+    page_line     = tail[first_magic:]
+
+    pre  = bytes(header) + entries + page_line
+    e    = end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
+# ===========================================================================
 # instruments_table_the_file_measures_itself.enc
 # A fixed-stride entry table of 242 bytes an entry where only the THIRD entry
 # carries a TK magic, which is how Encore 4 writes some files, and a plausible
@@ -14172,6 +14226,7 @@ if __name__=='__main__':
     write("instruments_key_from_a_sibling_measured_table.enc", gen_v0c4_key_from_a_sibling_measured_table())
     write("instruments_key_when_nothing_is_assigned.enc", gen_v0c4_key_when_nothing_is_assigned())
     write("instruments_table_the_file_measures_itself.enc", gen_v0c4_table_the_file_measures_itself())
+    write("instruments_unmarked_table_of_ten.enc", gen_v0c4_unmarked_table_of_ten())
     write("instruments_total_size_tk_key_not_from_channel_run.enc", gen_v0c4_total_size_tk_key_not_from_channel_run())
     write("instruments_no_tk_compact_table_two_instrs.enc", gen_v0c4_no_tk_compact_table_two_instrs())
     write("instruments_oversized_varsize_key_from_entry_end.enc", gen_v0c4_oversized_varsize_key_from_entry_end())
