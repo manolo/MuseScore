@@ -4723,6 +4723,26 @@ def gen_v0c4_lyrics_accent_first_letter():
 
 
 # ===========================================================================
+# text_lyrics_two_in_one_column.enc
+# Three quarters in columns 10, 40 and 70, and two syllables written in the
+# column of the second one, which is what a corrected lyric leaves behind: the
+# two are identical in every field but their text and the order they are
+# stored in. Both belong to that note; handing the second to a neighbour puts
+# a word on the third note, which the file leaves silent.
+# ===========================================================================
+def gen_v0c4_lyrics_two_in_one_column():
+    e  = note_v0c4_xoff(  0, 0, 0, 3, 60, 10)
+    e += note_v0c4_xoff(240, 0, 0, 3, 62, 40)
+    e += note_v0c4_xoff(480, 0, 0, 3, 64, 70)
+    e += note_v0c4_xoff(720, 0, 0, 3, 65, 100)
+    e += lyric_v0c4(  0, 0, 0, 'do', kie=10)
+    e += lyric_v0c4(240, 0, 0, 're', kie=40)        # the leftover, stored first here
+    e += lyric_v0c4(240, 0, 0, 'remi', kie=40)      # and the fuller text second
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+# ===========================================================================
 # text_lyrics_column_says_which_note.enc
 # Four quarters in columns 12, 36, 90 and 130. Their syllables are stored in
 # the reverse order, two of them at tick 0 and the first one carrying a stale
@@ -14216,6 +14236,7 @@ if __name__=='__main__':
     write("text_lyrics_latin1.enc",          gen_v0c4_lyrics_latin1())
     write("text_lyrics_accent_first_letter.enc", gen_v0c4_lyrics_accent_first_letter())
     write("text_lyrics_column_says_which_note.enc", gen_v0c4_lyrics_column_says_which_note(), layout=False)
+    write("text_lyrics_two_in_one_column.enc", gen_v0c4_lyrics_two_in_one_column(), layout=False)
     write("instruments_instr_bass_midi_tiebreak.enc",   gen_v0c4_instr_bass_midi_tiebreak())
     write("instruments_instr_percussion_drumset.enc",   gen_v0c4_instr_percussion_drumset())
     write("instruments_small_tk_key6.enc",               gen_v0c4_small_tk_key6())

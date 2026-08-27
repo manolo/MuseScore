@@ -397,6 +397,46 @@ TEST_F(Tst_Text, lyrics_take_the_note_written_in_their_own_column)
     delete score;
 }
 
+// Two syllables written in one column are what a corrected lyric leaves behind: identical in every
+// field but their text. Both belong to that note, stacked as verses; handing the second one to a
+// neighbour puts a word on a note the file leaves silent. Which of the two is stored first does not
+// survive a re-save, so the order is settled here instead: the fuller text sings.
+TEST_F(Tst_Text, two_syllables_in_one_column_stay_on_their_note)
+{
+    MasterScore* score = readEncoreScore("text_lyrics_two_in_one_column.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<size_t> perChord;
+    std::vector<String> onSecond;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            const std::vector<Lyrics*>& ly = toChord(el)->lyrics();
+            perChord.push_back(ly.size());
+            if (perChord.size() == 2) {
+                for (const Lyrics* l : ly) {
+                    onSecond.push_back(l->plainText());
+                }
+            }
+        }
+    }
+    const std::vector<size_t> expected { 1, 2, 0, 0 };
+    EXPECT_EQ(perChord, expected) << "the pair stays on the second note and the third stays silent";
+    const std::vector<String> stacked { String(u"remi"), String(u"re") };
+    EXPECT_EQ(onSecond, stacked)
+        << "the fuller text takes the first verse, whichever of the two the file stores first";
+    delete score;
+}
+
 // Lyrics on a grand-staff bottom staff must be matched against that staff's routed notes, not the raw
 // encStaff (which grabs another instrument's notes and reverses the syllables).
 TEST_F(Tst_Text, lyrics_grandstaff_match_routed_staff_notes)
