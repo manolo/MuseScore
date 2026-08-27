@@ -375,6 +375,11 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
         applyStaffScale(score, enc);
     }
 
+    // The passes that fit each bar to its signature can change a measure's length, which leaves the
+    // score's tick map describing the lengths they had before. Everything below resolves elements by
+    // tick, and a stale map answers with the measure before the one meant: rebuild it first.
+    score->updateTicksAndTimeSigMap();
+
     resolveAll(ctx);
 
     // Apply the tablature import mode (link tab staves to their notation staff, or drop them).
