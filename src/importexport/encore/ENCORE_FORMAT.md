@@ -968,6 +968,8 @@ In format 2.50 there is no anchor-and-gap run: a single control byte follows the
 
 **The anchor is the note's column, and it is what decides.** The anchor holds the same value as the x-offset of the note that sings the syllable, to the unit, so it names a note the way 7.7 names a chord. The stored tick does not always agree, and not only in later verses: a first verse can carry ticks running past the end of its own bar, or tick 0 on part of its syllables, in a bar whose anchors are all exact. The tick is a stale playback position, the same artefact 7.7 describes for notes. Two saves of one score by different Encore versions store the syllables of a bar in different sequences, with different ticks, and agree on every anchor, so the anchor is the only field that reads the phrase the same way twice.
 
+**Two syllables in one column.** A lyric that was corrected leaves the replaced one behind: two elements identical in tick, anchor, voice and staff, differing only in their text, `g` beside `quees`, `sol.` beside the same word with a run of dots, `there` beside `where`. The order they are stored in is the only thing that separates them and it is not preserved across a re-save, so nothing in the file says which one Encore draws. Both belong to the note of that column, one under the other. Measured over a few hundred scores, about one in thirty holds such a pair, and since the storage order cannot decide between them, the fuller text is taken as the one sung: it is the correction, and the shorter is what it replaced. That way the same score reads the same whichever Encore wrote it.
+
 ## 6.10 Chord symbol
 
 Type 7, variable size: a harmony marking above the staff.
