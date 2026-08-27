@@ -3577,6 +3577,27 @@ def gen_v0c4_staff_text():
 
 
 # ===========================================================================
+# text_staff_text_leading_break.enc
+# Two TEXT entries a real file holds: one that opens with a line break and
+# then says something, and one that is nothing but breaks. Written UTF-16 LE,
+# the first byte of both is a carriage return, and a probe that takes only
+# printable bytes for text sends them down the one-byte branch, where the zero
+# high byte of that return reads as the terminator: the mark is lost and the
+# blank one becomes an element that draws nothing.
+# ===========================================================================
+def gen_v0c4_staff_text_leading_break():
+    e  = stafftext_v0c4(  0, 0, 0, text_index=0)
+    e += note_v0c4(       0, 0, 0, fv=3, pitch=60)
+    e += stafftext_v0c4(240, 0, 0, text_index=1)
+    e += note_v0c4(     240, 0, 0, fv=3, pitch=62)
+    e += note_v0c4(     480, 0, 0, fv=3, pitch=64)
+    e += note_v0c4(     720, 0, 0, fv=3, pitch=65)
+    e += end_marker()
+    text = text_block_v0c4(['\r\ncresc.', '\r\n\r\n'])
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4), text_override=text)
+
+
+# ===========================================================================
 # text_staff_text_multirun.enc
 #
 # A STAFFTEXT whose TEXT-block entry uses Encore's rich-text run header with more
@@ -14330,6 +14351,7 @@ if __name__=='__main__':
     write("notes_tie_spurious_far_receiver.enc", gen_v0c4_tie_spurious_far_receiver())
     write("structure_keychange_to_c.enc",          gen_v0c4_keychange_to_c())
     write("text_staff_text.enc",              gen_v0c4_staff_text())
+    write("text_staff_text_leading_break.enc", gen_v0c4_staff_text_leading_break())
     write("text_staff_text_multirun.enc",     gen_v0c4_staff_text_multirun())
     write("text_staff_text_two_descriptors.enc", gen_v0c4_staff_text_two_descriptors())
     write("text_staff_text_first_block_wins.enc", gen_v0c4_text_first_block_wins())
