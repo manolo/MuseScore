@@ -111,7 +111,9 @@ static void handleStaffTextOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
         return;
     }
     QString text = enc.textBlock.entries[textIdx];
-    if (text.isEmpty()) {
+    // A comment of blank lines, which older files store as a run of CR and LF, is not a mark and
+    // must not become an element that draws nothing.
+    if (text.trimmed().isEmpty()) {
         return;
     }
     Fraction placeTick = elemTick;
