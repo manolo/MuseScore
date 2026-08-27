@@ -27,7 +27,9 @@
 namespace mu::iex::enc {
 bool probeUtf16LE(quint8 b0, quint8 b1)
 {
-    return b0 >= 0x20 && b0 < 0x7F && b1 == 0x00;
+    // Accented letters are text too; only the Latin-1 control ranges are taken as not-text.
+    const bool textByte = (b0 >= 0x20 && b0 < 0x7F) || b0 >= 0xA0;
+    return textByte && b1 == 0x00;
 }
 
 QString readEncodedStringRemaining(QDataStream& ds, int& remaining)

@@ -4706,6 +4706,23 @@ def gen_v0c4_lyrics_latin1():
 
 
 # ===========================================================================
+# text_lyrics_accent_first_letter.enc
+# The syllable "ño" written twice in one file, once UTF-16 LE (F1 00 6F 00)
+# and once Latin-1 (F1 6F), so both branches of the encoding probe are pinned
+# by the same expected text. A probe keyed on a printable ASCII first byte
+# sends the UTF-16 one down the Latin-1 branch, where the high byte of the
+# enye reads as the terminator and the syllable comes out as "ñ".
+# ===========================================================================
+def gen_v0c4_lyrics_accent_first_letter():
+    e  = lyric_v0c4(       0, 0, 0, 'ño')            # UTF-16 LE
+    e += note_v0c4(        0, 0, 0, fv=3, pitch=60)
+    e += lyric_v0c4_latin1(240, 0, 0, b'\xf1o')      # the same syllable, Latin-1
+    e += note_v0c4(        240, 0, 0, fv=3, pitch=62)
+    e += end_marker()
+    return assemble(0xC4, [(meas_hdr(4, 4), e)], fill_ts=(4, 4))
+
+
+# ===========================================================================
 # ornaments_accent_sibling_no_spillover.enc
 # BUG FIX: ACCENT ORN (0xBE) on staff 0 whose notes are in voice=3 must NOT
 # redirect to staff 1.  Without fix: resolver checks track=staffBase+0 (voice=0),
@@ -13944,6 +13961,7 @@ if __name__=='__main__':
     write("text_lyrics_offgrid_nearest_chord.enc", gen_v0c4_lyrics_offgrid_nearest_chord())
     write("text_lyrics_hyphen_across_barline.enc", gen_v0c4_lyrics_hyphen_across_barline())
     write("text_lyrics_latin1.enc",          gen_v0c4_lyrics_latin1())
+    write("text_lyrics_accent_first_letter.enc", gen_v0c4_lyrics_accent_first_letter())
     write("instruments_instr_bass_midi_tiebreak.enc",   gen_v0c4_instr_bass_midi_tiebreak())
     write("instruments_instr_percussion_drumset.enc",   gen_v0c4_instr_percussion_drumset())
     write("instruments_small_tk_key6.enc",               gen_v0c4_small_tk_key6())

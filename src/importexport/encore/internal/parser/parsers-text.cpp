@@ -23,6 +23,7 @@
 // Read the file header (version/counts/score size) and the indexed TEXT block for staff text.
 
 #include "elem.h"
+#include "parsers-encoding.h"
 #include "readers.h"
 
 namespace mu::iex::enc {
@@ -141,7 +142,7 @@ bool EncTextBlock::read(QDataStream& ds, quint32 varSize, int textOffset, bool h
         if (entrySize >= effTextOffset + 2) {
             const quint8 b0 = static_cast<quint8>(payload[effTextOffset]);
             const quint8 b1 = static_cast<quint8>(payload[effTextOffset + 1]);
-            const bool isUtf16 = (b0 >= 0x20 && b0 < 0x7F && b1 == 0x00);
+            const bool isUtf16 = probeUtf16LE(b0, b1);
             // Decode the whole text region, then post-process: multi-line comments separate lines
             // with U+0004 and terminate with a U+0000 null. See ENCORE_FORMAT.md §5.5 Text block.
             const int textBytes = entrySize - effTextOffset;
