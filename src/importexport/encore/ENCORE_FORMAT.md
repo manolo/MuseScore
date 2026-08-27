@@ -886,6 +886,8 @@ Type 5, variable size, and the busiest element in the format: it covers hairpins
 
 **Hairpin direction.** Bit 0 of `+26`: 0 crescendo, 1 diminuendo. Encore 5 also sets bit 1, giving `0x02` and `0x03` where legacy files use `0x00` and `0x01`, so test the bit rather than comparing to zero.
 
+**A file can carry a staff text Encore does not draw.** One score in a few hundred holds an ornament whose text is read correctly and which Encore shows nowhere, and re-saving in a later Encore drops the element while leaving its text entry in place, orphaned. Nothing in the element has been found to mark it: the fields from `+24` on match a drawn one exactly, and what differs is only its geometry, an x and a second point that fall outside the compact box a drawn mark has. **A negative x is not the mark**: measured across the corpus, a text nudged left of the first barline carries one and is drawn, `Moderately Slow` at the head of a score among them `[verified]`. Until something tells them apart, such a text is imported, which costs a mark the file does not show rather than losing one it does.
+
 **The ornament y.** Negative is below the staff and positive above. A dynamic dragged onto the staff above the one that owns it keeps its owner's staff byte and flips its y positive. A dynamic or staff text whose tick exceeds the measure's total ticks is a section-end marker. A file can carry two dynamics at the same tick and x on one staff and voice, an identical pair or a score-view and part-view pair differing only in y; Encore renders one per beat.
 
 ### The ornament across generations
