@@ -11858,6 +11858,39 @@ def gen_v0c4_tick_wrapped_before_barline():
     return assemble(0xC4, [(meas_hdr(3, 4), e)], fill_ts=(3, 4))
 
 
+# ===========================================================================
+# ornaments_measure_repeat_after_pickup.enc
+# Four 4/4 bars whose first holds a single quarter, so it becomes a pickup and
+# every bar behind it starts a quarter earlier than a full first bar would put
+# it.  The last bar carries a repeat-measure sign.  Anything resolved by tick
+# after the bars are built reads them through the score's tick map, and while
+# that map still describes the lengths the bars had before the pickup shortened
+# the first one, it answers with the bar before the one meant: the sign empties
+# the wrong bar and lands in the one before that, which is left holding its own
+# music plus a whole bar's worth of repeat sign pinned at its barline.
+# ===========================================================================
+def gen_v0c4_measure_repeat_after_pickup():
+    def repeat_meas_orn(tick, staffIdx=0, voice=0):
+        d = bytearray(13)
+        d[0] = 16
+        d[1] = staffIdx & 0x3F
+        d[2] = 0xA3       # REPEAT_MEASURE
+        return struct.pack('<H', tick) + bytes([(5 << 4) | (voice & 0xF)]) + bytes(d)
+
+    def four_quarters(pitches):
+        e = b''
+        for i, p in enumerate(pitches):
+            e += note_v0c4(i * 240, 0, 0, fv=3, pitch=p)
+        return e + end_marker()
+
+    m1 = note_v0c4(0, 0, 0, fv=3, pitch=60) + end_marker()      # a quarter alone: the pickup
+    m2 = four_quarters([62, 64, 65, 67])
+    m3 = four_quarters([69, 71, 72, 74])
+    m4 = repeat_meas_orn(0) + four_quarters([69, 71, 72, 74])
+    return assemble(0xC4, [(meas_hdr(4, 4), m1), (meas_hdr(4, 4), m2),
+                           (meas_hdr(4, 4), m3), (meas_hdr(4, 4), m4)], fill_ts=(4, 4))
+
+
 def gen_v0c4_nonuplet_missing_marker():
     TUP = 0x98               # nine in the time of eight
     FV_16TH = 5
@@ -13893,6 +13926,7 @@ if __name__=='__main__':
     write("notes_bracket_opening_rest_behind_fill.enc", gen_v0c4_bracket_opening_rest_behind_fill(), layout=False)
     write("notes_sixtyfourth_bracket_not_artifact.enc", gen_v0c4_sixtyfourth_bracket_not_artifact(), layout=False)
     write("notes_tick_wrapped_before_barline.enc", gen_v0c4_tick_wrapped_before_barline(), layout=False)
+    write("ornaments_measure_repeat_after_pickup.enc", gen_v0c4_measure_repeat_after_pickup(), layout=False)
     write("notes_tie_across_trimmed_overflow.enc", gen_v0c4_tie_across_trimmed_overflow(), layout=False)
     write("instruments_tk_empty_name_authoritative.enc", gen_v0c4_tk_empty_name_authoritative())
     write("instruments_instr_perc_clef_drumset.enc",    gen_v0c4_instr_perc_clef_drumset())
