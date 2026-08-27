@@ -910,6 +910,36 @@ TEST_F(Tst_Text, staff_text_resolved_via_text_block)
     delete score;
 }
 
+// A text can open with a line break, and one can be nothing but breaks. Written UTF-16 LE the first
+// byte of both is a carriage return, which a probe taking only printable bytes for text sends down
+// the one-byte branch, where the zero high byte of that return ends the string: the mark came out as
+// a bare return and was lost. A text of breaks alone is not a mark and must not become an element.
+TEST_F(Tst_Text, staff_text_opening_with_a_line_break)
+{
+    MasterScore* score = readEncoreScore("text_staff_text_leading_break.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            for (EngravingItem* e : s->annotations()) {
+                if (e && e->isStaffText()) {
+                    seen.push_back(toStaffText(e)->plainText());
+                }
+            }
+        }
+    }
+    ASSERT_EQ(seen.size(), 1u) << "the text of breaks alone leaves nothing behind";
+    EXPECT_TRUE(seen[0].contains(String(u"cresc."))) << "and the other keeps what it says";
+    delete score;
+}
+
 // A rich-text TEXT entry stores its text after a variable-length run header, so the text offset must be
 // derived from the run count; assuming the single-run offset resolves a multi-run entry to garbage.
 // See ENCORE_FORMAT.md §5.5 Text block.

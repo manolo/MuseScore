@@ -1208,9 +1208,9 @@ The note x-offset at `+10` is the notated horizontal column. It exists from form
 
 ## 7.8 Text encoding
 
-Text-bearing fields are Latin-1 or UTF-16 LE, chosen per field by a probe on the first two bytes: a text byte followed by a zero byte means UTF-16 LE, and anything else, especially an accented Latin-1 byte in the second position, means Latin-1. A text byte is printable ASCII, `0x20` to `0x7E`, or a Latin-1 letter or symbol, `0xA0` upwards; the two Latin-1 control ranges, below `0x20` and `0x7F` to `0x9F`, are not text and leave the field on the Latin-1 branch.
+Text-bearing fields are Latin-1 or UTF-16 LE, chosen per field by a probe on the first two bytes: a text byte followed by a zero byte means UTF-16 LE, and anything else, especially an accented Latin-1 byte in the second position, means Latin-1. A text byte is printable ASCII, `0x20` to `0x7E`, a Latin-1 letter or symbol, `0xA0` upwards, or one of the three line breaks a text can open with, `0x0A`, `0x0D` and Encore's own `0x04`: a comment whose first line is empty starts with one. The rest of the Latin-1 control range is not text and leaves the field on the Latin-1 branch.
 
-The first character matters as much as any other, and words in Spanish, Portuguese and French start with one often enough to notice: a probe that demands ASCII there reads the UTF-16 pair of an accented letter as the letter followed by its zero high byte, takes that zero for the terminator, and returns a field one character long. The syllable `ño` arrives as `ñ`.
+The first character matters as much as any other, and words in Spanish, Portuguese and French start with one often enough to notice: a probe that demands ASCII there reads the UTF-16 pair of an accented letter as the letter followed by its zero high byte, takes that zero for the terminator, and returns a field one character long. The syllable `ño` arrives as `ñ`, and a mark written under a blank first line arrives as nothing but that break, which is why a text with no printable content at all is not a mark and gets no element.
 
 | Field                    | Probe at                                  |
 |--------------------------|-------------------------------------------|
