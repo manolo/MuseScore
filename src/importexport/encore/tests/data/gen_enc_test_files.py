@@ -5065,6 +5065,94 @@ def gen_v0c4_total_size_tk_key_from_entry_end():
 
 
 # ===========================================================================
+# instruments_key_from_run_shaped_table.enc
+# Two TK entries in the total-block-size layout whose per-staff tables are not
+# provable by a program byte that differs from the channels. The first has a
+# channel run and no program at all, which is a staff with no instrument
+# assigned; the second carries the same number as channel and as program,
+# which a rule reading "the channels must differ from the program" throws out.
+# Either way the key went unread and the part came in at concert pitch. In the
+# corpus this cost a laud and a guitar their Key=-12, and with it the octave
+# clef and the octave of every note they hold.
+# ===========================================================================
+def gen_v0c4_key_from_run_shaped_table():
+    VARSIZE       = 242            # total block size (8-byte header + 234-byte content)
+    CONTENT       = VARSIZE - 8
+    MIDI_FROM_END = 46             # program table, measured back from the entry end
+    KEY_FROM_END  = MIDI_FROM_END + 23
+    VOICES        = 8
+    TK_START      = 194
+
+    header = bytearray(SKELETON_PRE[:TK_START])
+    header[0x32] = 2
+
+    def make_tk(idx, name_str, channel, program, key_semitones):
+        magic   = 'TK{:02d}'.format(idx).encode('ascii')
+        content = bytearray(CONTENT)
+        nb      = name_str.encode('ascii') + b'\x00'
+        content[:len(nb)] = nb
+        table = CONTENT - MIDI_FROM_END
+        content[table - VOICES:table] = bytes([channel]) * VOICES
+        content[table:table + VOICES]  = bytes([program]) * VOICES
+        content[CONTENT - KEY_FROM_END] = key_semitones & 0xFF
+        return bytes(magic) + struct.pack('<I', VARSIZE) + bytes(content)
+
+    tk00 = make_tk(0, 'AltoSax', 3, 0, -9)      # nothing assigned: only the channel run
+    tk01 = make_tk(1, 'TenorSax', 5, 5, -14)    # channel and program are the same number
+
+    LEGACY_TK_END = 194 + 8 + 2158
+    page_line     = SKELETON_PRE[LEGACY_TK_END:]
+
+    pre  = bytes(header) + tk00 + tk01 + page_line
+    e    = end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
+# ===========================================================================
+# instruments_key_from_a_sibling_measured_table.enc
+# Two TK entries in the total-block-size layout. The first names a channel and
+# a program, which places the tables. The second is a staff with neither, so
+# its own table region is a stretch of zeros and proves nothing at all, while
+# its key sits the same distance into the entry as its sibling's does.
+# ===========================================================================
+def gen_v0c4_key_from_a_sibling_measured_table():
+    VARSIZE       = 242            # total block size (8-byte header + 234-byte content)
+    CONTENT       = VARSIZE - 8
+    MIDI_FROM_END = 46             # program table, measured back from the entry end
+    KEY_FROM_END  = MIDI_FROM_END + 23
+    VOICES        = 8
+    TK_START      = 194
+
+    header = bytearray(SKELETON_PRE[:TK_START])
+    header[0x32] = 2
+
+    def make_tk(idx, name_str, channel, program, key_semitones):
+        magic   = 'TK{:02d}'.format(idx).encode('ascii')
+        content = bytearray(CONTENT)
+        nb      = name_str.encode('ascii') + b'\x00'
+        content[:len(nb)] = nb
+        table = CONTENT - MIDI_FROM_END
+        content[table - VOICES:table] = bytes([channel]) * VOICES
+        content[table:table + VOICES]  = bytes([program]) * VOICES
+        content[CONTENT - KEY_FROM_END] = key_semitones & 0xFF
+        return bytes(magic) + struct.pack('<I', VARSIZE) + bytes(content)
+
+    tk00 = make_tk(0, 'Harp', 11, 47, 0)       # names both, so it places the tables
+    tk01 = make_tk(1, 'AltoSax', 0, 0, -5)     # neither: nothing but zeros where they sit
+
+    LEGACY_TK_END = 194 + 8 + 2158
+    page_line     = SKELETON_PRE[LEGACY_TK_END:]
+
+    pre  = bytes(header) + tk00 + tk01 + page_line
+    e    = end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
+# ===========================================================================
 # instruments_total_size_tk_key_not_from_channel_run.enc
 # Two TK blocks in total-block-size format whose entries are 112 bytes and
 # keep their per-staff tables at the other generation's distance from the
@@ -13989,6 +14077,8 @@ if __name__=='__main__':
     write("instruments_small_tk_midi49.enc",            gen_v0c4_small_tk_midi49())
     write("instruments_total_size_tk_two_instrs.enc",   gen_v0c4_total_size_tk_two_instrs())
     write("instruments_total_size_tk_key_from_entry_end.enc", gen_v0c4_total_size_tk_key_from_entry_end())
+    write("instruments_key_from_run_shaped_table.enc", gen_v0c4_key_from_run_shaped_table())
+    write("instruments_key_from_a_sibling_measured_table.enc", gen_v0c4_key_from_a_sibling_measured_table())
     write("instruments_total_size_tk_key_not_from_channel_run.enc", gen_v0c4_total_size_tk_key_not_from_channel_run())
     write("instruments_no_tk_compact_table_two_instrs.enc", gen_v0c4_no_tk_compact_table_two_instrs())
     write("instruments_oversized_varsize_key_from_entry_end.enc", gen_v0c4_oversized_varsize_key_from_entry_end())
