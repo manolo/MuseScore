@@ -956,6 +956,8 @@ In format 2.50 there is no anchor-and-gap run: a single control byte follows the
 
 **Verses.** Verse N uses voice N-1 on the same staff, and every verse anchors on the voice-0 chord. Encore stores the first verse with correct per-syllable ticks, but **every later verse stores tick 0 on all its syllables** and distinguishes their positions only by the anchor byte, which matches the first verse's x-offsets syllable for syllable. The syllables are not necessarily stored in x-offset order.
 
+**The anchor is the note's column, and it is what decides.** The anchor holds the same value as the x-offset of the note that sings the syllable, to the unit, so it names a note the way 7.7 names a chord. The stored tick does not always agree, and not only in later verses: a first verse can carry ticks running past the end of its own bar, or tick 0 on part of its syllables, in a bar whose anchors are all exact. The tick is a stale playback position, the same artefact 7.7 describes for notes. Two saves of one score by different Encore versions store the syllables of a bar in different sequences, with different ticks, and agree on every anchor, so the anchor is the only field that reads the phrase the same way twice.
+
 ## 6.10 Chord symbol
 
 Type 7, variable size: a harmony marking above the staff.

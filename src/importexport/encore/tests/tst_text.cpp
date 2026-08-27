@@ -366,6 +366,37 @@ TEST_F(Tst_Text, lyrics_accented_first_letter_survives_the_encoding_probe)
     delete score;
 }
 
+// A syllable belongs to the note written in its column, which the anchor byte states exactly. The
+// stored tick does not always say the same thing, and the syllables of one bar are not stored in
+// order, so matching by tick alone read the phrase backwards.
+TEST_F(Tst_Text, lyrics_take_the_note_written_in_their_own_column)
+{
+    MasterScore* score = readEncoreScore("text_lyrics_column_says_which_note.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Lyrics* ly : toChord(el)->lyrics()) {
+                seen.push_back(ly->plainText());
+            }
+        }
+    }
+    const std::vector<String> expected { String(u"yer"), String(u"con"), String(u"flor") };
+    EXPECT_EQ(seen, expected) << "the phrase reads left to right, in the order of the columns";
+    delete score;
+}
+
 // Lyrics on a grand-staff bottom staff must be matched against that staff's routed notes, not the raw
 // encStaff (which grabs another instrument's notes and reverses the syllables).
 TEST_F(Tst_Text, lyrics_grandstaff_match_routed_staff_notes)
