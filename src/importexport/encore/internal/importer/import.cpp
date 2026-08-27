@@ -369,6 +369,7 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     buildMeasures(ctx);
     buildInitialSignatures(ctx);
     emitMeasures(ctx);
+    guaranteeAllMeasures(ctx);
 
     applyPageSetup(ctx);
     if (ctx.opts.importStaffSize) {
