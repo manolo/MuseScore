@@ -334,6 +334,38 @@ TEST_F(Tst_Text, lyrics_latin1_text_decoded_as_one_byte_per_char)
     delete score;
 }
 
+// A syllable whose first character is not ASCII is still UTF-16 when the byte after it is zero.
+// Probing for a printable ASCII byte sent it down the Latin-1 branch, which read the high byte of
+// the enye as the terminator and cut "ño" to "ñ".
+TEST_F(Tst_Text, lyrics_accented_first_letter_survives_the_encoding_probe)
+{
+    MasterScore* score = readEncoreScore("text_lyrics_accent_first_letter.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<String> seen;
+    for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
+        if (!mb->isMeasure()) {
+            continue;
+        }
+        for (Segment* s = toMeasure(mb)->first(SegmentType::ChordRest);
+             s; s = s->next(SegmentType::ChordRest)) {
+            EngravingItem* el = s->element(0);
+            if (!el || !el->isChord()) {
+                continue;
+            }
+            for (Lyrics* ly : toChord(el)->lyrics()) {
+                seen.push_back(ly->plainText());
+            }
+        }
+    }
+    ASSERT_EQ(seen.size(), 2u);
+    EXPECT_EQ(seen[0], String(u"ño")) << "the syllable written UTF-16 LE";
+    EXPECT_EQ(seen[1], String(u"ño")) << "the same syllable written Latin-1";
+    delete score;
+}
+
 // Lyrics on a grand-staff bottom staff must be matched against that staff's routed notes, not the raw
 // encStaff (which grabs another instrument's notes and reverses the syllables).
 TEST_F(Tst_Text, lyrics_grandstaff_match_routed_staff_notes)
