@@ -161,6 +161,11 @@ void handleDanglingGraces(BuildCtx& ctx);
 void extendMeasureIrregular(BuildCtx& ctx, mu::engraving::Measure* measure);
 // Nuclear hard-cap: remove trailing elements and fill deficit. (emitters-fill.cpp)
 void capMeasureLength(BuildCtx& ctx, mu::engraving::Measure* measure);
+// Release any spanner or tie anchored to a ChordRest before it is removed or moved.
+void detachSpannersAt(mu::engraving::ChordRest* cr);
+
+void guaranteeMeasureLength(BuildCtx& ctx, mu::engraving::Measure* measure);
+void guaranteeAllMeasures(BuildCtx& ctx);
 // Resolve overfull voices per the overfill strategy (Remove / Stretch / Irregular). (emitters-overfill.cpp)
 void fitOverfullMeasure(BuildCtx& ctx, mu::engraving::Measure* measure);
 

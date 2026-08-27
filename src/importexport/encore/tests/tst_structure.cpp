@@ -1947,3 +1947,32 @@ TEST_F(Tst_Structure, a_tick_wrapped_before_the_barline_opens_the_measure)
     EXPECT_EQ(crs.front()->actualTicks(), Fraction(3, 8)) << "and keeps its dotted quarter";
     EXPECT_EQ(toChord(crs.front())->notes().front()->pitch(), 70);
 }
+
+// A bar no notation fits: five thirty-seconds and two eighth rests, all marked three in the time of
+// two, twice over, coming to 520 Encore ticks where the bar holds 480. The run of five occupies
+// 5/48 of a whole and a bracket always spans a plain value times its member count, so no numeral
+// can hold it. What the import guarantees is the bar itself, because a voice that does not add up to
+// its signature is a corrupt score whatever the file meant.
+TEST_F(Tst_Structure, a_bar_no_notation_fits_still_comes_out_a_bar)
+{
+    MasterScore* score = readEncoreScore("notes_bar_that_cannot_be_written.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << "Corrupted: " << ret.text();
+
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    // The bar may end up irregular, which is a length and not a corruption; what must not happen is
+    // a voice that does not fill whatever length the bar has.
+
+    // The cascade signature: rests far shorter than anything the file states, each a quarter of the
+    // one before, laid down chasing a remainder no figure measures.
+    int cascade = 0;
+    for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        EngravingItem* el = s->element(0);
+        if (el && el->isRest() && toChordRest(el)->actualTicks() < Fraction(1, 128)) {
+            ++cascade;
+        }
+    }
+    EXPECT_EQ(cascade, 0) << "no rests shorter than anything the file states";
+}
