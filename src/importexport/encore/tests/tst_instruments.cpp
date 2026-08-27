@@ -873,6 +873,27 @@ TEST_F(Tst_Instruments, entries_read_at_the_stride_the_file_proves)
     delete score;
 }
 
+// A band score of ten staves with no TK magic anywhere. Choosing between the two known layouts by
+// where the first block falls reads it as a table of entries of 2158 bytes: the first name is found
+// and every later probe walks into the music, while the programs and keys are looked for at absolute
+// positions holding other things. The span from the table base to the first block divides by the
+// instrument count and says what the entries measure.
+TEST_F(Tst_Instruments, unmarked_table_read_at_the_stride_its_span_gives)
+{
+    MasterScore* score = readEncoreScore("instruments_unmarked_table_of_ten.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_GE(static_cast<int>(score->parts().size()), 10);
+    EXPECT_EQ(score->parts()[1]->longName(), String(u"Trompeta 1"));
+    EXPECT_EQ(score->parts()[6]->longName(), String(u"Tuba"));
+    const Instrument* inst0 = score->parts()[0]->instrument();
+    const Instrument* inst9 = score->parts()[9]->instrument();
+    ASSERT_NE(inst0, nullptr);
+    ASSERT_NE(inst9, nullptr);
+    EXPECT_NE(inst0->id(), String(u"grand-piano")) << "the program of the first entry is read too";
+    EXPECT_EQ(inst9->transpose().chromatic, -3) << "and the key of the last one";
+    delete score;
+}
+
 TEST_F(Tst_Instruments, total_size_tk_key_read_from_other_generation_distance)
 {
     // These entries keep their per-staff tables at the other generation's distance from the entry
