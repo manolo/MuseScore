@@ -4,6 +4,29 @@ Encore is a music notation program, first published by Passport Designs and sold
 
 First documented by Felipe Castro (enc2ly) and Leon Vinken (Enc2MusicXML, GPL v3+), then extended here by observation across a corpus large enough, and varied enough in versions and in notation features, to support the statements below. The method throughout is the same: open or write a score in a licensed copy of Encore, save it again from another version of the program, compare the two files field by field, and check every reading against what Encore itself displays and, where its MusicXML export carries the detail at all, against that too. The display is the better witness of the two: the export drops and garbles enough of what the file holds that it settles a question only when it happens to state it.
 
+## What this covers
+
+| Layer                     | How many                                              | Where          |
+|---------------------------|-------------------------------------------------------|----------------|
+| container magics          | eight: two programs, two byte orders, three encrypted | 1.2            |
+| generations of the layout | four, stamped with five version numbers               | 1.3, 1.4       |
+| blocks                    | eight kinds, after a fixed header with no magic       | 2.1, chapter 5 |
+| element types             | ten, told apart by one nibble of one byte             | 6.1, chapter 6 |
+
+## Contents
+
+| Chapter | What is in it                                                                                       |
+|---------|-----------------------------------------------------------------------------------------------------|
+| 1       | The formats: containers, generations, what moved at each boundary, and how to choose a reader       |
+| 2       | How a file is laid out: blocks, the fields that look authoritative and are not, the encrypted layer |
+| 3       | One complete small file, walked byte by byte                                                        |
+| 4       | The header                                                                                          |
+| 5       | The blocks, one section each                                                                        |
+| 6       | The element stream: framing first, then one section per element type                                |
+| 7       | Rules that cut across elements: durations, ticks, dots, tuplets, keys, articulations, columns, text |
+| 8       | Reference tables: per-generation differences, ornament subtypes, chord qualities, oddities          |
+| 9       | What is not established                                                                             |
+
 ## How to read this document
 
 Every non-trivial statement carries a tag saying how well it is known. This matters more than usual here, because the format was never published: every statement comes from reading files and from checking the reading against Encore.
@@ -50,9 +73,9 @@ The first four bytes are the file magic, and they fix the byte order for every m
 | `SCO5` | plaintext | big-endian    | macOS Encore 5 `[verified]`                     |
 | `MTIW` | plaintext | little-endian | Windows MusicTime `[verified]`                  |
 | `MTIM` | plaintext | big-endian    | macOS MusicTime `[verified]`                    |
-| `ZBOT` | encrypted | ,             | wraps `SCOW`, older Encore 4 saves `[verified]` |
-| `ZBOP` | encrypted | ,             | wraps `SCOS`, no sample `[verified]`            |
-| `ZBO6` | encrypted | ,             | wraps `SCO5` `[verified]`                       |
+| `ZBOT` | encrypted | of the body   | wraps `SCOW`, older Encore 4 saves `[verified]` |
+| `ZBOP` | encrypted | of the body   | wraps `SCOS`, no sample `[verified]`            |
+| `ZBO6` | encrypted | of the body   | wraps `SCO5` `[verified]`                       |
 
 `SCOW` covers most files, `ZBOT` a sizeable minority and `SCO5` a handful; every `ZBOT` decrypts to a `SCOW` body.
 
@@ -76,13 +99,13 @@ The three encrypted magics are the three plaintext ones seen through the keystre
 
 The format version at `0x28` is BCD, the major digit in the high byte, so `0x0420` reads as 4.20. It is the version of Encore that wrote the file: Encore 2.5.1 ships an example score stamped 2.50 and Encore 3 ships one stamped 3.05, both read out of the original distributions `[verified]`. The field stops tracking the release at 4.20, which Encore 4.x and every 5.x write unchanged.
 
-| Format | Bytes    | Release        | First dated | Evidence                            |  |
-|--------|----------|----------------|-------------|-------------------------------------|--|
-| 2.50   | `0x0250` | Encore 2.5     | 1993        | its own `SILENT.ENC` `[verified]`   |  |
-| 2.62   | `0x0262` | MusicTime      | ,           | its own documents `[verified]`      |  |
-| 3.05   | `0x0305` | Encore 3       | 1996        | a file on its disks `[verified]`    |  |
-| 3.07   | `0x0307` | unsampled      | 1999        | corpus only `[observed]`            |  |
-| 4.20   | `0x0420` | Encore 4.x-5.x | 1997        | its own example scores `[verified]` |  |
+| Format | Bytes    | Release        | First dated | Evidence                            |
+|--------|----------|----------------|-------------|-------------------------------------|
+| 2.50   | `0x0250` | Encore 2.5     | 1993        | its own `SILENT.ENC` `[verified]`   |
+| 2.62   | `0x0262` | MusicTime      | undated     | its own documents `[verified]`      |
+| 3.05   | `0x0305` | Encore 3       | 1996        | a file on its disks `[verified]`    |
+| 3.07   | `0x0307` | unsampled      | 1999        | corpus only `[observed]`            |
+| 4.20   | `0x0420` | Encore 4.x-5.x | 1997        | its own example scores `[verified]` |
 
 Every generation is represented in the corpus, 4.20 in most files and 2.50 in the fewest. The dates are the earliest file seen carrying each, which is a lower bound: a file cannot predate the program that wrote it, but a user may keep an old release for years, and many did.
 
@@ -136,11 +159,11 @@ The version byte and the format version are not redundant, and format 3.07 is wh
 
 The byte at `0x3E` takes the values 0, 1, 2 and 4. It is **not** a layout selector and nothing in a parser should branch on it.
 
-| Value | What it marks                                                                        |
-|-------|--------------------------------------------------------------------------------------|
-| 0, 1  | nothing that separates one release from another; every generation writes both        |
-| 2     | macOS Encore 5 `[observed]`                                                          |
-| 4     | Encore 5.0, never seen before 2009 in any dated file `[verified]`                    |
+| Value | What it marks                                                                 |
+|-------|-------------------------------------------------------------------------------|
+| 0, 1  | nothing that separates one release from another; every generation writes both |
+| 2     | macOS Encore 5 `[observed]`                                                   |
+| 4     | Encore 5.0, never seen before 2009 in any dated file `[verified]`             |
 
 Two of the values have a release behind them, measured by saving one score through each program: Encore 4.5 writes 0 and Encore 5.0 writes 4 `[verified]`. Encore 4.5 also refuses a file whose `0x3E` is newer than it supports, which is why a 5.0 file will not open there.
 
@@ -321,12 +344,12 @@ Observed sizes are 2158 for Encore 5.0 files, 242 for Encore 4.x files with vers
 
 **MIDI program and Key.** Key is a signed byte in semitones matching Encore's "Key" dropdown, 0 meaning it sounds as written and -12 an octave lower, with a range of about -33 to +24; Encore shifts every pitch by it at playback. MIDI program is a 1-indexed General MIDI number. The layout depends on the block size:
 
-| Layout      | Detection                    | MIDI program at       | Key at                |
-|-------------|------------------------------|-----------------------|-----------------------|
-| large       | size > 250                   | `2278 + n * 2158`     | 23 ahead of the program table |
-| small, 5.x  | size <= 250, stride size + 8 | `content + size + 76` | 23 ahead of the program table |
+| Layout      | Detection                    | MIDI program at                       | Key at                        |
+|-------------|------------------------------|---------------------------------------|-------------------------------|
+| large       | size > 250                   | `2278 + n * 2158`                     | 23 ahead of the program table |
+| small, 5.x  | size <= 250, stride size + 8 | `content + size + 76`                 | 23 ahead of the program table |
 | 4.x total   | size <= 250, stride size     | `content + 60`, or from the entry end | 23 ahead of the program table |
-| format 2.50 | `0xA6`, size 64              | `content + 52`        | `content + 42`        |
+| format 2.50 | `0xA6`, size 64              | `content + 52`                        | `content + 42`                |
 
 `content` is the block start plus eight, and `n` is the instrument's sequential index. The layout names are used in the notes below.
 
@@ -366,8 +389,8 @@ Some `0xC4` files and many `0xC2` files carry none, and the metadata lives in a 
 |------------|--------------------------|----------------|-----------------|-----------------|
 | `0xC4`     | block <= 2278, no `~~~~` | `202 + n*112`  | `390 + n*276`   | `367 + n*112`   |
 | large      | first block > 2278       | `202 + n*2158` | `2278 + n*2158` | `2255 + n*2158` |
-| `0xC2` A   | `~~~~` present           | `314 + k*112`  | `374 + k*112`   | ,               |
-| `0xC2` B   | no `~~~~`, block <= 2278 | `202 + n*112`  | `262 + n*112`   | ,               |
+| `0xC2` A   | `~~~~` present           | `314 + k*112`  | `374 + k*112`   | not established |
+| `0xC2` B   | no `~~~~`, block <= 2278 | `202 + n*112`  | `262 + n*112`   | not established |
 
 Every instrument in this table carries its own Key, 23 bytes ahead of its program entry, and not only the first one `[verified]`. As in the instrument blocks, a Key is taken from a position only where the channel run confirms a program table there, since these are absolute offsets and a file that keeps no table at one of them holds arbitrary bytes.
 
@@ -422,11 +445,11 @@ The header byte at `0x8D` is not this field. It agrees with the first staff's si
 
 One block per page, 26 bytes of content in every generation, saying which systems the page holds. Only three of the twenty-six are ever anything but zero, and the page size, orientation and scale come from the printer block in 5.7 rather than from here.
 
-| Offset | Size | Field                                                        |
-|--------|------|--------------------------------------------------------------|
-| `+0`   | 2    | index of the first system on the page, 0-based               |
-| `+2`   | 2    | number of systems on the page                                |
-| `+12`  | 2    | staff rows on the page: the systems times the staves in one  |
+| Offset | Size | Field                                                       |
+|--------|------|-------------------------------------------------------------|
+| `+0`   | 2    | index of the first system on the page, 0-based              |
+| `+2`   | 2    | number of systems on the page                               |
+| `+12`  | 2    | staff rows on the page: the systems times the staves in one |
 
 The three agree with the rest of the file and with each other. Across the corpus the system counts of a score's pages add up to its number of system blocks in every file, the first field of each page equals the systems of all the pages before it in every multi-page file, and `+12` is `+2` times the staves-per-system of the header in all but a few, the exceptions being scores whose systems do not all carry every staff `[verified]`.
 
@@ -844,12 +867,12 @@ The arc x pair has not been located in this generation. In the one file where a 
 
 A tie is recorded twice over, and the second record is on the note itself: the low nibble of `grace1`, at note offset `+6`, is a two-bit field saying whether the note is an end of a tie `[verified]`.
 
-| Low nibble | Meaning                                                          |
-|------------|------------------------------------------------------------------|
-| `0`        | no tie touches the note                                          |
-| `1`        | the note starts a tie                                            |
-| `2`        | the note ends a tie                                              |
-| `3`        | both: a note in the middle of a chain of tied notes              |
+| Low nibble | Meaning                                             |
+|------------|-----------------------------------------------------|
+| `0`        | no tie touches the note                             |
+| `1`        | the note starts a tie                               |
+| `2`        | the note ends a tie                                 |
+| `3`        | both: a note in the middle of a chain of tied notes |
 
 The reading is confirmed by what surrounds each note. A note flagged `1` is followed by a note of the same pitch in about three quarters of cases and preceded by one in a sixth; a note flagged `2` is the mirror image; a note flagged `3` has both neighbours at its pitch in about four cases in five `[verified]`.
 
@@ -922,7 +945,7 @@ The y and the measure count apply to every subtype, not only to staff text, and 
 
 The y is a byte, not a halfword. Reading `+8` as a 16-bit value happens to preserve the sign, because `+9` is that halfword's high byte, but the magnitude becomes `y * 256` plus whatever `+8` holds: 3840 instead of 15, -4865 instead of -20. Anything that only tests the sign survives; anything that uses the value does not.
 
-Over every compact slur and hairpin start, the forward count read at `+14` lands inside its score every time, while read at `+18` 105 of them, 16.5%, point past the last measure `[verified]`.
+Over every compact slur and hairpin start, the forward count read at `+14` lands inside its score every time, while read at `+18` one in six points past the last measure `[verified]`.
 
 **The start x is at `+8`**, the same field the later generations keep at `+10` and in the same unit, so a compact spanner carries both ends after all: this byte and the forward measure count at `+14`. A set of compact scores opened in Encore 4.5 and saved again gives a few hundred ornaments that pair one to one by measure, staff and tick, and the byte survives the conversion unchanged in over half of them, within eight in nearly two thirds, while the order of the ornaments within a measure agrees in nine comparisons out of ten `[verified]`. The rest are the ones Encore re-engraved on the way, which is what a conversion does to a hand-placed mark.
 
@@ -945,10 +968,10 @@ With `0xC2` the absolute end x lives in a stale coordinate origin and must not b
 
 Reading each generation at its own offset gives clean counts and reading it at the other gives noise `[verified]`:
 
-| Generation       | Correct offset                    | Wrong offset                             |
-|------------------|-----------------------------------|------------------------------------------|
-| 3.05             | `+16`, 100% inside, values 0 to 3 | `+18`, 48% inside, values 24, 11, 14, 37 |
-| 3.07             | `+18`, 100% inside, values 0 to 4 | `+16`, 67% inside, values include 255    |
+| Generation | Correct offset                    | Wrong offset                             |
+|------------|-----------------------------------|------------------------------------------|
+| 3.05       | `+16`, 100% inside, values 0 to 3 | `+18`, 48% inside, values 24, 11, 14, 37 |
+| 3.07       | `+18`, 100% inside, values 0 to 4 | `+16`, 67% inside, values include 255    |
 
 Once the offset follows the generation the count is reliable, including the value 0, a slur within one measure. Two effects once blamed on the field itself were artefacts of reading the wrong byte: the count looking unreliable across a whole file, and the count looking like a per-staff constant. A file whose slurs all carried 11 on one staff and 13 on the other at `+16` carries 0 at `+18` for every one of them `[verified]`.
 
@@ -1324,13 +1347,13 @@ A trill-span start opens a span when a span end or a non-zero forward measure co
 
 The table above is the vocabulary from format 3.07 on. **A file older than that states five of those articulations six codes higher**, and no later generation uses the higher values.
 
-| 3.05 and older | 3.07 and later | Meaning       | Evidence                               |
-|----------------|----------------|---------------|----------------------------------------|
-| `0xC4`         | `0xBE`         | accent        | 97% of cases are 3.05 `[verified]`     |
-| `0xCE`         | `0xC8`         | tenuto        | conversion pair, 1 for 1 `[verified]`  |
-| `0xCF`         | `0xC9`         | staccato      | conversion pair, 5 for 5 `[verified]`  |
-| `0xD2`         | `0xCC`         | fermata above | two conversion pairs `[verified]`      |
-| `0xD3`         | `0xCD`         | fermata below | corpus counts only `[observed]`        |
+| 3.05 and older | 3.07 and later | Meaning       | Evidence                              |
+|----------------|----------------|---------------|---------------------------------------|
+| `0xC4`         | `0xBE`         | accent        | 97% of cases are 3.05 `[verified]`    |
+| `0xCE`         | `0xC8`         | tenuto        | conversion pair, 1 for 1 `[verified]` |
+| `0xCF`         | `0xC9`         | staccato      | conversion pair, 5 for 5 `[verified]` |
+| `0xD2`         | `0xCC`         | fermata above | two conversion pairs `[verified]`     |
+| `0xD3`         | `0xCD`         | fermata below | corpus counts only `[observed]`       |
 
 The accent is the one whose two spellings collide, because `0xC4` is a genuine up bow from 3.07 on. So the mapping must be scoped by format version and not by the version byte, which reads `0xC2` for both generations.
 
