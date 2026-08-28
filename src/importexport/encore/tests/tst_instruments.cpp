@@ -278,6 +278,41 @@ TEST_F(Tst_Instruments, tab_separate_keeps_two_instruments)
     delete score;
 }
 
+// ===========================================================================
+// A tab staff states the string and the fret it drew every note at, and linking hands its notes to
+// the notation staff, so those positions have to travel with them. instruments_tab_linked_frets.enc
+// puts E4 on the third string at fret 9 and B3 on the third string at fret 4; left to itself
+// MuseScore frets both on their open strings.
+// ===========================================================================
+TEST_F(Tst_Instruments, tab_linked_frets_come_from_the_file)
+{
+    mu::iex::enc::EncImportOptions opts;
+    opts.tablatureImportMode = mu::iex::enc::TablatureImportMode::Linked;
+    MasterScore* score = readEncoreScoreWithOpts("instruments_tab_linked_frets.enc", opts);
+    ASSERT_NE(score, nullptr);
+    ASSERT_EQ(score->parts().size(), size_t(1));
+    Measure* m = score->firstMeasure();
+    ASSERT_NE(m, nullptr);
+    std::vector<Note*> notes;
+    for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        EngravingItem* el = seg->element(0);
+        if (el && el->isChord()) {
+            for (Note* n : toChord(el)->notes()) {
+                notes.push_back(n);
+            }
+        }
+    }
+    ASSERT_EQ(notes.size(), size_t(2));
+    EXPECT_EQ(notes[0]->pitch(), 64);
+    EXPECT_EQ(notes[0]->string(), 2) << "E4 sits on the third string, as the tab staff states";
+    EXPECT_EQ(notes[0]->fret(), 9);
+    EXPECT_EQ(notes[1]->pitch(), 59);
+    EXPECT_EQ(notes[1]->string(), 2) << "B3 sits on the third string, as the tab staff states";
+    EXPECT_EQ(notes[1]->fret(), 4);
+    EXPECT_TRUE(score->sanityCheck());
+    delete score;
+}
+
 TEST_F(Tst_Instruments, tab_ignore_drops_tab_staff)
 {
     mu::iex::enc::EncImportOptions opts;
