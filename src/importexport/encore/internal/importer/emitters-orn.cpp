@@ -567,6 +567,18 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         break;
     case EncOrnamentType::TENUTO:               pushBowing(SymId::articTenutoAbove);
         break;
+    case EncOrnamentType::VIBRATO: {
+        // The mark rides on the tab staff, whose notes live on the notation staff above it, so the
+        // line has to end up there: the tab is a clone of that staff and inherits it.
+        int noteStaff = staffIdx;
+        if (!mc.stavesWithRealNote.count(noteStaff) && noteStaff > 0
+            && mc.stavesWithRealNote.count(noteStaff - 1)) {
+            --noteStaff;
+        }
+        ctx.pendingVibratos.push_back({ noteStaff, measIdx,
+                                        static_cast<int>(eo->xoffset), static_cast<int>(eo->xoffset2) });
+        break;
+    }
     case EncOrnamentType::GUITAR_BEND:
     case EncOrnamentType::GUITAR_BEND_2:
     case EncOrnamentType::GUITAR_PREBEND:

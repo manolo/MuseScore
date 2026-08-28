@@ -233,6 +233,14 @@ struct PendingGrace {
     mu::engraving::Measure* measure { nullptr };
 };
 
+// A wavy line the tab staff draws over a run of notes, kept until the notes it spans are known.
+struct PendingVibrato {
+    int staffIdx { -1 };      // the staff that holds the notes, not the tab the mark came on
+    int measIdx { -1 };
+    int startColumn { 0 };
+    int endColumn { 0 };
+};
+
 // A fret position a tab staff stated for one note, kept until the staff is linked to its notation
 // staff and the two share their notes.
 struct PendingTabFingering {
@@ -282,6 +290,7 @@ struct BuildCtx
     std::vector<PendingMeasureRepeat> pendingMeasureRepeats {};
     std::vector<PendingBowing> pendingBowings {};
     std::vector<PendingTabFingering> pendingTabFingerings {};
+    std::vector<PendingVibrato> pendingVibratos {};
     // (measIdx, staffIdx) -> the notes emitted there with the Encore tick they came from. Filled only
     // when a tab staff may hand its fingerings over, which is the only reader of it.
     bool trackNotesForTab { false };

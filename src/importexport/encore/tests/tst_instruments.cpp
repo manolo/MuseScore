@@ -37,6 +37,7 @@
 #include "engraving/dom/stafftype.h"
 #include "engraving/dom/stringdata.h"
 #include "engraving/dom/tuplet.h"
+#include "engraving/dom/vibrato.h"
 
 #include "engraving/dom/instrtemplate.h"
 #include "importexport/encore/internal/importer/mappers.h"
@@ -309,6 +310,31 @@ TEST_F(Tst_Instruments, tab_linked_frets_come_from_the_file)
     EXPECT_EQ(notes[1]->pitch(), 59);
     EXPECT_EQ(notes[1]->string(), 2) << "B3 sits on the third string, as the tab staff states";
     EXPECT_EQ(notes[1]->fret(), 4);
+    EXPECT_TRUE(score->sanityCheck());
+    delete score;
+}
+
+// The tab staff carries the wavy line Encore draws over a run of notes, and the notes it means are
+// on the notation staff it is linked to. instruments_tab_vibrato.enc spans the second and third of
+// four quarters, so the line runs from 1/4 to 3/4 and both staves show it.
+TEST_F(Tst_Instruments, tab_vibrato_spans_the_notes_it_covers)
+{
+    mu::iex::enc::EncImportOptions opts;
+    opts.tablatureImportMode = mu::iex::enc::TablatureImportMode::Linked;
+    MasterScore* score = readEncoreScoreWithOpts("instruments_tab_vibrato.enc", opts);
+    ASSERT_NE(score, nullptr);
+    std::vector<const Vibrato*> vibratos;
+    for (const auto& pair : score->spanner()) {
+        if (pair.second->isVibrato()) {
+            vibratos.push_back(toVibrato(pair.second));
+        }
+    }
+    ASSERT_EQ(vibratos.size(), size_t(2)) << "one on the notation staff, one on the tab that clones it";
+    for (const Vibrato* v : vibratos) {
+        EXPECT_EQ(v->vibratoType(), VibratoType::GUITAR_VIBRATO);
+        EXPECT_EQ(v->tick(), Fraction(1, 4)) << "starts on the second note";
+        EXPECT_EQ(v->tick2(), Fraction(3, 4)) << "covers the third note to its end";
+    }
     EXPECT_TRUE(score->sanityCheck());
     delete score;
 }

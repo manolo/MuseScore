@@ -22,6 +22,7 @@
 
 // Post-pass: place pending ornaments, fermatas, tremolos, trills, arpeggios and breaths.
 
+#include <cstdlib>
 #include <limits>
 
 #include "resolvers.h"
@@ -42,6 +43,7 @@
 #include "engraving/dom/breath.h"
 #include "engraving/dom/measurerepeat.h"
 #include "engraving/dom/trill.h"
+#include "engraving/dom/vibrato.h"
 #include "engraving/editing/editmeasurerepeat.h"
 #include "engraving/editing/transaction/transaction.h"
 
@@ -450,6 +452,87 @@ static void resolveMeasureRepeats(MasterScore* score,
     }
 }
 
+// The wavy line states the column it starts at and the one it ends at, and the notes standing in
+// those columns are its ends. It goes on the notation staff, whose clone the tab staff is.
+static void resolveVibratos(BuildCtx& ctx)
+{
+    const EncRoot& enc = ctx.enc;
+    for (const PendingVibrato& pv : ctx.pendingVibratos) {
+        if (pv.measIdx < 0 || static_cast<size_t>(pv.measIdx) >= enc.measures.size()) {
+            continue;
+        }
+        const size_t msIdx = static_cast<size_t>(pv.measIdx) < ctx.encToMsIdx.size()
+                             ? ctx.encToMsIdx[static_cast<size_t>(pv.measIdx)] : static_cast<size_t>(pv.measIdx);
+        if (msIdx >= ctx.measuresByIdx.size() || !ctx.measuresByIdx[msIdx]) {
+            continue;
+        }
+        const EncMeasure& em = enc.measures[static_cast<size_t>(pv.measIdx)];
+        const int wholeTicks = encWholeNoteTicks(em);
+        // The line ends where its column falls, and the note nearest that column is the one it means.
+        const auto tickAtColumn = [&](int column) {
+            int best = -1, bestGap = -1;
+            forEachStaffNoteXoff(em, pv.staffIdx, /*includeRests*/ false, /*lineSlotByRawByte*/ nullptr,
+                                 [&](const EncMeasureElem* elem, int xoff) {
+                if (xoff <= 0) {
+                    return true;
+                }
+                const int gap = std::abs(xoff - column);
+                if (best < 0 || gap < bestGap) {
+                    bestGap = gap;
+                    best = static_cast<int>(elem->tick);
+                }
+                return true;
+            });
+            return best;
+        };
+        const int startEnc = tickAtColumn(pv.startColumn);
+        const int endEnc = tickAtColumn(pv.endColumn);
+        if (startEnc < 0 || endEnc < startEnc) {
+            continue;
+        }
+        const Fraction measTick = ctx.measuresByIdx[msIdx]->tick();
+        const track_idx_t track = static_cast<track_idx_t>(pv.staffIdx) * VOICES;
+        if (!validTrack(ctx.score, track)) {
+            continue;
+        }
+        // Where the note landed, not where its Encore tick says: a live-recorded tick is not the
+        // position the emitters gave it. The notes are on record from the tab pass.
+        const auto placeOf = [&](int encTick) {
+            Fraction tick = measTick + Fraction(encTick, wholeTicks).reduced();
+            const Chord* chord = nullptr;
+            auto it = ctx.notesByMeasStaff.find({ pv.measIdx, pv.staffIdx });
+            if (it != ctx.notesByMeasStaff.end()) {
+                for (const auto& [noteEncTick, note] : it->second) {
+                    if (noteEncTick == encTick && note->chord()) {
+                        chord = note->chord();
+                        tick = chord->tick();
+                        break;
+                    }
+                }
+            }
+            if (!chord) {
+                chord = findChordAt(ctx.score, tick, track);
+            }
+            return std::make_pair(tick, chord);
+        };
+        const auto [startTick, startChord] = placeOf(startEnc);
+        auto [endTick, endChord] = placeOf(endEnc);
+        if (endChord) {
+            endTick += endChord->actualTicks();   // the line covers the note it ends on
+        }
+        if (endTick <= startTick) {
+            continue;
+        }
+        Vibrato* vib = Factory::createVibrato(ctx.score->dummy());
+        vib->setTrack(track);
+        vib->setTrack2(track);
+        vib->setTick(startTick);
+        vib->setTick2(endTick);
+        vib->setVibratoType(VibratoType::GUITAR_VIBRATO);
+        ctx.score->addElement(vib);
+    }
+}
+
 void resolveOrnaments(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
@@ -462,5 +545,6 @@ void resolveOrnaments(BuildCtx& ctx)
     resolveUnconsumedTrillEnds(score, ctx.pendingTrillEnds);
     resolveBreaths(score, ctx.pendingBreaths);
     resolveMeasureRepeats(score, ctx.pendingMeasureRepeats);
+    resolveVibratos(ctx);
 }
 } // namespace mu::iex::enc

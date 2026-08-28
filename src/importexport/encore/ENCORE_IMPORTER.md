@@ -257,6 +257,8 @@ An Encore tab staff is a derived view with no notes of its own: its element stre
 
 Once the pair is linked, `applyTabFingerings` puts the positions the file states on the shared notes, so the tab shows the fingering Encore drew and not the one MuseScore would choose. Each position is matched to the note carrying the same Encore tick, then by pitch alone for whatever is left over, and it is used only where its string and fret really produce that note. A note the tab draws nowhere keeps MuseScore's own fretting. The position is written to every linked clone of the note, because the tab staff frets its own copy at layout and would otherwise overwrite it.
 
+The wavy line the tab staff draws over a run of notes becomes a `Vibrato`, `GUITAR_VIBRATO`. It is created on the notation staff, before the linking, so the clone carries it and both staves show it as Encore does. Its two columns name its ends, and each is resolved to the nearest note: the Encore tick of a live-recorded note is not where the emitters placed it, so the note is looked up in the table the fingering pass already keeps. The bends are still not imported, because Encore states the amount in a text and MuseScore states it in the pitch of a destination note that four bends in five do not have. See ENCORE_FORMAT.md 8.2 note 5.
+
 A tab-only score has no notation staff to pair with. Its tab staff carries its own notes as pitch-bearing rest elements, which the parser reads as notes, so the standalone tab shows fret numbers.
 
 ## 3.5 Per-instrument transposition and clef

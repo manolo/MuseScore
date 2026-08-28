@@ -1298,8 +1298,10 @@ Everything that moves between generations, in one table.
 | `0x29`           | guitar bend, curved arrow                          |
 | `0x2A`           | guitar prebend                                     |
 | `0x2B`           | guitar prebend and release                         |
+| `0x2F`           | vibrato, a wavy line; see note 5                   |
 | `0x30`           | guitar V-shape bend                                |
 | `0x32`           | tempo mark                                         |
+| `0x34`           | the notation staff's half of a vibrato; see note 5 |
 | `0x35`           | trill-span end; see note 1                         |
 | `0x36`           | trill-span start, tr with a wavy line              |
 | `0x37`           | secondary trill mark within a span                 |
@@ -1343,6 +1345,8 @@ Subtypes confirmed by opening the file in Encore 5 are `[verified]`; the rest ar
 2. **Standalone tr.** Size 16, a plain trill and never a span. The text is drawn to the left of its note, so its stored x sits left of the notehead. When a note shares the mark's tick, that note is the target and no snapping is needed; only when no note sits at the mark's tick does it snap to the note it visually rests on.
 3. **Trill zigzag.** Despite once being called a double mordent, it is not one: in the corpus it appears only as a trill mark, once, immediately after a trill-span start where Encore draws a wavy trill. Real mordents use the note articulation bytes.
 4. **Standalone fingerings.** Size 16, always stored on voice 0, but the digit belongs to the note it visually sits over, which may be in another voice of the same staff. Only a genuine overflow, more digits than notes at the tick, belongs to the second staff or the next measure's downbeat.
+
+5. **A guitar effect is stored once per staff, not once per score.** A notation staff over a tablature staff holds two elements for the same mark, one on each staff, in the same column and with the drawing each staff needs: a bend is `0x30` on the notation staff and `0x28` or `0x29` on the tablature, and a vibrato is a pair of `0x34` on the notation staff, its start column and its end column, against a single `0x2F` on the tablature that carries both columns itself. The proportion holds without exception in the corpus: every file that has any `0x2F` has exactly twice as many `0x34`, or none at all, every `0x2F` measured sits on a tablature staff and every `0x34` on a notation staff. The bend's amount is in none of them: it is the staff text drawn next to the mark, `FULL` or `1/2`.
 
 A trill-span start opens a span when a span end or a non-zero forward measure count is present, and is otherwise a plain trill glyph. The accent, up bow and down bow marks carry a voice byte that is always 0 regardless of the annotated note's voice.
 

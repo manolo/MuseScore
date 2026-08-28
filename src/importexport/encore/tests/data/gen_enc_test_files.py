@@ -5546,6 +5546,37 @@ def gen_v0c4_tab_tuning_key_offset():
     return pre + body + SKELETON_POST
 
 
+# instruments_tab_vibrato.enc
+# A notation staff (instrument 0) with a tablature staff (instrument 1) that carries the wavy line
+# Encore draws over a run of notes: an ORN of subtype 0x2F whose own columns say where the line
+# starts and ends. The mark rides on the tab staff, whose notes live on the notation staff above,
+# so the import has to put the vibrato there and let the linked tab inherit it. Here it spans the
+# second and third notes, columns 40 to 70.
+def gen_v0c4_tab_vibrato():
+    hdr, line_block = _tab_header_and_line([
+        (0x00, 0, 0x00),   # instrument 0: notation, treble clef
+        (0x08, 1, 0x01),   # instrument 1: tablature
+    ])
+
+    def note_raw(tick, fv, pitch, xoff):
+        d = bytearray(25)
+        d[0] = 28
+        d[1] = 0x00
+        d[2] = fv
+        d[7] = xoff        # element +10: the column
+        d[12] = pitch
+        return struct.pack('<H', tick) + bytes([(9 << 4) | 0]) + bytes(d)
+
+    e = (note_raw(0,   3, 64, 10)
+         + note_raw(240, 3, 65, 40)
+         + note_raw(480, 3, 67, 70)
+         + note_raw(720, 3, 69, 100)
+         + ornament_v0c4(0, 0, 1, 0x2F, xoffset=40, xoffset2=70)
+         + end_marker())
+    meas = meas_block(meas_hdr(4, 4), e)
+    return hdr + line_block + meas + SKELETON_POST
+
+
 # Build a custom 2-staff / N-instrument v0xC4 header + LINE block. Each entry is
 # (clef_byte, staff_type, packed_instr_staff_idx) with an optional 4th element show (1=visible,
 # 0=hidden; default visible). Mirrors how Encore lays out a notation staff followed by its
@@ -14360,6 +14391,7 @@ if __name__=='__main__':
     write("instruments_tab_hidden_notation.enc",          gen_v0c4_tab_hidden_notation())
     write("instruments_tab_linked_pair.enc",              gen_v0c4_tab_linked_pair())
     write("instruments_tab_linked_frets.enc",             gen_v0c4_tab_linked_frets())
+    write("instruments_tab_vibrato.enc",                  gen_v0c4_tab_vibrato())
     write("instruments_tab_linked_overfull.enc",          gen_v0c4_tab_linked_overfull())
     write("instruments_tab_standalone_frets.enc",         gen_v0c4_tab_standalone_frets())
     write("instruments_instr_clarinet_midi72_key0.enc",         gen_v0c4_instr_clarinet_midi72_key0())
