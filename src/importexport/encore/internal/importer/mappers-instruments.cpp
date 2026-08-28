@@ -37,7 +37,8 @@
 using namespace mu::engraving;
 
 namespace mu::iex::enc {
-// Strip trailing ordinal numbers from instrument names ("Bandurria 1ª" -> "Bandurria"; standalone "ª"/"º" also removed).
+// Strip trailing ordinal numbers from instrument names ("Bandurria 1ª" -> "Bandurria"; standalone "ª"/"º" also
+// removed).
 QString normalizeEncoreInstrName(const QString& name)
 {
     QString s = name.trimmed();
@@ -232,11 +233,8 @@ const InstrumentTemplate* findEncoreInstrumentTemplate(const QString& encName, i
             }
         }
     }
-    // Last resort when neither exact nor substring matched: an edit-distance (Levenshtein) match
-    // for typos and close inflections (>= 75% similar, <= 2 edits, both words >= 5 chars). Catches
-    // near roots but not distant cross-language roots. A fuzzy hit unique to one template is as
-    // distinctive as a unique substring (reported unique below so MIDI won't override); a shared
-    // fuzzy hit stays non-unique and defers to MIDI.
+    // Last resort: an edit-distance match for typos and close inflections. A fuzzy hit unique to one
+    // template is as distinctive as a unique substring; a shared one defers to the MIDI program.
     bool fuzzyUnique = false;
     if (!best) {
         static const QRegularExpression fuzzyWordSplit(QStringLiteral("[^\\p{L}\\p{N}]+"));
@@ -454,10 +452,9 @@ const InstrumentTemplate* findInstrumentVariant(const InstrumentTemplate* base, 
     return best;
 }
 
-// How representative a template is of a bare General MIDI program, when several templates share it.
-// A GM program names a mainstream instrument, so the "common" templates come first and the standard
-// ensemble members next; specialist entries (early music, world, none at all) are the last resort.
-// Without this, GM 69 picked Baroque Oboe over English Horn purely by file order.
+// How representative a template is of a bare GM program, since several share one: a program names a
+// mainstream instrument, so specialist entries are the last resort. Without this GM 69 picked
+// Baroque Oboe over English Horn by file order alone.
 static int midiTemplateRank(const InstrumentTemplate* it)
 {
     int rank = 0;
@@ -489,10 +486,8 @@ const InstrumentTemplate* findTemplateByMidi(int encMidiProgram0indexed)
             if (it->useDrumset || it->channel.empty()) {
                 continue;
             }
-            // Match only the first channel of each instrument. The first channel is the
-            // instrument's primary sound; additional channels (tremolo, pizzicato, mute…)
-            // are articulation variants that share programs across many instruments and
-            // would produce false matches if included.
+            // Only the first channel, the instrument's primary sound: the others are articulation variants whose
+            // programs are shared across many instruments and would match anything.
             if (it->channel.front().program() != encMidiProgram0indexed) {
                 continue;
             }

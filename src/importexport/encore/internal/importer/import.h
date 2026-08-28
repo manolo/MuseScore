@@ -20,12 +20,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Public entry point of the Encore (.enc) importer: parse a file into a MasterScore, plus the
-// helper that turns a rejected file into a user-facing error message.
-//
-// The binary format was documented by Leon Vinken (Enc2MusicXML project,
-// https://github.com/lvinken/Enc2MusicXML, GPL v3+) building on enc2ly by Felipe Castro.
-// This importer is based on that work, extended by observation of .enc files (see ENCORE_FORMAT.md).
+// The binary format was documented by Leon Vinken (Enc2MusicXML, https://github.com/lvinken/Enc2MusicXML,
+// GPL v3+) building on enc2ly by Felipe Castro. This importer is based on that work, extended by
+// observation; see ENCORE_FORMAT.md.
 
 #ifndef MU_IMPORTEXPORT_ENC_IMPORT_IMPORT_H
 #define MU_IMPORTEXPORT_ENC_IMPORT_IMPORT_H
@@ -40,10 +37,8 @@ class MasterScore;
 namespace mu::iex::enc {
 mu::engraving::Err importEncore(mu::engraving::MasterScore* score, const QString& path, const EncImportOptions& opts = EncImportOptions {});
 
-// Build a user-facing message for a file importEncore rejected with FileBadFormat, by
-// re-reading its header: an older encrypted Encore container (ZBOT/ZBOP/ZBO6), a SCOW/SCO5
-// file that could not be parsed (unsupported variant, damaged, or empty), or a file with no
-// recognizable Encore header at all.
+// Re-reads the header of a rejected file to say which of the three cases it is: an encrypted
+// container, an Encore file that could not be parsed, or not an Encore file at all.
 muse::String encoreLoadErrorMessage(const QString& path);
 } // namespace mu::iex::enc
 

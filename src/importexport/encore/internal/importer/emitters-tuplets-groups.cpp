@@ -75,10 +75,8 @@ static void getImplied(const std::vector<const EncMeasureElem*>& grp,
     }
 }
 
-// Face value as Fraction for the first element of a chord group.
-// The written value of an element, dots included. A dotted note is a value of its own: it takes
-// half a slot more than the bare face value, so reading it as undotted lets it into a bracket whose
-// slot it then overruns, and the member after it is laid on top of its tail.
+// The written value, dots included: a dotted note takes half a slot more, so reading it bare lets it
+// into a bracket whose slot it then overruns.
 static Fraction getFaceValue(const std::vector<const EncMeasureElem*>& grp)
 {
     if (grp.empty()) {
@@ -256,10 +254,8 @@ static bool opensGroupOneShort(
     return marked > 0 && ((marked + 1) % actualN) == 0;
 }
 
-// Sandwich heuristic: a note whose tup byte is missing/mismatched still belongs to the current
-// bracket when the NEXT note matches the ratio, the orphan's face value equals baseLen, and it sits
-// at the expected advance tick after the previous member (v0xC4 live recording occasionally drops
-// the byte). Either it sits inside an open group (faceSum > 0), or it opens the next one.
+// A note whose tuplet byte is missing still belongs to the bracket when the next one matches the
+// ratio, its value equals the base and it sits at the expected advance. Live recording drops the byte.
 static bool isSandwichOrphan(
     const std::vector<std::vector<const EncMeasureElem*> >& chords, int i, int n,
     int actualN, int normalN, Fraction baseLen, Fraction faceSum)
@@ -316,11 +312,8 @@ static void processImpliedTupletGroup(
     }
 }
 
-// A nested inner group replaces exactly ONE slot of the outer tuplet, so its notes must play for
-// as long as that slot does. Face values alone cannot tell the readings apart: a quarter followed
-// by eighths in a 3:2 bracket is equally consistent with an inner triplet filling the second slot
-// and with one flat bracket of a quarter plus four eighths. The played lengths the file records
-// settle it. Returns true when they are unavailable, leaving the face-value reading in charge.
+// An inner group replaces exactly one slot of the outer bracket, and face values cannot tell that
+// reading from one flat bracket, so the played lengths settle it. True when they are unavailable.
 static bool innerGroupFillsOneOuterSlot(
     const std::vector<std::vector<const EncMeasureElem*> >& chords,
     int outerSlotIdx, int innerGroupStartIdx, int innerEndIdx)

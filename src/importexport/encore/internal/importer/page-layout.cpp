@@ -79,11 +79,8 @@ static bool detectPtsPageSize(qint32 rightEdge, qint32 bottomEdge,
     return found;
 }
 
-// Identify the paper size from WINI screen-pixel coordinates (pageWUnits = rightEdge + left,
-// pageHUnits = bottomEdge + top) by matching the implied DPI ratio. Pass 1 tries the ISO A-series
-// first: all AN sizes share the 1:sqrt(2) ratio, so a non-A format with an accidentally smaller
-// delta must not win over the correct AN. Pass 2 tries every other standard size. Both keep the
-// candidate with the smallest abs(dpiW - dpiH). Returns false when nothing matches (custom page).
+// Paper size from the WINI coordinates, by the DPI ratio they imply. The A series is tried first,
+// since every AN shares one ratio and a stray non-A match must not beat the right AN.
 static bool detectWiniPageSize(int pageWUnits, int pageHUnits,
                                double& outWidthIn, double& outHeightIn)
 {
@@ -192,10 +189,8 @@ bool precPageSizeInches(const EncPrintSetup& pr, double& wIn, double& hIn)
     } else {
         return false;
     }
-    // The paper fields are raw file values, and a few files carry a stub rather than a page: a
-    // one-inch square, a couple of millimetres, a number in the wrong unit. Laying a system out
-    // on one leaves the spacing pass with no room at all, so anything outside the range printable
-    // paper takes counts as no page size and the WINI heuristic or the MuseScore default decides.
+    // A few files carry a stub rather than a page, a one-inch square or a couple of millimetres, and a
+    // system laid out on one has no room at all; anything outside printable paper counts as no size.
     static constexpr double kMinPageInches = 3.0;
     static constexpr double kMaxPageInches = 60.0;
     if (wIn < kMinPageInches || hIn < kMinPageInches || wIn > kMaxPageInches || hIn > kMaxPageInches) {
@@ -207,11 +202,8 @@ bool precPageSizeInches(const EncPrintSetup& pr, double& wIn, double& hIn)
     return true;
 }
 
-// Apply page size, orientation and notation scale from the PREC (DEVMODE) block. Returns
-// true when the page size was set (so the WINI margin pass must not override it). PREC is
-// present in almost every Encore file across all formats, while WINI (margins) exists only
-// in v0xC4, so this is the primary source of the page size for v0xA6/v0xC2 and for the
-// many v0xC4 files without a WINI block.
+// Page size, orientation and scale from PREC, which almost every file carries while WINI is v0xC4
+// only. Returns true when the size was set, so the WINI pass leaves it alone.
 static bool applyPagePrintSetup(MasterScore* score, const EncPrintSetup& pr)
 {
     double wIn = 0.0, hIn = 0.0;
@@ -258,10 +250,8 @@ double winiUnitsPerInch(int rightEdge, int left, double pageWIn)
     if (pageWIn <= 0.0) {
         return 72.0;
     }
-    // (rightEdge + left) / pageWidth near 72 means the WINI is in typographic points; a clearly
-    // larger value (about 84) means screen pixels at the monitor DPI. Snap the near-72 case to
-    // exactly 72. The pixel estimate is exact only when left/right margins are symmetric; with
-    // asymmetric margins it reads about 2% low.
+    // Near 72 the WINI is in points, near 84 in screen pixels. The pixel estimate is exact only with
+    // symmetric margins; asymmetric ones read about 2% low.
     const double est = static_cast<double>(rightEdge + left) / pageWIn;
     return (est <= 76.0) ? 72.0 : est;
 }
@@ -271,13 +261,9 @@ static void applyPageMargins(MasterScore* score, const EncPageSetup& ps, bool pa
     if (!ps.hasData) {
         return;
     }
-    // WINI fields are nominally typographic points (1/72 inch), but some Encore versions store
-    // them in screen pixels at the monitor DPI (about 84-85 PPI on older hardware); the tell is
-    // rightEdge/bottomEdge exceeding the page size in pts (e.g. 672 > A4 width 595). The pts case
-    // recovers the page via detectPtsPageSize, the pixel case via detectWiniPageSize (DPI ratio).
-    // See ENCORE_FORMAT.md §5.8 Margins block (WINI).
-    // Cap each margin to a fraction of the page so a misread WINI cannot produce an absurd margin,
-    // while still allowing legitimately large margins (2"+ are common on A3/landscape).
+    // WINI is nominally in points but some versions store screen pixels; the tell is an edge past the
+    // page size in points. See ENCORE_FORMAT.md 5.8. Each margin is capped so a misread cannot
+    // produce an absurd one, while 2 inches and more stay legitimate.
     static constexpr double kMaxMarginFrac = 0.45;
 
     double pageHIn = score->style().styleD(Sid::pageHeight);
@@ -478,11 +464,8 @@ void applyPageSetup(BuildCtx& ctx)
     if (ctx.opts.importPageLayout) {
         const bool sizeFromPrec = applyPagePrintSetup(score, enc.printSetup);
         applyPageMargins(score, enc.pageSetup, sizeFromPrec);
-        // SCO5 (macOS Encore 5) does not store document margins in any importable block:
-        // WINI holds only window state, the PREC plist holds only printer rects, and some
-        // files have no PREC at all. Apply a clean, symmetric 0.25" margin: forcing 0 looks
-        // cramped (edge to edge), and MuseScore's default margins are tuned for A4 so they
-        // come out asymmetric on Letter. A small uniform margin is the better default.
+        // SCO5 stores no document margins anywhere, so a small symmetric one is the better default: zero
+        // looks cramped and the MuseScore defaults are tuned for A4, which comes out lopsided on Letter.
         if (enc.fmt && enc.fmt->usesUniformPageMargins()) {
             constexpr double kMacMarginIn = 0.25;
             const double pageWIn = score->style().styleD(Sid::pageWidth);
@@ -494,11 +477,8 @@ void applyPageSetup(BuildCtx& ctx)
             score->style().set(Sid::pageEvenBottomMargin, kMacMarginIn);
             score->style().set(Sid::pagePrintableWidth,   pageWIn - 2.0 * kMacMarginIn);
         } else if (sizeFromPrec && !enc.pageSetup.hasData) {
-            // No WINI margins, but PREC set the page size (e.g. A4 landscape). MuseScore's default
-            // printable width is sized for the portrait page, so the extra landscape width becomes a
-            // lopsided right margin (~4" on A4 landscape). Keep the default margins but recompute the
-            // printable width so the right margin equals the left. On a portrait page whose size
-            // matches the default this is a no-op (printable already = width - 2*leftMargin).
+            // With PREC's size and no WINI, the default printable width belongs to the portrait page and leaves
+            // a lopsided right margin, so recompute it to match the left. A no-op on the default page.
             const double pageWIn = score->style().styleD(Sid::pageWidth);
             const double leftIn  = score->style().styleD(Sid::pageOddLeftMargin);
             score->style().set(Sid::pagePrintableWidth, pageWIn - 2.0 * leftIn);
@@ -562,10 +542,8 @@ void fitFirstPageStaffSpace(BuildCtx& ctx)
     constexpr double kStepInches      = 0.002;   // reduction granularity
     constexpr double kMinStaffSpaceMm = 1.0;     // below this the staff stops being readable in print
 
-    // How far the staff has to shrink scales with how many staves share a system: a band score of
-    // twenty-odd staves needs a far smaller staff than a piano part before its first system fits
-    // beside the title frame. So the limit is where the staff stops being legible, not a fixed
-    // reduction, which would stop short on exactly the wide scores that need it most.
+    // How far the staff must shrink scales with how many share the system, so the limit is where the
+    // staff stops being legible; a fixed reduction stops short on the wide scores that need it most.
     const double spMin = kMinStaffSpaceMm * DPMM;
 
     // Bubble up from the smallest reduction; the first that pulls the spilled system back onto

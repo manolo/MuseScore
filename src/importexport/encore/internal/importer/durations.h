@@ -21,11 +21,8 @@
  */
 #pragma once
 
-// Rendering decisions derived from Encore's raw ticks: MuseScore DurationType, dot count and
-// tuplet shape. These are importer concerns (they translate the parser's raw tick/face-value
-// model into engraving types), so they live in the importer layer and keep the engraving/dom
-// dependency out of the parser. The parser exposes only the raw tick table (faceValue2ticks)
-// and the pure-integer implied-tuplet probe (detectImpliedTuplet) in parser/ticks.h.
+// Engraving types derived from raw ticks. They live in the importer layer so the parser keeps no
+// engraving/dom dependency; it exposes only the tick table and the integer tuplet probe.
 
 #include <QtGlobal>
 

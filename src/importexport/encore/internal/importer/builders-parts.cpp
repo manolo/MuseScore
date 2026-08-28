@@ -102,10 +102,8 @@ static const char* matchStepLabel(MatchStep step)
     return "";
 }
 
-// Describe an Encore MIDI program for the debug log using MuseScore's own instrument names
-// (localized like everything else: the template trackName is translated at load). Encore stores
-// a 1-indexed GM program; map it to the template whose primary sound is that program and show its
-// track name. No hardcoded GM table; an unmapped program shows just the number.
+// Names a program for the log through MuseScore's own templates, so it is localized like everything
+// else and needs no hardcoded GM table.
 static std::string midiProgramInfo(const EncInstrument& instr)
 {
     if (instr.midiProgram <= 0) {
@@ -272,11 +270,9 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         if (!tmpl) {
             tryStep(MatchStep::NameMidiScore, tryNameMidiScore(instr, encMidi, encKey, isRhythm));
         }
-        // Step 3: name scoring over drumset templates. A pitched GM program outvotes a name that
-        // merely resembles a percussion instrument: "Slap Ucillee" on Acoustic Bass is a bass and
-        // "Con." on Piano is a piano, however well they score against Slap and Congas, and the file
-        // draws both on a pitched clef. A name with no program behind it, or a percussive one, still
-        // reaches this step, which is where "Congas" and "Maracas" are recognised.
+        // Name scoring over drumset templates. A pitched program outvotes a name that merely sounds
+        // percussive, since the file draws those on a pitched clef; a name with no program behind it still
+        // reaches here, which is where Congas and Maracas are recognised.
         const bool pitchedProgram = (instr.midiProgram > 0 && instr.midiProgram < GM_PERC_FIRST);
         if (!nameTooShort && !pitchedProgram) {
             tryStep(MatchStep::DrumsetName, findDrumsetTemplate(instr.name));
@@ -407,11 +403,8 @@ void buildParts(BuildCtx& ctx)
         }
 
         const int pitchOffset = static_cast<int>(instr.keyTransposeSemitones);
-        // Transposition handling depends on the offset:
-        //  - non-octave and positive octave: set on the instrument so the display keeps the written
-        //    pitch under a plain clef (the octave is a playback transposition, no 8va clef).
-        //  - negative octave: left to the octave-down clef from pickStaffClef()/applyOctaveToClef()
-        //    plus the template's own transposition.
+        // A non-octave or upward offset goes on the instrument, so a plain clef keeps the written pitch. A
+        // downward octave is left to the octave clef instead. See ENCORE_IMPORTER.md 3.5.
         Instrument* instrument = part->instrument();
         if (instrument) {
             if (pitchOffset != 0 && (std::abs(pitchOffset) % 12 != 0 || pitchOffset > 0)) {

@@ -75,10 +75,8 @@ inline mu::engraving::Chord* findChordAt(mu::engraving::MasterScore* score,
     return toChord(el);
 }
 
-// First chord on any voice of `staffIdx` within segment `seg`, scanning voices 0..VOICES-1 in order.
-// Sets outTrack to the carrying voice's track and returns the chord, or nullptr if seg is null or
-// holds no chord on that staff. validTrack is folded in so an out-of-range staff yields nullptr
-// instead of an out-of-bounds element() access.
+// First chord on any voice of the staff in this segment, with the carrying track reported. The staff
+// range check is folded in, so an out-of-range staff yields nullptr rather than a bad access.
 inline mu::engraving::Chord* firstChordVoiceAt(const mu::engraving::Score* score,
                                                const mu::engraving::Segment* seg, int staffIdx,
                                                mu::engraving::track_idx_t& outTrack)

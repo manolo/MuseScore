@@ -125,11 +125,8 @@ mu::engraving::OrnamentInterval encArticByteToTrillInterval(quint8 articByte)
 {
     using mu::engraving::IntervalStep;
     using mu::engraving::IntervalType;
-    // Trill artic bytes 0x04..0x07 share the trill glyph but carry an accidental:
-    //   0x04: no accidental (AUTO = use key context)
-    //   0x05: flat  → minor second above (MINOR)
-    //   0x06: sharp → augmented second above (AUGMENTED)
-    //   0x07: natural → major second above (MAJOR)
+    // Bytes 0x04 to 0x07 share the trill glyph and differ only in the accidental: none, flat, sharp,
+    // natural, which set the interval above.
     switch (articByte) {
     case 0x05: return { IntervalStep::SECOND, IntervalType::MINOR };
     case 0x06: return { IntervalStep::SECOND, IntervalType::AUGMENTED };
