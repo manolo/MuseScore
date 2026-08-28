@@ -27,10 +27,8 @@
 #include "readers.h"
 
 namespace mu::iex::enc {
-// Shared base for v0xC2 and v0xC4 format readers.
-// Provides the element block offset, instrument encoding probe, and the full
-// instrument-metadata read (MIDI programs + key transpositions) used by v0xC4.
-// v0xC2 overrides readInstrumentMeta to skip MIDI/key data.
+// Shared base for the v0xC2 and v0xC4 readers: element offsets, the encoding probe and the full
+// instrument metadata read, which v0xC2 overrides away.
 struct EncFormatReader_V0xC4Base : EncFormatReader
 {
     quint32 elemBlockOffset() const override { return 0x36; }

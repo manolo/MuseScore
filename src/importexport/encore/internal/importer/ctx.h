@@ -79,10 +79,9 @@ inline const EncLineStaffData* lineStaffDataAt(const EncRoot& enc, int idx)
     return &enc.lines[0].staffData[static_cast<size_t>(idx)];
 }
 
-// A tie whose start note is written and whose end is still to come. The start is remembered by
-// where it was written and what pitch it holds, never by pointer: the passes that make an overfull
-// measure fit can remove the chord after the tie was registered, and an address the allocator has
-// since reused would answer to a pointer comparison as though the note were still there.
+// A tie start, remembered by where it was written and what pitch it holds, never by pointer: the
+// passes that make an overfull measure fit can remove the chord, and a reused address would answer
+// to a pointer comparison as though the note were still there.
 struct PendingTie {
     mu::engraving::track_idx_t track = 0;
     mu::engraving::Fraction tick;
@@ -200,11 +199,8 @@ struct PendingOttava {
     mu::engraving::OttavaType ottavaType;
 };
 
-// A volta bracket and the measures it covers. The bracket is built while its first measure is
-// emitted, but any measure can still change length afterwards (pickup shorten, irregular fill),
-// which moves every tick behind it. Holding the measures instead of the ticks keeps the bracket
-// on the bars Encore marked, and a bracket whose end tick outlives the score has no end element
-// and cannot be written.
+// A volta and the measures it covers, held as measures rather than ticks: any measure can still
+// change length afterwards, which moves every tick behind it.
 struct PendingVolta {
     mu::engraving::Volta* volta { nullptr };
     mu::engraving::Measure* firstMeasure { nullptr };

@@ -73,11 +73,8 @@ bool tryHandleGraceNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec,
         }
     };
 
-    // Each grace chord member is a separate note at the same tick, but the grace path rolls
-    // prevMidiTick back so isChordExt never fires for the second member. Merge it into this
-    // track's last grace chord, else a 2-note grace chord splits into two single-note graces.
-    // A beamed grace group (grace1 & 0x10) is the exception: its members are a melodic sequence
-    // (separate stems joined by a beam), not a stacked chord, so they stay as separate graces.
+    // The grace path rolls the previous tick back, so a second member never reads as a chord extension
+    // and has to be merged here. A beamed group is the exception: its members are a melodic sequence.
     {
         auto gcIt = ctx.scratch.lastGraceChord.find(trackKey);
         auto tkIt = ctx.scratch.lastGraceTick.find(trackKey);
@@ -98,12 +95,9 @@ bool tryHandleGraceNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec,
     const bool appoggiatura = (en->graceType() == EncGraceType::APPOGGIATURA);
     const bool beamedGroup = (en->grace1 & 0x10);
 
-    // Classify the grace against the principal notes of its own voice/measure:
-    //  - principalAtOrAfter: a principal note at or after the grace -> grace-before, ornaments it.
-    //  - contiguousNoteBefore: a principal note whose written span reaches the grace tick with no
-    //    silence between -> grace-after, belongs to that preceding note.
-    // A grace preceded by silence with nothing at/after it is neither: it falls through to the
-    // grace-before path and, via the cross-barline pending carry, ornaments the next bar's downbeat.
+    // A principal note at or after the grace makes it a grace-before; one whose written span reaches the
+    // grace tick with no silence between makes it a grace-after. Preceded by silence with nothing after,
+    // it ornaments the next bar's downbeat through the pending carry.
     bool principalAtOrAfter = false;
     bool contiguousNoteBefore = false;
     if (mc.encMeas) {

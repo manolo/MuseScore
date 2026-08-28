@@ -208,10 +208,8 @@ static void applyPendingBowings(BuildCtx& ctx, MasterScore* score)
             Measure* m = score->tick2measure(pb.tick);
             if (m) {
                 const int ownStaff = static_cast<int>(pb.track / VOICES);
-                // Nothing starts on a barline. A mark stored there and not marked as belonging to
-                // the next measure is on the note that ENDS there, the last one of the measure
-                // before, so that is where to look: the chord that begins after the barline is a
-                // different note and taking it moves the mark out of its own bar.
+                // Nothing starts on a barline, so a mark stored there belongs to the note that ends there, in the
+                // measure before; the chord after the barline is a different note.
                 if (pb.tick == m->tick() && m->prevMeasure()) {
                     for (Segment* s = m->prevMeasure()->first(SegmentType::ChordRest); s;
                          s = s->next(SegmentType::ChordRest)) {
@@ -231,11 +229,9 @@ static void applyPendingBowings(BuildCtx& ctx, MasterScore* score)
                     }
                 }
                 if (!c) {
-                    // A mark on the last note of a bar is stored at the tick where that note ends, so
-                    // nothing starts there. Walk back to the note sounding at that tick. When that
-                    // tick is the barline itself the note lives in the measure before, which is where
-                    // the search has to go: the mark belongs to the note that ends there, never to
-                    // whatever begins after it.
+                    // A mark on the last note of a bar is stored where that note ends, so walk back to the note
+                    // sounding
+                    // at that tick, into the previous measure when the tick is the barline itself.
                     Measure* look = (pb.tick == m->tick() && m->prevMeasure()) ? m->prevMeasure() : m;
                     for (Segment* s = look->first(SegmentType::ChordRest);
                          s && (look != m || s->tick() < pb.tick);
@@ -297,10 +293,9 @@ static void applyPendingFingeringOrns(BuildCtx& ctx, MasterScore* score)
                             c = toChord(ownEl);
                             useTrack = pf.track;
                         } else {
-                            // A fingering stored on voice 0 may belong to a note in another voice of
-                            // the SAME staff (Encore keeps all fingerings on voice 0). Prefer such a
-                            // note over the second staff, so a finger over a voice-2 note is not
-                            // misrouted to the bass sibling.
+                            // Encore keeps every fingering on voice 0, so prefer another voice of the same staff over
+                            // the second
+                            // staff, or a finger over a voice-2 note lands on the bass sibling.
                             const track_idx_t staffBase = (pf.track / VOICES) * VOICES;
                             for (track_idx_t v = staffBase; v < staffBase + VOICES; ++v) {
                                 if (v == pf.track) {

@@ -134,10 +134,8 @@ void applyMeasureBpmMarks(BuildCtx& ctx)
             }
         }
         if (!hasExisting) {
-            // The header BPM is a quarter-note BPM. Choose the display beat unit: prefer the
-            // explicit unit on this measure's ORN tempo mark (`noto`) so a quarter=198 mark in 6/8
-            // stays "quarter=198" rather than the compound default "dotted-quarter=132"; otherwise
-            // fall back to the meter heuristic (compound meters display in dotted quarters).
+            // The header BPM is per quarter; the displayed unit comes from the mark when it states one, so a
+            // quarter=198 in 6/8 is not redrawn as the compound default.
             int displayBeatTicks = 0;
             for (const auto& el : enc.measures[mi].elements) {
                 const EncOrnament* orn = dynamic_cast<const EncOrnament*>(el.get());
