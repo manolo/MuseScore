@@ -50,7 +50,11 @@ static std::unique_ptr<EncMeasureElem> createMeasureElement(
     case EncElemType::NOTE:
         return std::make_unique<EncNote>(tick, tp, vo);
     case EncElemType::REST:
-        return std::make_unique<EncRest>(tick, tp, vo);
+    {
+        auto rest = std::make_unique<EncRest>(tick, tp, vo);
+        rest->isTabFingering = (vo & 0x08) != 0;
+        return rest;
+    }
     case EncElemType::CHORD:
         return std::make_unique<EncChordSym>(tick, tp, vo);
     case EncElemType::ORNAMENT:

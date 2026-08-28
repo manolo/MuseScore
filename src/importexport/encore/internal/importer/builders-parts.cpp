@@ -463,6 +463,7 @@ void buildParts(BuildCtx& ctx)
             if (staffWantsTab) {
                 setupTablatureStaff(staff, instrument, instr.tabTuning.hasData ? instr.tabTuning : enc.tabTuning,
                                     pitchOffset);
+                ctx.trackNotesForTab = ctx.opts.tablatureImportMode == TablatureImportMode::Linked;
             }
             ctx.staffPitchOffset.push_back(pitchOffset);
             ClefType cClef = ClefType::INVALID;
@@ -600,6 +601,65 @@ static void linkTabToNotation(Score* score, Staff* notation, Staff* tab, bool no
     tab->setVisible(tabVisible);
 }
 
+// Put the fret positions the tab staff stated on the notes it now shares with its notation staff, so
+// the tab draws Encore's own fingering instead of the one MuseScore would choose. Encore numbers the
+// strings from the lowest and writes twice the number, MuseScore numbers them from the highest, and a
+// position is used only where its string and fret really produce the note it lands on.
+static void applyTabFingerings(BuildCtx& ctx, const Staff* notation, int notationStaffIdx, int tabStaffIdx)
+{
+    const StringData* sd = notation->part()->instrument()->stringData();
+    if (!sd || sd->strings() < 1) {
+        return;
+    }
+    const int nStrings = sd->strings();
+    std::map<int, std::vector<const PendingTabFingering*> > byMeasure;
+    for (const PendingTabFingering& f : ctx.pendingTabFingerings) {
+        if (f.staffIdx == tabStaffIdx) {
+            byMeasure[f.measIdx].push_back(&f);
+        }
+    }
+    for (const auto& [measIdx, fingerings] : byMeasure) {
+        auto notesIt = ctx.notesByMeasStaff.find({ measIdx, notationStaffIdx });
+        if (notesIt == ctx.notesByMeasStaff.end()) {
+            continue;
+        }
+        const std::vector<std::pair<int, Note*> >& notes = notesIt->second;
+        std::vector<bool> taken(notes.size(), false);
+        // A position goes to the note of that pitch whose Encore tick is nearest, which is its own tick
+        // in all but a small fraction: the tab and the notation staff hold the same music but their
+        // elements are stamped separately. A note no position lands on keeps MuseScore's fretting.
+        for (const PendingTabFingering* f : fingerings) {
+            const int lowIdx = f->stringByte / 2 - 1;
+            if (lowIdx < 0 || lowIdx >= nStrings || f->fret < 0 || f->fret > sd->frets()) {
+                continue;
+            }
+            const int pitch = sd->stringList()[static_cast<size_t>(lowIdx)].pitch + f->fret;
+            size_t best = notes.size();
+            int bestGap = 0;
+            for (size_t i = 0; i < notes.size(); ++i) {
+                if (taken[i] || notes[i].second->pitch() != pitch) {
+                    continue;
+                }
+                const int gap = std::abs(notes[i].first - f->encTick);
+                if (best == notes.size() || gap < bestGap) {
+                    best = i;
+                    bestGap = gap;
+                }
+            }
+            if (best == notes.size()) {
+                continue;
+            }
+            taken[best] = true;
+            // The tab staff holds linked clones of these notes and frets them itself at layout; the
+            // position has to reach the clone too, or the one it computes replaces this one.
+            for (EngravingObject* linked : notes[best].second->linkList()) {
+                toNote(linked)->setString(nStrings - lowIdx - 1);
+                toNote(linked)->setFret(f->fret);
+            }
+        }
+    }
+}
+
 void applyTablatureImportMode(BuildCtx& ctx)
 {
     if (ctx.opts.tablatureImportMode == TablatureImportMode::Separate) {
@@ -621,6 +681,8 @@ void applyTablatureImportMode(BuildCtx& ctx)
         Staff* tab;
         bool notationVisible;
         bool tabVisible;
+        int notationStaffIdx;
+        int tabStaffIdx;
     };
     std::vector<Pair> pairs;
 
@@ -643,7 +705,7 @@ void applyTablatureImportMode(BuildCtx& ctx)
             const EncLineStaffData* notLsd = lineStaffDataAt(enc, i - 1);
             const EncLineStaffData* tabLsd = lineStaffDataAt(enc, i);
             pairs.push_back({ staves[i - 1], staves[i],
-                              !notLsd || notLsd->showStaff, !tabLsd || tabLsd->showStaff });
+                              !notLsd || notLsd->showStaff, !tabLsd || tabLsd->showStaff, i - 1, i });
             LOGD() << "  linked tab: staff " << i << " <- notation staff " << (i - 1);
         }
     }
@@ -679,6 +741,7 @@ void applyTablatureImportMode(BuildCtx& ctx)
         };
         linkTabToNotation(score, p.notation, p.tab, p.notationVisible, p.tabVisible,
                           offsetOf(p.notation) - offsetOf(p.tab));
+        applyTabFingerings(ctx, p.notation, p.notationStaffIdx, p.tabStaffIdx);
     }
 }
 } // namespace mu::iex::enc

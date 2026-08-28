@@ -463,9 +463,9 @@ The eight slots hold the open-string MIDI pitches from lowest to highest, then p
 
 Because the tuning is per track, a file mixing differently tuned tab staves carries a distinct tuning in each block, and each tab staff must use its own. A near-identical block also appears once in the `SCO5` header, around `0x1A1`, always the guitar default padded with `0x58`; that copy is a global default, not a per-staff tuning.
 
-Encore stores no per-note string or fret, only the tuning: the fingering is computed from the pitches.
+**Encore does state the fingering, note by note.** A tab staff's element stream is not empty: for every note the staff draws it holds one element in the rest layout with bit `0x8` set in the voice nibble, carrying the string at `+12`, the fret at `+13` and the written pitch at `+15`, the slot a note uses. The string is written as twice its index counted from the lowest string, so `02` names the lowest and `0C` the sixth, and the three fields always agree: the open pitch of the named string plus the fret is the pitch at `+15` `[verified]`. A genuine rest has a voice nibble below 4 and no pitch, so the voice bit tells the two apart.
 
-A tab staff is normally a derived view, its notes living on the paired notation staff while its own element stream carries only rests. The exception is a tab-only score, where Encore materialises the notes as pitch-bearing rest elements: such an element uses the rest layout but sets bit `0x8` of the voice nibble and stores the MIDI pitch at `+15`, the slot a note uses. It has no face value, and its duration comes from the gap rule in 7.1. A genuine rest has a voice nibble below 4 and no pitch, so the voice bit tells them apart.
+Where the notes themselves live depends on the score. A notation plus tab pair keeps them on the notation staff, and the tab's stream carries only the position elements above, which is why the tab is a derived view of a staff that holds the music. A tab-only score has no other staff to hold them, and there those same elements are the notes: they carry no face value, and their duration comes from the gap rule in 7.1.
 
 ## 5.4 Measure block (`MEAS`)
 
@@ -783,6 +783,8 @@ A slur can begin on a grace note stored at the same tick as its parent chord, si
 | `+15`  | 1    | multi-measure rest count, only when the size exceeds 15 |
 
 When the count at `+15` is above 1, the single measure block stands for that many consecutive empty display measures, which Encore draws as one symbol with the count above it. Multi-staff files emit one rest per staff, all carrying the same count.
+
+**A tab staff's fingering rides on this layout, and reads differently.** When bit `0x8` of the voice nibble is set the element is not a rest at all: `+12` is the string it stands on, `+13` the fret and `+15` the written pitch, so neither the tuplet ratio nor the multi-measure count is there to be read. See 5.3.
 
 **The compact rest, format 2.50**, is 7 bytes declared and 14 on disk:
 
