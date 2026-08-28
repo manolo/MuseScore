@@ -85,7 +85,12 @@ bool EncRest::read(QDataStream& ds)
     ds >> faceValue;
     ds.skipRawData(4 + bodyShift);
     ds >> xoffset;
-    ds.skipRawData(2);
+    ds.skipRawData(1);
+    if (isTabFingering) {
+        ds >> tabString >> tabFret;   // element +12 and +13; +15 holds the written pitch
+        return true;
+    }
+    ds.skipRawData(1);
     ds >> tuplet >> dotControl;
     if (static_cast<int>(size) > 15 + bodyShift) {
         ds >> mrestCount;   // multi-measure rest count at element offset +15

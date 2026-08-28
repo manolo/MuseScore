@@ -249,11 +249,13 @@ Tablature is decided per staff, from `clef == TAB` or `staffType == TAB` in the 
 
 Encore writes that array as written pitches, exactly as it writes its notes, so it is moved by the instrument's Key and back out again by whatever transposition the matched template carries: MuseScore frets a note against the string table after undoing the transposition, and the two have to meet in the same place. A guitar states a Key of -12, and its tuning read unmoved leaves every string an octave above the notes, which no string can then play. A tuning taken from the template or from the guitar fallback is already in MuseScore's own terms and is used as it is.
 
-An Encore tab staff is a derived view with no notes of its own: its element stream holds only rests. A post-pass, `applyTablatureImportMode`, supplies the notes according to the option the user chose.
+An Encore tab staff is a derived view with no notes of its own: its element stream holds the string and the fret of every note the staff draws, on elements that otherwise look like rests. A post-pass, `applyTablatureImportMode`, supplies the notes according to the option the user chose.
 
 - **Linked**, the shipped default. Each empty tab staff is paired with the notation staff immediately above it, which is how Encore stores the pair, and the two are merged into one instrument. `Excerpt::cloneStaff` clones the notation music into the tab staff as linked clones, so the same notes render as frets, the tab staff is reparented into the notation part and the empty tab part is dropped. Per-staff visibility is applied from Encore's show flags, so a hidden notation staff behind a visible tab survives, which a merged part could not express as a whole.
 - **Separate.** The staves stay as Encore stores them, notation with notes and tab as an empty view, each its own instrument.
 - **Ignore.** Tab staves are removed with `cmdRemovePart`.
+
+Once the pair is linked, `applyTabFingerings` puts the positions the file states on the shared notes, so the tab shows the fingering Encore drew and not the one MuseScore would choose. Each position is matched to the note carrying the same Encore tick, then by pitch alone for whatever is left over, and it is used only where its string and fret really produce that note. A note the tab draws nowhere keeps MuseScore's own fretting. The position is written to every linked clone of the note, because the tab staff frets its own copy at layout and would otherwise overwrite it.
 
 A tab-only score has no notation staff to pair with. Its tab staff carries its own notes as pitch-bearing rest elements, which the parser reads as notes, so the standalone tab shows fret numbers.
 

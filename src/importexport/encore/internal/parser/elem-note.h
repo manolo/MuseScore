@@ -147,6 +147,12 @@ struct EncRest : EncMeasureElem {
     quint8 mrestCount { 1 };
     // Set by calculateRealDurations() Phase 4 for v0xC2 (same semantics as EncNote::isImpliedTupletMember).
     bool isImpliedTupletMember { false };
+    // A tab staff writes its fingering as a rest (voice bit 0x8): the string and the fret take the
+    // slots a plain rest uses for the tuplet ratio and the multi-measure count, so neither is read
+    // for one of these. See ENCORE_FORMAT.md 6.4 Rest.
+    bool isTabFingering { false };
+    quint8 tabString  { 0 };
+    quint8 tabFret    { 0 };
 
     using EncMeasureElem::EncMeasureElem;
 

@@ -5658,6 +5658,45 @@ def gen_v0c4_tab_linked_pair():
     return hdr + line_block + meas + SKELETON_POST
 
 
+# instruments_tab_linked_frets.enc
+# A notation staff (instrument 0) over a tablature staff (instrument 1) that states, for every note,
+# the position Encore drew it at: the string at element +12 (twice the index counted from the lowest
+# string), the fret at +13 and the written pitch at +15, in the rest byte layout. The positions are
+# deliberately not the ones MuseScore picks on its own (E4 on the third string at fret 9, B3 on the
+# third string at fret 4, instead of the open first and second strings), so the linked tab can only
+# show them by reading them from the file.
+def gen_v0c4_tab_linked_frets():
+    hdr, line_block = _tab_header_and_line([
+        (0x00, 0, 0x00),   # instrument 0: notation, treble clef
+        (0x08, 1, 0x01),   # instrument 1: tablature
+    ])
+
+    def note_raw(tick, fv, pitch):
+        d = bytearray(25)
+        d[0] = 28
+        d[1] = 0x00          # notation staff
+        d[2] = fv
+        d[12] = pitch
+        return struct.pack('<H', tick) + bytes([(9 << 4) | 0]) + bytes(d)
+
+    def tab_fingering(tick, string_byte, fret, pitch):
+        d = bytearray(15)
+        d[0] = 18            # size (rest byte layout)
+        d[1] = 0x01          # tablature staff
+        d[9] = string_byte   # element +12
+        d[10] = fret         # element +13
+        d[12] = pitch        # element +15
+        return struct.pack('<H', tick) + bytes([(8 << 4) | 0x8]) + bytes(d)
+
+    e = (note_raw(0, 3, 64)
+         + note_raw(240, 3, 59)
+         + tab_fingering(0, 8, 9, 64)
+         + tab_fingering(240, 8, 4, 59)
+         + end_marker())
+    meas = meas_block(meas_hdr(4, 4), e)
+    return hdr + line_block + meas + SKELETON_POST
+
+
 # instruments_tab_linked_overfull.enc
 # Like the linked pair, but the notation measure overfills a 3/4 nominal bar to 7/8: five eighth
 # notes (enc ticks 0..480) followed by a quarter (enc 600). The quarter spans to the bar end, so the
@@ -14320,6 +14359,7 @@ if __name__=='__main__':
     write("instruments_tab_two_tunings.enc",              gen_v0c4_tab_two_tunings())
     write("instruments_tab_hidden_notation.enc",          gen_v0c4_tab_hidden_notation())
     write("instruments_tab_linked_pair.enc",              gen_v0c4_tab_linked_pair())
+    write("instruments_tab_linked_frets.enc",             gen_v0c4_tab_linked_frets())
     write("instruments_tab_linked_overfull.enc",          gen_v0c4_tab_linked_overfull())
     write("instruments_tab_standalone_frets.enc",         gen_v0c4_tab_standalone_frets())
     write("instruments_instr_clarinet_midi72_key0.enc",         gen_v0c4_instr_clarinet_midi72_key0())
