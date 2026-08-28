@@ -188,7 +188,7 @@ TEST(Digest, walk_directory)
     if (startAt == 0) {
         fs << "file,imported,sane,parts,staves,measures,note\n";
         ps << "file,part,staves,instrument_id,program,transpose_chromatic,transpose_diatonic,long_name\n";
-        ms << "file,part,measure,voice,timesig,nominal,actual,fifths,clefs,repeats,events,lyrics,directions\n";
+        ms << "file,part,staff,measure,voice,timesig,nominal,actual,fifths,clefs,repeats,events,lyrics,directions\n";
     }
 
     int imported = 0, sane = 0;
@@ -266,35 +266,41 @@ TEST(Digest, walk_directory)
                 }
                 collectStaffTexts(m, staffFrom, staffTo, directions);
 
-                for (int v = 0; v < static_cast<int>(VOICES); ++v) {
-                    QString events;
-                    Fraction actual(0, 1);
-                    for (const Segment* s = m->first(SegmentType::ChordRest); s;
-                         s = s->next(SegmentType::ChordRest)) {
-                        for (staff_idx_t st = staffFrom; st < staffTo; ++st) {
-                            const EngravingItem* e = s->element(st * VOICES + v);
-                            if (!e || !e->isChordRest()) {
-                                continue;
-                            }
-                            const ChordRest* cr = toChordRest(e);
-                            events += (events.isEmpty() ? "" : " ") + eventText(cr, m->tick());
-                            actual += cr->ticks();
-                            for (const Lyrics* l : cr->lyrics()) {
-                                if (l) {
-                                    lyrics += (lyrics.isEmpty() ? "" : "|") + l->plainText();
+                // One row per staff and voice, and the sum is the sounding duration: a tuplet member's
+                // written value is longer than it sounds, and a part can hold more than one staff, so
+                // either would make a well-formed bar read as overfull.
+                for (staff_idx_t st = staffFrom; st < staffTo; ++st) {
+                    for (int v = 0; v < static_cast<int>(VOICES); ++v) {
+                        QString events;
+                        Fraction actual(0, 1);
+                        for (const Segment* s = m->first(SegmentType::ChordRest); s;
+                             s = s->next(SegmentType::ChordRest)) {
+                            {
+                                const EngravingItem* e = s->element(st * VOICES + v);
+                                if (!e || !e->isChordRest()) {
+                                    continue;
+                                }
+                                const ChordRest* cr = toChordRest(e);
+                                events += (events.isEmpty() ? "" : " ") + eventText(cr, m->tick());
+                                actual += cr->actualTicks();
+                                for (const Lyrics* l : cr->lyrics()) {
+                                    if (l) {
+                                        lyrics += (lyrics.isEmpty() ? "" : "|") + l->plainText();
+                                    }
                                 }
                             }
                         }
+                        if (events.isEmpty()) {
+                            continue;
+                        }
+                        ms << csvQuote(base) << ',' << partIdx << ',' << static_cast<int>(st - staffFrom)
+                           << ',' << measIdx << ',' << v << ','
+                           << csvQuote(m->timesig().toString()) << ',' << csvQuote(m->ticks().toString())
+                           << ',' << csvQuote(actual.toString()) << ',' << 0 << ','
+                           << csvQuote(clefs) << ',' << csvQuote(repeats) << ','
+                           << csvQuote(events) << ',' << csvQuote(lyrics) << ','
+                           << csvQuote(directions) << '\n';
                     }
-                    if (events.isEmpty()) {
-                        continue;
-                    }
-                    ms << csvQuote(base) << ',' << partIdx << ',' << measIdx << ',' << v << ','
-                       << csvQuote(m->timesig().toString()) << ',' << csvQuote(m->ticks().toString())
-                       << ',' << csvQuote(actual.toString()) << ',' << 0 << ','
-                       << csvQuote(clefs) << ',' << csvQuote(repeats) << ','
-                       << csvQuote(events) << ',' << csvQuote(lyrics) << ','
-                       << csvQuote(directions) << '\n';
                 }
             }
             ++partIdx;
