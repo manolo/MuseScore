@@ -37,10 +37,8 @@ inline constexpr int kEncWholeTicks = 960;
 // derived from these ticks (DurationType, dot count, tuplet shape) live in importer/durations.h.
 int faceValue2ticks(quint8 fv);
 
-// Inverse of faceValue2ticks: the face value whose base duration is the largest that fits in
-// `ticks` (so a dotted/tuplet duration maps to its undotted base; dots come from realDuration).
-// Used to give a face value to notes materialized from tab-only staves, whose source elements
-// store no face value. Returns quarter (3) as a safe fallback.
+// Inverse of faceValue2ticks, taking the largest base that fits, so a dotted or tuplet duration maps
+// to its undotted base. For notes materialized from tab staves, which store no face value.
 quint8 ticks2faceValue(int ticks);
 
 // Pure-integer implied-tuplet probe: returns the tuplet's actualN (with normalNotes set) when

@@ -97,10 +97,8 @@ struct EncLine {
     quint16 start        { 0 };
     quint8 measureCount { 0 };
     std::vector<EncLineStaffData> staffData;
-    // Per-staff written key index (Encore key index 0-14), clef and display size, filled only by
-    // the formats whose reader implements EncFormatReader::readLineStaffEntries, where the LINE
-    // block carries a staff entry this parse cannot read and staffData stays empty. One entry per
-    // staff of the system, in system order.
+    // Per-staff key, clef and size, filled only by the readers whose LINE block carries a staff entry
+    // this parse cannot walk. One entry per staff, in system order.
     std::vector<quint8> staffKeys;
     std::vector<EncClefType> staffClefs;
     std::vector<quint8> staffSizes;   // 0-indexed selector, as in EncLineStaffData::staffSizeHint

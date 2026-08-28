@@ -64,11 +64,8 @@ static void resolveArpeggios(MasterScore* score,
     }
 }
 
-// Locate the Chord a single-chord tremolo ORN belongs to. The ORN's stored tick/voice are
-// unreliable (Encore may place it at durTicks or in voice 0 regardless of the note's real voice),
-// so the tick->measure->voice fallbacks try, in order: the exact (tick, track) segment; the last
-// chord on that track in the source measure; then any voice on that staff. Returns nullptr when no
-// chord is found. See ENCORE_FORMAT.md §6.8 Ornament.
+// The tremolo's stored tick and voice are unreliable, so try the exact segment, then the last chord
+// on that track in the measure, then any voice of the staff.
 static Chord* findChordForTremolo(MasterScore* score, const PendingOrnTremolo& pt)
 {
     // staffIdx/msVoice come from the file; reject an out-of-range staff before deriving tracks.
@@ -288,10 +285,8 @@ static void resolveTrillsWithSpans(MasterScore* score,
 
         if (hasSpan) {
             hasSpan = false;
-            // A TRILL_END pairs with a start only within the same measure; longer spans use the
-            // explicit alMezuro field below. Without this, a lone end many measures later (a
-            // standalone terminal trill) would be greedily consumed here, swallowed into a huge
-            // wrong span and lost from resolveUnconsumedTrillEnds.
+            // A trill end pairs within its own measure only; longer spans use the explicit forward count. Without
+            // the bound, a standalone terminal trill is swallowed into a huge wrong span.
             Measure* startMeas = score->tick2measure(trillTick);
             const Fraction startMeasEnd = startMeas
                                           ? startMeas->tick() + startMeas->ticks()

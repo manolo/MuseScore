@@ -87,13 +87,9 @@ static void markImpliedTupletMembers(std::vector<EncMeasureElem*>& elems)
     }
 }
 
-// Encore 3.x / 4.x (v0xC2) format reader.
-// Differences from v0xC4:
-//   - grace1 low nibble encodes the tie-sender flag
-//   - alMezuro field in ornaments is unreliable
-//   - Lyric text starts at element offset +18 (not +20)
-//   - NOTE: MIDI pitch is in tuplet slot; semiTonePitch is 0 (swap them in postProcess)
-//   - Instrument metadata: names only (no TK-based MIDI/key tables)
+// Encore 3.x and 4.x. What this generation does differently, and why, is in ENCORE_READERS.md 2:
+// the tie flag in the grace nibble, an unreliable forward count, the lyric text two bytes lower, and
+// a MIDI pitch that arrives in the tuplet slot.
 struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
 {
     explicit EncFormatReader_V0xC2(quint16 formatVersion)
@@ -102,10 +98,9 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
     const char* formatName() const override { return "v0xC2"; }
     quint8 lyricTextGapAfterKie() const override { return 7; }
 
-    // Format 3.07 inserted two bytes into every element body at offset +8, so a file written by an
-    // earlier build keeps those fields two bytes lower. The format version is what separates the
-    // two generations: the version byte is 0xC2 for both, and element sizes overlap between them.
-    // See ENCORE_FORMAT.md §1.4 What changed at each boundary.
+    // Format 3.07 inserted two bytes at +8, so an earlier file keeps those fields two bytes lower. The
+    // format version is what separates them: the version byte reads 0xC2 for both and the sizes overlap.
+    // See ENCORE_FORMAT.md 1.4.
     int elementBodyShift() const override { return m_formatVersion < ENC_FORMAT_3_07 ? -2 : 0; }
 
     // v0xC2 instrument entries end two bytes earlier than v0xC4 ones, so their MIDI program
@@ -138,13 +133,9 @@ struct EncFormatReader_V0xC2 final : EncFormatReader_V0xC4Base
         EncFormatReader::postProcessElement(elem, ds, rawElemStart);
         if (EncOrnament* orn = dynamic_cast<EncOrnament*>(elem)) {
             orn->tipo = normalizeOrnamentSubtype(orn->tipo);
-            // The forward slur span (0 = within measure, N = ends N bars later) is what anchors the
-            // endpoint, since the xoffset2 coordinate is stale in this format. Marking it valid lets
-            // the post-pass anchor by measure count instead. See ENCORE_FORMAT.md §6.8 Ornament.
-            //
-            // elementBodyShift() has already pointed alMezuro at the right byte for the file's
-            // generation, so the value read inline is the span in both. Only the trust flag differs
-            // by subtype: outside a slur the field is stale in this format.
+            // The forward span anchors the endpoint here, since the end column is stale in this format. The value
+            // is already at the right byte for the generation; only its trustworthiness differs by subtype, and
+            // outside a slur the field is stale. See ENCORE_FORMAT.md 6.8.
             orn->alMezuroValid = (orn->tipo == static_cast<quint8>(EncOrnamentType::SLURSTART));
             // v0xC2 has two TEMPO layouts. New (v0xC4-style): beat-unit code at +28, BPM at +30.
             // Old: BPM at +28 (read into noto) with a constant in the +30 slot. Discriminate by

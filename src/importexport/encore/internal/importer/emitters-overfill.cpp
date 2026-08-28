@@ -20,14 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Overfull-measure resolution. When a voice's content sums to more than the measure
-// length, each overfill strategy resolves it here, in the post-pass, so a tuplet is
-// always handled atomically (never left as an invalid partial tuplet):
-//   - Truncate ("Remove extra notes"): dissolve any cut tuplet, drop trailing notes,
-//     dot the last survivor, fill the remainder with an exact rest. Destructive.
-//   - StretchLastNote ("Stretch last notes"): preserve the notes by reclaiming preceding rests
-//     (tier 1) / compressing the tuplet bracket (tier 2); fall back to irregular.
-//   - IrregularMeasure: extend the measure to fit (handled by capMeasureLength).
+// Overfull-measure resolution, in a post-pass so a tuplet is always handled atomically rather than
+// left partial. The three strategies are described in ENCORE_IMPORTER.md §4.5.
 
 #include "emitters-internal.h"
 
@@ -87,10 +81,8 @@ void dissolveTuplet(Tuplet* t)
     delete t;
 }
 
-// Remove any spanner (slur, hairpin, ottava, ...) anchored to this ChordRest before the CR
-// is removed or moved. Segment::remove() would otherwise call score()->undo() to null the
-// spanner's start/end, leaving a dangling spanner that crashes layout. Done up front here so
-// no such undo fires. (Ties live on notes, not in the spanner map, so they are unaffected.)
+// Segment::remove() would undo the spanner's endpoints into a dangling state that crashes layout, so
+// release them first. Ties live on notes and are unaffected.
 void detachSpannersAt(ChordRest* cr)
 {
     Score* score = cr->score();
@@ -145,12 +137,8 @@ Fraction collectVoice(Measure* measure, track_idx_t tr, std::vector<ChordRest*>&
     return sum;
 }
 
-// Recut a trailing chord/rest that crosses the barline so it ends exactly at the barline,
-// keeping its notes. The fitting duration (`room`) is expressed as the minimal chain of
-// tied figures rather than collapsed to a single smaller value: e.g. a dotted half stranded
-// in a 5/8 bar becomes a half tied to an eighth, preserving the full sounding value up to
-// the barline. Rests are refigured the same way (no tie). Returns nothing; the crossing
-// element is replaced in place.
+// Recut a trailing element to end at the barline, keeping its notes: the room is written as a chain
+// of tied figures, not one smaller figure, so the full sounding value survives.
 static void recutCrossingCR(Measure* measure, track_idx_t tr, ChordRest* cr, const Fraction& room)
 {
     const Fraction measTick = measure->tick();
@@ -213,12 +201,8 @@ static void recutCrossingCR(Measure* measure, track_idx_t tr, ChordRest* cr, con
     }
 }
 
-// "Remove extra notes" (Truncate). A trailing tuplet is dissolved and its notes shrunk from the
-// right to keep as many as possible: each trailing note is halved (down to a quarter of its value)
-// and removed only if even a quarter still overflows, stopping once the content fits. The last
-// survivor is then dotted (up to 3 dots) to reach the barline and the remainder is filled with an
-// exact rest. A plain trailing note that crosses the barline is recut to it (as a tied chain)
-// rather than dropped. See ENCORE_IMPORTER.md §Overfull measures.
+// Truncate: dissolve a trailing tuplet, halve and then drop from the right until the content fits,
+// dot the survivor, fill exactly. See ENCORE_IMPORTER.md §4.5.
 static void removeExtraNotes(Measure* measure, track_idx_t tr)
 {
     const Fraction mLen = measure->ticks();
@@ -367,12 +351,8 @@ static void addFillRest(Measure* measure, track_idx_t tr, const Fraction& startT
     }
 }
 
-// Stretch tier 1: reclaim space from preceding rests so all notes fit within the nominal measure
-// length. Non-destructive: only shortens/removes rests, never alters note values. The overflow is
-// reclaimed from the latest rests first, so the least content shifts (typically only the trailing
-// notes move earlier onto the shortened rest). Returns true if the voice was made to fit; false if
-// there is not enough reclaimable rest (the caller falls through to tier 2/3), or if the voice holds
-// a tuplet (moving tuplet members individually is unsafe here; tier 2 compresses the bracket).
+// Stretch tier 1: reclaim space from the latest preceding rests, never from notes. Declines when
+// there is not enough rest, or when a tuplet is present, which tier 2 handles.
 static bool robRestsToFit(Measure* measure, track_idx_t tr)
 {
     const Fraction mLen = measure->ticks();
@@ -438,11 +418,8 @@ static bool robRestsToFit(Measure* measure, track_idx_t tr)
     return true;
 }
 
-// "Stretch last notes" for one overfull voice. Preserves all notes by, in order: reclaiming space
-// from preceding rests (tier 1), compressing the trailing tuplet's bracket (tier 2), or, for a lone
-// trailing note, recutting it to the barline; fills the remainder with an exact rest. Returns false
-// (declining) when the result would be too small to be musical (tuplet bracket < half its natural
-// span, or no space): the caller then falls back to extending the measure (tier 3, IrregularMeasure).
+// Stretch: rests first, then the trailing tuplet's bracket, then a lone note recut to the barline.
+// Declines when the result would be too small to be musical, and the caller extends the measure.
 static bool stretchOverfullVoice(Measure* measure, track_idx_t tr)
 {
     const Fraction mLen = measure->ticks();
@@ -555,10 +532,7 @@ void fitOverfullMeasure(BuildCtx& ctx, Measure* measure)
                 removeExtraNotes(measure, tr);
                 break;
             case OverfillStrategy::StretchLastNote:
-                // Tier 1 (reclaim preceding rests) / tier 2 (compress bracket) / lone-note recut;
-                // decline -> tier 3 (irregular). Tier 1 robs value only from rests (non-destructive),
-                // so a stretch that still cannot resolve degrades to IrregularMeasure output rather
-                // than a standard-length bar. See ENCORE_IMPORTER.md §Overfull measures.
+                // Declining here degrades to an irregular bar rather than a standard-length one.
                 if (!stretchOverfullVoice(measure, tr)) {
                     needIrregularFallback = true;
                 }

@@ -72,13 +72,9 @@ static int instrumentMagicIndex(const QString& magic)
     return (magic.at(2).digitValue() * 10) + magic.at(3).digitValue();
 }
 
-// Instrument entries sit in a fixed-stride table (see ENCORE_FORMAT.md §5.1 Instrument block), so
-// which instrument a TK block describes is decided by WHERE it sits, not by the digits in its magic:
-// files exist whose seven entries are labelled TK00 TK01 TK02 TK04 TK04 TK05 TK06. Reorder the
-// blocks, discovered in file order, into their table slots, leaving a gap for any entry whose block
-// header was zeroed out (readInstrumentMeta then names it from its position). A lone block gives no
-// stride to measure, so there the magic is the only thing to go on. Anything that does not divide
-// evenly into slots is left in discovery order.
+// Which instrument a TK block describes follows from where it sits, not from the digits in its magic;
+// see ENCORE_FORMAT.md 2.2. Reorder into table slots, leaving a gap for a zeroed header. A lone block
+// gives no stride to measure, so there the magic is all there is.
 static void placeInstrumentsInSlots(std::vector<EncInstrument>& instruments,
                                     const std::vector<int>& magicIndex, int instrumentCount)
 {
@@ -154,12 +150,8 @@ QString findNextKnownMagic(QDataStream& ds)
     return magic;
 }
 
-// Parse a Windows DEVMODE (the PREC block) into page orientation, paper size and notation
-// scale. The device-name prefix is 32 bytes for an ANSI DEVMODE and 64 bytes (UTF-16) for a
-// Unicode one; the fixed fields follow at the same relative offsets. Detect the variant by
-// trying both bases and keeping the one whose dmOrientation is a valid 1 (portrait) or 2
-// (landscape); range-check the rest so a wrong base or an unusual driver blob is ignored.
-// See ENCORE_FORMAT.md §5.7 Printer block (PREC).
+// A DEVMODE's device-name prefix is 32 bytes ANSI and 64 UTF-16, so try both bases and keep the one
+// whose orientation reads valid. See ENCORE_FORMAT.md 5.7.
 static void parsePrecDevmode(const QByteArray& buf, EncPrintSetup& out)
 {
     auto s16 = [&](int off) -> int {
@@ -186,10 +178,8 @@ static void parsePrecDevmode(const QByteArray& buf, EncPrintSetup& out)
     }
 }
 
-// SCO5 (macOS Encore 5) stores the PREC page setup as an NSPrintInfo XML plist
-// rather than a Windows DEVMODE. Pull orientation, paper size and notation scale
-// from it; the page margins are NOT in this block (the plist only carries the
-// printer's imageable rects, not Encore's document margins).
+// SCO5 keeps this as an NSPrintInfo plist. The document margins are not in it, only the printer's
+// imageable rects.
 bool parsePrecPlist(const QByteArray& buf, EncPrintSetup& out)
 {
     const QString s = QString::fromUtf8(buf);
@@ -380,10 +370,8 @@ bool EncRoot::read(QDataStream& ds)
     if (!header.readMagicAndVersion(ds)) {
         return false;
     }
-    // The format version at 0x28 selects the element body layout, and the reader has to know it
-    // before the header is read (reading the header needs the reader). Peek it and restore the
-    // cursor; 0x28 is the same offset in every format.
-    // See ENCORE_FORMAT.md §1.7 Choosing a reader.
+    // The reader has to know the format version before the header is read, and reading the header needs
+    // the reader, so peek 0x28 and restore the cursor. See ENCORE_FORMAT.md 1.7.
     quint16 formatVersion = 0;
     if (QIODevice* dev = ds.device()) {
         const qint64 saved = dev->pos();
@@ -441,10 +429,8 @@ bool EncRoot::read(QDataStream& ds)
                 titleBlock = std::move(tmp);
             }
         } else if (nextId == "TEXT") {
-            // Multi-part files write one TEXT block per part view, with the same
-            // strings reordered. ORN tind indices match only the first (score)
-            // block, so keep the first non-empty block and skip later ones
-            // (mirrors the TITL handling above).
+            // One TEXT block per part view, the same strings reordered, and the ORN indices match only the first,
+            // so keep that one.
             EncTextBlock tmp;
             tmp.read(ds, varSize, fmt->textBlockEntryTextOffset(), fmt->textBlockEntryHasRunHeader());
             if (textBlock.entries.empty()) {
