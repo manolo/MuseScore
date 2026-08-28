@@ -195,6 +195,28 @@ TEST_F(Tst_Instruments, tab_generic_name_reads_guitar_tuning)
     delete score;
 }
 
+// The instrument's Key applies to the stored tuning as much as to the notes: both are written
+// pitches and MuseScore wants what sounds. A guitar states Key -12, so its tuning 52..76 has to
+// reach StringData as 40..64; left where the file writes it, no string can play the notes.
+TEST_F(Tst_Instruments, tab_tuning_moves_with_the_instrument_key)
+{
+    MasterScore* score = readEncoreScore("instruments_tab_tuning_key_offset.enc");
+    ASSERT_NE(score, nullptr);
+    ASSERT_FALSE(score->staves().empty());
+    const StringData* sd = score->staff(0)->part()->instrument()->stringData();
+    ASSERT_NE(sd, nullptr);
+    ASSERT_EQ(sd->strings(), 6);
+    const std::vector<int> expected { 40, 45, 50, 55, 59, 64 };
+    for (size_t i = 0; i < expected.size(); ++i) {
+        EXPECT_EQ(sd->stringList()[i].pitch, expected[i]) << "string " << i << " must sound where the notes do";
+    }
+    Note* n = firstImportedNote(score, 0);
+    ASSERT_NE(n, nullptr);
+    EXPECT_EQ(n->pitch(), 40);
+    EXPECT_EQ(n->fret(), 0) << "the lowest note sits on the open lowest string";
+    delete score;
+}
+
 // Two TAB staves, each its own instrument with a DIFFERENT stored tuning, must each keep their own.
 // The bug applied one (last-block / global) tuning to every tab staff, so the first tab was wrong.
 TEST_F(Tst_Instruments, tab_two_staves_keep_own_tunings)

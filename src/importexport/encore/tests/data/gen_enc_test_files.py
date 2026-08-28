@@ -5525,6 +5525,27 @@ def gen_v0c4_tab_tuning_guitar():
     return pre + body + SKELETON_POST
 
 
+# ===========================================================================
+# instruments_tab_tuning_key_offset.enc
+# The same guitar tab staff, but the instrument states a Key of -12, as Encore does for a guitar:
+# the notes are written an octave above what they sound, and so is the stored tuning. The importer
+# must move the tuning by the Key too, giving MuseScore the sounding pitches 40..64. Reading it
+# unmoved left the strings an octave above the notes, which no string could then play.
+# ===========================================================================
+def gen_v0c4_tab_tuning_key_offset():
+    name = 'Guitar'.encode('utf-16-le') + b'\x00\x00'
+    pre  = _patch_tk00(name)
+    pre  = _set_staff_clef(pre, 0x08)                        # EncClefType::TAB
+    pre  = _set_tab_tuning(pre, [52, 57, 62, 67, 71, 76])    # written guitar tuning
+    pre  = _patch_key_transpose(pre, 0, -12)                 # Key = -12, sounds an octave below
+    e  = note_v0c4(0,   0, 0, fv=3, pitch=52)                # written low E, sounds 40
+    e += note_v0c4(240, 0, 0, fv=3, pitch=64)
+    e += end_marker()
+    body = meas_block(meas_hdr(4, 4), e)
+    body += b''.join(empty_meas(4, 4) for _ in range(5))
+    return pre + body + SKELETON_POST
+
+
 # Build a custom 2-staff / N-instrument v0xC4 header + LINE block. Each entry is
 # (clef_byte, staff_type, packed_instr_staff_idx) with an optional 4th element show (1=visible,
 # 0=hidden; default visible). Mirrors how Encore lays out a notation staff followed by its
@@ -14295,6 +14316,7 @@ if __name__=='__main__':
     write("instruments_tab_clef_keeps_tablature.enc",     gen_v0c4_tab_clef_keeps_tablature())
     write("instruments_tab_tuning_mandolin.enc",          gen_v0c4_tab_tuning_mandolin())
     write("instruments_tab_tuning_guitar.enc",            gen_v0c4_tab_tuning_guitar())
+    write("instruments_tab_tuning_key_offset.enc",        gen_v0c4_tab_tuning_key_offset())
     write("instruments_tab_two_tunings.enc",              gen_v0c4_tab_two_tunings())
     write("instruments_tab_hidden_notation.enc",          gen_v0c4_tab_hidden_notation())
     write("instruments_tab_linked_pair.enc",              gen_v0c4_tab_linked_pair())

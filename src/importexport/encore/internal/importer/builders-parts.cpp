@@ -333,13 +333,23 @@ static StaffTypes tabPresetForStringCount(int n)
 
 // Make an Encore tab staff a real MuseScore tab: attach StringData + a TAB StaffType so notes
 // auto-fret at layout. Tuning source: Encore's stored tuning, else template StringData, else guitar.
-static void setupTablatureStaff(Staff* staff, Instrument* instrument, const EncTabTuning& tuning)
+// The file writes the tuning as written pitches, like the notes, and MuseScore frets a note against
+// the string table after undoing the instrument's transposition. The Key moves the tuning into the
+// note pitches, the transposition back out again. Template and fallback tunings are already in
+// MuseScore's own terms and are taken as they are.
+static void setupTablatureStaff(Staff* staff, Instrument* instrument, const EncTabTuning& tuning, int keyOffset)
 {
     if (!staff || !instrument) {
         return;
     }
     const char* source = "Encore tuning";
-    std::vector<int> pitches = tuning.hasData ? tuning.openStringPitches : std::vector<int>();
+    std::vector<int> pitches;
+    if (tuning.hasData) {
+        const int shift = keyOffset - instrument->transpose().chromatic;
+        for (int p : tuning.openStringPitches) {
+            pitches.push_back(p + shift);
+        }
+    }
     if (pitches.empty()) {
         const StringData* tmplSd = instrument->stringData();
         if (tmplSd && tmplSd->strings() > 0) {
@@ -451,7 +461,8 @@ void buildParts(BuildCtx& ctx)
             const bool staffWantsTab = staffLsd && (staffLsd->clef == EncClefType::TAB
                                                     || staffLsd->staffType == EncStaffType::TAB);
             if (staffWantsTab) {
-                setupTablatureStaff(staff, instrument, instr.tabTuning.hasData ? instr.tabTuning : enc.tabTuning);
+                setupTablatureStaff(staff, instrument, instr.tabTuning.hasData ? instr.tabTuning : enc.tabTuning,
+                                    pitchOffset);
             }
             ctx.staffPitchOffset.push_back(pitchOffset);
             ClefType cClef = ClefType::INVALID;
@@ -541,7 +552,10 @@ static void convertTabStaffToStandard(Score* score, Staff* staff)
 
 // Merge an empty tab staff into its notation staff as one instrument (guitar+tab idiom): clone the
 // notation's notes as linked clones (the tab renders them as frets), reparent the tab, drop its part.
-static void linkTabToNotation(Score* score, Staff* notation, Staff* tab, bool notationVisible, bool tabVisible)
+// pitchShift moves the tab's tuning into the notation staff's pitch space. The two are separate Encore
+// instruments and can state different Keys, and the tuning has to sound where the notes it reads do.
+static void linkTabToNotation(Score* score, Staff* notation, Staff* tab, bool notationVisible, bool tabVisible,
+                              int pitchShift)
 {
     Part* notPart = notation->part();
     Part* tabPart = tab->part();
@@ -567,7 +581,13 @@ static void linkTabToNotation(Score* score, Staff* notation, Staff* tab, bool no
     Excerpt::cloneStaff(notation, tab, true);
 
     if (const StringData* sd = tabPart->instrument()->stringData()) {
-        notPart->instrument()->setStringData(*sd);
+        std::vector<instrString> strings;
+        for (const instrString& is : sd->stringList()) {
+            instrString moved = is;
+            moved.pitch = is.pitch + pitchShift;
+            strings.push_back(moved);
+        }
+        notPart->instrument()->setStringData(StringData(sd->frets(), strings));
     }
 
     tabPart->removeStaff(tab);
@@ -653,7 +673,12 @@ void applyTablatureImportMode(BuildCtx& ctx)
         return;
     }
     for (const Pair& p : pairs) {
-        linkTabToNotation(score, p.notation, p.tab, p.notationVisible, p.tabVisible);
+        const auto offsetOf = [&ctx](const Staff* st) {
+            const size_t i = static_cast<size_t>(st->idx());
+            return i < ctx.staffPitchOffset.size() ? ctx.staffPitchOffset[i] : 0;
+        };
+        linkTabToNotation(score, p.notation, p.tab, p.notationVisible, p.tabVisible,
+                          offsetOf(p.notation) - offsetOf(p.tab));
     }
 }
 } // namespace mu::iex::enc
