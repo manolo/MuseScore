@@ -35,7 +35,7 @@ struct EncOrnament : EncMeasureElem {
     quint8 altMezuro    { 0 };  // v0xC2 spanning measure-count lives at element +16 (not +18)
     quint8 alMezuro     { 0 };
     bool alMezuroValid  { true };  // false when format cannot guarantee measure-count semantics (v0xC2)
-    quint8 xoffset2  { 0 };
+    qint16 xoffset2  { 0 };   // end column, signed: a mark can end left of where it starts
     quint8 speguleco { 0 };
     quint8 noto      { 0 };
     quint8 tempo     { 0 };

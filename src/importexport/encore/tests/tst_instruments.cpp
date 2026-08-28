@@ -34,9 +34,11 @@
 #include "engraving/dom/segment.h"
 #include "engraving/dom/spanner.h"
 #include "engraving/dom/staff.h"
+#include "engraving/dom/stafftext.h"
 #include "engraving/dom/stafftype.h"
 #include "engraving/dom/stringdata.h"
 #include "engraving/dom/tuplet.h"
+#include "engraving/dom/guitarbend.h"
 #include "engraving/dom/vibrato.h"
 
 #include "engraving/dom/instrtemplate.h"
@@ -335,6 +337,121 @@ TEST_F(Tst_Instruments, tab_vibrato_spans_the_notes_it_covers)
         EXPECT_EQ(v->tick(), Fraction(1, 4)) << "starts on the second note";
         EXPECT_EQ(v->tick2(), Fraction(3, 4)) << "covers the third note to its end";
     }
+    EXPECT_TRUE(score->sanityCheck());
+    delete score;
+}
+
+// The mark sits right behind its note in the stream and the note after it is the one the bend
+// reaches, so the two are joined and nothing is invented: same notes, same durations. The staff text
+// beside it is left where it is, because it belongs to the player and not to the bend.
+TEST_F(Tst_Instruments, tab_bend_joins_the_note_it_reaches)
+{
+    mu::iex::enc::EncImportOptions opts;
+    opts.tablatureImportMode = mu::iex::enc::TablatureImportMode::Linked;
+    MasterScore* score = readEncoreScoreWithOpts("instruments_tab_bend.enc", opts);
+    ASSERT_NE(score, nullptr);
+    std::vector<const GuitarBend*> bends;
+    int chords = 0;
+    int staffTexts = 0;
+    for (Segment* seg = score->firstMeasure()->first(SegmentType::ChordRest); seg;
+         seg = seg->next(SegmentType::ChordRest)) {
+        for (EngravingItem* ann : seg->annotations()) {
+            if (ann && ann->isStaffText()) {
+                ++staffTexts;
+            }
+        }
+        if (EngravingItem* el = seg->element(0); el && el->isChord()) {
+            ++chords;
+            EXPECT_EQ(toChord(el)->ticks(), Fraction(1, 4)) << "the bend adds no note and splits none";
+            for (Note* n : toChord(el)->notes()) {
+                if (GuitarBend* b = n->bendFor()) {
+                    bends.push_back(b);
+                }
+            }
+        }
+    }
+    ASSERT_EQ(bends.size(), size_t(1));
+    const GuitarBend* bend = bends.front();
+    EXPECT_EQ(bend->bendType(), GuitarBendType::BEND);
+    ASSERT_NE(bend->startNote(), nullptr);
+    ASSERT_NE(bend->endNote(), nullptr);
+    EXPECT_EQ(bend->startNote()->pitch(), 65) << "the mark sits behind the second note";
+    EXPECT_EQ(bend->endNote()->pitch(), 67) << "and the third is where it lands";
+    EXPECT_EQ(bend->bendAmountInQuarterTones(), 4);
+    EXPECT_EQ(chords, 4);
+    EXPECT_EQ(staffTexts, 1) << "the text beside the bend is the file's, and stays";
+    EXPECT_TRUE(score->sanityCheck());
+    delete score;
+}
+
+// A bend that reaches a note of its own pitch is where the string comes back to rest, so the mark
+// belongs to that second note and is drawn as the curve into a note that a scoop is. Nothing is
+// created and nothing is split: instruments_tab_bend_release.enc keeps its four quarters.
+TEST_F(Tst_Instruments, tab_bend_onto_the_same_pitch_marks_the_note_it_returns_to)
+{
+    mu::iex::enc::EncImportOptions opts;
+    opts.tablatureImportMode = mu::iex::enc::TablatureImportMode::Linked;
+    MasterScore* score = readEncoreScoreWithOpts("instruments_tab_bend_release.enc", opts);
+    ASSERT_NE(score, nullptr);
+    std::vector<Chord*> chords;
+    for (Segment* seg = score->firstMeasure()->first(SegmentType::ChordRest); seg;
+         seg = seg->next(SegmentType::ChordRest)) {
+        if (EngravingItem* el = seg->element(0); el && el->isChord()) {
+            chords.push_back(toChord(el));
+        }
+    }
+    ASSERT_EQ(chords.size(), size_t(4)) << "no note is added and none is split";
+    for (const Chord* c : chords) {
+        EXPECT_EQ(c->ticks(), Fraction(1, 4));
+    }
+    EXPECT_EQ(chords[0]->upNote()->pitch(), 64);
+    EXPECT_EQ(chords[1]->upNote()->pitch(), 64);
+    // bendFor() passes over a scoop by design, so the note's own spanners are the place to look.
+    const auto scoopOn = [](const Note* n) {
+        for (const Spanner* sp : n->spannerFor()) {
+            if (sp->isGuitarBend() && toGuitarBend(sp)->bendType() == GuitarBendType::SCOOP) {
+                return true;
+            }
+        }
+        return false;
+    };
+    EXPECT_FALSE(scoopOn(chords[0]->upNote())) << "the mark is not on the note it starts from";
+    EXPECT_TRUE(scoopOn(chords[1]->upNote())) << "it is on the one the string comes back to";
+    EXPECT_TRUE(score->sanityCheck());
+    delete score;
+}
+
+// A prebend is a string already pulled when the note is struck. MuseScore writes it as a small note
+// below the real one with an arrow into it and adds that small note itself, so the notes the file
+// states keep their pitches and their durations and only the ghost is new.
+TEST_F(Tst_Instruments, tab_prebend_adds_the_note_it_is_struck_from)
+{
+    mu::iex::enc::EncImportOptions opts;
+    opts.tablatureImportMode = mu::iex::enc::TablatureImportMode::Linked;
+    MasterScore* score = readEncoreScoreWithOpts("instruments_tab_prebend.enc", opts);
+    ASSERT_NE(score, nullptr);
+    std::vector<Chord*> chords;
+    for (Segment* seg = score->firstMeasure()->first(SegmentType::ChordRest); seg;
+         seg = seg->next(SegmentType::ChordRest)) {
+        EngravingItem* el = seg->element(0);
+        if (!el || !el->isChord()) {
+            continue;
+        }
+        Chord* chord = toChord(el);
+        for (Chord* grace : chord->graceNotes()) {
+            chords.push_back(grace);
+        }
+        chords.push_back(chord);
+    }
+    ASSERT_EQ(chords.size(), size_t(5)) << "four notes and the ghost the prebend is struck from";
+    EXPECT_TRUE(chords[1]->isGrace());
+    EXPECT_EQ(chords[1]->upNote()->pitch(), 65) << "a whole tone under the note it bends into";
+    EXPECT_EQ(chords[2]->upNote()->pitch(), 67) << "which is the note the file states, untouched";
+    EXPECT_EQ(chords[2]->ticks(), Fraction(1, 4));
+    const GuitarBend* bend = chords[1]->upNote()->bendFor();
+    ASSERT_NE(bend, nullptr);
+    EXPECT_EQ(bend->bendType(), GuitarBendType::PRE_BEND);
+    EXPECT_EQ(bend->endNote(), chords[2]->upNote());
     EXPECT_TRUE(score->sanityCheck());
     delete score;
 }

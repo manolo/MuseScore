@@ -42,7 +42,7 @@ bool EncOrnament::read(QDataStream& ds)
     ds >> alMezuro;    // +18: v0xC4 spanning measure-count
     ds.skipRawData(1);
     ds >> xoffset2;
-    ds.skipRawData(5);
+    ds.skipRawData(4);
     ds >> speguleco;
     speguleco &= 3;
     ds.skipRawData(1);

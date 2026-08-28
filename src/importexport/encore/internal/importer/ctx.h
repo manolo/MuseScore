@@ -233,6 +233,16 @@ struct PendingGrace {
     mu::engraving::Measure* measure { nullptr };
 };
 
+// A guitar bend mark, kept until the note under its column is known. Encore states no amount here:
+// the pitch wheel it recorded does, and the staff text drawn beside it names it for the player.
+struct PendingBend {
+    int staffIdx { -1 };      // the staff that holds the notes, not the tab the mark came on
+    int markStaffIdx { -1 };  // the staff the mark itself came on, to find it again in the stream
+    int measIdx { -1 };
+    int column { 0 };
+    quint8 kind { 0 };        // the ornament subtype that drew it
+};
+
 // A wavy line the tab staff draws over a run of notes, kept until the notes it spans are known.
 struct PendingVibrato {
     int staffIdx { -1 };      // the staff that holds the notes, not the tab the mark came on
@@ -291,9 +301,13 @@ struct BuildCtx
     std::vector<PendingBowing> pendingBowings {};
     std::vector<PendingTabFingering> pendingTabFingerings {};
     std::vector<PendingVibrato> pendingVibratos {};
-    // (measIdx, staffIdx) -> the notes emitted there with the Encore tick they came from. Filled only
-    // when a tab staff may hand its fingerings over, which is the only reader of it.
-    bool trackNotesForTab { false };
+    std::vector<PendingBend> pendingBends {};
+    // (measIdx, staffIdx) -> the pitch wheel Encore recorded there, as (Encore tick, signed position).
+    std::map<std::pair<int, int>, std::vector<std::pair<int, int> > > wheelByMeasStaff {};
+    // (measIdx, staffIdx) -> the notes emitted there with the Encore tick they came from. Filled
+    // only for the marks that need it, a tab staff handing over its fingerings and the guitar marks
+    // that name a note by the column it stands in.
+    bool trackEmittedNotes { false };
     std::map<std::pair<int, int>, std::vector<std::pair<int, mu::engraving::Note*> > > notesByMeasStaff {};
     // (measIdx, staffIdx) → list of (enc_tick, note.xoffset) for bowing xoffset clustering.
     std::map<std::pair<int, int>, std::vector<std::pair<int, int> > > noteXoffByMeasStaff {};

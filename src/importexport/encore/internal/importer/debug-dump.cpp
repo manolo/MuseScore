@@ -171,12 +171,17 @@ void logEncRootInfo(const EncRoot& enc)
     // events (sustain/volume/modulation) are playback-only and decoded here so the log says what
     // they are instead of one "unknown" line per event.
     {
-        int ccSustain = 0, ccVolume = 0, ccMod = 0, ccOther = 0, unknown1 = 0;
+        int ccSustain = 0, ccVolume = 0, ccMod = 0, ccOther = 0, ccWheel = 0, unknown1 = 0;
         for (const EncMeasure& m : enc.measures) {
             for (const auto& ep : m.elements) {
                 switch (static_cast<EncElemType>(ep->type)) {
-                case EncElemType::MIDI_CC:
-                    switch (static_cast<const EncMidiCc*>(ep.get())->controller) {
+                case EncElemType::MIDI_CC: {
+                    const auto* cc = static_cast<const EncMidiCc*>(ep.get());
+                    if (cc->isPitchWheel()) {
+                        ++ccWheel;
+                        break;
+                    }
+                    switch (cc->controller) {
                     case 64: ++ccSustain;
                         break;
                     case 7:  ++ccVolume;
@@ -187,6 +192,7 @@ void logEncRootInfo(const EncRoot& enc)
                         break;
                     }
                     break;
+                }
                 case EncElemType::UNKNOWN1:
                     ++unknown1;
                     break;
@@ -195,7 +201,7 @@ void logEncRootInfo(const EncRoot& enc)
                 }
             }
         }
-        const int ccTotal = ccSustain + ccVolume + ccMod + ccOther;
+        const int ccTotal = ccSustain + ccVolume + ccMod + ccOther + ccWheel;
         if (ccTotal || unknown1) {
             LOGD() << "---- Diagnostics ----";
             if (ccTotal) {
@@ -212,6 +218,7 @@ void logEncRootInfo(const EncRoot& enc)
                 add("volume", ccVolume);
                 add("modulation", ccMod);
                 add("other", ccOther);
+                add("pitch wheel", ccWheel);
                 LOGD() << "  MIDI CC events (playback only, dropped): " << ccTotal
                        << "  (" << by << ")";
             }

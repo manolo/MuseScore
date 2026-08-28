@@ -23,6 +23,7 @@
 // Post-pass: place pending ornaments, fermatas, tremolos, trills, arpeggios and breaths.
 
 #include <cstdlib>
+#include <tuple>
 #include <limits>
 
 #include "resolvers.h"
@@ -44,6 +45,7 @@
 #include "engraving/dom/measurerepeat.h"
 #include "engraving/dom/trill.h"
 #include "engraving/dom/vibrato.h"
+#include "engraving/dom/guitarbend.h"
 #include "engraving/editing/editmeasurerepeat.h"
 #include "engraving/editing/transaction/transaction.h"
 
@@ -533,6 +535,251 @@ static void resolveVibratos(BuildCtx& ctx)
     }
 }
 
+// The note a bend reaches: the next one struck on the same track, the nearest in pitch when that
+// beat carries a chord.
+static Note* nextNoteOnTrack(const Note* note)
+{
+    const Chord* chord = note->chord();
+    const track_idx_t track = chord->track();
+    for (Segment* seg = chord->segment()->next(SegmentType::ChordRest); seg;
+         seg = seg->next(SegmentType::ChordRest)) {
+        EngravingItem* el = seg->element(track);
+        if (!el) {
+            continue;
+        }
+        if (!el->isChord()) {
+            return nullptr;   // a rest ends the run: nothing to bend into
+        }
+        Note* best = nullptr;
+        for (Note* n : toChord(el)->notes()) {
+            if (!best || std::abs(n->pitch() - note->pitch()) < std::abs(best->pitch() - note->pitch())) {
+                best = n;
+            }
+        }
+        return best;
+    }
+    return nullptr;
+}
+
+// A bend is the arrow that joins a note to the one above it, which is what Encore leaves written
+// whenever the string is struck again while bent. Struck again at the pitch it started from, the
+// second note is where the string comes back to rest and the mark belongs to it, drawn as the curve
+// into a note that a scoop is. Pulled down instead of up, which the recorded pitch wheel is the only
+// thing to say, the bend stays on its own note the same way.
+//
+// How far it goes is not in the file: the mark carries no size, the wheel is a curve drawn by hand
+// that reaches wherever the drawing reached, and the word beside it is whatever language the author
+// wrote in. Joined notes measure themselves and the rest take the size MuseScore gives them, and no
+// note, duration or fret the file states is touched either way.
+static void resolveGuitarBends(BuildCtx& ctx)
+{
+    static constexpr int kFarthestBend = 5;          // a fourth, as far as a string is pulled
+    const EncRoot& enc = ctx.enc;
+    // Both staves of a guitar pair draw the same bend, a few pixels apart, and the one on the staff
+    // that holds the notes is the one worth keeping: a tablature staff files all its marks at the
+    // head of the measure, where the stream no longer says which note they belong to. Two marks on
+    // one staff are never that pair, however close they are drawn: they are two bends.
+    static constexpr int kSameMarkColumns = 24;
+    std::vector<PendingBend> sorted = ctx.pendingBends;
+    std::sort(sorted.begin(), sorted.end(), [](const PendingBend& a, const PendingBend& b) {
+        return std::tie(a.staffIdx, a.measIdx, a.column) < std::tie(b.staffIdx, b.measIdx, b.column);
+    });
+    std::vector<PendingBend> bends;
+    for (size_t i = 0; i < sorted.size();) {
+        size_t j = i + 1;
+        while (j < sorted.size() && sorted[j].staffIdx == sorted[i].staffIdx
+               && sorted[j].measIdx == sorted[i].measIdx
+               && sorted[j].markStaffIdx != sorted[j - 1].markStaffIdx
+               && std::abs(sorted[j].column - sorted[j - 1].column) <= kSameMarkColumns) {
+            ++j;
+        }
+        size_t pick = i;
+        for (size_t k = i; k < j; ++k) {
+            if (sorted[k].markStaffIdx == sorted[k].staffIdx) {
+                pick = k;
+                break;
+            }
+        }
+        bends.push_back(sorted[pick]);
+        i = j;
+    }
+
+    for (const PendingBend& pb : bends) {
+        if (pb.measIdx < 0 || static_cast<size_t>(pb.measIdx) >= enc.measures.size()) {
+            continue;
+        }
+        const EncMeasure& em = enc.measures[static_cast<size_t>(pb.measIdx)];
+        // Encore files a mark next to the group of elements its note belongs to, before the group in
+        // format 3.05 and inside it from 4.20 on, so the neighbour whose column is nearest names the
+        // note however the generation ordered them. Its own column cannot: a mark is often drawn a
+        // note's width away from what it decorates. See ENCORE_FORMAT.md 8.2 note 6.
+        int bendEncTick = -1, destEncTick = -1;
+        {
+            const auto columnOf = [](const EncMeasureElem* elem) {
+                if (const auto* note = dynamic_cast<const EncNote*>(elem)) {
+                    return static_cast<int>(note->xoffset);
+                }
+                if (const auto* rest = dynamic_cast<const EncRest*>(elem); rest && rest->isTabFingering) {
+                    return static_cast<int>(rest->xoffset);
+                }
+                return -1;
+            };
+            int before = -1;
+            bool ownStaffHasNoteBefore = false;
+            for (size_t k = 0; k < em.elements.size(); ++k) {
+                const EncMeasureElem* elem = em.elements[k].get();
+                const auto* orn = dynamic_cast<const EncOrnament*>(elem);
+                if (!orn || orn->tipo != pb.kind || static_cast<int>(orn->xoffset) != pb.column
+                    || static_cast<int>(elem->staffIdx) != pb.markStaffIdx) {
+                    const int col = columnOf(elem);
+                    if (col >= 0) {
+                        before = col;
+                        if (static_cast<int>(elem->staffIdx) == pb.markStaffIdx) {
+                            ownStaffHasNoteBefore = true;
+                        }
+                    } else if (orn && static_cast<int>(elem->staffIdx) == pb.markStaffIdx) {
+                        ownStaffHasNoteBefore = false;   // a mark, not a note: the run is still at the head
+                    }
+                    continue;
+                }
+                if (!ownStaffHasNoteBefore) {
+                    break;   // filed at the head of the measure: only its own column names a note
+                }
+                int after = -1;
+                for (size_t j = k + 1; j < em.elements.size() && after < 0; ++j) {
+                    after = columnOf(em.elements[j].get());
+                }
+                int group = -1;
+                if (before >= 0 && after >= 0) {
+                    group = std::abs(before - pb.column) <= std::abs(after - pb.column) ? before : after;
+                } else {
+                    group = before >= 0 ? before : after;
+                }
+                if (group < 0) {
+                    break;
+                }
+                int gap = -1;
+                forEachStaffNoteXoff(em, pb.staffIdx, /*includeRests*/ false, /*lineSlotByRawByte*/ nullptr,
+                                     [&](const EncMeasureElem* n, int xoff) {
+                    if (xoff <= 0) {
+                        return true;
+                    }
+                    const int d = std::abs(xoff - group);
+                    if (bendEncTick < 0 || d < gap) {
+                        gap = d;
+                        bendEncTick = static_cast<int>(n->tick);
+                    }
+                    return true;
+                });
+                int destGap = -1;
+                forEachStaffNoteXoff(em, pb.staffIdx, /*includeRests*/ false, /*lineSlotByRawByte*/ nullptr,
+                                     [&](const EncMeasureElem* n, int xoff) {
+                    const int tick = static_cast<int>(n->tick);
+                    if (xoff <= 0 || tick <= bendEncTick) {
+                        return true;
+                    }
+                    if (destEncTick < 0 || tick - bendEncTick < destGap) {
+                        destGap = tick - bendEncTick;
+                        destEncTick = tick;
+                    }
+                    return true;
+                });
+                break;
+            }
+        }
+        if (bendEncTick < 0) {
+            // A mark filed at the head of the measure has no note before it; its column names one.
+            int bestGap = -1;
+            forEachStaffNoteXoff(em, pb.staffIdx, /*includeRests*/ false, /*lineSlotByRawByte*/ nullptr,
+                                 [&](const EncMeasureElem* elem, int xoff) {
+                if (xoff <= 0) {
+                    return true;
+                }
+                const int gap = std::abs(xoff - pb.column);
+                if (bendEncTick < 0 || gap < bestGap) {
+                    bestGap = gap;
+                    bendEncTick = static_cast<int>(elem->tick);
+                }
+                return true;
+            });
+            if (bendEncTick < 0) {
+                continue;
+            }
+            int destGap = -1;
+            forEachStaffNoteXoff(em, pb.staffIdx, /*includeRests*/ false, /*lineSlotByRawByte*/ nullptr,
+                                 [&](const EncMeasureElem* elem, int xoff) {
+                const int tick = static_cast<int>(elem->tick);
+                if (xoff <= 0 || tick <= bendEncTick) {
+                    return true;
+                }
+                const int gap = tick - bendEncTick;
+                if (destEncTick < 0 || gap < destGap) {
+                    destGap = gap;
+                    destEncTick = tick;
+                }
+                return true;
+            });
+        }
+        Note* note = nullptr;
+        int noteGap = -1;
+        auto it = ctx.notesByMeasStaff.find({ pb.measIdx, pb.staffIdx });
+        if (it != ctx.notesByMeasStaff.end()) {
+            for (const auto& [noteEncTick, n] : it->second) {
+                const int gap = std::abs(noteEncTick - bendEncTick);
+                if (!note || gap < noteGap) {
+                    noteGap = gap;
+                    note = n;
+                }
+            }
+        }
+        if (!note || !note->chord()) {
+            continue;
+        }
+        // Which way it goes is the one thing the wheel does say, and says plainly: a bend that pulls
+        // the string down is written nowhere else. Its depth is not read, only its sign.
+        static constexpr int kWheelAtRest = 400;
+        bool pullsDown = false;
+        auto wit = ctx.wheelByMeasStaff.find({ pb.measIdx, pb.staffIdx });
+        if (wit != ctx.wheelByMeasStaff.end()) {
+            for (const auto& [tick, value] : wit->second) {
+                if (tick >= bendEncTick && std::abs(value) > kWheelAtRest) {
+                    pullsDown = value < 0;
+                    break;
+                }
+            }
+        }
+        // A tie is one sounding note written twice, and the bend belongs to the end of it: the string
+        // is struck, held, and only then pulled. Starting on the first of the pair would draw the
+        // arrow across the tie, which says the note bends into itself.
+        while (const Tie* tie = note->tieFor()) {
+            if (!tie->endNote() || tie->endNote() == note) {
+                break;
+            }
+            note = tie->endNote();
+        }
+        // The note the bend reaches is the one struck after it, and joining the two is the arrow a
+        // guitarist reads: MuseScore frets it on the string the first was bent on and takes the size
+        // from the distance between them. A mark with nothing above it to reach stays on its note as
+        // a dip, which needs no second note and so leaves the music the file states untouched.
+        Note* dest = nextNoteOnTrack(note);
+        // Struck again at the pitch it started from, the second note is where the string comes back
+        // to rest, and the mark belongs there. Pulled down, the bend never leaves its own note.
+        const bool joins = dest && !pullsDown && dest->pitch() > note->pitch()
+                           && dest->pitch() - note->pitch() <= kFarthestBend;
+        const bool returns = dest && !pullsDown && !joins && dest->pitch() == note->pitch();
+        // A prebend is a string already pulled when it is struck, which MuseScore writes as a small
+        // note below and an arrow into the real one, adding the small note itself.
+        const EncOrnamentType kind = static_cast<EncOrnamentType>(pb.kind);
+        if (kind == EncOrnamentType::GUITAR_PREBEND || kind == EncOrnamentType::GUITAR_PREBEND_RELEASE) {
+            ctx.score->addGuitarBend(GuitarBendType::PRE_BEND, note, nullptr);
+        } else if (joins) {
+            ctx.score->addGuitarBend(GuitarBendType::BEND, note, dest);
+        } else {
+            ctx.score->addGuitarBend(GuitarBendType::SCOOP, returns ? dest : note, nullptr);
+        }
+    }
+}
+
 void resolveOrnaments(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
@@ -546,5 +793,6 @@ void resolveOrnaments(BuildCtx& ctx)
     resolveBreaths(score, ctx.pendingBreaths);
     resolveMeasureRepeats(score, ctx.pendingMeasureRepeats);
     resolveVibratos(ctx);
+    resolveGuitarBends(ctx);
 }
 } // namespace mu::iex::enc

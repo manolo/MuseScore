@@ -196,8 +196,13 @@ struct EncGenericElem : EncMeasureElem {
 struct EncMidiCc : EncMeasureElem {
     using EncMeasureElem::EncMeasureElem;
 
-    quint8 controller { 0 };   // 64=sustain pedal, 7=volume, 1=modulation
-    quint8 value      { 0 };   // 127=max/on, 0=off
+    quint8 status     { 0 };   // 0xB0 control change, 0xE0 pitch wheel
+    quint8 controller { 0 };   // 64=sustain pedal, 7=volume, 1=modulation; wheel LSB when status is 0xE0
+    quint8 value      { 0 };   // 127=max/on, 0=off; wheel MSB when status is 0xE0
+
+    bool isPitchWheel() const { return (status & 0xF0) == 0xE0; }
+    // Signed wheel position, zero at rest, the two bytes being the usual MIDI LSB and MSB.
+    int wheel() const { return ((static_cast<int>(value) << 7) | controller) - 8192; }
 
     bool read(QDataStream& ds) override;
 };

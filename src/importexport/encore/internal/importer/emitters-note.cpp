@@ -784,7 +784,7 @@ void handleNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
     Note* note = Factory::createNote(chord);
     applyConcertPitch(note, concertPitch);
     chord->add(note);
-    if (ctx.trackNotesForTab) {
+    if (ctx.trackEmittedNotes) {
         ctx.notesByMeasStaff[{ mc.measIdx, staffIdx }].push_back({ static_cast<int>(en->tick), note });
     }
 

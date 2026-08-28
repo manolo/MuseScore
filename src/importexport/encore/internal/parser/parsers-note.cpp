@@ -127,7 +127,8 @@ bool EncMidiCc::read(QDataStream& ds)
     // Controller/value only exist in the full 12-byte element; a short/garbage one stays aligned
     // (the measure loop reseeks past it) with controller/value left at 0.
     if (static_cast<int>(size) >= 12 + bodyShift) {
-        ds.skipRawData(5 + bodyShift);
+        ds >> status;
+        ds.skipRawData(4 + bodyShift);
         ds >> controller >> value;
     }
     return true;

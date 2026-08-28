@@ -34,6 +34,7 @@
 #include "engraving/dom/chord.h"
 #include "engraving/dom/clef.h"
 #include "engraving/dom/excerpt.h"
+#include "engraving/dom/guitarbend.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
@@ -383,10 +384,36 @@ static void setupTablatureStaff(Staff* staff, Instrument* instrument, const EncT
     LOGD() << "  tab staff: " << nStrings << " strings, tuning [ " << tuningStr << "] (" << source << ")";
 }
 
+// The guitar marks name their note by the column it stands in, so the notes have to be on record as
+// they are emitted. Scanning for them first keeps that record out of every other score.
+static bool hasColumnAnchoredGuitarMarks(const EncRoot& enc)
+{
+    for (const EncMeasure& meas : enc.measures) {
+        for (const auto& elem : meas.elements) {
+            if (static_cast<EncElemType>(elem->type) != EncElemType::ORNAMENT) {
+                continue;
+            }
+            switch (static_cast<const EncOrnament*>(elem.get())->ornType()) {
+            case EncOrnamentType::GUITAR_BEND:
+            case EncOrnamentType::GUITAR_BEND_2:
+            case EncOrnamentType::GUITAR_PREBEND:
+            case EncOrnamentType::GUITAR_PREBEND_RELEASE:
+            case EncOrnamentType::GUITAR_BEND_V:
+            case EncOrnamentType::VIBRATO:
+                return true;
+            default:
+                break;
+            }
+        }
+    }
+    return false;
+}
+
 void buildParts(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
     const EncRoot& enc = ctx.enc;
+    ctx.trackEmittedNotes = hasColumnAnchoredGuitarMarks(enc);
     const char* searchModeLabel
         =ctx.opts.instrumentSearchMode == InstrumentSearchMode::MidiOnly ? "MIDI only"
           : ctx.opts.instrumentSearchMode == InstrumentSearchMode::Piano ? "Grand Piano for all"
@@ -463,7 +490,8 @@ void buildParts(BuildCtx& ctx)
             if (staffWantsTab) {
                 setupTablatureStaff(staff, instrument, instr.tabTuning.hasData ? instr.tabTuning : enc.tabTuning,
                                     pitchOffset);
-                ctx.trackNotesForTab = ctx.opts.tablatureImportMode == TablatureImportMode::Linked;
+                ctx.trackEmittedNotes = ctx.trackEmittedNotes
+                                        || ctx.opts.tablatureImportMode == TablatureImportMode::Linked;
             }
             ctx.staffPitchOffset.push_back(pitchOffset);
             ClefType cClef = ClefType::INVALID;
@@ -660,6 +688,29 @@ static void applyTabFingerings(BuildCtx& ctx, const Staff* notation, int notatio
     }
 }
 
+// A bend puts its second note on the string the first was bent on, and the fingering pass above runs
+// after the bends are made, so the positions it wrote are reconciled with them here.
+static void refretBendDestinations(Score* score, const Staff* notation)
+{
+    const track_idx_t base = notation->idx() * VOICES;
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+            for (voice_idx_t v = 0; v < VOICES; ++v) {
+                EngravingItem* el = seg->element(base + v);
+                if (!el || !el->isChord()) {
+                    continue;
+                }
+                for (Note* n : toChord(el)->notes()) {
+                    GuitarBend* bend = n->bendFor();
+                    if (bend && bend->bendType() == GuitarBendType::BEND && bend->endNote()) {
+                        GuitarBend::fixNotesFrettingForStandardBend(n, bend->endNote());
+                    }
+                }
+            }
+        }
+    }
+}
+
 void applyTablatureImportMode(BuildCtx& ctx)
 {
     if (ctx.opts.tablatureImportMode == TablatureImportMode::Separate) {
@@ -742,6 +793,7 @@ void applyTablatureImportMode(BuildCtx& ctx)
         linkTabToNotation(score, p.notation, p.tab, p.notationVisible, p.tabVisible,
                           offsetOf(p.notation) - offsetOf(p.tab));
         applyTabFingerings(ctx, p.notation, p.notationStaffIdx, p.tabStaffIdx);
+        refretBendDestinations(score, p.notation);
     }
 }
 } // namespace mu::iex::enc

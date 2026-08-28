@@ -583,13 +583,17 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
     case EncOrnamentType::GUITAR_BEND_2:
     case EncOrnamentType::GUITAR_PREBEND:
     case EncOrnamentType::GUITAR_PREBEND_RELEASE:
-    case EncOrnamentType::GUITAR_BEND_V:
-        LOGW() << QString("Encore: guitar bend 0x%1 not yet imported (measure %2 staff %3 tick %4)")
-            .arg(eo->tipo, 2, 16, QChar('0'))
-            .arg(measIdx)
-            .arg(staffIdx)
-            .arg(static_cast<int>(e->tick));
+    case EncOrnamentType::GUITAR_BEND_V: {
+        // Both staves of a guitar pair state the same bend, so this lands twice on one note; the
+        // second is dropped when the mark is built. See ENCORE_FORMAT.md 8.2 note 5.
+        int noteStaff = staffIdx;
+        if (!mc.stavesWithRealNote.count(noteStaff) && noteStaff > 0
+            && mc.stavesWithRealNote.count(noteStaff - 1)) {
+            --noteStaff;
+        }
+        ctx.pendingBends.push_back({ noteStaff, staffIdx, measIdx, static_cast<int>(eo->xoffset), eo->tipo });
         break;
+    }
     case EncOrnamentType::TREMOLO_16: {
         PendingOrnTremolo pt;
         pt.tick = elemTick;

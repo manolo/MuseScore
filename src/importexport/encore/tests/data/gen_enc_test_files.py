@@ -5577,6 +5577,113 @@ def gen_v0c4_tab_vibrato():
     return hdr + line_block + meas + SKELETON_POST
 
 
+# instruments_tab_bend.enc
+# A notation staff (instrument 0) with a tablature staff (instrument 1) that carries a guitar bend
+# on the second note: the ORN of subtype 0x28 Encore draws as the curved arrow, plus the staff text
+# "Full" that names its size, plus the pitch wheel Encore records to play it, here a whole tone up
+# and back to rest. The import turns the three into one bend on the note, and the notes, their
+# durations and their frets stay exactly as the file states them.
+def gen_v0c4_tab_bend():
+    hdr, line_block = _tab_header_and_line([
+        (0x00, 0, 0x00),   # instrument 0: notation, treble clef
+        (0x08, 1, 0x01),   # instrument 1: tablature
+    ])
+
+    def note_raw(tick, fv, pitch, xoff):
+        d = bytearray(25)
+        d[0] = 28
+        d[1] = 0x00
+        d[2] = fv
+        d[7] = xoff        # element +10: the column
+        d[12] = pitch
+        return struct.pack('<H', tick) + bytes([(9 << 4) | 0]) + bytes(d)
+
+    def pitch_wheel(tick, position):
+        # MIDI_CC element (type 11) whose status byte is 0xE0: the wheel, LSB then MSB at +10.
+        raw = position + 8192
+        d = bytearray(9)
+        d[0] = 12                      # size
+        d[1] = 0x00                    # notation staff
+        d[2] = 0xE0                    # pitch wheel, channel 0
+        d[7] = raw & 0x7F              # element +10: LSB
+        d[8] = (raw >> 7) & 0x7F       # element +11: MSB
+        return struct.pack('<H', tick) + bytes([(11 << 4) | 0]) + bytes(d)
+
+    # The mark goes right behind the note it belongs to, which is where Encore writes it and how the
+    # importer knows which note it is.
+    e = (note_raw(0,   3, 64, 10)
+         + note_raw(240, 3, 65, 40)
+         + ornament_v0c4(0, 0, 0, 0x30, xoffset=45)
+         + note_raw(480, 3, 67, 70)
+         + note_raw(720, 3, 69, 100)
+         + stafftext_v0c4(0, 0, 1, 0)
+         + pitch_wheel(250, 4000)
+         + pitch_wheel(300, 8191)
+         + pitch_wheel(400, 0)
+         + end_marker())
+    meas = meas_block(meas_hdr(4, 4), e)
+    return hdr + line_block + meas + text_block_v0c4(['Full']) + SKELETON_POST
+
+
+# instruments_tab_bend_release.enc
+# The bend lands on a note of its own pitch, which is how Encore writes a bend and a release: the
+# string is pulled up and let back down onto the same note. The import halves that note, raises the
+# first half by the bend and leaves the second at the pitch it returns to, so the bar keeps its
+# length. Two quarters of the same pitch, the mark behind the first.
+def gen_v0c4_tab_bend_release():
+    hdr, line_block = _tab_header_and_line([
+        (0x00, 0, 0x00),   # instrument 0: notation, treble clef
+        (0x08, 1, 0x01),   # instrument 1: tablature
+    ])
+
+    def note_raw(tick, fv, pitch, xoff):
+        d = bytearray(25)
+        d[0] = 28
+        d[1] = 0x00
+        d[2] = fv
+        d[7] = xoff
+        d[12] = pitch
+        return struct.pack('<H', tick) + bytes([(9 << 4) | 0]) + bytes(d)
+
+    e = (note_raw(0,   3, 64, 10)
+         + ornament_v0c4(0, 0, 0, 0x30, xoffset=15)
+         + note_raw(240, 3, 64, 40)
+         + note_raw(480, 3, 67, 70)
+         + note_raw(720, 3, 69, 100)
+         + end_marker())
+    meas = meas_block(meas_hdr(4, 4), e)
+    return hdr + line_block + meas + SKELETON_POST
+
+
+# instruments_tab_prebend.enc
+# A prebend: the string is already pulled when the note is struck, which Encore marks with ornament
+# subtype 0x2A. MuseScore writes it as a small note below the real one with an arrow into it, and
+# adds that small note itself, so the notes the file states keep their pitches and durations.
+def gen_v0c4_tab_prebend():
+    hdr, line_block = _tab_header_and_line([
+        (0x00, 0, 0x00),   # instrument 0: notation, treble clef
+        (0x08, 1, 0x01),   # instrument 1: tablature
+    ])
+
+    def note_raw(tick, fv, pitch, xoff):
+        d = bytearray(25)
+        d[0] = 28
+        d[1] = 0x00
+        d[2] = fv
+        d[7] = xoff
+        d[12] = pitch
+        return struct.pack('<H', tick) + bytes([(9 << 4) | 0]) + bytes(d)
+
+    e = (note_raw(0,   3, 64, 10)
+         + note_raw(240, 3, 67, 40)
+         + ornament_v0c4(0, 0, 0, 0x2A, xoffset=45)
+         + note_raw(480, 3, 69, 70)
+         + note_raw(720, 3, 71, 100)
+         + end_marker())
+    meas = meas_block(meas_hdr(4, 4), e)
+    return hdr + line_block + meas + SKELETON_POST
+
+
 # Build a custom 2-staff / N-instrument v0xC4 header + LINE block. Each entry is
 # (clef_byte, staff_type, packed_instr_staff_idx) with an optional 4th element show (1=visible,
 # 0=hidden; default visible). Mirrors how Encore lays out a notation staff followed by its
@@ -14392,6 +14499,9 @@ if __name__=='__main__':
     write("instruments_tab_linked_pair.enc",              gen_v0c4_tab_linked_pair())
     write("instruments_tab_linked_frets.enc",             gen_v0c4_tab_linked_frets())
     write("instruments_tab_vibrato.enc",                  gen_v0c4_tab_vibrato())
+    write("instruments_tab_bend.enc",                     gen_v0c4_tab_bend())
+    write("instruments_tab_bend_release.enc",             gen_v0c4_tab_bend_release())
+    write("instruments_tab_prebend.enc",                  gen_v0c4_tab_prebend())
     write("instruments_tab_linked_overfull.enc",          gen_v0c4_tab_linked_overfull())
     write("instruments_tab_standalone_frets.enc",         gen_v0c4_tab_standalone_frets())
     write("instruments_instr_clarinet_midi72_key0.enc",         gen_v0c4_instr_clarinet_midi72_key0())

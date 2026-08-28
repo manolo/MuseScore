@@ -966,6 +966,15 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
         break;
     case EncElemType::CLEF:     handleClefChange(ctx, mc, ec, e);
         break;
+    case EncElemType::MIDI_CC: {
+        // Playback only, and dropped as such, except the pitch wheel: it is where a bend states how
+        // far it goes and in which direction, which the mark itself never says.
+        const auto* cc = static_cast<const EncMidiCc*>(e);
+        if (cc->isPitchWheel()) {
+            ctx.wheelByMeasStaff[{ mc.measIdx, staffIdx }].push_back({ static_cast<int>(e->tick), cc->wheel() });
+        }
+        break;
+    }
     default: break;
     }
 }
