@@ -196,6 +196,17 @@ static int findBestCrByColumn(const std::vector<CrAnchor>& pairs, const std::vec
     return bestIdx;
 }
 
+// The first chord after a column, still without a syllable.
+static int findNextFreeCrRightOf(const std::vector<CrAnchor>& pairs, const std::vector<bool>& consumed, int column)
+{
+    for (size_t ni = 0; ni < pairs.size(); ++ni) {
+        if (!consumed[ni] && pairs[ni].column > column && pairs[ni].cr->isChord()) {
+            return static_cast<int>(ni);
+        }
+    }
+    return -1;
+}
+
 // Attach queued lyrics to the nearest chord in the measure. Greedy "lyrics-first" assignment:
 // each syllable in tick order claims the nearest available note within the threshold, so later
 // syllables cannot steal a note from an earlier one.
@@ -347,12 +358,16 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
             int bestIdx = pl.xoffset > 0
                           ? findBestCrByColumn(crTickPairs, crConsumed, pl.xoffset, kColumnSlack)
                           : -1;
-            // Pass 0b: a syllable written at the same tick and column as the one before is the
-            // leftover of a correction, and belongs to the note that one took, stacked under it.
-            bool stacked = false;
+            // Pass 0b: a syllable drawn in a column already taken was pushed left to fit, which Encore
+            // does when the words are wider than their notes. It sings the next note along, and there
+            // is nothing for it when no note is left. See ENCORE_FORMAT.md 6.9.
+            bool crowded = false;
             if (bestIdx < 0 && lastIdx >= 0 && pl.encTick == lastTick && pl.xoffset == lastColumn) {
-                bestIdx = lastIdx;
-                stacked = true;
+                bestIdx = findNextFreeCrRightOf(crTickPairs, crConsumed, pl.xoffset);
+                crowded = true;
+            }
+            if (crowded && bestIdx < 0) {
+                continue;
             }
             // Pass 1: nearest chord within the threshold, preferring notes at/before the lyric
             // tick so a slightly-misaligned lyric does not grab a later note just for proximity.
@@ -378,14 +393,7 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
             ChordRest* c = crTickPairs[bestIdx].cr;
             Lyrics* ly = Factory::createLyrics(c);
             ly->setTrack(chordTrack);
-            int verse = lyVerseNo;
-            if (stacked) {
-                while (std::any_of(c->lyrics().begin(), c->lyrics().end(),
-                                   [verse](const Lyrics* l) { return l && l->verse() == verse; })) {
-                    ++verse;
-                }
-            }
-            ly->setVerse(verse);
+            ly->setVerse(lyVerseNo);
             ly->setXmlText(pl.text);
             LyricsSyllabic syll = LyricsSyllabic::SINGLE;
             if (pl.hyphenBefore && pl.hyphenAfter) {

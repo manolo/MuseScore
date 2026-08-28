@@ -4752,10 +4752,12 @@ def gen_v0c4_lyrics_accent_first_letter():
 # a word on the third note, which the file leaves silent.
 # ===========================================================================
 def gen_v0c4_lyrics_two_in_one_column():
+    # The second note carries no syllable and sits to the left of the crowded pair, which is where a
+    # reading that goes by tick alone sends the second of the two.
     e  = note_v0c4_xoff(  0, 0, 0, 3, 60, 10)
+    e += note_v0c4_xoff(120, 0, 0, 4, 61, 25)
     e += note_v0c4_xoff(240, 0, 0, 3, 62, 40)
     e += note_v0c4_xoff(480, 0, 0, 3, 64, 70)
-    e += note_v0c4_xoff(720, 0, 0, 3, 65, 100)
     e += lyric_v0c4(  0, 0, 0, 'do', kie=10)
     e += lyric_v0c4(240, 0, 0, 're', kie=40)        # the leftover, stored first here
     e += lyric_v0c4(240, 0, 0, 'remi', kie=40)      # and the fuller text second
