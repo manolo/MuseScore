@@ -2,6 +2,21 @@
 
 This document describes how MuseScore turns an Encore file into a score. The bytes themselves are described in [ENCORE_FORMAT.md](ENCORE_FORMAT.md), and nothing here repeats them: where a decision depends on a field, the field is named and the section of that document is cited. It is written to be read start to finish by a person who has to change the importer, and to explain why each decision is what it is, because most of them were forced by a real file that broke.
 
+## Contents
+
+| Chapter | What is in it                                                                                     |
+|---------|---------------------------------------------------------------------------------------------------|
+| 1       | The shape of the importer: the two layers, the source tree, the path a file takes                 |
+| 2       | Reading the file: block dispatch, the encrypted container, MusicTime, encodings, what to distrust |
+| 3       | The score skeleton: instruments, names, staff types, transposition, page setup, titles            |
+| 4       | Measures: one authority for length, pickups, under and overfull bars, repeats and jumps           |
+| 5       | Voices and time inside the measure                                                                |
+| 6       | Notes: face value and dots, tuplets, ties, grace notes                                            |
+| 7       | Marks attached to a note: articulations, tremolos, dynamics, text, lyrics, chord symbols          |
+| 8       | Spanners: how an endpoint is found at all, then slurs, hairpins and ottavas                       |
+| 9       | Import options                                                                                    |
+| 10      | What is not imported                                                                              |
+
 ## How to read this document
 
 Chapters 1 and 2 are the ones to read first: they describe the two layers and the path a file takes through them. After that the order follows the score being built, from the staves down to the marks attached to a note, so a reader looking for one subject can jump straight to its chapter.
@@ -91,12 +106,12 @@ Two things about that order matter downstream. Layout runs before the repeat lis
 
 All format-specific interpretation is resolved before `EncRoot` reaches the importer. `postProcessElement` in each `EncFormatReader` subclass is the single hook where a raw binary quirk becomes a semantic field. The importer then uses the semantic field and never asks which generation it came from.
 
-| Quirk                            | Raw encoding                  | Normalized field                | Where                                  |
-|----------------------------------|-------------------------------|---------------------------------|----------------------------------------|
-| the note's own tie flag          | `grace1` bit 0                | `EncNote::isTieSender`          | the base reader, every generation      |
-| the older articulation numbering | ORN subtype six codes higher  | the shared subtype vocabulary   | `normalizeOrnamentSubtype`, below 3.07 |
-| the two TEMPO layouts            | BPM at `+28` or at `+30`      | `EncOrnament::tempo` and `noto` | the v0xC2 reader                       |
-| which forward count to trust     | a count on any ornament       | `EncOrnament::alMezuroValid`    | the v0xC2 reader, true on a slur start |
+| Quirk                            | Raw encoding                 | Normalized field                | Where                                  |
+|----------------------------------|------------------------------|---------------------------------|----------------------------------------|
+| the note's own tie flag          | `grace1` bit 0               | `EncNote::isTieSender`          | the base reader, every generation      |
+| the older articulation numbering | ORN subtype six codes higher | the shared subtype vocabulary   | `normalizeOrnamentSubtype`, below 3.07 |
+| the two TEMPO layouts            | BPM at `+28` or at `+30`     | `EncOrnament::tempo` and `noto` | the v0xC2 reader                       |
+| which forward count to trust     | a count on any ornament      | `EncOrnament::alMezuroValid`    | the v0xC2 reader, true on a slur start |
 
 The note's own tie flag is decoded by the base `EncFormatReader::postProcessElement`, so every reader inherits it and a format-specific override calls the base first. It used to be decoded only for v0xC2, which left the same flag unread in the other three generations. It is a second record of a tie that usually has a TIE element as well, so on real files it rarely changes the outcome; it matters for the notes where that element is missing.
 
@@ -142,14 +157,14 @@ Of the nine distinct MusicTime documents to hand, eight import clean. The ninth,
 
 Every text-bearing path probes its payload, so modern UTF-16 LE files and legacy Latin-1 files both decode without a manual hint.
 
-| Site                         | Function              | Probe                                        |
-|------------------------------|-----------------------|----------------------------------------------|
-| TK block instrument name     | `EncInstrument::read` | printable then NUL means UTF-16, else Latin-1 |
-| TK name recovery             | `EncRoot::read`       | same as the TK name                          |
-| LYRIC element                | `EncLyric::read`      | bytes 0 and 1 at the payload start           |
-| TEXT block entry             | `EncTextBlock::read`  | bytes 14 and 15; `0x04 0x00` is a line break |
-| CHORD-symbol text            | `EncChordSym::read`   | bytes 0 and 1 of the 36-byte slot            |
-| TITL block                   | `EncTitle::read`      | varsize below 5000 is 1-byte, 10000 or more is 2-byte |
+| Site                     | Function              | Probe                                                 |
+|--------------------------|-----------------------|-------------------------------------------------------|
+| TK block instrument name | `EncInstrument::read` | printable then NUL means UTF-16, else Latin-1         |
+| TK name recovery         | `EncRoot::read`       | same as the TK name                                   |
+| LYRIC element            | `EncLyric::read`      | bytes 0 and 1 at the payload start                    |
+| TEXT block entry         | `EncTextBlock::read`  | bytes 14 and 15; `0x04 0x00` is a line break          |
+| CHORD-symbol text        | `EncChordSym::read`   | bytes 0 and 1 of the 36-byte slot                     |
+| TITL block               | `EncTitle::read`      | varsize below 5000 is 1-byte, 10000 or more is 2-byte |
 
 Every probe runs in both directions. Forcing one encoding is not a safe simplification: reading a Latin-1 payload as UTF-16 pairs adjacent bytes into Chinese-looking gibberish, and reading a UTF-16 payload as Latin-1 silently drops half of every character.
 
@@ -252,18 +267,18 @@ Encore writes the **written** staff position into `EncNote::semiTonePitch` and s
 
 The staff clef then carries the visual half of the same idea, in `pickStaffClef`. It is derived from the Encore clef and the Key offset alone, with no need for a matched template.
 
-| Encore clef | Key in semitones     | MuseScore clef                      |
-|-------------|----------------------|-------------------------------------|
-| G           | -12                  | G8_VB                               |
-| G           | +12                  | G8_VA                               |
-| G           | -24                  | G15_MB                              |
-| G           | +24                  | G15_MA                              |
-| F           | -12                  | F8_VB                               |
-| F           | +12                  | F_8VA                               |
-| F           | -24                  | F15_MB                              |
-| F           | +24                  | F_15MA                              |
-| any         | 0                    | the Encore clef                     |
-| any         | not a whole octave   | the Encore clef, the notes shift    |
+| Encore clef | Key in semitones   | MuseScore clef                   |
+|-------------|--------------------|----------------------------------|
+| G           | -12                | G8_VB                            |
+| G           | +12                | G8_VA                            |
+| G           | -24                | G15_MB                           |
+| G           | +24                | G15_MA                           |
+| F           | -12                | F8_VB                            |
+| F           | +12                | F_8VA                            |
+| F           | -24                | F15_MB                           |
+| F           | +24                | F_15MA                           |
+| any         | 0                  | the Encore clef                  |
+| any         | not a whole octave | the Encore clef, the notes shift |
 
 The rule is one sentence: when the offset is a whole number of octaves, look for a clef in the same glyph family whose octave offset equals it, and use it if there is one. C clefs, percussion and tablature have no octave variants and always keep the Encore clef.
 
@@ -643,12 +658,12 @@ Two families need a specific element rather than a plain articulation. A symbol 
 
 The fermata rule has one exception. Bytes `0x20` and `0x21` on a note that belongs to a tuplet are not fermatas: they state the tuplet bracket's placement above or below, which is what Encore exports as a placement attribute on the tuplet stop. No fermata is created there.
 
-| Byte           | Element                                                              |
-|----------------|----------------------------------------------------------------------|
-| `0x0D` to `0x11` | `Fingering` text 1 to 5                                            |
-| `0x1E`, `0x1F` | `Articulation` with the harmonic symbol                              |
-| `0x44`, `0x45` | `Articulation` with the thumb-position symbol                        |
-| `0x46`         | `Fingering` as a string number 0, exported as an open string         |
+| Byte             | Element                                                      |
+|------------------|--------------------------------------------------------------|
+| `0x0D` to `0x11` | `Fingering` text 1 to 5                                      |
+| `0x1E`, `0x1F`   | `Articulation` with the harmonic symbol                      |
+| `0x44`, `0x45`   | `Articulation` with the thumb-position symbol                |
+| `0x46`           | `Fingering` as a string number 0, exported as an open string |
 
 Fingerings and the open string attach to the note. The remaining technical marks attach to the chord and export under the technical block.
 
@@ -672,11 +687,11 @@ Subtype `0xBE` is the accent, and it is anchored by tick like the other attached
 
 Encore writes a trill span with three ornament subtypes.
 
-| Subtype       | Value  | Role                                                              |
-|---------------|--------|-------------------------------------------------------------------|
+| Subtype       | Value  | Role                                                                |
+|---------------|--------|---------------------------------------------------------------------|
 | `TRILL_START` | `0x36` | start of the span; the forward count says how many measures it runs |
-| `TRILL_ALT`   | `0x37` | a secondary mark inside the span, not a start                     |
-| `TRILL_END`   | `0x35` | end of the span, no visible glyph, dropped by Encore's own export  |
+| `TRILL_ALT`   | `0x37` | a secondary mark inside the span, not a start                       |
+| `TRILL_END`   | `0x35` | end of the span, no visible glyph, dropped by Encore's own export   |
 
 `resolvers-ornaments.cpp` resolves each start in three ways. A matching end on the same track at a later tick gives a spanner to that tick. A non-zero forward count gives a spanner to the end of the target measure. With neither, the start degrades to a single-beat trill glyph.
 
@@ -708,15 +723,15 @@ A staff-text ornament takes its payload from the TEXT block through the index by
 
 **Italian tempo terms are promoted.** An anonymous staff text leaves a tempo word untracked in MuseScore's tempo map, so both the spacing and the playback speed are wrong. `encTextToTempoBps`, in `mappers-tempo.cpp`, recognises the canonical set and promotes those strings to a tempo text.
 
-| Term        | BPM | Term        | BPM |
-|-------------|-----|-------------|-----|
-| Grave       | 35  | Moderato    | 114 |
-| Largo       | 50  | Allegretto  | 116 |
-| Lento       | 52  | Allegro     | 144 |
-| Larghetto   | 63  | Vivace      | 172 |
-| Adagio      | 71  | Presto      | 187 |
-| Andante     | 92  | Prestissimo | 200 |
-| Andantino   | 94  |             |     |
+| Term      | BPM | Term        | BPM |
+|-----------|-----|-------------|-----|
+| Grave     | 35  | Moderato    | 114 |
+| Largo     | 50  | Allegretto  | 116 |
+| Lento     | 52  | Allegro     | 144 |
+| Larghetto | 63  | Vivace      | 172 |
+| Adagio    | 71  | Presto      | 187 |
+| Andante   | 92  | Prestissimo | 200 |
+| Andantino | 94  |             |     |
 
 The values mirror MuseScore's own tempo palette. Relative markings such as "a tempo" or "Tempo I" stay tempo texts, so the layout treats them as such, but carry no absolute speed and fall back to the previous tempo. Any other string keeps the plain staff-text path.
 
@@ -726,11 +741,11 @@ The pass skips both the visible mark and the tempo map update when a tempo text 
 
 The display follows the beat unit, taken from the measure's `beatTicks`.
 
-| beatTicks | Beat unit      | Display   | Speed factor |
-|-----------|----------------|-----------|--------------|
-| 240       | quarter        | quarter   | 1            |
-| 360       | dotted quarter | dotted    | 1.5          |
-| 120       | eighth         | eighth    | 0.5          |
+| beatTicks | Beat unit      | Display | Speed factor |
+|-----------|----------------|---------|--------------|
+| 240       | quarter        | quarter | 1            |
+| 360       | dotted quarter | dotted  | 1.5          |
+| 120       | eighth         | eighth  | 0.5          |
 
 Compound meters, whether they state 360 or the legacy 240, display a dotted quarter and use the 1.5 factor, so the number means dotted-quarter BPM. A piece in 5/8 or 7/8 felt in eighths displays an eighth and uses 0.5.
 
@@ -764,9 +779,9 @@ Encore writes chord symbols as their own element type, and `handleChordSym` in `
 
 | Field    | Meaning                                                                       |
 |----------|-------------------------------------------------------------------------------|
-| `radiko` | root: the low nibble names it, the high nibble is the accidental               |
-| `toniko` | quality, an index from 0 to 63 into the quality table                          |
-| `baso`   | slash bass, encoded like the root, present when bit 1 of the type byte is set   |
+| `radiko` | root: the low nibble names it, the high nibble is the accidental              |
+| `toniko` | quality, an index from 0 to 63 into the quality table                         |
+| `baso`   | slash bass, encoded like the root, present when bit 1 of the type byte is set |
 
 `EncChordSym::chordName` assembles root, quality and optional bass and hands the string over. Several quality indices are undefined in the format, and their table entries are empty, so such a chord degrades to its root read as major, which is a safe reading for a file using an undocumented type.
 
@@ -878,18 +893,18 @@ Encore writes 8va and 8vb as ornaments with no endpoint at all: subtype `0x10` f
 
 | Field                                  | Shipped default  | Effect                                        |
 |----------------------------------------|------------------|-----------------------------------------------|
-| `importPageLayout`                     | true             | page margins from the WINI block               |
-| `importPageBreaks`                     | true             | page breaks from the LINE page counter         |
-| `importSystemLocks`                    | true             | system locks from the LINE show byte           |
-| `importStaffSize`                      | true             | the LINE staff-size hint                       |
-| `importTempoTextSemantic`              | true             | Italian tempo terms become tempo marks         |
-| `importUnsupportedArticulationsAsText` | false            | unmapped articulation bytes become staff text  |
-| `instrumentSearchMode`                 | NameAndMidi      | name and MIDI, MIDI only, or everything piano  |
-| `tablatureImportMode`                  | Linked           | linked, separate, or ignore                    |
-| `underfillMeasureStrategy`             | IrregularMeasure | how a short measure is filled                  |
-| `overfillMeasureStrategy`              | IrregularMeasure | how a long measure is resolved                 |
-| `firstMeasureIsPickup`                 | true             | shorten the first measure as a pickup          |
-| `mergeVoices`                          | true             | collapse voices that never overlap             |
+| `importPageLayout`                     | true             | page margins from the WINI block              |
+| `importPageBreaks`                     | true             | page breaks from the LINE page counter        |
+| `importSystemLocks`                    | true             | system locks from the LINE show byte          |
+| `importStaffSize`                      | true             | the LINE staff-size hint                      |
+| `importTempoTextSemantic`              | true             | Italian tempo terms become tempo marks        |
+| `importUnsupportedArticulationsAsText` | false            | unmapped articulation bytes become staff text |
+| `instrumentSearchMode`                 | NameAndMidi      | name and MIDI, MIDI only, or everything piano |
+| `tablatureImportMode`                  | Linked           | linked, separate, or ignore                   |
+| `underfillMeasureStrategy`             | IrregularMeasure | how a short measure is filled                 |
+| `overfillMeasureStrategy`              | IrregularMeasure | how a long measure is resolved                |
+| `firstMeasureIsPickup`                 | true             | shorten the first measure as a pickup         |
+| `mergeVoices`                          | true             | collapse voices that never overlap            |
 
 The defaults in that column are what Preferences ships. Four options deliberately differ in the struct itself, which is what direct callers and the unit tests get: the two measure strategies fall back to Remove and to invisible rests, `mergeVoices` to false so a fixture keeps its voices unless the test asks otherwise, and `tablatureImportMode` to Separate.
 
@@ -919,7 +934,7 @@ Everything here is a deliberate omission, and each one is recorded so the next r
 
 **The articulation bytes with no MuseScore equivalent** are dropped unless the option in §9 is on.
 
-**A dot the note states but the durations contradict** stays as the durations have it, §6.1. That is 380 notes in the corpus, against the 76 the importer does put back.
+**A dot the note states but the durations contradict** stays as the durations have it, §6.1. Those outnumber the ones the importer does put back by about five to one.
 
 **The word "Coda"** is not imported because it is not in the file, §4.8.
 
