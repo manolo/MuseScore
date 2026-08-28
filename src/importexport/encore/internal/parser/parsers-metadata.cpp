@@ -112,10 +112,8 @@ bool EncLineStaffData::read(QDataStream& ds)
 
 bool EncLine::read(QDataStream& ds, quint32 vs, int staffPerSystem)
 {
-    // LINE block layout constants. kStaffEntryBytes is one EncLineStaffData staff entry;
-    // kBlockHeaderBytes is the magic + size already consumed on entry; kLinePrefixBytes is the
-    // fixed prefix before the staff entries (the header plus the 13 bytes of skip + start +
-    // measureCount read below).
+    // LINE layout: one staff entry, the block header already consumed, and the fixed prefix before the
+    // entries. See ENCORE_FORMAT.md 5.2.
     static constexpr int kBlockHeaderBytes = 8;
     static constexpr int kLinePrefixBytes  = 21;
     static constexpr int kStaffEntryBytes  = 30;
@@ -154,10 +152,8 @@ static constexpr int kTitlTextBytesTwoByte = 1026;
 // them; in the two-byte layout all entries are the same width. See ENCORE_FORMAT.md §5.6 Title block (TITL).
 static constexpr int kTitlCopyrightBytesOneByte = 130;
 
-// blockEnd bounds every read to the TITL block's declared end (startPos + varSize). A truncated
-// block would otherwise pull zero-fill past EOF and, worse, a block shorter than the fixed line
-// structure would read into the following block and desync the top-level magic scan. No read here
-// crosses blockEnd, so EncTitle::read can realign exactly with skipToBlockEnd afterwards.
+// Every read is bounded by the block's declared end: a block shorter than the fixed line structure
+// would otherwise read into the next one and desync the magic scan.
 static EncHeaderFooter readTitleLine(QDataStream& ds, EncCharSize cs, qint64 blockEnd,
                                      int oneByteTextBytes = kTitlTextBytesOneByte)
 {

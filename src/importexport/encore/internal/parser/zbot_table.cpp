@@ -20,15 +20,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// TABLE_B for the legacy Encore ZBOT stream cipher (the cipher itself lives in zbot.cpp).
-// TABLE_B was recovered by comparing what two Encore releases (5.0.2 and 4.5) ship in common and
-// keeping the data both hold unchanged.
-//
-// Storage: TABLE_B (9776x4 = 39104 bytes) is nibble-packed (2 values/byte) since 99.98% of values
-// are 0-9. Columns are pre-permuted ([orig_col2, orig_col3, orig_col0, orig_col1]) so access is
-// kFlat[idx*4 + sub] with no extra indirection. Nine outlier bytes (values > 9) are fixed up via
-// kPatches at first use (see zbot.cpp). It is kept in its own translation unit so zbot.cpp stays
-// small and easy to review.
+// The substitution table of the ZBOT cipher, recovered by keeping what two Encore releases ship
+// unchanged in common. Nibble-packed since almost every value is a digit, with the columns
+// pre-permuted so access needs no indirection and nine outliers patched at first use. Its own
+// translation unit so zbot.cpp stays small enough to review.
 
 #include <cstdint>
 

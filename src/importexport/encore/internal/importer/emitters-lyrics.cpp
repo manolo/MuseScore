@@ -74,11 +74,9 @@ void enqueueLyric(BuildCtx& ctx, const EncLyric* el, track_idx_t track)
     }
 }
 
-// Build the Encore NOTE ticks of each MuseScore staff's voice-0 notes, so lyric matching uses
-// the real Encore tick of each note rather than a cumTick-to-encTick conversion (unreliable: the
-// note loop accumulates durations, not Encore ticks, so the relationship is not proportional).
-// Notes are routed with the SAME logic as the note loop (routeElementStaffVoice); keying by raw
-// encStaff instead put grand-staff notes on the wrong staff and reversed the syllables.
+// The real Encore tick and column of each voice-0 note, since the note loop accumulates durations
+// rather than Encore ticks. Routed exactly as the note loop routes, or grand-staff notes land on the
+// wrong staff.
 static std::map<int, std::vector<std::pair<int, int> > > buildEncNoteTicksByStaff(
     BuildCtx& ctx, const MeasEmitCtx& mc, const EncMeasure& encMeas)
 {
@@ -145,11 +143,8 @@ static std::vector<CrAnchor> buildCrTickPairs(
     return crTickPairs;
 }
 
-// Find the index of the best unconsumed ChordRest for a lyric at encTick.
-// wantChord selects chords (true) or rests (false); maxDelta caps the distance.
-// When preferNotAfter is set, notes at/before encTick win over later notes regardless of
-// distance, and ties break to the closest (the threshold pass); otherwise the closest by
-// absolute distance wins (the rest/last-resort fallback passes).
+// Best unconsumed ChordRest for a lyric at encTick. preferNotAfter makes a note at or before the tick
+// win over a later one whatever the distance, which is the threshold pass; otherwise nearest wins.
 static int findBestCr(const std::vector<CrAnchor>& pairs,
                       const std::vector<bool>& consumed, int encTick,
                       bool wantChord, int maxDelta, bool preferNotAfter)
@@ -217,10 +212,8 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
     const int beatTicksVal = encMeas.beatTicks ? static_cast<int>(encMeas.beatTicks) : 240;
     const int matchThreshold = beatTicksVal / 2;
 
-    // Encore stores the second and later verses with tick=0 on every syllable; the real horizontal
-    // position lives only in the xoffset (kie). Build a per-staff xoffset->tick reference from the
-    // verses whose ticks are reliable (they span more than one value); a collapsed verse is remapped
-    // by nearest xoffset below so all verses align on the same notes.
+    // Later verses store tick 0 on every syllable and keep the position only in the anchor, so build a
+    // column to tick reference from the verses whose ticks span more than one value.
     std::map<int, std::vector<std::pair<int, int> > > xoffTickRefByStaff;   // staff -> [(xoffset, encTick)]
     for (const auto& [refTrack, refEntries] : ctx.scratch.pendingLyrics) {
         if (refEntries.size() < 2) {
@@ -242,11 +235,8 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
         }
     }
 
-    // Fallback for measures where NO verse has reliable (spanning) ticks: a lone melisma word can be
-    // stored at its end note in one verse and at tick 0 in another, so tick matching would split the
-    // verses across notes. Position purely by xoffset: syllables whose xoffset nearly coincides are
-    // the same held word and resolve to the same (earliest) note. Only staves absent from the spanning
-    // reference are touched, so normal multi-syllable verses are left unchanged.
+    // Where no verse has spanning ticks, position by column alone: a held word can be stored at its end
+    // note in one verse and at tick 0 in another. Only staves absent from the reference are touched.
     {
         std::map<int, std::vector<std::pair<int, int> > > noSpanByStaff;   // staff -> [(xoffset, encTick)]
         for (const auto& [t, es] : ctx.scratch.pendingLyrics) {

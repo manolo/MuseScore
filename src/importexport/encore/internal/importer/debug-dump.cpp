@@ -52,11 +52,8 @@ void logEncRootInfo(const EncRoot& enc)
                           : (h.magic == "SCOR") ? "Encore or MusicTime, Windows"
                           : "unknown container";
 
-    // The release, only as far as the format version and the revision byte can say it. The revision
-    // byte does not separate builds within the Encore 4 line, and no distribution in hand produces
-    // format 3.07, so those two say a range instead of a release. The releases below are Encore's:
-    // MusicTime moves through the same format versions, so a version alone cannot name one of its
-    // releases. See ENCORE_FORMAT.md §1.3 The four generations and §1.6 The revision byte.
+    // The release only as far as the format version and revision can say it, which for the Encore 4 line
+    // and for format 3.07 is a range. MusicTime shares the versions, so they cannot name its releases.
     const bool isMusicTime = (h.magic == "MTIW" || h.magic == "MTIM");
     std::string release;
     switch (isMusicTime ? 0 : h.chuVersio) {

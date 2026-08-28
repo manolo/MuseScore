@@ -51,11 +51,7 @@ static int readMidiByteAt(QDataStream& ds, qint64 off)
 
 static constexpr qint64 VOICES_PER_STAFF = 8;
 
-// The MIDI channels sit immediately before the program byte, one per voice of the staff, eight of
-// them from format 3.05 on, and a staff normally carries the same channel on every voice. The first
-// one is the staff's channel, and it is read whether or not the program byte holds anything: a
-// percussion track often carries no program at all. Stored from zero, returned as the Staff Sheet
-// shows it. See ENCORE_FORMAT.md §5.1 Instrument block.
+// Read whether or not a program is there: percussion often carries none. ENCORE_FORMAT.md §5.1.
 static void readChannelBeforeMidi(QDataStream& ds, qint64 midiOff, EncInstrument& instr)
 {
     const qint64 off = midiOff - VOICES_PER_STAFF;
@@ -141,15 +137,8 @@ static qint64 findTildeBlockOffset(QDataStream& ds)
 // Byte offset of the first instrument entry; its name starts 8 bytes in, at NAME_BASE.
 static constexpr qint64 ENTRY_TABLE_BASE = 194;
 
-// Size of one instrument entry, derived from the file rather than from the TK size field (Encore 4
-// saves routinely declare 112 there whatever the real entry is). Returns 0 when nothing reliable
-// can be derived. Three sources, most trustworthy first: the spacing between two discovered TK
-// blocks; the distance from the table base to a single block whose magic names a later instrument;
-// and the span from the table base to the first PAGE/LINE/MEAS block divided by the instrument
-// count. See ENCORE_FORMAT.md §5.1 Instrument block.
-// evidenceOnly returns a stride only where the file shows one, from the spacing between two entries
-// that carry a block or from where a single one sits in the table; the division by the instrument
-// count at the end is a guess and is withheld.
+// Entry size derived from the file, since the TK size field lies; three sources, most trustworthy
+// first, per ENCORE_FORMAT.md §5.1. evidenceOnly withholds the last one, which is a guess.
 qint64 instrumentEntryStride(const std::vector<EncInstrument>& instruments, QDataStream& ds,
                              bool evidenceOnly = false)
 {
@@ -193,10 +182,7 @@ qint64 instrumentEntryStride(const std::vector<EncInstrument>& instruments, QDat
 
 void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& ds)
 {
-    // NAME_BASE=202 is the name position of instrument 0 in every compact-table layout; the step
-    // differs (2158 for large-TK/~~~~-block files, 112 for no-~~~~-block compact files). The
-    // COMPACT_NAME_BASE fallback fills names left unresolved by the primary probe.
-    // See ENCORE_FORMAT.md §5.1 Instrument block.
+    // Name positions of the two formula layouts; see ENCORE_FORMAT.md §5.1.
     static constexpr qint64 NAME_BASE = 202;
     static constexpr qint64 NAME_STEP = 2158;
     static constexpr qint64 COMPACT_NAME_BASE = 314;
@@ -232,12 +218,8 @@ void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& d
                                            [](const EncInstrument& i){ return i.contentFilePos < 0; });
     if (noTkBlocks && findTildeBlockOffset(ds) < 0) {
         const qint64 firstBlockOff = findFirstBlockOffset(ds, /*includePageBlock=*/ true);
-        // The table runs from its base to the first block, so a span that divides by the instrument
-        // count says what the entries measure. Choosing between the two known layouts by where the
-        // first block falls is only a guess, and it reads a table of ten short entries as one of ten
-        // long ones, which finds the first name and then walks into the music.
-        // Taken only when it lands on a name for the second entry as well: the compact table is
-        // anchored past this base, so dividing its span yields a step that means nothing.
+        // A span that divides by the instrument count says what the entries measure, and is taken only
+        // when it also lands on a name for the second entry. See ENCORE_FORMAT.md §5.1.
         const qint64 spanStride = instrumentEntryStride(instruments, ds);
         const bool spanFits = spanStride > 0 && instruments.size() > 1
                               && !tryReadName(NAME_BASE + spanStride).trimmed().isEmpty();
@@ -253,22 +235,15 @@ void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& d
         return;
     }
 
-    // An instrument that has its own TK block (contentFilePos >= 0) carries an authoritative
-    // name: if that name came back empty, the instrument is genuinely unnamed and must stay
-    // empty (the "Part N" fallback applies later). Positional recovery from the formula/compact
-    // offsets is only for instruments WITHOUT a TK block, and for ~~~~-block files whose compact
-    // table legitimately names even the TK-block instruments. Without a ~~~~ block, probing the
-    // formula offset for a real-TK instrument reads unrelated music/structure bytes as garbage.
+    // A name from the block itself is the last word, empty included, so positional recovery is only for
+    // entries without one, and for ~~~~ files whose table names them all. ENCORE_FORMAT.md §5.1.
     const bool hasTilde = findTildeBlockOffset(ds) >= 0;
     auto resolvedByTkBlock = [&](size_t n) {
         return !hasTilde && instruments[n].contentFilePos >= 0;
     };
 
-    // Both formulas below belong to layouts of their own, with entries of 2158 bytes and of 112. So
-    // where the file shows what its own entries measure, that comes first: the formula step would
-    // walk out of the table and read page or music bytes, which spell plausible words often enough
-    // to pass for a name. Encore 4 writes a fixed-stride table and puts a TK magic on only some of
-    // its entries, which is where this happens.
+    // Both formulas below belong to other layouts, so a stride the file shows comes first: theirs walks
+    // out of the table and reads page bytes, which spell plausible words. ENCORE_FORMAT.md §5.1.
     if (const qint64 proven = instrumentEntryStride(instruments, ds, /*evidenceOnly*/ true)) {
         for (size_t n = 0; n < instruments.size(); ++n) {
             if (!instruments[n].name.trimmed().isEmpty() || resolvedByTkBlock(n)) {
@@ -313,10 +288,7 @@ void recoverMissingNames(std::vector<EncInstrument>& instruments, QDataStream& d
         }
     }
 
-    // Last resort: read each still-unnamed instrument at its own position in the entry table, whose
-    // stride the file itself implies. Encore 4 writes a fixed-stride table but only puts a TK magic
-    // on some entries, so an instrument with no block of its own still has its name 8 bytes into
-    // its slot; neither the 2158 probe nor the compact table reaches it.
+    // Last resort: the entry's own slot, at the stride the file implies.
     if (const qint64 stride = instrumentEntryStride(instruments, ds)) {
         for (size_t n = 0; n < instruments.size(); ++n) {
             if (!instruments[n].name.trimmed().isEmpty() || resolvedByTkBlock(n)) {
@@ -380,12 +352,8 @@ static void readMidiProgramsNoTk(
             }
         }
     } else {
-        // Compact layout, two sub-layouts:
-        //   a) Encore 3.x compact (older synthetic files): MIDI at CMP_BASE=390, step=276.
-        //   b) Encore 4.x v0xC2 with ~~~~ block: MIDI at byte +93 of each 112-byte entry,
-        //      base=374 (= entry_table_start(281) + midi_field_offset(93)), step=112.
-        //      Instrument entries map to instruments that lack both a name AND a MIDI
-        //      program (instruments with their own named TK block are skipped).
+        // The two compact sub-layouts of ENCORE_FORMAT.md 5.1. In the second, entries map only to
+        // instruments that lack both a name and a program.
         static constexpr qint64 CMP_BASE = 390, CMP_STEP = 276;
 
         // First try sub-layout (a): check if CMP_BASE has valid MIDI.
@@ -408,10 +376,7 @@ static void readMidiProgramsNoTk(
                 }
             }
         } else if (tildeOff < 0) {
-            // No-~~~~-block compact format: instrument entries at
-            // entry_base=176, step=112, MIDI at entry+86.
-            // NAME_BASE(202) = entry_base(176) + name_off(26), so
-            // MIDI_BASE = 176 + 86 = 262 = NAME_BASE - 26 + 86.
+            // The no-tilde compact layout: entries at 176, step 112, program at entry+86.
             static constexpr qint64 NC_MIDI_BASE = 262;
             static constexpr qint64 NC_MIDI_STEP = 112;
             for (size_t n = 0; n < instruments.size(); ++n) {
@@ -489,10 +454,8 @@ static void readMidiProgramsNoTk(
     recoverMissingNames(instruments, ds);
 }
 
-// Detect Encore 4.x v0xC4 files where TK varSize encodes the TOTAL block size
-// (including the 8-byte magic+size header) rather than just the content length.
-// Symptom: consecutive contentFilePos values are spaced exactly `offset` bytes apart
-// (not `offset+8` as in the standard Encore 5.x layout).
+// Files whose TK size is the total block size: consecutive entries then sit exactly `offset` apart
+// instead of offset plus eight. See ENCORE_FORMAT.md 5.1.
 static bool isTotalBlockSizeTkFmt(const std::vector<EncInstrument>& instruments)
 {
     if (instruments.size() < 2) {
@@ -533,14 +496,8 @@ static void readMidiProgramsLargeEntry(std::vector<EncInstrument>& instruments, 
 static constexpr qint64 MIDI_FROM_ENTRY_END_305 = 46;
 static constexpr qint64 MIDI_FROM_ENTRY_END_300 = 44;
 
-// True when off begins a per-staff program table: the channel table ends right there, one entry per
-// voice, so every byte of the run before a program is a channel, below 16, and the last of them is
-// not the program value itself. That rejects both a position two bytes inside the channel run and
-// the arbitrary bytes an absolute offset can land on. See ENCORE_FORMAT.md §5.1 Instrument block.
-// A staff carries its channel run whether or not an instrument is assigned to it, and a staff whose
-// channel number happens to equal its program number carries both the same. What tells a table from
-// a stretch of one repeated value is the run structure itself, so three proofs are offered, ranked
-// below because the weaker ones also match more.
+// A per-staff table is proved by its run shape, one byte per voice. Three proofs, ranked because the
+// weaker ones also match more; see ENCORE_FORMAT.md §5.1.
 enum class TableProof {
     Program,        // a program names an instrument and the channels differ from it
     ValueRun,       // the program repeats once per voice, whatever the channels hold
@@ -598,10 +555,8 @@ static qint64 programTableOffset(QDataStream& ds, std::initializer_list<qint64> 
     return -1;
 }
 
-// Where an instrument's per-staff tables can sit in the small-TK layouts, most specific first.
-// A stride measured between two blocks bounds the entry, so a candidate outside it belongs to
-// another instrument; a stride merely assumed from the declared size rules nothing out, because
-// the entry may well be longer than declared.
+// Where the tables can sit in the small-TK layouts, most specific first. Only a measured stride
+// bounds the entry; an assumed one rules nothing out.
 static constexpr qint64 MIDI_AFTER_CONTENT = 76;
 static constexpr qint64 MIDI_IN_CONTENT = 60;
 
@@ -630,12 +585,7 @@ static void readMidiProgramsSmallTk(
     qint64 entryStride,
     qint64 midiFromEntryEnd)
 {
-    // Standard Encore 5.x: MIDI is 76 bytes past the content end
-    //   (content is `instr.offset` bytes; absolute = contentFilePos + offset + 76).
-    // Encore 4.x total-size variant: varSize is the TOTAL block size including header,
-    //   so actual content = varSize-8 = 104 bytes, and MIDI is at content[60].
-    // Neither holds for entries that keep the tables at the other generation's distance, so the
-    // position a channel run confirms wins over both.
+    // The two fixed positions of ENCORE_FORMAT.md §5.1; a confirmed one beats both.
     const bool totalSizeFmt = isTotalBlockSizeTkFmt(instruments);
     const bool strideMeasured = std::count_if(instruments.begin(), instruments.end(),
                                               [](const EncInstrument& i) { return i.contentFilePos >= 0; }) >= 2;
@@ -658,10 +608,7 @@ static void readMidiProgramsSmallTk(
             }
         }
         const qint64 afterContent = instr.contentFilePos + static_cast<qint64>(instr.offset) + MIDI_AFTER_CONTENT;
-        // A varSize that overstates the content makes the standard offset land past the entry, where
-        // it reads an unrelated byte as a program number. Keep it only while it stays inside the
-        // instrument's own entry; otherwise measure back from the entry end, where the per-staff
-        // tables actually sit.
+        // An overstated varSize puts this past the entry, so keep it only while it stays inside.
         const qint64 entryEnd = entryStride > 0 ? instr.contentFilePos - 8 + entryStride : -1;
         const bool afterContentInEntry = (entryEnd < 0) || (afterContent < entryEnd);
         const bool contentSizeMisdeclared = totalSizeFmt || !afterContentInEntry;
@@ -708,10 +655,7 @@ void readMidiPrograms(std::vector<EncInstrument>& instruments, QDataStream& ds, 
 
     if (smallTK) {
         readMidiProgramsSmallTk(instruments, ds, entryStride, midiFromEntryEnd);
-        // Fallback for mixed-TK files (e.g. v0xC2 with one named TK block and the
-        // remaining instruments in a compact ~~~~ block at a fixed layout).
-        // Apply compact byte-93 MIDI for any instrument that still lacks both a TK
-        // block (contentFilePos<0) and a MIDI program (midiProgram==0).
+        // Mixed-TK files: the compact byte-93 program for entries with neither a block nor a program.
         {
             static constexpr qint64 CMPX_MIDI_BASE = 374;
             static constexpr qint64 CMPX_MIDI_STEP = 112;
@@ -845,11 +789,8 @@ static void readKeyTranspositionsSmallTk(std::vector<EncInstrument>& instruments
         const qint64 fallback = totalSizeFmt
                                 ? instr.contentFilePos + KEY_IN_CONTENT
                                 : instr.contentFilePos + static_cast<qint64>(instr.offset) + KEY_AFTER_CONTENT;
-        // Where nothing at all is assigned in the file there is no run to prove and no sibling to
-        // measure, and the tables are a stretch of zeros; the key is still 23 bytes ahead of where
-        // this layout keeps them, back from the entry end.
-        // Only a stride measured between two blocks bounds the entry; one assumed from the declared
-        // size would put the entry end anywhere.
+        // With nothing assigned anywhere, no run proves and no sibling measures: fall back to this layout's
+        // distance from the entry end, which only a measured stride bounds. ENCORE_FORMAT.md §5.1.
         const qint64 entryEnd = strideMeasured && entryStride > 0
                                 ? instr.contentFilePos - 8 + entryStride : -1;
         qint64 table = tables[n];
