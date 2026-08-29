@@ -676,7 +676,7 @@ The 4.20 layout, a 28-byte note:
 | `+5`   | 1    | face value                                                 |
 | `+6`   | 1    | grace flags, first byte                                    |
 | `+7`   | 1    | grace flags, second byte                                   |
-| `+10`  | 1    | x-offset, the notated column; see 7.7                      |
+| `+10`  | 2    | x-offset, the notated column, signed; see 7.7               |
 | `+12`  | 1    | staff position, diatonic steps from C4                     |
 | `+13`  | 1    | tuplet: actual count in the high nibble, normal in the low |
 | `+14`  | 1    | layout byte, see above                                     |
@@ -777,7 +777,7 @@ A slur can begin on a grace note stored at the same tick as its parent chord, si
 | Offset | Size | Field                                                   |
 |--------|------|---------------------------------------------------------|
 | `+5`   | 1    | face value, same encoding as a note                     |
-| `+10`  | 1    | x-offset                                                |
+| `+10`  | 2    | x-offset, signed                                        |
 | `+13`  | 1    | tuplet, same encoding as a note                         |
 | `+14`  | 1    | layout byte, low two bits the dot count                 |
 | `+15`  | 1    | multi-measure rest count, only when the size exceeds 15 |
@@ -891,7 +891,7 @@ Type 5, variable size, and the busiest element in the format: it covers hairpins
 | Offset | Size | Field                                                |
 |--------|------|------------------------------------------------------|
 | `+5`   | 1    | subtype; see 8.2                                     |
-| `+10`  | 1    | x-offset, the start x within the measure             |
+| `+10`  | 2    | x-offset, the start x within the measure, signed     |
 | `+12`  | 2    | signed y: negative below the staff, positive above   |
 | `+16`  | 1    | forward measure count for slurs, version byte `0xC2` |
 | `+18`  | 1    | forward measure count to the end measure             |
@@ -959,7 +959,7 @@ Hairpins and slurs store no stop element. The end is the forward measure count p
 
 **Slurs** need more care, because the reliable field differs by generation.
 
-With version byte `0xC4` the end x at `+20` is meaningful: the difference between end and start x equals the pixel distance between the first and last covered notes. The x-offset is stored as a signed byte but must be read unsigned for this arithmetic, since values above 127 are stored negative.
+With version byte `0xC4` the end x at `+20` is meaningful: the difference between end and start x equals the pixel distance between the first and last covered notes.
 
 With `0xC2` the absolute end x lives in a stale coordinate origin and must not be matched directly, so the forward measure count is the only usable endpoint, and **its offset follows the element size**:
 
@@ -1224,7 +1224,8 @@ Each note of a chord carries its own articulation bytes, so a glyph shared by se
 
 ## 7.7 The chord column
 
-The note x-offset at `+10` is the notated horizontal column. It exists from format 3.05 on; format 2.50 does not store it.
+
+The note x-offset at `+10` is the notated horizontal column. It exists from format 3.05 on; format 2.50 does not store it. **It is two bytes and signed**, and stored the same way in every element that has one, note, rest, ornament and chord symbol: a wide measure runs past 255 and a mark drawn left of what it decorates reads negative, so a reader that takes only the low byte puts at the head of the bar what belongs at its end. One element in a thousand is that wide.
 
 - Every member of one chord shares the same non-zero column, and successive chords occupy distinct ones. A zero means no stored column.
 - The layout runs strictly left to right, so the column increases with tick, and it is aligned across the staves of a system: notes on the same beat share a column across staves.

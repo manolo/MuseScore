@@ -57,7 +57,6 @@ bool EncNote::read(QDataStream& ds)
     // layout into this one read. See ENCORE_FORMAT.md §6.3 Note.
     ds.skipRawData(2 + bodyShift);
     ds >> xoffset;
-    ds.skipRawData(1);
     ds >> position >> tuplet >> dotControl >> semiTonePitch >> playbackDurTicks;
     ds.skipRawData(1);
     ds >> velocity >> options >> alterationGlyph;
@@ -85,7 +84,6 @@ bool EncRest::read(QDataStream& ds)
     ds >> faceValue;
     ds.skipRawData(4 + bodyShift);
     ds >> xoffset;
-    ds.skipRawData(1);
     if (isTabFingering) {
         ds >> tabString >> tabFret;   // element +12 and +13; +15 holds the written pitch
         return true;
