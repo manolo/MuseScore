@@ -75,15 +75,33 @@ static void getImplied(const std::vector<const EncMeasureElem*>& grp,
     }
 }
 
-// Face value as Fraction for the first element of a chord group.
+// The written value, dots included: a dotted note takes half a slot more, so reading it bare lets it
+// into a bracket whose slot it then overruns.
 static Fraction getFaceValue(const std::vector<const EncMeasureElem*>& grp)
 {
     if (grp.empty()) {
         return Fraction(0, 1);
     }
     const quint8 fv = fvLow(grp[0]->faceValueByte());
-    return faceValue2DurationType(fv) == DurationType::V_INVALID ? Fraction(0, 1)
-           : TDuration(faceValue2DurationType(fv)).fraction();
+    const DurationType dt = faceValue2DurationType(fv);
+    if (dt == DurationType::V_INVALID) {
+        return Fraction(0, 1);
+    }
+    TDuration td(dt);
+    td.setDots(grp[0]->dotCount());
+    return td.fraction();
+}
+
+// The value a bracket is built from: the member's face value with its dots left off. A dot extends
+// a value rather than being one, and a bracket states how many of a plain value fit in the room of
+// fewer, so a dotted member says nothing about which value that is.
+static Fraction getBaseValue(const std::vector<const EncMeasureElem*>& grp)
+{
+    if (grp.empty()) {
+        return Fraction(0, 1);
+    }
+    const DurationType dt = faceValue2DurationType(fvLow(grp[0]->faceValueByte()));
+    return dt == DurationType::V_INVALID ? Fraction(0, 1) : TDuration(dt).fraction();
 }
 
 // Actual Encore-tick duration of chord at index k.
@@ -217,16 +235,36 @@ static void processSegmentOverrides(
     }
 }
 
-// Sandwich heuristic: a note whose tup byte is missing/mismatched still belongs to the current
-// bracket when the NEXT note matches the ratio, the orphan's face value equals baseLen, and it sits
-// at the expected advance tick after the previous member (v0xC4 live recording occasionally drops
-// the byte). i must be inside an open group (faceSum > 0) with a valid previous and next chord.
+// The member that opens a group can lose its byte as readily as one inside it. Then the marked run
+// that follows is one member short of whole groups, and the unmarked note is exactly the one
+// missing, so it belongs to the group it appears to precede.
+static bool opensGroupOneShort(
+    const std::vector<std::vector<const EncMeasureElem*> >& chords, int i, int n,
+    int actualN, int normalN, Fraction baseLen)
+{
+    int marked = 0;
+    for (int j = i + 1; j < n; ++j) {
+        int aj = 0, nj = 0;
+        getExplicit(chords[j], aj, nj);
+        if (aj != actualN || nj != normalN || getFaceValue(chords[j]) != baseLen) {
+            break;
+        }
+        ++marked;
+    }
+    return marked > 0 && ((marked + 1) % actualN) == 0;
+}
+
+// A note whose tuplet byte is missing still belongs to the bracket when the next one matches the
+// ratio, its value equals the base and it sits at the expected advance. Live recording drops the byte.
 static bool isSandwichOrphan(
     const std::vector<std::vector<const EncMeasureElem*> >& chords, int i, int n,
     int actualN, int normalN, Fraction baseLen, Fraction faceSum)
 {
-    if (!(faceSum > Fraction(0, 1) && i + 1 < n
-          && !chords[i].empty() && !chords[i - 1].empty())) {
+    if (!(i > 0 && i + 1 < n && !chords[i].empty() && !chords[i - 1].empty())) {
+        return false;
+    }
+    if (faceSum <= Fraction(0, 1)
+        && !opensGroupOneShort(chords, i, n, actualN, normalN, baseLen)) {
         return false;
     }
     int a3 = 0, n3 = 0;
@@ -274,11 +312,8 @@ static void processImpliedTupletGroup(
     }
 }
 
-// A nested inner group replaces exactly ONE slot of the outer tuplet, so its notes must play for
-// as long as that slot does. Face values alone cannot tell the readings apart: a quarter followed
-// by eighths in a 3:2 bracket is equally consistent with an inner triplet filling the second slot
-// and with one flat bracket of a quarter plus four eighths. The played lengths the file records
-// settle it. Returns true when they are unavailable, leaving the face-value reading in charge.
+// An inner group replaces exactly one slot of the outer bracket, and face values cannot tell that
+// reading from one flat bracket, so the played lengths settle it. True when they are unavailable.
 static bool innerGroupFillsOneOuterSlot(
     const std::vector<std::vector<const EncMeasureElem*> >& chords,
     int outerSlotIdx, int innerGroupStartIdx, int innerEndIdx)
@@ -483,7 +518,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                 // Explicit: accumulate faceSum; close when faceSum >= threshold.
                 // No-downdate rule: baseLen only shrinks when faceSum still fits the new threshold,
                 // allowing mixed-duration brackets like {Q,E}/3:2 or {Q,Q,8,8}/3:2.
-                Fraction baseLen = getFaceValue(chords[i]);
+                Fraction baseLen = getBaseValue(chords[i]);
                 if (baseLen <= Fraction(0, 1)) {
                     ++i;
                     continue;
@@ -502,6 +537,13 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                         if (isSandwichOrphan(chords, i, n, actualN, normalN, baseLen, faceSum)) {
                             a2 = actualN;
                             n2 = normalN;
+                            if (overrideRatios && faceSum <= Fraction(0, 1)) {
+                                // Opening the group: the tracker holds no live ratio to inherit,
+                                // so state the one the group carries.
+                                for (const EncMeasureElem* eo : chords[i]) {
+                                    (*overrideRatios)[eo] = { actualN, normalN };
+                                }
+                            }
                         } else {
                             break;
                         }
@@ -510,7 +552,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     const Fraction fv_i = getFaceValue(chords[i]);
                     if (fv_i > Fraction(0, 1) && fv_i < baseLen) {
                         const Fraction newThreshold = fv_i * actualN;
-                        if (faceSum <= newThreshold) {
+                        if (faceSum + fv_i <= newThreshold) {
                             // Record where the inner group starts (= the downdating note).
                             innerGroupStartIdx = i;
                             innerBaseLen       = fv_i;
@@ -541,7 +583,7 @@ std::set<const EncMeasureElem*> computeImpliedTupletMembers(
                     seenCompleteGroup  = true;
                     // Reset for next group.
                     if (i < n) {
-                        baseLen         = getFaceValue(chords[i]);
+                        baseLen         = getBaseValue(chords[i]);
                         threshold       = baseLen * actualN;
                         originalBaseLen = baseLen;
                     }

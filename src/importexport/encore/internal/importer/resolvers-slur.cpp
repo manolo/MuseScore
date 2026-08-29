@@ -211,11 +211,8 @@ static Chord* firstChordOnStaffFrom(const Score* score, Measure* m, int staffIdx
     return nullptr;
 }
 
-// The xoffset of the slur's start note: scan the start measure for the NOTE at startEncTick on
-// this staff (any voice, since the slur ORN's encVoice is the arc position, not the note voice)
-// and return its xoffset. A grace note at that tick wins over a regular one (v0xC4 serializes the
-// regular note first, but the grace xoffset is the true arc-start reference). Returns -1 when no
-// start note is found. See ENCORE_FORMAT.md §Slur.
+// Column of the slur's start note; the arc ORN's voice is the arc position, not the note's, so scan
+// every voice. A grace at that tick wins: its column is the true arc start.
 static int findSlurStartNoteXoffset(const EncMeasure& startEncMeas, int staffIdx, int startEncTick,
                                     const std::array<int, 256>& lineSlotByRawByte)
 {
@@ -239,10 +236,8 @@ static int findSlurStartNoteXoffset(const EncMeasure& startEncMeas, int staffIdx
     return (graceXoff >= 0) ? graceXoff : firstNoteXoff;
 }
 
-// Cross-measure endpoint search: when alMezuro is unreliable and the arc clearly runs past the
-// start measure, scan the next one or two measures for the note whose xoffset best matches
-// targetEndXoff. bestDist is in/out: only a strictly closer note updates it and yields a result.
-// Returns the endpoint tick when a closer note is found, else nullopt (caller keeps its endpoint).
+// When the forward count is unreliable and the arc clearly runs past the start measure, scan the next
+// one or two for the closest column. bestDist is in and out: only a strictly closer note counts.
 static std::optional<Fraction> extendSlurToLaterMeasures(
     BuildCtx& ctx, const PendingSlur& ps, const std::array<int, 256>& lineSlotByRawByte,
     int targetEndXoff, int& bestDist)
@@ -360,11 +355,8 @@ static std::optional<Fraction> resolveSameMeasureHeuristic(
                     bestEncTick = static_cast<int>(em->tick);
                 }
             }
-            // Grace-to-main: grace + regular share startEncTick and regular is closest match: zero-span.
-            // If a later note is closer, resolve as grace-to-later instead.
-            // For a v0xC2 short slur the next-note rule sets bestDist=0, so the distance
-            // comparison can never pick grace-to-main; a grace at the start is the strong
-            // signal that the slur ornaments its own main note, so prefer zero-span there.
+            // A grace at the start is the strong signal that the slur ornaments its own main note, so prefer the
+            // zero-span reading there; a v0xC2 short slur can never reach it by distance alone.
             if (hasGraceAtStart && regularXoffAtStart >= 0) {
                 const int regularDist = std::abs(regularXoffAtStart - targetEndXoff);
                 if (v0c2ShortSlur || regularDist < bestDist) {
@@ -397,11 +389,8 @@ static std::optional<Fraction> resolveSameMeasureHeuristic(
                 }
                 resolved = true;
             }
-            // Cross-measure extension when alMezuro is unreliable and the arc endpoint clearly
-            // exceeds the start measure. Excluded for tiny-pixelspan slurs (ornament placed after
-            // first note) because their targetEndXoff is slurXoffset2, which may be in the next
-            // measure's coordinate space and would produce a false positive. Also excluded when
-            // the same-measure search already resolved to a zero-span (grace-to-main) endpoint.
+            // Excluded for tiny-span slurs, whose end column may already be in the next measure's coordinates,
+            // and when the same-measure search already resolved to a zero span.
             if (!ps.alMezuroValid && !usedTinyPixelSpan && bestDist > 0
                 && (targetEndXoff > maxXoffInMeas || bestEncTick < 0)
                 && !(resolved && endTick == ps.startTick)) {
@@ -470,13 +459,9 @@ void resolveSlurs(BuildCtx& ctx)
         Fraction endTick;
         bool resolved = false;
 
-        // v0xC2 reliable forward measure-count (element +16): Encore draws these as
-        // note-1-to-note-1 arcs between bar starts; xoffset2 is stale in this format, so anchor
-        // explicitly to the downbeat chord of the target measure rather than guessing by
-        // coordinate. v0xC4/SCO5 keep the xoffset2 heuristic (reliable there).
-        // tick2segment is unreliable at bar boundaries (computeEndElement returns null there),
-        // so locate both endpoints by iterating ChordRest segments and set the slur elements
-        // explicitly; these are protected from recompute in removeOrphanSlurs.
+        // A trusted forward count draws note-1 to note-1 between bar starts, so anchor to the downbeat chord
+        // rather than to a stale end column. tick2segment is unreliable at bar boundaries, so both endpoints
+        // are located by walking segments and set explicitly, then protected from recompute.
         if (enc.fmt->slurXoffset2Stale() && ps.alMezuroValid && ps.alMezuro > 0
             && ps.startMeasIdx >= 0
             && ps.startMeasIdx < static_cast<int>(ctx.measuresByIdx.size())) {

@@ -35,6 +35,7 @@
 #include "engraving/dom/chord.h"
 #include "engraving/dom/clef.h"
 #include "engraving/dom/excerpt.h"
+#include "engraving/dom/guitarbend.h"
 #include "engraving/dom/factory.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
@@ -102,10 +103,8 @@ static const char* matchStepLabel(MatchStep step)
     return "";
 }
 
-// Describe an Encore MIDI program for the debug log using MuseScore's own instrument names
-// (localized like everything else: the template trackName is translated at load). Encore stores
-// a 1-indexed GM program; map it to the template whose primary sound is that program and show its
-// track name. No hardcoded GM table; an unmapped program shows just the number.
+// Names a program for the log through MuseScore's own templates, so it is localized like everything
+// else and needs no hardcoded GM table.
 static std::string midiProgramInfo(const EncInstrument& instr)
 {
     if (instr.midiProgram <= 0) {
@@ -279,11 +278,9 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
         if (!tmpl) {
             tryStep(MatchStep::NameMidiScore, tryNameMidiScore(instr, encMidi, encKey, isRhythm));
         }
-        // Step 3: name scoring over drumset templates. A pitched GM program outvotes a name that
-        // merely resembles a percussion instrument: "Slap Ucillee" on Acoustic Bass is a bass and
-        // "Con." on Piano is a piano, however well they score against Slap and Congas, and the file
-        // draws both on a pitched clef. A name with no program behind it, or a percussive one, still
-        // reaches this step, which is where "Congas" and "Maracas" are recognised.
+        // Name scoring over drumset templates. A pitched program outvotes a name that merely sounds
+        // percussive, since the file draws those on a pitched clef; a name with no program behind it still
+        // reaches here, which is where Congas and Maracas are recognised.
         const bool pitchedProgram = (instr.midiProgram > 0 && instr.midiProgram < GM_PERC_FIRST);
         if (!nameTooShort && !pitchedProgram) {
             tryStep(MatchStep::DrumsetName, findDrumsetTemplate(instr.name));
@@ -344,13 +341,23 @@ static StaffTypes tabPresetForStringCount(int n)
 
 // Make an Encore tab staff a real MuseScore tab: attach StringData + a TAB StaffType so notes
 // auto-fret at layout. Tuning source: Encore's stored tuning, else template StringData, else guitar.
-static void setupTablatureStaff(Staff* staff, Instrument* instrument, const EncTabTuning& tuning)
+// The file writes the tuning as written pitches, like the notes, and MuseScore frets a note against
+// the string table after undoing the instrument's transposition. The Key moves the tuning into the
+// note pitches, the transposition back out again. Template and fallback tunings are already in
+// MuseScore's own terms and are taken as they are.
+static void setupTablatureStaff(Staff* staff, Instrument* instrument, const EncTabTuning& tuning, int keyOffset)
 {
     if (!staff || !instrument) {
         return;
     }
     const char* source = "Encore tuning";
-    std::vector<int> pitches = tuning.hasData ? tuning.openStringPitches : std::vector<int>();
+    std::vector<int> pitches;
+    if (tuning.hasData) {
+        const int shift = keyOffset - instrument->transpose().chromatic;
+        for (int p : tuning.openStringPitches) {
+            pitches.push_back(p + shift);
+        }
+    }
     if (pitches.empty()) {
         const StringData* tmplSd = instrument->stringData();
         if (tmplSd && tmplSd->strings() > 0) {
@@ -384,10 +391,36 @@ static void setupTablatureStaff(Staff* staff, Instrument* instrument, const EncT
     LOGD() << "  tab staff: " << nStrings << " strings, tuning [ " << tuningStr << "] (" << source << ")";
 }
 
+// The guitar marks name their note by the column it stands in, so the notes have to be on record as
+// they are emitted. Scanning for them first keeps that record out of every other score.
+static bool hasColumnAnchoredGuitarMarks(const EncRoot& enc)
+{
+    for (const EncMeasure& meas : enc.measures) {
+        for (const auto& elem : meas.elements) {
+            if (static_cast<EncElemType>(elem->type) != EncElemType::ORNAMENT) {
+                continue;
+            }
+            switch (static_cast<const EncOrnament*>(elem.get())->ornType()) {
+            case EncOrnamentType::GUITAR_BEND:
+            case EncOrnamentType::GUITAR_BEND_2:
+            case EncOrnamentType::GUITAR_PREBEND:
+            case EncOrnamentType::GUITAR_PREBEND_RELEASE:
+            case EncOrnamentType::GUITAR_BEND_V:
+            case EncOrnamentType::VIBRATO:
+                return true;
+            default:
+                break;
+            }
+        }
+    }
+    return false;
+}
+
 void buildParts(BuildCtx& ctx)
 {
     MasterScore* score = ctx.score;
     const EncRoot& enc = ctx.enc;
+    ctx.trackEmittedNotes = hasColumnAnchoredGuitarMarks(enc);
     const char* searchModeLabel
         =ctx.opts.instrumentSearchMode == InstrumentSearchMode::MidiOnly ? "MIDI only"
           : ctx.opts.instrumentSearchMode == InstrumentSearchMode::Piano ? "Grand Piano for all"
@@ -414,11 +447,8 @@ void buildParts(BuildCtx& ctx)
         }
 
         const int pitchOffset = static_cast<int>(instr.keyTransposeSemitones);
-        // Transposition handling depends on the offset:
-        //  - non-octave and positive octave: set on the instrument so the display keeps the written
-        //    pitch under a plain clef (the octave is a playback transposition, no 8va clef).
-        //  - negative octave: left to the octave-down clef from pickStaffClef()/applyOctaveToClef()
-        //    plus the template's own transposition.
+        // A non-octave or upward offset goes on the instrument, so a plain clef keeps the written pitch. A
+        // downward octave is left to the octave clef instead. See ENCORE_IMPORTER.md 3.5.
         Instrument* instrument = part->instrument();
         if (instrument) {
             if (pitchOffset != 0 && (std::abs(pitchOffset) % 12 != 0 || pitchOffset > 0)) {
@@ -465,7 +495,10 @@ void buildParts(BuildCtx& ctx)
             const bool staffWantsTab = staffLsd && (staffLsd->clef == EncClefType::TAB
                                                     || staffLsd->staffType == EncStaffType::TAB);
             if (staffWantsTab) {
-                setupTablatureStaff(staff, instrument, instr.tabTuning.hasData ? instr.tabTuning : enc.tabTuning);
+                setupTablatureStaff(staff, instrument, instr.tabTuning.hasData ? instr.tabTuning : enc.tabTuning,
+                                    pitchOffset);
+                ctx.trackEmittedNotes = ctx.trackEmittedNotes
+                                        || ctx.opts.tablatureImportMode == TablatureImportMode::Linked;
             }
             ctx.staffPitchOffset.push_back(pitchOffset);
             ClefType cClef = ClefType::INVALID;
@@ -555,7 +588,10 @@ static void convertTabStaffToStandard(Score* score, Staff* staff)
 
 // Merge an empty tab staff into its notation staff as one instrument (guitar+tab idiom): clone the
 // notation's notes as linked clones (the tab renders them as frets), reparent the tab, drop its part.
-static void linkTabToNotation(Score* score, Staff* notation, Staff* tab, bool notationVisible, bool tabVisible)
+// pitchShift moves the tab's tuning into the notation staff's pitch space. The two are separate Encore
+// instruments and can state different Keys, and the tuning has to sound where the notes it reads do.
+static void linkTabToNotation(Score* score, Staff* notation, Staff* tab, bool notationVisible, bool tabVisible,
+                              int pitchShift)
 {
     Part* notPart = notation->part();
     Part* tabPart = tab->part();
@@ -581,7 +617,13 @@ static void linkTabToNotation(Score* score, Staff* notation, Staff* tab, bool no
     Excerpt::cloneStaff(notation, tab, true);
 
     if (const StringData* sd = tabPart->instrument()->stringData()) {
-        notPart->instrument()->setStringData(*sd);
+        std::vector<instrString> strings;
+        for (const instrString& is : sd->stringList()) {
+            instrString moved = is;
+            moved.pitch = is.pitch + pitchShift;
+            strings.push_back(moved);
+        }
+        notPart->instrument()->setStringData(StringData(sd->frets(), strings));
     }
 
     tabPart->removeStaff(tab);
@@ -592,6 +634,88 @@ static void linkTabToNotation(Score* score, Staff* notation, Staff* tab, bool no
     notPart->setShow(true);
     notation->setVisible(notationVisible);
     tab->setVisible(tabVisible);
+}
+
+// Put the fret positions the tab staff stated on the notes it now shares with its notation staff, so
+// the tab draws Encore's own fingering instead of the one MuseScore would choose. Encore numbers the
+// strings from the lowest and writes twice the number, MuseScore numbers them from the highest, and a
+// position is used only where its string and fret really produce the note it lands on.
+static void applyTabFingerings(BuildCtx& ctx, const Staff* notation, int notationStaffIdx, int tabStaffIdx)
+{
+    const StringData* sd = notation->part()->instrument()->stringData();
+    if (!sd || sd->strings() < 1) {
+        return;
+    }
+    const int nStrings = sd->strings();
+    std::map<int, std::vector<const PendingTabFingering*> > byMeasure;
+    for (const PendingTabFingering& f : ctx.pendingTabFingerings) {
+        if (f.staffIdx == tabStaffIdx) {
+            byMeasure[f.measIdx].push_back(&f);
+        }
+    }
+    for (const auto& [measIdx, fingerings] : byMeasure) {
+        auto notesIt = ctx.notesByMeasStaff.find({ measIdx, notationStaffIdx });
+        if (notesIt == ctx.notesByMeasStaff.end()) {
+            continue;
+        }
+        const std::vector<std::pair<int, Note*> >& notes = notesIt->second;
+        std::vector<bool> taken(notes.size(), false);
+        // A position goes to the note of that pitch whose Encore tick is nearest, which is its own tick
+        // in all but a small fraction: the tab and the notation staff hold the same music but their
+        // elements are stamped separately. A note no position lands on keeps MuseScore's fretting.
+        for (const PendingTabFingering* f : fingerings) {
+            const int lowIdx = f->stringByte / 2 - 1;
+            if (lowIdx < 0 || lowIdx >= nStrings || f->fret < 0 || f->fret > sd->frets()) {
+                continue;
+            }
+            const int pitch = sd->stringList()[static_cast<size_t>(lowIdx)].pitch + f->fret;
+            size_t best = notes.size();
+            int bestGap = 0;
+            for (size_t i = 0; i < notes.size(); ++i) {
+                if (taken[i] || notes[i].second->pitch() != pitch) {
+                    continue;
+                }
+                const int gap = std::abs(notes[i].first - f->encTick);
+                if (best == notes.size() || gap < bestGap) {
+                    best = i;
+                    bestGap = gap;
+                }
+            }
+            if (best == notes.size()) {
+                continue;
+            }
+            taken[best] = true;
+            // The tab staff holds linked clones of these notes and frets them itself at layout; the
+            // position has to reach the clone too, or the one it computes replaces this one.
+            for (EngravingObject* linked : notes[best].second->linkList()) {
+                toNote(linked)->setString(nStrings - lowIdx - 1);
+                toNote(linked)->setFret(f->fret);
+            }
+        }
+    }
+}
+
+// A bend puts its second note on the string the first was bent on, and the fingering pass above runs
+// after the bends are made, so the positions it wrote are reconciled with them here.
+static void refretBendDestinations(Score* score, const Staff* notation)
+{
+    const track_idx_t base = notation->idx() * VOICES;
+    for (Measure* m = score->firstMeasure(); m; m = m->nextMeasure()) {
+        for (Segment* seg = m->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+            for (voice_idx_t v = 0; v < VOICES; ++v) {
+                EngravingItem* el = seg->element(base + v);
+                if (!el || !el->isChord()) {
+                    continue;
+                }
+                for (Note* n : toChord(el)->notes()) {
+                    GuitarBend* bend = n->bendFor();
+                    if (bend && bend->bendType() == GuitarBendType::BEND && bend->endNote()) {
+                        GuitarBend::fixNotesFrettingForStandardBend(n, bend->endNote());
+                    }
+                }
+            }
+        }
+    }
 }
 
 void applyTablatureImportMode(BuildCtx& ctx)
@@ -615,6 +739,8 @@ void applyTablatureImportMode(BuildCtx& ctx)
         Staff* tab;
         bool notationVisible;
         bool tabVisible;
+        int notationStaffIdx;
+        int tabStaffIdx;
     };
     std::vector<Pair> pairs;
 
@@ -637,7 +763,7 @@ void applyTablatureImportMode(BuildCtx& ctx)
             const EncLineStaffData* notLsd = lineStaffDataAt(enc, i - 1);
             const EncLineStaffData* tabLsd = lineStaffDataAt(enc, i);
             pairs.push_back({ staves[i - 1], staves[i],
-                              !notLsd || notLsd->showStaff, !tabLsd || tabLsd->showStaff });
+                              !notLsd || notLsd->showStaff, !tabLsd || tabLsd->showStaff, i - 1, i });
             LOGD() << "  linked tab: staff " << i << " <- notation staff " << (i - 1);
         }
     }
@@ -667,7 +793,14 @@ void applyTablatureImportMode(BuildCtx& ctx)
         return;
     }
     for (const Pair& p : pairs) {
-        linkTabToNotation(score, p.notation, p.tab, p.notationVisible, p.tabVisible);
+        const auto offsetOf = [&ctx](const Staff* st) {
+            const size_t i = static_cast<size_t>(st->idx());
+            return i < ctx.staffPitchOffset.size() ? ctx.staffPitchOffset[i] : 0;
+        };
+        linkTabToNotation(score, p.notation, p.tab, p.notationVisible, p.tabVisible,
+                          offsetOf(p.notation) - offsetOf(p.tab));
+        applyTabFingerings(ctx, p.notation, p.notationStaffIdx, p.tabStaffIdx);
+        refretBendDestinations(score, p.notation);
     }
 }
 } // namespace mu::iex::enc

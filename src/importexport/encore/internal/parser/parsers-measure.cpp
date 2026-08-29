@@ -50,7 +50,11 @@ static std::unique_ptr<EncMeasureElem> createMeasureElement(
     case EncElemType::NOTE:
         return std::make_unique<EncNote>(tick, tp, vo);
     case EncElemType::REST:
-        return std::make_unique<EncRest>(tick, tp, vo);
+    {
+        auto rest = std::make_unique<EncRest>(tick, tp, vo);
+        rest->isTabFingering = (vo & 0x08) != 0;
+        return rest;
+    }
     case EncElemType::CHORD:
         return std::make_unique<EncChordSym>(tick, tp, vo);
     case EncElemType::ORNAMENT:
@@ -117,7 +121,8 @@ void computeElementDurations(
             }
         }
         qint16 dur = nextTick - elems[i]->tick;
-        // v0xA6 grace time-borrowing: grace notes shorten next note's gap; see ENCORE_FORMAT.md §6.3 Note, Grace and cue notes.
+        // v0xA6 grace time-borrowing: grace notes shorten next note's gap; see ENCORE_FORMAT.md §6.3 Note, Grace and
+        // cue notes.
         const EncNote* enCur = dynamic_cast<const EncNote*>(elems[i]);
         if (hasGraceTimeBorrowing && enCur && dur > 0) {
             const qint16 faceTicks = faceValue2ticks(enCur->faceValue);
@@ -155,12 +160,9 @@ void computeElementDurations(
     }
 }
 
-// Encore staggers a chord's playback ticks ("strum" drift), but all its notes share one notated
-// column in the xoffset byte. Collapse each run of consecutive notes with the same nonzero xoffset
-// and face value to the run's earliest tick, so downstream sees chord members instead of a split
-// chord. A run counts as one chord only within a small window of the anchor (capped at one notated
-// duration and at CHORD_STRUM_MAX_SPAN) so a long note never absorbs a genuine later note reusing
-// the column. Zero-xoffset notes are left untouched. See ENCORE_FORMAT.md §7.7 The chord column.
+// A chord's playback ticks are staggered while its notes share one column, so collapse each run to its
+// earliest tick, inside a window so a long note never absorbs a later note reusing the column.
+// See ENCORE_FORMAT.md 7.7.
 static void normalizeChordColumnTicks(std::vector<EncMeasureElem*>& elems)
 {
     // Observed strum spans reach ~30 ticks; the tightest sequential subdivision stays well above,
@@ -265,6 +267,12 @@ bool EncMeasure::read(QDataStream& ds, const quint32 vs, const EncFormatReader& 
         const quint8 tp = typeVoice >> 4;
         const quint8 vo = typeVoice & 0x0F;
 
+        // A note played a hair before the barline wraps past the top of the sixteen-bit tick, and no measure
+        // comes near that value, so the upper half of the range is a position before the bar. Only the ones
+        // inside the drift window move to the downbeat. See ENCORE_FORMAT.md 7.1.
+        if (tick >= 0x8000 && (0x10000 - static_cast<int>(tick)) <= 2 * CHORD_CLUSTER_THRESHOLD) {
+            tick = 0;
+        }
         auto elem = createMeasureElement(tick, tp, vo, fmt, pureTabFile);
         elem->bodyShift = static_cast<qint8>(fmt.elementBodyShift());
 
@@ -346,16 +354,9 @@ static int statedExtra(const EncMeasureElem* e)
     return (len > faceTicks && en->realDuration == faceTicks) ? len - faceTicks : 0;
 }
 
-// Puts back the dots a note states in its layout byte but its sounding duration does not show, and
-// moves everything past them so the stored ticks line up with the notation again. The dots have to
-// account for the group's shortfall exactly, not merely fit in it: room alone would let a spurious
-// bit dot a plain note, which the two tests named in ENCORE_IMPORTER.md 6.1 pin down.
-// See ENCORE_FORMAT.md 7.3 Dots for the two habits this tells apart.
-// Encore lets the LAST note of a bar be drawn longer than the space left and clips its playback to
-// what remains, so a bar with 120 ticks free can end in a dotted quarter. The face value survives
-// that on its own, being authoritative for the notation, but the dots do not: they are stated in the
-// layout byte and no duration in the bar shows them. Restore them and let the importer's overfull
-// strategy decide what the bar does about it, which is the question that option exists to answer.
+// Puts back the dots the layout byte states and no sounding duration shows, and shifts what follows so
+// the stored ticks line up again. They have to account for the shortfall exactly, not merely fit in
+// it. See ENCORE_FORMAT.md 7.3.
 void EncMeasure::keepStatedFigureOfLastNote(std::vector<EncMeasureElem*>& elems)
 {
     if (elems.empty()) {
@@ -456,11 +457,8 @@ void EncMeasure::calculateRealDurations(bool hasGraceTimeBorrowing, const EncFor
     reconcileStaleNoteTicksByColumn();
 }
 
-// A note's xoffset column identifies its beat and is consistent across the staves of a system.
-// A note edited in Encore can keep a stale MIDI tick that no longer matches its column, so it
-// draws on the column's beat but the importer places it later. Snap such a note back to its
-// column's tick, keeping the realDuration already computed from its stored tick. Runs after
-// duration computation so rdur is not recomputed from the corrected tick.
+// A note edited in Encore can keep a stale tick that no longer matches its column, so snap it back to
+// the column's tick. Runs after durations so rdur is not recomputed from the corrected tick.
 void EncMeasure::reconcileStaleNoteTicksByColumn()
 {
     // Column (xoffset) -> earliest tick a non-grace note occupies it at, across all staves.
@@ -470,7 +468,7 @@ void EncMeasure::reconcileStaleNoteTicksByColumn()
         if (!en || en->graceType() != EncGraceType::NORMAL || en->tick >= durTicks) {
             continue;
         }
-        const int xo = static_cast<int>(static_cast<quint8>(en->xoffset));
+        const int xo = static_cast<int>(en->xoffset);
         if (xo <= 0) {
             continue;
         }
@@ -488,7 +486,7 @@ void EncMeasure::reconcileStaleNoteTicksByColumn()
         if (!en || en->graceType() != EncGraceType::NORMAL || en->tick >= durTicks) {
             continue;
         }
-        const int xo = static_cast<int>(static_cast<quint8>(en->xoffset));
+        const int xo = static_cast<int>(en->xoffset);
         if (xo <= 0) {
             continue;
         }
@@ -497,11 +495,8 @@ void EncMeasure::reconcileStaleNoteTicksByColumn()
             continue;   // already the column's earliest tick (or later note is genuine)
         }
         const qint16 target = it->second;
-        // Reconcile only a note that is the EARLIEST in its own staff/voice: the stale-tick
-        // artifact is a whole voice drawn one column too far right. A note with an earlier
-        // voice-mate is a genuine sequence, leave it. Also never merge two independent notes:
-        // block when a DIFFERENT column already occupies the target tick on this staff/voice
-        // (same-column notes are chord siblings).
+        // Only the earliest note of its voice: the artifact is a whole voice drawn one column too far right.
+        // Never merge two independent notes, so block when a different column already holds the target tick.
         bool hasEarlierVoiceMate = false;
         bool occupied = false;
         for (auto& other : elements) {
@@ -514,7 +509,7 @@ void EncMeasure::reconcileStaleNoteTicksByColumn()
                 break;
             }
             if (on->tick == target
-                && static_cast<int>(static_cast<quint8>(on->xoffset)) != xo) {
+                && static_cast<int>(on->xoffset) != xo) {
                 occupied = true;
             }
         }

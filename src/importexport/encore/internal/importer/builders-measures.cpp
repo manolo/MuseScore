@@ -20,7 +20,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Build MuseScore measures from EncMeasure data: time signatures, barlines, multi-measure-rest expansion, and initial clefs/keys.
+// Build MuseScore measures from EncMeasure data: time signatures, barlines, multi-measure-rest expansion, and initial
+// clefs/keys.
 
 #include "builders.h"
 #include "ctx.h"
@@ -48,10 +49,8 @@
 using namespace mu::engraving;
 
 namespace mu::iex::enc {
-// The number of empty measures Encore collapsed into this block (byte +15 of a REST element), or 0
-// when the block is not an empty multi-measure rest. The block may carry companion elements on the
-// empty span (a key change, a clef); only pitched notes/chords disqualify it. Consecutive empty
-// groups are genuinely separate blocks with their own counts, so each expands independently.
+// Empty measures Encore collapsed into this block, or 0. Companion elements on the span are allowed;
+// only pitched notes disqualify it, and consecutive groups expand independently.
 static int encMeasMultiRestCount(const EncMeasure& m)
 {
     int maxMrest = 0;
@@ -159,10 +158,8 @@ void buildMeasures(BuildCtx& ctx)
                 if (encMeas.startBarline() == EncBarlineType::REPEATSTART) {
                     measure->setRepeatStart(true);
                 }
-                // A non-repeat special barline drawn at a measure's START (e.g. a double bar
-                // before this measure) belongs, in MuseScore's model, to the end of the
-                // previous measure. Encore stores it as this measure's startBarline; map it
-                // onto the preceding measure's end barline so the divider is not dropped.
+                // MuseScore keeps a divider at the end of the previous measure, while Encore stores it as this
+                // measure's start barline, so move it back or it is dropped.
                 if (encMeas.startBarline() == EncBarlineType::DOUBLEL
                     || encMeas.startBarline() == EncBarlineType::DOUBLER
                     || encMeas.startBarline() == EncBarlineType::DOTTED) {
@@ -246,10 +243,8 @@ void buildInitialSignatures(BuildCtx& ctx)
                 const size_t ci = std::min(static_cast<size_t>(si), firstLine.staffClefs.size() - 1);
                 const int keyOffset = si < static_cast<int>(ctx.staffPitchOffset.size())
                                       ? ctx.staffPitchOffset[si] : 0;
-                // Same rule as the staffData path: a drumset staff keeps its percussion clef
-                // whatever the entry says. A file can write a drum part on an ordinary staff with
-                // an ordinary clef, but once the part carries a drum map the vertical position of
-                // a note is an instrument and not a pitch, and a G clef there says otherwise.
+                // A drumset staff keeps its percussion clef whatever the entry says: once the part carries a drum map
+                // a note's vertical position is an instrument, and a G clef there says otherwise.
                 const Staff* st = score->staff(static_cast<staff_idx_t>(si));
                 const bool hasDrumset = st && st->part() && st->part()->instrument()
                                         && st->part()->instrument()->drumset();
@@ -260,10 +255,8 @@ void buildInitialSignatures(BuildCtx& ctx)
         }
     }
 
-    // Files without per-staff LINE clef data (v0xA6): the initial clef comes from the
-    // instrument template, which does not reflect an octave Key. The note pitches are already
-    // octave-shifted by the Key, so apply the matching octave-decorated clef to bring the
-    // display back to the written octave, mirroring what pickStaffClef does for v0xC4.
+    // Without per-staff clef data the clef comes from the template, which knows nothing of an octave key,
+    // while the pitches are already shifted; so decorate the clef to bring the display back.
     const bool haveLineClefs = !enc.lines.empty()
                                && (!enc.lines[0].staffData.empty() || !enc.lines[0].staffClefs.empty());
     if (!haveLineClefs) {

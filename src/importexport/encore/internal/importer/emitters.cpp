@@ -179,10 +179,8 @@ static bool hasPitchedNotes(const EncMeasure& m)
     return false;
 }
 
-// The number of empty measures Encore collapsed into this block (its REST mrestCount), or 0 when the
-// block is not an empty multi-measure rest. The block may carry companion elements on the empty span
-// (a key change, a clef); only pitched notes/chords disqualify it. Consecutive empty groups are
-// genuinely separate blocks with their own counts, so each expands independently (no anti-cascade).
+// Empty measures Encore collapsed into this block, or 0. Companion elements on the span are allowed;
+// only pitched notes disqualify it.
 static int measMultiRestCount(const EncMeasure& m)
 {
     int maxMrest = 0;
@@ -354,7 +352,8 @@ std::optional<RoutedTrack> routeElementStaffVoice(
     int staffIdx = static_cast<int>(e->staffIdx);
     int voice    = static_cast<int>(e->voice);
 
-    // Translate rawStaff byte (staffWithin<<6)|instrIdx to LINE slot; apply case-B voice remap when origStaffWithin > 0.
+    // Translate rawStaff byte (staffWithin<<6)|instrIdx to LINE slot; apply case-B voice remap when origStaffWithin >
+    // 0.
     const quint8 rawNoteStaff = e->rawStaffByte();
     const int origStaffWithin  = static_cast<int>(e->staffWithin);
     bool rawByteResolved = false;
@@ -376,10 +375,8 @@ std::optional<RoutedTrack> routeElementStaffVoice(
         ++ctx.scratch.droppedByMissingStaff[staffIdx];
         return std::nullopt;
     }
-    // Multi-staff routing:
-    // (A) voice == VOICES (the canonical staff-2 / silent-voice marker): route to staffIdx+1, voice=0.
-    // (A') voice > VOICES (5..7): a genuine extra voice on the SAME staff, mapped into 0..3.
-    // (B) staffWithin > 0: route to staffIdx+sw, remap voice down by sw*(VOICES/2).
+    // Routing, per ENCORE_IMPORTER.md 5.1: voice == VOICES marks the second staff, above that is a real
+    // extra voice on the same staff, and staffWithin shifts both.
     if (voice == static_cast<int>(VOICES)) {
         bool routedToSecondStaff = false;
         bool singleStaffInstr = false;
@@ -395,10 +392,8 @@ std::optional<RoutedTrack> routeElementStaffVoice(
                 }
             }
         }
-        // Grand-staff: voice 4 is the second staff's silent voice -> voice 0 there. On a single-staff
-        // instrument whose voice 0 already has a line, voice 4 is a genuine second melodic voice ->
-        // MuseScore voice 1 (kept separate; mergeNonOverlappingVoices may fold it back). If voice 0
-        // is empty (an SATB line stored only as voice 4), keep it on voice 0.
+        // Voice 4 is the second staff's silent voice, except on a single-staff instrument whose voice 0
+        // already has a line, where it is a real second voice. See ENCORE_IMPORTER.md 5.1.
         const bool hasOwnVoice0 = mc.stavesWithRealNote.count(static_cast<int>(e->staffIdx)) > 0;
         voice = (singleStaffInstr && !routedToSecondStaff && hasOwnVoice0) ? 1 : 0;
     } else if (voice > static_cast<int>(VOICES)) {
@@ -815,7 +810,8 @@ static void flushPendingKeySigs(MasterScore* score, Measure* measure, Fraction m
 static void prepareMeasureContext(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasure& encMeas,
                                   MeasureElemRefVec& sortedElems)
 {
-    // Sort: tick asc, ORNs before notes, tuplet notes before non-tuplet (ensures tup note sets duration at shared tick).
+    // Sort: tick asc, ORNs before notes, tuplet notes before non-tuplet (ensures tup note sets duration at shared
+    // tick).
     sortMeasureElements(encMeas, sortedElems);
     // Collect TIE-START positions using routed (staffIdx, voice) so bit6-encoded second-staff notes resolve correctly.
     collectTieStartPositions(sortedElems, *mc.lineSlotByRawByte, ctx.totalStaves, mc);
@@ -840,10 +836,8 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
     const EncElemType et = static_cast<EncElemType>(e->type);
     const bool isNoteOrRest = (et == EncElemType::NOTE || et == EncElemType::REST);
 
-    // Let notes/rests past durTicks through for every overfill strategy so an
-    // overshooting tuplet's later members still arrive; non-tuplet overflow is
-    // re-dropped below (the "voice full" guard), and the post-pass resolves the
-    // rest. (Only note/rest are let through; other element gating is unchanged.)
+    // Content past the measure length is let through so an overshooting tuplet keeps its later members;
+    // the post-pass resolves the rest.
     if (!shouldIncludeElement(e, encMeas) && !isNoteOrRest) {
         return;
     }
@@ -859,6 +853,13 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
     const std::pair<int, int> trackKey = routed->trackKey;
     const std::pair<int, int> encVoiceKey = routed->encVoiceKey;
 
+    // A tab staff's fingering keeps its string and fret until the staff is linked to the notation
+    // staff that carries the notes; the element itself stays the rest it is.
+    if (const auto* tabRest = dynamic_cast<const EncRest*>(e); tabRest && tabRest->isTabFingering) {
+        ctx.pendingTabFingerings.push_back({ staffIdx, mc.measIdx, static_cast<int>(e->tick),
+                                             tabRest->tabString, tabRest->tabFret });
+    }
+
     // Encore's "voice 4" is a silent-voice placeholder that routing folds into voice 0. A voice-4
     // rest on a staff that already carries a real note is redundant: merged into voice 0 it collides
     // with the notes and pushes content past the barline. Drop it here.
@@ -869,24 +870,27 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
 
     // Near-simultaneous notes (< CHORD_MIDI_THRESHOLD) extend the chord; same Encore voice required.
     constexpr int CHORD_MIDI_THRESHOLD = 2 * CHORD_CLUSTER_THRESHOLD;  // = 8
-    // Two notes close in time but in different notated columns (xoffset) are sequential events, not
-    // one chord: a chord's members share a column (a few pixels of notehead offset at most), so only
-    // a gap >= COLUMN_SEPARATION_MIN marks a genuine column change. Only for formats that store the
-    // column (see EncFormatReader::clustersChordsByXoffset).
-    constexpr int COLUMN_SEPARATION_MIN = 8;
+    // Where the format stores a column, an equal column is one chord however far apart the ticks are, and
+    // different columns are sequential even a pixel apart. The exception is a shared tick, where a
+    // notehead nudged aside still reads as one chord. See ENCORE_FORMAT.md 7.7.
+    constexpr int NOTEHEAD_NUDGE_MAX = 8;
     const bool columnAware = ctx.enc.fmt && ctx.enc.fmt->clustersChordsByXoffset();
-    const bool differentColumn = columnAware && e->xoffset != 0
-                                 && ctx.scratch.prevXoffset.count(trackKey)
-                                 && ctx.scratch.prevXoffset.at(trackKey) != 0
-                                 && std::abs(ctx.scratch.prevXoffset.at(trackKey) - static_cast<int>(e->xoffset))
-                                 >= COLUMN_SEPARATION_MIN;
-    bool isChordExt = isNoteOrRest && !differentColumn
+    const bool haveColumns = columnAware && e->xoffset != 0
+                             && ctx.scratch.prevXoffset.count(trackKey)
+                             && ctx.scratch.prevXoffset.at(trackKey) != 0;
+    const int columnGap = haveColumns
+                          ? std::abs(ctx.scratch.prevXoffset.at(trackKey) - static_cast<int>(e->xoffset))
+                          : 0;
+    const int chordTickGap = ctx.scratch.prevMidiTick.count(trackKey)
+                             ? (int)e->tick - (int)ctx.scratch.prevMidiTick.at(trackKey) : -1;
+    bool isChordExt = isNoteOrRest
                       && ctx.scratch.prevMidiTick.count(trackKey)
                       && ctx.scratch.prevEncVoice.count(trackKey)
                       && ctx.scratch.prevEncVoice.at(trackKey) == voice
-                      && (int)e->tick - (int)ctx.scratch.prevMidiTick.at(trackKey) >= 0
-                      && (int)e->tick - (int)ctx.scratch.prevMidiTick.at(trackKey)
-                      < CHORD_MIDI_THRESHOLD;
+                      && chordTickGap >= 0
+                      && chordTickGap < CHORD_MIDI_THRESHOLD
+                      && (!haveColumns || columnGap == 0
+                          || (chordTickGap == 0 && columnGap < NOTEHEAD_NUDGE_MAX));
     // REST-REST dedup: two Encore voices routing to the same MuseScore voice at the same tick; the
     // second REST would double-advance cumTick.
     if (!isChordExt && et == EncElemType::REST
@@ -894,9 +898,13 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
         && ctx.scratch.prevRestTick.at(trackKey) == static_cast<int>(e->tick)) {
         return;
     }
-    // A REST before its voice's already-filled position is redundant (a chord or earlier rest covers
-    // that beat); placing it would push later content forward and inflate the bar. Drop it.
-    if (!isChordExt && et == EncElemType::REST
+    // A rest before its voice's filled position would push later content forward, so drop it, unless a
+    // tuplet is open or this rest opens a bracket: a member's stored tick can sit before the exact one.
+    // See ENCORE_IMPORTER.md 5.3.
+    const bool voiceInTuplet = ctx.scratch.tuplets.count(trackKey)
+                               && ctx.scratch.tuplets.at(trackKey).inTuplet();
+    const bool bracketMember = mc.validTupletGroupMember.count(e) > 0;
+    if (!isChordExt && et == EncElemType::REST && !voiceInTuplet && !bracketMember
         && ctx.scratch.cumTick.count(trackKey)
         && Fraction(static_cast<int>(e->tick), kEncWholeTicks) < ctx.scratch.cumTick.at(trackKey)) {
         return;
@@ -910,14 +918,11 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
         return;
     }
 
-    // Drop overflow notes when the voice is full (MIDI artifacts must not spill to the next voice),
-    // but only under Truncate: the other strategies keep them for the post-pass to resolve. An open
-    // tuplet is never dropped here so the whole tuplet lands intact. See ENCORE_IMPORTER.md
-    // §Overfull measures.
-    const bool inOpenTuplet = ctx.scratch.tuplets.count(trackKey) && ctx.scratch.tuplets.at(trackKey).inTuplet();
+    // Under Truncate only: the other strategies keep the overflow for the post-pass, and an open tuplet
+    // is never cut here. See ENCORE_IMPORTER.md 4.5.
     if (isNoteOrRest && !isChordExt && ctx.scratch.cumTick[trackKey] >= measure->ticks()
         && ctx.opts.overfillMeasureStrategy == OverfillStrategy::Truncate
-        && !inOpenTuplet) {
+        && !voiceInTuplet) {
         return;
     }
 
@@ -962,6 +967,15 @@ static void emitMeasureElement(BuildCtx& ctx, MeasEmitCtx& mc, const EncMeasureE
         break;
     case EncElemType::CLEF:     handleClefChange(ctx, mc, ec, e);
         break;
+    case EncElemType::MIDI_CC: {
+        // Playback only, and dropped as such, except the pitch wheel: it is where a bend states how
+        // far it goes and in which direction, which the mark itself never says.
+        const auto* cc = static_cast<const EncMidiCc*>(e);
+        if (cc->isPitchWheel()) {
+            ctx.wheelByMeasStaff[{ mc.measIdx, staffIdx }].push_back({ static_cast<int>(e->tick), cc->wheel() });
+        }
+        break;
+    }
     default: break;
     }
 }
@@ -986,7 +1000,8 @@ void emitMeasures(BuildCtx& ctx)
         }
     }
 
-    // Slurs resolved after the pass: .enc has no SLURSTOP; end anchored at last ChordRest in the alMezuro target measure.
+    // Slurs resolved after the pass: .enc has no SLURSTOP; end anchored at last ChordRest in the alMezuro target
+    // measure.
 
     std::vector<DeferredKeySig> pendingKeySigs;
 

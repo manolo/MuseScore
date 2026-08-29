@@ -105,18 +105,14 @@ bool isValidFaceValue(quint8 faceValue)
 
 void applyConcertPitch(Note* n, int semitone)
 {
-    // A transposed or garbage Encore semitone can land outside MIDI's [0,127]. Note::setPitch
-    // only asserts the range (no clamp), and downstream drumset lookups index a 128-entry table
-    // by pitch, so an out-of-range value is undefined behaviour. Clamp once, here, at the single
-    // choke point both the main and grace note paths go through.
+    // Note::setPitch only asserts the range, and drumset lookups index a 128-entry table by pitch, so
+    // clamp once here, where both the main and the grace path pass.
     n->setPitch(std::clamp(semitone, 0, 127));
     n->setTpcFromPitch();
 }
 
-// score->spell() re-spells the whole score with a context heuristic that can spell transposed
-// pitches with double-flats instead of the plain note the key wants. Re-derive the TPC of notes on
-// transposing staves from pitch + concert key + transposition (pitch unchanged); leave others as is.
-// TODO: format-agnostic, reads no Encore data; candidate to promote to a shared importexport util.
+// score->spell() can spell a transposed pitch with double flats, so re-derive the TPC on transposing
+// staves from pitch, concert key and transposition. Format agnostic: could move to a shared util.
 static void respellTransposingStaves(MasterScore* score)
 {
     for (MeasureBase* mb = score->first(); mb; mb = mb->next()) {
@@ -163,11 +159,8 @@ static void applyStaffScale(MasterScore* score, const EncRoot& enc)
     }
 }
 
-// Collapse a staff's voices back into voice 1 when they never sound at the same time (the
-// engraving equivalent of "move to voice 1" + Tools > Implode). All-or-nothing per staff:
-// a staff is collapsible only if every voice fits into voice 1 with no timing change (notes may
-// merge into a chord only at identical onset+duration), so the music is never altered.
-// TODO: format-agnostic, reads no Encore data; candidate to promote to a shared importexport util.
+// Collapse a staff's voices into voice 1 when they never sound together. All or nothing per staff, so
+// the music is never altered; see ENCORE_IMPORTER.md 5.4.
 static void mergeNonOverlappingVoices(MasterScore* score)
 {
     // Pass 1: find the staves that carry notes in more than voice 0 and whose voices
@@ -220,17 +213,12 @@ static void mergeNonOverlappingVoices(MasterScore* score)
         return;
     }
 
-    // Pass 2: collapse each candidate staff. No undo transaction is opened, so the
-    // editing commands below execute immediately and free themselves (see
-    // UndoStack::pushAndPerform); the surrounding ScoreLoad keeps that path quiet.
-    // (May be empty; the stale-rest cleanup below still runs.)
+    // No undo transaction is opened, so the commands below execute and free themselves.
     for (staff_idx_t si : candidates) {
         const track_idx_t base = si * VOICES;
 
-        // The voice change below rebuilds the destination chord from scratch; it carries
-        // articulations, lyrics and slurs across but not a single-chord tremolo, so a
-        // tremolo on a moved upper-voice chord would be lost. Snapshot every tremolo on
-        // the staff (keyed by onset tick) and re-attach it after the collapse.
+        // The voice change rebuilds the destination chord and carries everything across except a
+        // single-chord tremolo, so snapshot those by tick and re-attach them after.
         std::map<int, TremoloType> tremolosByTick;
         for (Measure* m = first; m; m = m->nextMeasure()) {
             for (Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
@@ -283,10 +271,8 @@ static void mergeNonOverlappingVoices(MasterScore* score)
         }
     }
 
-    // Final pass: drop redundant upper-voice rests. An upper voice (index >= 1) holding only rests
-    // in a measure is not a real second voice (voice 0 already fills the bar after the collapse);
-    // it would show as a spurious extra voice and can inflate the measure length. An upper voice
-    // still carrying a chord is a genuine overlapping voice and is left untouched.
+    // An upper voice holding only rests is not a second voice once voice 0 fills the bar: it shows as a
+    // spurious extra voice and can inflate the measure. One still holding a chord is genuine.
     for (staff_idx_t si = 0; si < score->nstaves(); ++si) {
         const track_idx_t base = si * VOICES;
         std::vector<Rest*> staleRests;
@@ -350,10 +336,8 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     score->style().set(Sid::tupletVHeadDistance,   0.0);
     score->style().set(Sid::tupletVStemDistance,   0.0);
 
-    // Encore does not stretch systems and staves to fill the page: it lays them out at fixed
-    // distances from the top. Keep vertical justification enabled but allow it no extra room
-    // (max system/staff spread = 0), so the imported spacing matches Encore instead of being
-    // spread to fill the page.
+    // Encore lays systems out at fixed distances from the top, so justification stays enabled with no
+    // room to spread and the imported spacing survives.
     score->style().set(Sid::enableVerticalSpread, true);
     score->style().set(Sid::maxSystemSpread,      Spatium(0.0));
     score->style().set(Sid::maxStaffSpread,       Spatium(0.0));
@@ -363,11 +347,17 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     buildMeasures(ctx);
     buildInitialSignatures(ctx);
     emitMeasures(ctx);
+    guaranteeAllMeasures(ctx);
 
     applyPageSetup(ctx);
     if (ctx.opts.importStaffSize) {
         applyStaffScale(score, enc);
     }
+
+    // The passes that fit each bar to its signature can change a measure's length, which leaves the
+    // score's tick map describing the lengths they had before. Everything below resolves elements by
+    // tick, and a stale map answers with the measure before the one meant: rebuild it first.
+    score->setUpTempoMap();   // 4.7 name for the tick and time signature rebuild
 
     resolveAll(ctx);
 
@@ -378,10 +368,8 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     score->spell();
     respellTransposingStaves(score);
     addTitleFrame(score, enc.titleBlock);
-    // Assign MIDI ports/channels to every part. The file read path does this on load,
-    // but a direct import builds the score in memory without it, leaving each channel
-    // at -1; that makes Part::midiPort() index m_midiMapping[-1] and crash on a
-    // straight-to-MusicXML export.
+    // The file read path does this on load; a direct import leaves every channel at -1, which makes
+    // Part::midiPort() index the mapping at -1 and crash on a straight-to-MusicXML export.
     score->rebuildMidiMapping();
     score->setUpTempoMap();
     score->doLayout();
@@ -395,11 +383,9 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     // default staff space; shrink it just enough (<= 0.022 inch) to pull that system back.
     fitFirstPageStaffSpace(ctx);
 
-    // doLayout computes and caches the repeat list; at that point voltas may not yet be
-    // anchored, so the cached expansion ignores 1st/2nd endings and replays the 1st
-    // ending on every pass. The file read path invalidates the repeat list after load
-    // for the same reason; do the same here so playback right after import is correct.
-    score->masterScore()->setPlaylistDirty();
+    // doLayout caches the repeat list before the voltas are anchored, so the cached expansion replays
+    // the first ending on every pass.
+    score->masterScore()->setPlaylistDirty();   // 4.7 way of dropping the cached repeat list
 }
 
 // What to tell the user about a file that failed to load, from its header alone. Encore's two

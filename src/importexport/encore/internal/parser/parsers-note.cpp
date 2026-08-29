@@ -57,7 +57,6 @@ bool EncNote::read(QDataStream& ds)
     // layout into this one read. See ENCORE_FORMAT.md §6.3 Note.
     ds.skipRawData(2 + bodyShift);
     ds >> xoffset;
-    ds.skipRawData(1);
     ds >> position >> tuplet >> dotControl >> semiTonePitch >> playbackDurTicks;
     ds.skipRawData(1);
     ds >> velocity >> options >> alterationGlyph;
@@ -85,7 +84,11 @@ bool EncRest::read(QDataStream& ds)
     ds >> faceValue;
     ds.skipRawData(4 + bodyShift);
     ds >> xoffset;
-    ds.skipRawData(2);
+    if (isTabFingering) {
+        ds >> tabString >> tabFret;   // element +12 and +13; +15 holds the written pitch
+        return true;
+    }
+    ds.skipRawData(1);
     ds >> tuplet >> dotControl;
     if (static_cast<int>(size) > 15 + bodyShift) {
         ds >> mrestCount;   // multi-measure rest count at element offset +15
@@ -124,7 +127,8 @@ bool EncMidiCc::read(QDataStream& ds)
     // Controller/value only exist in the full 12-byte element; a short/garbage one stays aligned
     // (the measure loop reseeks past it) with controller/value left at 0.
     if (static_cast<int>(size) >= 12 + bodyShift) {
-        ds.skipRawData(5 + bodyShift);
+        ds >> status;
+        ds.skipRawData(4 + bodyShift);
         ds >> controller >> value;
     }
     return true;

@@ -38,11 +38,8 @@ void resolveVoltas(BuildCtx& ctx)
 
     MasterScore* score = ctx.score;
 
-    // A bracket is built while its first measure is emitted, with the ticks the measures had then.
-    // Measures still change length after that (a pickup is shortened, an irregular measure is
-    // stretched to its content), and every later tick moves with them, so a bracket left on its
-    // original ticks drifts off the bars and can end past the last measure. Reading the ticks off
-    // the measures now, when no measure can change again, keeps the bracket where Encore put it.
+    // Measures still change length after a bracket is built, and every later tick moves with them, so the
+    // ticks are read off the measures now, when none can change again.
     std::vector<Volta*> toRemove;
     for (const PendingVolta& pv : ctx.pendingVoltas) {
         if (!pv.volta) {

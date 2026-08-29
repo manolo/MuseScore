@@ -28,8 +28,8 @@
 #include <QString>
 
 namespace mu::iex::enc {
-// Returns true if b0/b1 look like the first two bytes of a UTF-16 LE string:
-// b0 is a printable ASCII byte and b1 is zero (BMP character in 0x0020..0x007E range).
+// Returns true if b0/b1 look like the first two bytes of a UTF-16 LE string: b0 is a text byte,
+// printable ASCII or a Latin-1 letter or symbol, and b1 is zero. See ENCORE_FORMAT.md 7.8.
 bool probeUtf16LE(quint8 b0, quint8 b1);
 
 // Reads a null-terminated string from ds, auto-detecting UTF-16 LE vs Latin-1 from the

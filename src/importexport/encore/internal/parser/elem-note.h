@@ -48,7 +48,7 @@ struct EncMeasureElem {
     quint8 size  { 0 };
     quint8 staffIdx    { 0 };   // low 6 bits of raw staff byte: staff index in system
     quint8 staffWithin { 0 };   // high 2 bits (>> 6): staff index within instrument (0=first, 1=second, ...)
-    quint8 xoffset  { 0 };
+    qint16 xoffset  { 0 };   // column, signed: a wide measure runs past a byte
     qint16 realDuration { -1 };
     // Bytes to add to every body field from offset +8 onward, from EncFormatReader::elementBodyShift().
     // -2 for files older than format 3.07, 0 otherwise. Set before read(); see parsers-measure.cpp.
@@ -67,8 +67,12 @@ struct EncMeasureElem {
     virtual quint8 faceValueByte() const { return 0; }
     virtual bool impliedTupletMember() const { return false; }
 
+    // Raw layout byte carrying the dot count in its low two bits; 0 for elements without one.
+    virtual quint8 dotControlByte() const { return 0; }
     // The written duration, as a face value nibble; 0 for elements that carry none.
     quint8 faceValue4() const { return faceValueByte() & 0x0F; }
+    // Dots the element is drawn with, which are part of its written value, not a decoration.
+    quint8 dotCount() const { return dotControlByte() & 0x03; }
     // True when the element carries an explicit tuplet ratio, actual against normal.
     bool inTuplet() const { return (tupletByte() >> 4) >= 2 && (tupletByte() & 0x0F) >= 1; }
 
@@ -119,6 +123,7 @@ struct EncNote : EncMeasureElem {
 
     quint8 tupletByte() const override { return tuplet; }
     quint8 faceValueByte() const override { return faceValue; }
+    quint8 dotControlByte() const override { return dotControl; }
     bool impliedTupletMember() const override { return isImpliedTupletMember; }
     int actualNotes() const { return tuplet >> 4; }
     int normalNotes() const { return tuplet & 0x0F; }
@@ -142,11 +147,18 @@ struct EncRest : EncMeasureElem {
     quint8 mrestCount { 1 };
     // Set by calculateRealDurations() Phase 4 for v0xC2 (same semantics as EncNote::isImpliedTupletMember).
     bool isImpliedTupletMember { false };
+    // A tab staff writes its fingering as a rest (voice bit 0x8): the string and the fret take the
+    // slots a plain rest uses for the tuplet ratio and the multi-measure count, so neither is read
+    // for one of these. See ENCORE_FORMAT.md 6.4 Rest.
+    bool isTabFingering { false };
+    quint8 tabString  { 0 };
+    quint8 tabFret    { 0 };
 
     using EncMeasureElem::EncMeasureElem;
 
     quint8 tupletByte() const override { return tuplet; }
     quint8 faceValueByte() const override { return faceValue; }
+    quint8 dotControlByte() const override { return dotControl; }
     bool impliedTupletMember() const override { return isImpliedTupletMember; }
     int actualNotes() const { return tuplet >> 4; }
     int normalNotes() const { return tuplet & 0x0F; }
@@ -184,8 +196,13 @@ struct EncGenericElem : EncMeasureElem {
 struct EncMidiCc : EncMeasureElem {
     using EncMeasureElem::EncMeasureElem;
 
-    quint8 controller { 0 };   // 64=sustain pedal, 7=volume, 1=modulation
-    quint8 value      { 0 };   // 127=max/on, 0=off
+    quint8 status     { 0 };   // 0xB0 control change, 0xE0 pitch wheel
+    quint8 controller { 0 };   // 64=sustain pedal, 7=volume, 1=modulation; wheel LSB when status is 0xE0
+    quint8 value      { 0 };   // 127=max/on, 0=off; wheel MSB when status is 0xE0
+
+    bool isPitchWheel() const { return (status & 0xF0) == 0xE0; }
+    // Signed wheel position, zero at rest, the two bytes being the usual MIDI LSB and MSB.
+    int wheel() const { return ((static_cast<int>(value) << 7) | controller) - 8192; }
 
     bool read(QDataStream& ds) override;
 };

@@ -27,6 +27,7 @@
 #include "../parser/ticks.h"
 #include "durations.h"
 #include "engraving/dom/factory.h"
+#include "engraving/dom/measure.h"
 #include "engraving/dom/rest.h"
 #include "engraving/dom/segment.h"
 #include "engraving/dom/tuplet.h"
@@ -99,6 +100,13 @@ void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         if (actualNr == 0 && (er->faceValue & 0x0F) >= 4 && impliedGroupMember.count(e)) {
             actualNr = detectImpliedTuplet(er->realDuration, er->faceValue, normalNr);
         }
+        // Sandwich orphan, as in the note path: a rest whose tuplet byte is missing but which the
+        // group scan validated as a member joins the open bracket with its ratio. Encore leaves the
+        // byte off some members, and a rest dropped from the bracket leaves the group a member short.
+        if (actualNr == 0 && tt.inTuplet() && !tt.groupFull() && validTupletGroupMember.count(e)) {
+            actualNr = tt.actualN;
+            normalNr = tt.normalN;
+        }
         if (actualNr > 0 && normalNr > 0) {
             if (tt.groupFull()) {
                 closeTupletWithFill(tt, trackKey);
@@ -123,7 +131,7 @@ void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
             rest->setTuplet(tt.currentTuplet);
             tt.currentTuplet->add(rest);
 
-            tt.faceTicks += TDuration(dt).fraction();
+            tt.faceTicks += dottedAdvance(dt, dots);
         } else {
             if (tt.groupFull()) {
                 closeTupletWithFill(tt, trackKey);
@@ -136,7 +144,7 @@ void handleRest(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         // When capped, also update the rest's ticks so actualTicks() matches the cumTick advance
         // (avoids sanityCheck overshoot).
         Fraction advance = tt.inTuplet()
-                           ? TDuration(dt).fraction() * Fraction(tt.normalN, tt.actualN)
+                           ? dottedAdvance(dt, dots) * Fraction(tt.normalN, tt.actualN)
                            : dottedAdvance(dt, dots);
         // Mirror the note path (advanceCumulativeTick): never cut a tuplet member here (a tuplet is
         // atomic, resolved whole in fitOverfullMeasure) and skip the cap for IrregularMeasure so

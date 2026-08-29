@@ -27,7 +27,11 @@
 namespace mu::iex::enc {
 bool probeUtf16LE(quint8 b0, quint8 b1)
 {
-    return b0 >= 0x20 && b0 < 0x7F && b1 == 0x00;
+    // Accented letters are text too, and so are the line breaks a text can open with: Encore writes
+    // them as CR, LF or its own separator. The rest of the Latin-1 control range is not text.
+    const bool lineBreak = b0 == 0x04 || b0 == 0x0A || b0 == 0x0D;
+    const bool textByte = lineBreak || (b0 >= 0x20 && b0 < 0x7F) || b0 >= 0xA0;
+    return textByte && b1 == 0x00;
 }
 
 QString readEncodedStringRemaining(QDataStream& ds, int& remaining)

@@ -111,7 +111,9 @@ static void handleStaffTextOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
         return;
     }
     QString text = enc.textBlock.entries[textIdx];
-    if (text.isEmpty()) {
+    // A comment of blank lines, which older files store as a run of CR and LF, is not a mark and
+    // must not become an element that draws nothing.
+    if (text.trimmed().isEmpty()) {
         return;
     }
     Fraction placeTick = elemTick;
@@ -175,11 +177,8 @@ static void handleTempoOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
         }
         // Use nominal timesig so a pickup measure inherits the main sig's beat classification.
         const bool cmpd = isCompoundBeat(encMeas.beatTicks, measure->timesig());
-        // The MEAS header BPM is the authoritative tempo position (applyMeasureBpmMarks places a
-        // TempoText at the measure start, which registers in the tempo map). The ORN TEMPO is only
-        // a visual mark whose stored tick is often off (end of a measure, or a system early). So
-        // suppress the ORN whenever a header BPM equals it, and keep the ORN only when NO header
-        // BPM matches (a genuine standalone mark).
+        // The header BPM is the tempo position that counts; the ORN tempo is a visual mark whose tick is
+        // often off by a measure or a system, so keep it only when no header BPM matches it.
         if (static_cast<quint16>(eo->tempo) == encMeas.bpm) {
             return;  // redundant with this measure's header
         }
@@ -203,10 +202,8 @@ static void handleTempoOrnament(BuildCtx& ctx, const MeasEmitCtx& mc,
         TempoText* tt2 = Factory::createTempoText(seg);
         tt2->setTrack(track);
 
-        // The tempo value is expressed in the mark's beat unit. Prefer the unit Encore stored
-        // explicitly on the mark (`noto`); a compound meter is often beaten in dotted quarters,
-        // but the composer may pick a plain quarter (e.g. quarter=198 in 6/8), and only `noto`
-        // records that choice. Fall back to the meter heuristic when `noto` is unset.
+        // The value is in the mark's own beat unit, which only the stored unit records: a compound meter is
+        // usually beaten in dotted quarters but the composer may pick a plain one.
         const int notoTicks = notoToBeatTicks(eo->noto);
         const int displayBeatTicks = notoTicks ? notoTicks : (cmpd ? 360 : 240);
         const double beatInQuarters = displayBeatTicks / 240.0;
@@ -436,10 +433,9 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
 
     // Register a bowing/articulation ORN in pendingBowings.
     auto pushBowing = [&](SymId sid) {
-        // A mark travels to the next measure only in the grand-staff case: Encore stores the second
-        // staff's marks at the end of the previous measure's block, at the last voice-0 tick. Outside
-        // that, a tick with no note is where a note ENDS, and the mark belongs to that note, which the
-        // resolver walks back to. Reading every such tick as cross-measure emptied the bar instead.
+        // A mark travels to the next measure only for a grand staff, where Encore stores the second staff's
+        // marks at the end of the previous block. Elsewhere a tick with no note is where a note ends, and the
+        // mark belongs to that note.
         const bool cm = !mc.voice4NoteTicks.empty()
                         && !mc.voice4NoteTicks.count(static_cast<int>(e->tick))
                         && static_cast<int>(e->tick) == mc.maxVoice0Tick;
@@ -473,9 +469,8 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         ps.endMeasIdx = endIdx;
         ps.alMezuro = static_cast<int>(eo->alMezuro);
         ps.alMezuroValid = eo->alMezuroValid;
-        // xoffset is a pixel position that wraps at 256; cast to quint8 to get the true positive value.
-        ps.slurXoffset  = static_cast<int>(static_cast<quint8>(eo->xoffset));
-        ps.slurXoffset2 = static_cast<int>(eo->xoffset2);  // already quint8
+        ps.slurXoffset  = static_cast<int>(eo->xoffset);
+        ps.slurXoffset2 = static_cast<int>(eo->xoffset2);
         ps.staffIdx = staffIdx;
         ps.encVoice = voice;
         ctx.pendingSlurs.push_back(ps);
@@ -574,17 +569,33 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         break;
     case EncOrnamentType::TENUTO:               pushBowing(SymId::articTenutoAbove);
         break;
+    case EncOrnamentType::VIBRATO: {
+        // The mark rides on the tab staff, whose notes live on the notation staff above it, so the
+        // line has to end up there: the tab is a clone of that staff and inherits it.
+        int noteStaff = staffIdx;
+        if (!mc.stavesWithRealNote.count(noteStaff) && noteStaff > 0
+            && mc.stavesWithRealNote.count(noteStaff - 1)) {
+            --noteStaff;
+        }
+        ctx.pendingVibratos.push_back({ noteStaff, measIdx,
+                                        static_cast<int>(eo->xoffset), static_cast<int>(eo->xoffset2) });
+        break;
+    }
     case EncOrnamentType::GUITAR_BEND:
     case EncOrnamentType::GUITAR_BEND_2:
     case EncOrnamentType::GUITAR_PREBEND:
     case EncOrnamentType::GUITAR_PREBEND_RELEASE:
-    case EncOrnamentType::GUITAR_BEND_V:
-        LOGW() << QString("Encore: guitar bend 0x%1 not yet imported (measure %2 staff %3 tick %4)")
-            .arg(eo->tipo, 2, 16, QChar('0'))
-            .arg(measIdx)
-            .arg(staffIdx)
-            .arg(static_cast<int>(e->tick));
+    case EncOrnamentType::GUITAR_BEND_V: {
+        // Both staves of a guitar pair state the same bend, so this lands twice on one note; the
+        // second is dropped when the mark is built. See ENCORE_FORMAT.md 8.2 note 5.
+        int noteStaff = staffIdx;
+        if (!mc.stavesWithRealNote.count(noteStaff) && noteStaff > 0
+            && mc.stavesWithRealNote.count(noteStaff - 1)) {
+            --noteStaff;
+        }
+        ctx.pendingBends.push_back({ noteStaff, staffIdx, measIdx, static_cast<int>(eo->xoffset), eo->tipo });
         break;
+    }
     case EncOrnamentType::TREMOLO_16: {
         PendingOrnTremolo pt;
         pt.tick = elemTick;

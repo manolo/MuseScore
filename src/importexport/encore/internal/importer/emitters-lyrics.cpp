@@ -22,6 +22,8 @@
 
 // Queue Encore LYRIC elements and attach syllables to the nearest chords in a measure.
 
+#include <algorithm>
+
 #include "emitters-internal.h"
 
 #include "../parser/ticks.h"
@@ -72,15 +74,13 @@ void enqueueLyric(BuildCtx& ctx, const EncLyric* el, track_idx_t track)
     }
 }
 
-// Build the Encore NOTE ticks of each MuseScore staff's voice-0 notes, so lyric matching uses
-// the real Encore tick of each note rather than a cumTick-to-encTick conversion (unreliable: the
-// note loop accumulates durations, not Encore ticks, so the relationship is not proportional).
-// Notes are routed with the SAME logic as the note loop (routeElementStaffVoice); keying by raw
-// encStaff instead put grand-staff notes on the wrong staff and reversed the syllables.
-static std::map<int, std::vector<int> > buildEncNoteTicksByStaff(
+// The real Encore tick and column of each voice-0 note, since the note loop accumulates durations
+// rather than Encore ticks. Routed exactly as the note loop routes, or grand-staff notes land on the
+// wrong staff.
+static std::map<int, std::vector<std::pair<int, int> > > buildEncNoteTicksByStaff(
     BuildCtx& ctx, const MeasEmitCtx& mc, const EncMeasure& encMeas)
 {
-    std::map<int, std::vector<int> > encNoteTicksByStaff;
+    std::map<int, std::vector<std::pair<int, int> > > encNoteTicksByStaff;   // staff -> [(tick, column)]
     for (const auto& elem : encMeas.elements) {
         const EncMeasureElem* e = elem.get();
         if (e->type != static_cast<quint8>(EncElemType::NOTE)) {
@@ -96,8 +96,8 @@ static std::map<int, std::vector<int> > buildEncNoteTicksByStaff(
         }
         auto& tickList = encNoteTicksByStaff[routed->staffIdx];
         const int t = static_cast<int>(e->tick);
-        if (tickList.empty() || tickList.back() != t) {
-            tickList.push_back(t);
+        if (tickList.empty() || tickList.back().first != t) {
+            tickList.emplace_back(t, static_cast<int>(static_cast<const EncNote*>(e)->xoffset));
         }
     }
     return encNoteTicksByStaff;
@@ -106,11 +106,17 @@ static std::map<int, std::vector<int> > buildEncNoteTicksByStaff(
 // Pair each ChordRest on chordTrack with an Encore tick. The kth chord takes the kth Encore note
 // tick (positional assignment), which is more accurate than a cumTick conversion (see
 // buildEncNoteTicksByStaff); rests do not consume a note tick.
-static std::vector<std::pair<int, ChordRest*> > buildCrTickPairs(
+struct CrAnchor {
+    int encTick = 0;
+    int column = 0;         // where the note is written; zero when unknown, as in format 2.50
+    ChordRest* cr = nullptr;
+};
+
+static std::vector<CrAnchor> buildCrTickPairs(
     Measure* measure, const Fraction& measTick, const EncMeasure& encMeas,
-    track_idx_t chordTrack, const std::vector<int>* noteTickList)
+    track_idx_t chordTrack, const std::vector<std::pair<int, int> >* noteTickList)
 {
-    std::vector<std::pair<int, ChordRest*> > crTickPairs;
+    std::vector<CrAnchor> crTickPairs;
     size_t noteTickIdx = 0;
     for (Segment* s = measure->first(SegmentType::ChordRest);
          s; s = s->next(SegmentType::ChordRest)) {
@@ -119,9 +125,12 @@ static std::vector<std::pair<int, ChordRest*> > buildCrTickPairs(
             continue;
         }
         int segEncTick;
+        int segColumn = 0;
         ChordRest* cr = toChordRest(el);
         if (cr->isChord() && noteTickList && noteTickIdx < noteTickList->size()) {
-            segEncTick = (*noteTickList)[noteTickIdx++];
+            segEncTick = (*noteTickList)[noteTickIdx].first;
+            segColumn = (*noteTickList)[noteTickIdx].second;
+            ++noteTickIdx;
         } else {
             // Rest, or note list exhausted: estimate from the measure's beat grid.
             const Fraction relTick = s->tick() - measTick;
@@ -129,17 +138,14 @@ static std::vector<std::pair<int, ChordRest*> > buildCrTickPairs(
             segEncTick = (relTick.numerator() * durTicks)
                          / std::max(1, relTick.denominator());
         }
-        crTickPairs.emplace_back(segEncTick, cr);
+        crTickPairs.push_back({ segEncTick, segColumn, cr });
     }
     return crTickPairs;
 }
 
-// Find the index of the best unconsumed ChordRest for a lyric at encTick.
-// wantChord selects chords (true) or rests (false); maxDelta caps the distance.
-// When preferNotAfter is set, notes at/before encTick win over later notes regardless of
-// distance, and ties break to the closest (the threshold pass); otherwise the closest by
-// absolute distance wins (the rest/last-resort fallback passes).
-static int findBestCr(const std::vector<std::pair<int, ChordRest*> >& pairs,
+// Best unconsumed ChordRest for a lyric at encTick. preferNotAfter makes a note at or before the tick
+// win over a later one whatever the distance, which is the threshold pass; otherwise nearest wins.
+static int findBestCr(const std::vector<CrAnchor>& pairs,
                       const std::vector<bool>& consumed, int encTick,
                       bool wantChord, int maxDelta, bool preferNotAfter)
 {
@@ -150,15 +156,15 @@ static int findBestCr(const std::vector<std::pair<int, ChordRest*> >& pairs,
         if (consumed[ni]) {
             continue;
         }
-        const bool ok = wantChord ? pairs[ni].second->isChord() : pairs[ni].second->isRest();
+        const bool ok = wantChord ? pairs[ni].cr->isChord() : pairs[ni].cr->isRest();
         if (!ok) {
             continue;
         }
-        const int delta = std::abs(pairs[ni].first - encTick);
+        const int delta = std::abs(pairs[ni].encTick - encTick);
         if (delta > maxDelta) {
             continue;
         }
-        const bool isAfter = (pairs[ni].first > encTick);
+        const bool isAfter = (pairs[ni].encTick > encTick);
         if (bestIdx < 0
             || (preferNotAfter && !isAfter && bestIsAfter)
             || ((!preferNotAfter || isAfter == bestIsAfter) && delta < bestDelta)) {
@@ -170,6 +176,37 @@ static int findBestCr(const std::vector<std::pair<int, ChordRest*> >& pairs,
     return bestIdx;
 }
 
+// The column a syllable is written at is the column of the note that sings it, and it holds where
+// the stored tick does not. See ENCORE_FORMAT.md 6.9.
+static int findBestCrByColumn(const std::vector<CrAnchor>& pairs, const std::vector<bool>& consumed,
+                              int column, int maxDelta)
+{
+    int bestIdx = -1;
+    int bestDelta = INT_MAX;
+    for (size_t ni = 0; ni < pairs.size(); ++ni) {
+        if (consumed[ni] || pairs[ni].column <= 0 || !pairs[ni].cr->isChord()) {
+            continue;
+        }
+        const int delta = std::abs(pairs[ni].column - column);
+        if (delta <= maxDelta && delta < bestDelta) {
+            bestDelta = delta;
+            bestIdx = static_cast<int>(ni);
+        }
+    }
+    return bestIdx;
+}
+
+// The first chord after a column, still without a syllable.
+static int findNextFreeCrRightOf(const std::vector<CrAnchor>& pairs, const std::vector<bool>& consumed, int column)
+{
+    for (size_t ni = 0; ni < pairs.size(); ++ni) {
+        if (!consumed[ni] && pairs[ni].column > column && pairs[ni].cr->isChord()) {
+            return static_cast<int>(ni);
+        }
+    }
+    return -1;
+}
+
 // Attach queued lyrics to the nearest chord in the measure. Greedy "lyrics-first" assignment:
 // each syllable in tick order claims the nearest available note within the threshold, so later
 // syllables cannot steal a note from an earlier one.
@@ -179,16 +216,15 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
     const EncMeasure& encMeas = *mc.encMeas;
     const Fraction measTick = mc.measTick;
 
-    std::map<int, std::vector<int> > encNoteTicksByStaff = buildEncNoteTicksByStaff(ctx, mc, encMeas);
+    std::map<int, std::vector<std::pair<int, int> > > encNoteTicksByStaff
+        = buildEncNoteTicksByStaff(ctx, mc, encMeas);
 
     // matchThreshold: half a beat in Encore ticks.
     const int beatTicksVal = encMeas.beatTicks ? static_cast<int>(encMeas.beatTicks) : 240;
     const int matchThreshold = beatTicksVal / 2;
 
-    // Encore stores the second and later verses with tick=0 on every syllable; the real horizontal
-    // position lives only in the xoffset (kie). Build a per-staff xoffset->tick reference from the
-    // verses whose ticks are reliable (they span more than one value); a collapsed verse is remapped
-    // by nearest xoffset below so all verses align on the same notes.
+    // Later verses store tick 0 on every syllable and keep the position only in the anchor, so build a
+    // column to tick reference from the verses whose ticks span more than one value.
     std::map<int, std::vector<std::pair<int, int> > > xoffTickRefByStaff;   // staff -> [(xoffset, encTick)]
     for (const auto& [refTrack, refEntries] : ctx.scratch.pendingLyrics) {
         if (refEntries.size() < 2) {
@@ -210,11 +246,8 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
         }
     }
 
-    // Fallback for measures where NO verse has reliable (spanning) ticks: a lone melisma word can be
-    // stored at its end note in one verse and at tick 0 in another, so tick matching would split the
-    // verses across notes. Position purely by xoffset: syllables whose xoffset nearly coincides are
-    // the same held word and resolve to the same (earliest) note. Only staves absent from the spanning
-    // reference are touched, so normal multi-syllable verses are left unchanged.
+    // Where no verse has spanning ticks, position by column alone: a held word can be stored at its end
+    // note in one verse and at tick 0 in another. Only staves absent from the reference are touched.
     {
         std::map<int, std::vector<std::pair<int, int> > > noSpanByStaff;   // staff -> [(xoffset, encTick)]
         for (const auto& [t, es] : ctx.scratch.pendingLyrics) {
@@ -286,22 +319,62 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
             }
         }
 
-        const std::vector<int>* noteTickList = nullptr;
+        const std::vector<std::pair<int, int> >* noteTickList = nullptr;
         {
             auto it = encNoteTicksByStaff.find(lyStaffIdx);
             if (it != encNoteTicksByStaff.end() && !it->second.empty()) {
                 noteTickList = &it->second;
             }
         }
-        std::vector<std::pair<int, ChordRest*> > crTickPairs
+        std::vector<CrAnchor> crTickPairs
             = buildCrTickPairs(measure, measTick, encMeas, chordTrack, noteTickList);
 
+        // Syllables are sung left to right, and the column is where each one is written; the order
+        // they happen to be stored in is not. See ENCORE_FORMAT.md 6.9.
+        std::stable_sort(entries.begin(), entries.end(),
+                         [](const PendingLyric& a, const PendingLyric& b) {
+            if (a.xoffset != b.xoffset) {
+                return a.xoffset < b.xoffset;
+            }
+            if (a.encTick != b.encTick) {
+                return a.encTick < b.encTick;
+            }
+            // A pair written at one place is a correction and the syllable it replaced, and which of
+            // them is stored first does not survive a re-save, so it cannot decide. The fuller text
+            // is taken as the one sung, and goes on the first verse.
+            if (a.text.size() != b.text.size()) {
+                return a.text.size() > b.text.size();
+            }
+            return a.text < b.text;
+        });
+
         std::vector<bool> crConsumed(crTickPairs.size(), false);
+        // Where the syllable before this one went, and from what: a pair that shares both belongs to
+        // one note. See ENCORE_FORMAT.md 6.9.
+        int lastIdx = -1, lastTick = -1, lastColumn = -1;
         for (const auto& pl : entries) {
+            // Pass 0: the chord written in the same column, which is what the syllable sits under.
+            const int kColumnSlack = 6;
+            int bestIdx = pl.xoffset > 0
+                          ? findBestCrByColumn(crTickPairs, crConsumed, pl.xoffset, kColumnSlack)
+                          : -1;
+            // Pass 0b: a syllable drawn in a column already taken was pushed left to fit, which Encore
+            // does when the words are wider than their notes. It sings the next note along, and there
+            // is nothing for it when no note is left. See ENCORE_FORMAT.md 6.9.
+            bool crowded = false;
+            if (bestIdx < 0 && lastIdx >= 0 && pl.encTick == lastTick && pl.xoffset == lastColumn) {
+                bestIdx = findNextFreeCrRightOf(crTickPairs, crConsumed, pl.xoffset);
+                crowded = true;
+            }
+            if (crowded && bestIdx < 0) {
+                continue;
+            }
             // Pass 1: nearest chord within the threshold, preferring notes at/before the lyric
             // tick so a slightly-misaligned lyric does not grab a later note just for proximity.
-            int bestIdx = findBestCr(crTickPairs, crConsumed, pl.encTick,
+            if (bestIdx < 0) {
+                bestIdx = findBestCr(crTickPairs, crConsumed, pl.encTick,
                                      /*wantChord*/ true, matchThreshold, /*preferNotAfter*/ true);
+            }
             // Pass 2: nearest rest.
             if (bestIdx < 0) {
                 bestIdx = findBestCr(crTickPairs, crConsumed, pl.encTick,
@@ -317,7 +390,7 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
                 continue;
             }
             crConsumed[bestIdx] = true;
-            ChordRest* c = crTickPairs[bestIdx].second;
+            ChordRest* c = crTickPairs[bestIdx].cr;
             Lyrics* ly = Factory::createLyrics(c);
             ly->setTrack(chordTrack);
             ly->setVerse(lyVerseNo);
@@ -333,6 +406,9 @@ void attachPendingLyrics(BuildCtx& ctx, const MeasEmitCtx& mc)
             ly->setSyllabic(syll);
             c->add(ly);
             ctx.scratch.lastAttachedLyric[lyTrack] = ly;
+            lastIdx = bestIdx;
+            lastTick = pl.encTick;
+            lastColumn = pl.xoffset;
         }
         // Lyric ticks are measure-relative; unmatched leftovers cannot anchor in a
         // later measure, so discard them.

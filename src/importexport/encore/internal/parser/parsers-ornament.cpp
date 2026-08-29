@@ -35,7 +35,6 @@ bool EncOrnament::read(QDataStream& ds)
     // layout into this one read. See ENCORE_FORMAT.md §6.8 Ornament.
     ds.skipRawData(4 + bodyShift);
     ds >> xoffset;
-    ds.skipRawData(1);
     ds >> yoffset;
     ds.skipRawData(2);
     ds >> altMezuro;   // +16: v0xC2 spanning measure-count
@@ -43,7 +42,7 @@ bool EncOrnament::read(QDataStream& ds)
     ds >> alMezuro;    // +18: v0xC4 spanning measure-count
     ds.skipRawData(1);
     ds >> xoffset2;
-    ds.skipRawData(5);
+    ds.skipRawData(4);
     ds >> speguleco;
     speguleco &= 3;
     ds.skipRawData(1);

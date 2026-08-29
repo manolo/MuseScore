@@ -79,6 +79,15 @@ inline const EncLineStaffData* lineStaffDataAt(const EncRoot& enc, int idx)
     return &enc.lines[0].staffData[static_cast<size_t>(idx)];
 }
 
+// A tie start, remembered by where it was written and what pitch it holds, never by pointer: the
+// passes that make an overfull measure fit can remove the chord, and a reused address would answer
+// to a pointer comparison as though the note were still there.
+struct PendingTie {
+    mu::engraving::track_idx_t track = 0;
+    mu::engraving::Fraction tick;
+    int pitch = -1;
+};
+
 struct PendingSlur {
     Fraction startTick;
     track_idx_t track;
@@ -190,11 +199,8 @@ struct PendingOttava {
     mu::engraving::OttavaType ottavaType;
 };
 
-// A volta bracket and the measures it covers. The bracket is built while its first measure is
-// emitted, but any measure can still change length afterwards (pickup shorten, irregular fill),
-// which moves every tick behind it. Holding the measures instead of the ticks keeps the bracket
-// on the bars Encore marked, and a bracket whose end tick outlives the score has no end element
-// and cannot be written.
+// A volta and the measures it covers, held as measures rather than ticks: any measure can still
+// change length afterwards, which moves every tick behind it.
 struct PendingVolta {
     mu::engraving::Volta* volta { nullptr };
     mu::engraving::Measure* firstMeasure { nullptr };
@@ -225,6 +231,34 @@ struct PendingGrace {
     // Measure the grace was queued in, so a grace that never finds a principal chord (dangling at end
     // of score) can be re-placed as a cue note in its own bar instead of being discarded.
     mu::engraving::Measure* measure { nullptr };
+};
+
+// A guitar bend mark, kept until the note under its column is known. Encore states no amount here:
+// the pitch wheel it recorded does, and the staff text drawn beside it names it for the player.
+struct PendingBend {
+    int staffIdx { -1 };      // the staff that holds the notes, not the tab the mark came on
+    int markStaffIdx { -1 };  // the staff the mark itself came on, to find it again in the stream
+    int measIdx { -1 };
+    int column { 0 };
+    quint8 kind { 0 };        // the ornament subtype that drew it
+};
+
+// A wavy line the tab staff draws over a run of notes, kept until the notes it spans are known.
+struct PendingVibrato {
+    int staffIdx { -1 };      // the staff that holds the notes, not the tab the mark came on
+    int measIdx { -1 };
+    int startColumn { 0 };
+    int endColumn { 0 };
+};
+
+// A fret position a tab staff stated for one note, kept until the staff is linked to its notation
+// staff and the two share their notes.
+struct PendingTabFingering {
+    int staffIdx { -1 };     // tab staff, in Encore staff order
+    int measIdx { -1 };
+    int encTick { 0 };
+    int stringByte { 0 };
+    int fret { 0 };
 };
 
 // Shared importer context threaded through builders, emitters and resolvers: the target score,
@@ -265,6 +299,16 @@ struct BuildCtx
     std::vector<PendingBreath> pendingBreaths {};
     std::vector<PendingMeasureRepeat> pendingMeasureRepeats {};
     std::vector<PendingBowing> pendingBowings {};
+    std::vector<PendingTabFingering> pendingTabFingerings {};
+    std::vector<PendingVibrato> pendingVibratos {};
+    std::vector<PendingBend> pendingBends {};
+    // (measIdx, staffIdx) -> the pitch wheel Encore recorded there, as (Encore tick, signed position).
+    std::map<std::pair<int, int>, std::vector<std::pair<int, int> > > wheelByMeasStaff {};
+    // (measIdx, staffIdx) -> the notes emitted there with the Encore tick they came from. Filled
+    // only for the marks that need it, a tab staff handing over its fingerings and the guitar marks
+    // that name a note by the column it stands in.
+    bool trackEmittedNotes { false };
+    std::map<std::pair<int, int>, std::vector<std::pair<int, mu::engraving::Note*> > > notesByMeasStaff {};
     // (measIdx, staffIdx) → list of (enc_tick, note.xoffset) for bowing xoffset clustering.
     std::map<std::pair<int, int>, std::vector<std::pair<int, int> > > noteXoffByMeasStaff {};
     std::vector<PendingOrnFingering> pendingOrnFingerings {};
@@ -294,7 +338,7 @@ struct BuildCtx
         std::map<std::pair<int, int>, TupletTracker> innerTuplets {};
 
         // Pending tie-start notes, persists across measures. key=(staffIdx, voice, pitch).
-        std::map<std::tuple<int, int, int>, Note*> pendingTieNote {};
+        std::map<std::tuple<int, int, int>, PendingTie> pendingTieNote {};
 
         // Accumulated written position per (staffIdx, msVoice).
         std::map<std::pair<int, int>, Fraction> cumTick {};

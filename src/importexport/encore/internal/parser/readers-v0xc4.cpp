@@ -31,10 +31,8 @@
 #include "elem.h"
 
 namespace mu::iex::enc {
-// Encore 5.x (v0xC4) format reader.
-// All defaults inherited from EncFormatReader_V0xC4Base are correct for v0xC4.
-// The only v0xC4-specific post-processing is zeroing articulation bytes when
-// the element is smaller than 27 bytes (bytes lie beyond the element boundary).
+// Encore 5.x. Every default of the shared base is right here; the only addition is zeroing the
+// articulation bytes of an element too short to hold them.
 struct EncFormatReader_V0xC4 : EncFormatReader_V0xC4Base
 {
     const char* formatName() const override { return "v0xC4"; }

@@ -52,11 +52,8 @@ void logEncRootInfo(const EncRoot& enc)
                           : (h.magic == "SCOR") ? "Encore or MusicTime, Windows"
                           : "unknown container";
 
-    // The release, only as far as the format version and the revision byte can say it. The revision
-    // byte does not separate builds within the Encore 4 line, and no distribution in hand produces
-    // format 3.07, so those two say a range instead of a release. The releases below are Encore's:
-    // MusicTime moves through the same format versions, so a version alone cannot name one of its
-    // releases. See ENCORE_FORMAT.md §1.3 The four generations and §1.6 The revision byte.
+    // The release only as far as the format version and revision can say it, which for the Encore 4 line
+    // and for format 3.07 is a range. MusicTime shares the versions, so they cannot name its releases.
     const bool isMusicTime = (h.magic == "MTIW" || h.magic == "MTIM");
     std::string release;
     switch (isMusicTime ? 0 : h.chuVersio) {
@@ -174,12 +171,17 @@ void logEncRootInfo(const EncRoot& enc)
     // events (sustain/volume/modulation) are playback-only and decoded here so the log says what
     // they are instead of one "unknown" line per event.
     {
-        int ccSustain = 0, ccVolume = 0, ccMod = 0, ccOther = 0, unknown1 = 0;
+        int ccSustain = 0, ccVolume = 0, ccMod = 0, ccOther = 0, ccWheel = 0, unknown1 = 0;
         for (const EncMeasure& m : enc.measures) {
             for (const auto& ep : m.elements) {
                 switch (static_cast<EncElemType>(ep->type)) {
-                case EncElemType::MIDI_CC:
-                    switch (static_cast<const EncMidiCc*>(ep.get())->controller) {
+                case EncElemType::MIDI_CC: {
+                    const auto* cc = static_cast<const EncMidiCc*>(ep.get());
+                    if (cc->isPitchWheel()) {
+                        ++ccWheel;
+                        break;
+                    }
+                    switch (cc->controller) {
                     case 64: ++ccSustain;
                         break;
                     case 7:  ++ccVolume;
@@ -190,6 +192,7 @@ void logEncRootInfo(const EncRoot& enc)
                         break;
                     }
                     break;
+                }
                 case EncElemType::UNKNOWN1:
                     ++unknown1;
                     break;
@@ -198,7 +201,7 @@ void logEncRootInfo(const EncRoot& enc)
                 }
             }
         }
-        const int ccTotal = ccSustain + ccVolume + ccMod + ccOther;
+        const int ccTotal = ccSustain + ccVolume + ccMod + ccOther + ccWheel;
         if (ccTotal || unknown1) {
             LOGD() << "---- Diagnostics ----";
             if (ccTotal) {
@@ -215,6 +218,7 @@ void logEncRootInfo(const EncRoot& enc)
                 add("volume", ccVolume);
                 add("modulation", ccMod);
                 add("other", ccOther);
+                add("pitch wheel", ccWheel);
                 LOGD() << "  MIDI CC events (playback only, dropped): " << ccTotal
                        << "  (" << by << ")";
             }

@@ -117,6 +117,9 @@ enum class EncOrnamentType : quint8 {
     GUITAR_BEND_2          = 0x29,
     GUITAR_PREBEND         = 0x2A,
     GUITAR_PREBEND_RELEASE = 0x2B,
+    // A wavy line over the notes it spans. The tab staff carries this one element, start and end
+    // columns and all; the notation staff states the same line as a pair of 0x34, still unread.
+    VIBRATO                = 0x2F,
     GUITAR_BEND_V          = 0x30,
     TEMPO                  = 0x32,
 

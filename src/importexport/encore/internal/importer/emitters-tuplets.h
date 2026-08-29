@@ -79,11 +79,9 @@ struct NestedTupletInfo {
 // True when a Fraction fits exactly in a TDuration (power-of-two, up to 4 dots).
 bool fitsTDuration(const mu::engraving::Fraction& f);
 
-// Find all elements belonging to complete tuplet groups (implied v0xC2 or explicit). Isolated notes with matching rdur are MIDI swing drift.
-// partialEndGroup: if non-null, receives measure-end partial groups (rdur fills measure AND face-value would overflow without scaling).
-// nestedInfos: if non-null, receives nested-tuplet annotations for detected inner groups.
-// overrideRatios: if non-null, receives {actualN, normalN} overrides for notes that triggered
-//   uniform-fill detection (e.g. 15 equal notes → [15:8] instead of the tup-byte ratio [9:5]).
+// Elements of complete tuplet groups, implied or explicit. The out parameters carry, in turn, the
+// measure-end partial groups, the nested-group annotations, and the ratio overrides that
+// uniform-fill detection produces.
 std::set<const EncMeasureElem*> computeImpliedTupletMembers(
     const MeasureElemRefVec& sortedElems, const EncMeasure& encMeas, int totalStaves,
     std::set<const EncMeasureElem*>* partialEndGroup = nullptr, std::vector<NestedTupletInfo>* nestedInfos = nullptr,
