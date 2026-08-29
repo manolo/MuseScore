@@ -123,7 +123,6 @@ bool EncChordSym::read(QDataStream& ds)
     ds >> toniko >> tipo;
     ds.skipRawData(3 + bodyShift);
     ds >> xoffset;
-    ds.skipRawData(1);
     ds >> radiko >> baso;
     // tipo bit 2 = draw a fretboard diagram above the symbol. See ENCORE_FORMAT.md §6.10 Chord symbol.
     hasFretDiagram = (tipo & 0x04) != 0;

@@ -468,7 +468,7 @@ void EncMeasure::reconcileStaleNoteTicksByColumn()
         if (!en || en->graceType() != EncGraceType::NORMAL || en->tick >= durTicks) {
             continue;
         }
-        const int xo = static_cast<int>(static_cast<quint8>(en->xoffset));
+        const int xo = static_cast<int>(en->xoffset);
         if (xo <= 0) {
             continue;
         }
@@ -486,7 +486,7 @@ void EncMeasure::reconcileStaleNoteTicksByColumn()
         if (!en || en->graceType() != EncGraceType::NORMAL || en->tick >= durTicks) {
             continue;
         }
-        const int xo = static_cast<int>(static_cast<quint8>(en->xoffset));
+        const int xo = static_cast<int>(en->xoffset);
         if (xo <= 0) {
             continue;
         }
@@ -509,7 +509,7 @@ void EncMeasure::reconcileStaleNoteTicksByColumn()
                 break;
             }
             if (on->tick == target
-                && static_cast<int>(static_cast<quint8>(on->xoffset)) != xo) {
+                && static_cast<int>(on->xoffset) != xo) {
                 occupied = true;
             }
         }

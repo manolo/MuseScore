@@ -467,9 +467,8 @@ void handleOrnament(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec)
         ps.endMeasIdx = endIdx;
         ps.alMezuro = static_cast<int>(eo->alMezuro);
         ps.alMezuroValid = eo->alMezuroValid;
-        // xoffset is a pixel position that wraps at 256; cast to quint8 to get the true positive value.
-        ps.slurXoffset  = static_cast<int>(static_cast<quint8>(eo->xoffset));
-        ps.slurXoffset2 = static_cast<int>(eo->xoffset2);  // already quint8
+        ps.slurXoffset  = static_cast<int>(eo->xoffset);
+        ps.slurXoffset2 = static_cast<int>(eo->xoffset2);
         ps.staffIdx = staffIdx;
         ps.encVoice = voice;
         ctx.pendingSlurs.push_back(ps);
