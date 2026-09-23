@@ -605,6 +605,7 @@ void EditStyle::classBegin()
         { StyleId::keySigCourtesyBarlineMode, false, ksbl,                        0 },
         { StyleId::timeSigCourtesyBarlineMode, false, tsbl,                       0 },
         { StyleId::swingRatio,               false, swingBox,                     0 },
+        { StyleId::tremoloUnmeasuredMinStrokes, false, tremoloUnmeasuredMinStrokes, 0 },
         // { StyleId::chordsXmlFile,            false, chordsXmlFile,                0 },
         { StyleId::dotMag,                   true,  dotMag,                       0 },
         { StyleId::articulationMag,          true,  articulationMag,              resetArticulationMag },
