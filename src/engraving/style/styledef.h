@@ -761,6 +761,7 @@ enum class Sid : short {
     tremoloStrokeLengthMultiplier,
     tremoloNoteSidePadding,
     tremoloOutSidePadding,
+    tremoloUnmeasuredMinStrokes,
     // TODO tremoloMaxBeamLength,
 
     linearStretch,
