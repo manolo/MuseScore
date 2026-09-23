@@ -757,6 +757,7 @@ const std::array<StyleDef::StyleValue, size_t(Sid::STYLES)> StyleDef::styleValue
     styleDef(tremoloStrokeLengthMultiplier,              0.62),
     styleDef(tremoloNoteSidePadding,                     1.25_sp),
     styleDef(tremoloOutSidePadding,                      0.5_sp),
+    styleDef(tremoloUnmeasuredMinStrokes,                PropertyValue(0)),
     //styleDef(tremoloMaxBeamLength,                       PropertyValue(double(1.5))), // TODO
 
     styleDef(linearStretch,                              PropertyValue(double(1.5))),

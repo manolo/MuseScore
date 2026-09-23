@@ -242,6 +242,60 @@ TEST_F(Engraving_PlaybackModelTests, Repeat_And_Tremolo)
 }
 
 /**
+ * @brief PlaybackModelTests_Unmeasured_Tremolo
+ * @details Checks that a tremolo reaching the style threshold is rendered as a single sustained
+ *          note carrying the tremolo articulation, instead of being subdivided into repeated notes
+ */
+TEST_F(Engraving_PlaybackModelTests, Unmeasured_Tremolo)
+{
+    // [GIVEN] A score whose half notes carry a three stroke tremolo
+    Score* score = ScoreRW::readScore(PLAYBACK_MODEL_TEST_FILES_DIR + "repeat_and_tremolo/repeat_and_tremolo.mscx");
+
+    ASSERT_TRUE(score);
+    ASSERT_EQ(score->parts().size(), 1);
+
+    const Part* part = score->parts().at(0);
+    ASSERT_TRUE(part);
+
+    // [GIVEN] Three strokes are enough to be played as unmeasured
+    score->style().set(Sid::tremoloUnmeasuredMinStrokes, 3);
+
+    // [WHEN] The articulation profiles repository will be returning profiles
+    m_defaultProfile->setPattern(ArticulationType::Standard, buildTestArticulationPattern());
+    m_defaultProfile->setPattern(ArticulationType::Tremolo32nd, buildTestArticulationPattern());
+
+    EXPECT_CALL(*m_repositoryMock, defaultProfile(_)).WillRepeatedly(Return(m_defaultProfile));
+
+    // [WHEN] The playback model requested to be loaded
+    PlaybackModel model(modularity::globalCtx());
+    model.profilesRepository.set(m_repositoryMock);
+    model.load(score);
+
+    const PlaybackEventsMap& result = model.resolveTrackPlaybackData(part->id(), part->instrumentId()).originEvents;
+
+    ASSERT_FALSE(result.empty());
+
+    // [THEN] Every tremolo is one note lasting the whole half note, still marked as a tremolo
+    for (const auto& pair : result) {
+        size_t notes = 0;
+
+        for (const PlaybackEvent& event : pair.second) {
+            if (!std::holds_alternative<mpe::NoteEvent>(event)) {
+                continue;
+            }
+
+            const mpe::NoteEvent& noteEvent = std::get<mpe::NoteEvent>(event);
+            EXPECT_EQ(noteEvent.arrangementCtx().actualDuration, 2 * QUARTER_NOTE_DURATION);
+            EXPECT_TRUE(noteEvent.expressionCtx().articulations.contains(ArticulationType::Tremolo32nd));
+
+            ++notes;
+        }
+
+        EXPECT_EQ(notes, 1);
+    }
+}
+
+/**
  * @brief PlaybackModelTests_Repeat_Tempo_Changes_And_Tie
  * @details Checks that the length of tied notes is correct even after tempo changes and repeats
  */
