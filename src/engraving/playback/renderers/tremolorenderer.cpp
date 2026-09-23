@@ -124,6 +124,22 @@ static duration_t tremoloDuration(const Note* note, const timestamp_t tremoloTim
     return ctx.nominalDuration;
 }
 
+static bool playsAsUnmeasured(const Chord* chord, const TremoloSingleChord* tremolo, int lines)
+{
+    // A two note tremolo alternates between two pitches, so it can never collapse into one event
+    if (!tremolo) {
+        return false;
+    }
+
+    const int minStrokes = chord->style().styleI(Sid::tremoloUnmeasuredMinStrokes);
+    if (minStrokes <= 0) {
+        return false;
+    }
+
+    // Beams count towards the total, so an eighth note with two strokes reaches three
+    return chord->beams() + lines >= minStrokes;
+}
+
 const ArticulationTypeSet& TremoloRenderer::supportedTypes()
 {
     static const mpe::ArticulationTypeSet types = {
@@ -170,7 +186,7 @@ void TremoloRenderer::doRender(const EngravingItem* item, const mpe::Articulatio
     }
 
     int stepDurationTicks = 0;
-    if (preferredType == ArticulationType::TremoloBuzz) {
+    if (preferredType == ArticulationType::TremoloBuzz || playsAsUnmeasured(chord, tremolo.single, tremolo.lines())) {
         stepDurationTicks = overallDurationTicks;
     } else {
         stepDurationTicks = TremoloRenderer::stepDurationTicks(chord, tremolo.lines());
