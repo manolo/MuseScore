@@ -838,8 +838,8 @@ TEST_F(Tst_Structure, old_format_v0c2_triplets_detected)
         if (!mb->isMeasure()) {
             continue;
         }
-        for (EngravingItem* e : toMeasure(mb)->el()) {
-            if (e->isTuplet() && toTuplet(e)->ratio() == Fraction(3, 2)) {
+        for (const Tuplet* t : measureTuplets(toMeasure(mb))) {
+            if (t->ratio() == Fraction(3, 2)) {
                 foundTriplet = true;
                 break;
             }
@@ -865,8 +865,8 @@ TEST_F(Tst_Structure, old_format_v0c2_triplet_pitch_in_semitone)
         if (!mb->isMeasure()) {
             continue;
         }
-        for (EngravingItem* e : toMeasure(mb)->el()) {
-            if (e->isTuplet() && toTuplet(e)->ratio() == Fraction(3, 2)) {
+        for (const Tuplet* t : measureTuplets(toMeasure(mb))) {
+            if (t->ratio() == Fraction(3, 2)) {
                 foundTriplet = true;
             }
         }

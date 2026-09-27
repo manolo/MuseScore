@@ -95,11 +95,11 @@ Tuplet* TupletTracker::startTuplet(Measure* measure, Fraction tick,
     currentTuplet->setBaseLen(TDuration(baseType));
     currentTuplet->setTick(tick);
     currentTuplet->setTrack(track_);
+    currentTuplet->setOwnershipParent(measure);
     Fraction tupletDuration = TDuration(baseType).fraction() * normalN_;
     if (fitsTDuration(tupletDuration)) {
         currentTuplet->setTicks(tupletDuration);
     }
-    measure->add(currentTuplet);
     actualN = aN;
     normalN = normalN_;
     placedTicks = Fraction(0, 1);
