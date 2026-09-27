@@ -32,7 +32,10 @@
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/fret.h"
 #include "engraving/dom/harmony.h"
+#include "engraving/dom/chordrest.h"
+#include "engraving/dom/measure.h"
 #include "engraving/dom/segment.h"
+#include "engraving/dom/tuplet.h"
 
 #include "engraving/engravingerrors.h"
 #include "engraving/compat/mscxcompat.h"
@@ -69,6 +72,25 @@ static MasterScore* loadEncore(const QString& path, const iex::enc::EncImportOpt
         s->doLayout();
     }
     return score;
+}
+
+std::set<const Tuplet*> measureTuplets(const Measure* m)
+{
+    std::set<const Tuplet*> found;
+    if (!m) {
+        return found;
+    }
+    for (const Segment* s = m->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        for (const EngravingItem* e : s->elist()) {
+            if (!e || !e->isChordRest()) {
+                continue;
+            }
+            for (const Tuplet* t = toChordRest(e)->tuplet(); t; t = t->tuplet()) {
+                found.insert(t);
+            }
+        }
+    }
+    return found;
 }
 
 Harmony* segmentHarmony(const Segment* seg)
