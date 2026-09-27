@@ -27,6 +27,8 @@
 
 #include <QString>
 
+#include <set>
+
 #include "../internal/importer/import-options.h"
 
 namespace mu::engraving {
@@ -34,11 +36,18 @@ class MasterScore;
 class Score;
 class Segment;
 class Harmony;
+class Measure;
+class Tuplet;
 
 // Return the chord symbol attached at seg, whether it sits directly on the segment or is
 // nested inside a FretDiagram annotation (the importer wraps recognised chords in a
 // fretboard diagram). Returns nullptr when the segment carries no chord symbol.
 Harmony* segmentHarmony(const Segment* seg);
+
+// The tuplets of a measure, reached the way the rest of the engraving reaches them: through the
+// chords and rests that are their members, nested tuplets included. A tuplet is never an entry of
+// the measure's generic element list.
+std::set<const Tuplet*> measureTuplets(const Measure* m);
 
 class MTest
 {

@@ -570,6 +570,8 @@ What each strategy then does is what it does everywhere else. **Expand measure**
 
 A tuplet is read from the explicit ratio byte where there is one, and otherwise inferred, and the group is then placed as a unit. Several real shapes need more than that.
 
+**Where a bracket lives.** A tuplet belongs to its measure through its ownership parent and is reached through the chords and rests that are its members. It is never an entry of the measure's generic element list: an element registered there is also written out as a direct child of the measure, so the bracket appears twice in the saved file. The reader discards that second copy, which is why saving and reopening used to repair a score that the importer had just built.
+
 **Ticks that cannot be written.** For a ratio whose denominator is not a power of two, the placed duration is not representable as a MuseScore duration, and setting the bracket to such a value aborts the beam layout later. The importer detects this with a truncating duration snap and falls back to the canonical base times the normal count, filling the unused positions with invisible rests.
 
 **Chord and rest ticks must agree.** When the remaining space cannot fit any standard duration, the note is dropped rather than created with a non-standard one, which would leave chord ticks with garbage values. When a cap fires on a chord extension, the chord ticks are updated to match the advance whether or not the note is in a tuplet.
