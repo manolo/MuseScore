@@ -47,10 +47,6 @@ components:
       The local tip, not the published one. It is usually ahead, and the
       rebuild is pointless with a stale importer.
 
-  - name: converter interactive guard
-    pr: 35047
-    ref: 35022-converter-interactive-null
-
   - name: tablature fret circle
     pr: 31200
     ref: pr_tablature_circle
