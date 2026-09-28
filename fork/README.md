@@ -40,6 +40,16 @@ The upstream reusable workflows solve this themselves: `build_macos.yml`, `build
 
 `4.7-tmp` has no framework section at all: that line still uses the old monolithic layout with no submodules.
 
+## Fixups: what rerere cannot reach
+
+`rerere` only ever sees conflicts. Two things it therefore cannot help with live in `fork/fixups/<line>/`, run in order after the merges:
+
+**Clean but wrong automerges.** Merging #31200 leaves `#include "masklayout.h"` twice, because main and the pull request each add it at a different line and git's three way merge takes both as independent insertions. It is never a conflict, so it never reaches `rerere`, and it comes back on every rebuild.
+
+**A component whose base predates something main has since added.** #31738 changes the excerpt interface but was written before `masternotationmock.h` existed, so the mock main carries now goes abstract when the two meet. The fixup derives the difference from the interface instead of hardcoding it, so it keeps working when that pull request is finally rebased, and says it has nothing to do once the mismatch is gone.
+
+Every fixup is idempotent and fails loudly rather than silently when the file stops looking the way it assumed. Two consecutive rebuilds produce identical source.
+
 ## The submodule check
 
 After a rebuild the script verifies that **only the overlay commit touches `muse` or `muse_deps`**.

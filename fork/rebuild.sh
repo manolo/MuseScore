@@ -139,8 +139,11 @@ say "base     : $BASE"
 
 # ------------------------------------------------------------------ safety --
 if [ "$DRY_RUN" = 0 ]; then
-    if [ -n "$(g status --porcelain --untracked-files=no)" ]; then
+    # Submodules are excluded: this script moves the muse pointer itself, and a
+    # previous run legitimately leaves it on the framework branch.
+    if [ -n "$(g status --porcelain --untracked-files=no --ignore-submodules=all)" ]; then
         echo "the worktree at $REPO has uncommitted changes; stash or commit first" >&2
+        g status --short --untracked-files=no --ignore-submodules=all >&2
         exit 1
     fi
 fi
@@ -232,6 +235,30 @@ EOF
     fi
 done < <(manifest_components)
 
+# ------------------------------------------------------------------ fixups --
+# What rerere cannot reach. Two kinds live here: clean but wrong automerges,
+# which are never conflicts so rerere never sees them, and adaptations a
+# component needs because its base predates something main has since added.
+step "Running fixups"
+FIXUPS="$TOOLS_DIR/fixups/$LINE"
+if [ -d "$FIXUPS" ] && [ "$DRY_RUN" = 0 ]; then
+    for f in "$FIXUPS"/*.sh; do
+        [ -e "$f" ] || continue
+        say "   $(basename "$f")"
+        ( cd "$REPO" && bash "$f" ) || {
+            echo "   fixup failed; it is probably stale, read its header" >&2
+            exit 1
+        }
+    done
+elif [ -d "$FIXUPS" ]; then
+    for f in "$FIXUPS"/*.sh; do
+        [ -e "$f" ] || continue
+        say "   would run: $(basename "$f")"
+    done
+else
+    say "   none for this line"
+fi
+
 # ----------------------------------------------------------------- overlay --
 step "Applying the fork overlay"
 if [ "$DRY_RUN" = 0 ]; then
@@ -245,6 +272,9 @@ if [ "$DRY_RUN" = 0 ]; then
             say "   $f"
         done
         g add -A .github 2>/dev/null || true
+    fi
+    if [ -n "$(g status --porcelain --untracked-files=no)" ]; then
+        g add -A src 2>/dev/null || true
     fi
 fi
 
