@@ -52,7 +52,7 @@ jobs:
   build_linux:
     uses: ./.github/workflows/build_linux.yml
     with:
-      platforms: linux_x64
+      platforms: linux_x64 linux_arm64
       build_mode: devel
       publish: 'off'
       framework_repo: manolo/muse_framework
