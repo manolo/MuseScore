@@ -165,6 +165,9 @@ if [ -n "$FRAMEWORK_REPO" ] && [ "$(manifest_scalar framework)" != "none" ]; the
     step "Rebuilding the framework branch $FRAMEWORK_BRANCH"
     PIN="$(g ls-tree "$BASE" muse | awk '{print $3}')"
     say "   starting from the pin the base asks for: ${PIN:0:12}"
+    # Upstream too, not just the fork: the base may have moved the pin to a
+    # commit this clone has never seen.
+    run git -C "$REPO/muse" fetch origin --quiet || true
     run git -C "$REPO/muse" fetch manolo --quiet || true
     run git -C "$REPO/muse" checkout --quiet -B "$FRAMEWORK_BRANCH" "$PIN"
     while IFS='|' read -r ref name; do

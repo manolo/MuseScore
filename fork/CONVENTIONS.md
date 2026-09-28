@@ -55,6 +55,15 @@ Publishing is avoided by passing `publish: 'off'`, which is what the fork workfl
 
 **`check_submodules`** insists the pinned `muse` commit exists upstream. `5.0-tmp` pins a commit that lives only on the framework fork, so this check would fail. It only runs on `pull_request`, so pushing a line never triggers it, and the fork workflows sidestep the problem entirely by passing `framework_repo` and `framework_ref` instead of changing `.gitmodules`.
 
+**The Windows portable job on the 4.7 line** builds fine and then dies signing. It uploads to `s3://muse-sign`, a service only MuseScore holds credentials for, and unlike the macOS signing it never checks whether the secret is empty. Worse, it cannot be switched off from the caller: its condition reads
+
+```
+github.event_name != 'pull_request' &&
+(github.event_name != 'workflow_dispatch' || contains(inputs.platforms, 'windows_portable'))
+```
+
+so under `push` the first branch of the or is already true and `platforms` is ignored. The 5.0 line tests the input itself and skips the job properly. The fork workflow for 4.7 therefore builds Windows only on `workflow_dispatch`, where the filter does apply, and its packaging step tolerates the missing artifact. This is one of the reasons the two workflow files are separate rather than shared.
+
 **`triage_issues` and `triage_prs`** act on labels and use `pull_request_target`. Both are repository guarded and do nothing on a fork.
 
 ### Configuration worth setting on the fork

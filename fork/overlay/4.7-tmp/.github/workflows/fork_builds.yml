@@ -23,7 +23,21 @@ jobs:
       publish: 'off'
     secrets: inherit
 
+  # Windows only when dispatched by hand.
+  #
+  # On this line the portable job ignores the platforms input unless the event
+  # is workflow_dispatch:
+  #
+  #   github.event_name != 'pull_request' &&
+  #   (github.event_name != 'workflow_dispatch' || contains(inputs.platforms, 'windows_portable'))
+  #
+  # Under push the first branch of the or is already true, so windows_portable
+  # runs whatever we ask for, and it dies signing: it uploads to s3://muse-sign,
+  # a service a fork has no credentials for, and unlike the macOS signing it
+  # does not check whether the secret is empty. The 5.0 line tests the input
+  # itself and skips the job, which is why that workflow needs none of this.
   build_windows:
+    if: github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/build_windows.yml
     with:
       platforms: windows_x64
@@ -78,6 +92,9 @@ jobs:
 
   package:
     needs: [build_mac, build_windows, build_linux, package_mac_arm64_zip]
+    # Windows is skipped on push, and a skipped dependency would take this job
+    # with it. Assembling what did build is the point.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Download macOS universal artifact
