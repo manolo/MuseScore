@@ -7,6 +7,8 @@ This branch holds no MuseScore source. It carries the definition of the integrat
 | `5.0-tmp` | `origin/main` | Today's upstream plus every open pull request of mine |
 | `4.7-tmp` | `origin/4.7` | The 4.7 line plus ports that mostly never go upstream |
 
+Conventions for what may live on a line, how CI changes are committed, and how upstream's own workflows behave on a fork: [CONVENTIONS.md](CONVENTIONS.md).
+
 ## The idea
 
 A line is **never updated in place**. It is thrown away and rebuilt from upstream every time, from the list in its manifest. That is what makes a merged pull request cost nothing: delete its entry, rebuild, and it arrives through the base instead, with no leftovers to hunt down.

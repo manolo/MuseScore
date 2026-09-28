@@ -1,3 +1,8 @@
+# Every component below is either an open pull request or a branch holding a
+# feature the fork needs and upstream will not take. Nothing is committed onto
+# a line by hand: the next rebuild would throw it away without saying so.
+# See CONVENTIONS.md.
+#
 # Integration line: 5.0-tmp
 #
 # Today's upstream main plus every open pull request of mine, rebuilt from
