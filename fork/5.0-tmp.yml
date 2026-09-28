@@ -1,0 +1,82 @@
+# Integration line: 5.0-tmp
+#
+# Today's upstream main plus every open pull request of mine, rebuilt from
+# scratch by fork/rebuild.sh. Nothing here is maintained by hand.
+#
+# When one of these pull requests is merged upstream, delete its entry and
+# rebuild: the change then arrives through the base instead.
+
+line: 5.0-tmp
+base: origin/main
+
+framework:
+  repo: manolo/muse_framework
+  upstream: origin/main
+  # The branch the rebuild creates and pushes. CI fetches the pin from here,
+  # so it must exist on the fork before a build can run.
+  branch: 5.0-tmp-framework
+  base: pin
+  components:
+    - name: layered articulation dynamics
+      pr: 179
+      ref: manolo/fix-layered-articulation-dynamics
+
+    - name: VST3 keyswitch articulations
+      pr: 183
+      ref: manolo/vst-articulation-keyswitches
+
+    - name: tremolo strings preset
+      pr: 263
+      ref: manolo/fix-tremolo-string-instruments
+      note: >
+        The pull request still points at fix-tremolo-string-instruments. A
+        renamed copy, 31273-tremolo-strings-preset, also exists on the fork.
+        Decide which one is canonical and drop the other.
+
+components:
+  - name: Encore importer
+    pr: 34129
+    ref: feature/enc-importer
+    local: true
+    note: >
+      The local tip, not the published one. It is usually ahead, and the
+      rebuild is pointless with a stale importer.
+
+  - name: converter interactive guard
+    pr: 35047
+    ref: 35022-converter-interactive-null
+
+  - name: tablature fret circle
+    pr: 31200
+    ref: pr_tablature_circle
+    conflicts:
+      - path: src/engraving/rendering/score/scorehorizontalviewlayout.cpp
+        resolution: >
+          Take our side. What the pull request adds here, the masklayout
+          include and the computeMasks call, is already in main, identical.
+      - path: src/engraving/tests/CMakeLists.txt
+        resolution: >
+          Keep both lists. Ours adds parent_tests and renames tempomap_tests
+          to tempotimeline_tests; theirs adds tablature_tests.
+
+  - name: uninitialised excerpts
+    pr: 31738
+    ref: fix/potential-excerpt-rename-persistence
+    conflicts:
+      - path: src/engraving/tests/parts_tests.cpp
+        resolution: >
+          Both sides append tests at the end of the file. Keep both blocks.
+    after:
+      # Its base predates masternotationmock.h, so the mock main carries now
+      # does not match the interface this pull request changes.
+      - sync-masternotationmock
+
+  - name: tremolo articulation mapping
+    pr: 30951
+    skip: >
+      Cannot be merged. It edits soundmapping.h, a path that moved into the
+      muse submodule, so the merge comes out as delete/modify. It needs
+      porting, not merging.
+
+overlay:
+  - .github/workflows/fork_builds.yml

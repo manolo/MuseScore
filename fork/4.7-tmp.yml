@@ -1,0 +1,40 @@
+# Integration line: 4.7-tmp
+#
+# The maintained 4.7 line. Unlike 5.0-tmp, most of its content does not exist
+# as an upstream pull request: these are ports retro-adapted to the older API,
+# and several will never go upstream at all.
+#
+# That content lives on its own branch, fork/4.7-ports, and enters here as a
+# single component. Keeping it as a branch rather than a pile of patches means
+# a conflict is fixed once, in one place, instead of on every rebuild.
+#
+# The repository at this line uses the OLD monolithic layout: no muse or
+# muse_deps submodules. The framework section is therefore absent on purpose.
+
+line: 4.7-tmp
+base: origin/4.7
+
+framework: none
+
+components:
+  - name: 4.7 ports and fork features
+    ref: fork/4.7-ports
+    local: true
+    note: >
+      Seventeen commits as of 2026-09-28: the Encore importer adapted to 4.7,
+      VST timing and keyswitches, several plugin API additions, the tablature
+      fret circle, and assorted fixes. Rebased onto origin/4.7 when that moves,
+      which is the one place a conflict has to be resolved.
+
+api-notes:
+  # Differences that bite when porting 5.0 work down to this line. Whenever a
+  # port fails to build, look here before inventing a new adaptation.
+  - symbol: Tuplet ownership
+    on-5.0: setOwnershipParent(measure)
+    on-4.7: setParent(measure)
+    source: >
+      Read it off the reader of each line, src/engraving/rw/read460/
+      measureread.cpp, rather than guessing.
+
+overlay:
+  - .github/workflows/fork_builds.yml
