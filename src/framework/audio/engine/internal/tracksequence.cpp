@@ -107,7 +107,7 @@ RetVal2<TrackId, AudioParams> TrackSequence::addTrack(const std::string& trackNa
         m_prevActiveTrackId = trackId;
     };
 
-    EventAudioSourcePtr source = std::make_shared<EventAudioSource>(newId, playbackData, onOffStreamReceived, iocContext());
+    EventAudioSourcePtr source = std::make_shared<EventAudioSource>(newId, trackName, playbackData, onOffStreamReceived, iocContext());
     source->setOutputSpec(audioEngine()->outputSpec());
 
     RetVal<MixerChannelPtr> channel = mixer()->addChannel(newId, source);
