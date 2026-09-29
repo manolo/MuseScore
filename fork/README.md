@@ -58,6 +58,32 @@ After a rebuild the script verifies that **only the overlay commit touches `muse
 
 This is not decoration. In September 2026 a single feature commit on the importer branch carried stale pointers for both submodules. It broke the pull request as an unresolvable delete/modify against main, and then broke all four platform builds with a crashpad link error, twice, because the first repair fixed `muse` and never looked at `muse_deps`. A feature commit has no business moving the framework; if this check fires, strip the pointer from the offending commit rather than resolving it here, or it returns on the next rebuild.
 
+## Cutting a release
+
+The push builds are for iterating: they are `devel`, so the app carries a
+Development suffix and keeps its settings and data directory away from a real
+install. A release is the opposite, `stable`, so it is called PlectroScore 5
+and uses the ordinary MuseScore paths.
+
+Releases are cut by pushing a tag:
+
+```sh
+git tag plectroscore-5.0.0-$(date +%Y%m%d) 5.0-tmp
+git push manolo plectroscore-5.0.0-$(date +%Y%m%d)
+```
+
+That builds the three platforms and publishes a GitHub release on the fork,
+with the five downloads and notes listing which pull requests went in, taken
+from `fork/CONTENTS.md`, which the rebuild writes into the line.
+
+It has to be a tag rather than a button. `workflow_dispatch` requires the
+workflow file to sit on the repository's default branch, and these live on the
+line; GitHub answers a dispatch of an unregistered workflow with a flat 404.
+Once a tag run has registered the workflow, the button works too.
+
+Several releases share a version, since what differs is what the manifest held
+that day, so put the date in the tag.
+
 ## Builds
 
 CI builds the three platforms on push to a line, and by hand through `workflow_dispatch`. Artifacts keep the date and the short SHA, and the macOS one comes both as the universal DMG and thinned to arm64.

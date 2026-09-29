@@ -19,7 +19,15 @@ name: 'Fork: release 5.0-tmp'
 # login to fetch. A release does not: it keeps a tag, notes saying which pull
 # requests went in, and direct download links.
 
+# Cut by pushing a tag, which is both the conventional way and the only way
+# that works here: workflow_dispatch needs the file on the repository's default
+# branch, and these workflows live on the line instead. GitHub answers a
+# dispatch of an unregistered workflow with a flat 404. The dispatch trigger is
+# kept because it becomes usable once a tag run has registered the workflow.
 on:
+  push:
+    tags:
+      - 'plectroscore-*'
   workflow_dispatch:
     inputs:
       build_mode:
@@ -126,10 +134,16 @@ jobs:
           VERSION="$MAJ.$MIN.$PAT"
           DATE=$(date -u +%Y%m%d)
           SHA=$(git rev-parse --short=10 HEAD)
+          # A tag run is named by its tag; a dispatch has to invent a name.
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="plectroscore-$VERSION-$DATE-$SHA"
+          fi
           # Several releases share a version: what the manifest held that day is
           # what differs, so the date and the commit are part of the identity.
           echo "version=$VERSION"                        >> $GITHUB_OUTPUT
-          echo "tag=plectroscore-$VERSION-$DATE-$SHA"    >> $GITHUB_OUTPUT
+          echo "tag=$TAG"                                >> $GITHUB_OUTPUT
           echo "title=PlectroScore $VERSION ($DATE)"     >> $GITHUB_OUTPUT
 
       - name: Collect the downloads
@@ -186,6 +200,7 @@ jobs:
             --repo "${{ github.repository }}" \
             --title "${{ steps.name.outputs.title }}" \
             --notes-file NOTES.md \
+            --target "$(git rev-parse HEAD)" \
             ${{ inputs.prerelease && '--prerelease' || '' }} \
             out/*
           echo "released: ${{ steps.name.outputs.tag }}"
