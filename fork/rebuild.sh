@@ -274,6 +274,44 @@ else
     say "   none for this line"
 fi
 
+# -------------------------------------------------------------- provenance --
+# What went into this line, written into the line itself. Artifacts and
+# releases outlive anyone's memory of which pull requests were open the day
+# they were built, and this is the only place that can answer it later.
+step "Recording what went in"
+if [ "$DRY_RUN" = 0 ]; then
+    mkdir -p "$REPO/fork"
+    {
+        echo "# What this build contains"
+        echo
+        echo "Line \`$LINE\`, rebuilt from \`$BASE\` at $(g rev-parse --short "$BASE")."
+        echo
+        echo "| Component | Pull request |"
+        echo "|---|---|"
+        python3 - "$MANIFEST" <<'PYIN'
+import re, sys
+text = open(sys.argv[1]).read()
+m = re.search(r'^components:\n(.*?)(?=^\w|\Z)', text, re.S | re.M)
+for item in re.split(r'\n  - ', '\n' + (m.group(1) if m else '')):
+    if not item.strip():
+        continue
+    def f(k):
+        g = re.search(r'^\s*%s:\s*(.+?)\s*$' % k, item, re.M)
+        return g.group(1).strip() if g else ''
+    name, pr = f('name'), f('pr')
+    skipped = re.search(r'^\s*skip:', item, re.M)
+    if skipped:
+        print("| %s | left out, see the manifest |" % name)
+    else:
+        print("| %s | %s |" % (name, ("#" + pr) if pr else "not a pull request"))
+PYIN
+        echo
+        echo "Built from the manifest by \`fork/rebuild.sh\`. Editing this file by"
+        echo "hand achieves nothing: the next rebuild overwrites it."
+    } > "$REPO/fork/BUILD-MANIFEST.md"
+    say "   fork/BUILD-MANIFEST.md"
+fi
+
 # ----------------------------------------------------------------- overlay --
 step "Applying the fork overlay"
 if [ "$DRY_RUN" = 0 ]; then
@@ -287,6 +325,9 @@ if [ "$DRY_RUN" = 0 ]; then
             say "   $f"
         done
         g add -A .github 2>/dev/null || true
+    fi
+    if [ -d "$REPO/fork" ]; then
+        g add -A fork 2>/dev/null || true
     fi
     if [ -n "$(g status --porcelain --untracked-files=no)" ]; then
         g add -A src 2>/dev/null || true
