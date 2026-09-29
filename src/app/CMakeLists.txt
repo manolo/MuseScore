@@ -257,6 +257,16 @@ if (OS_IS_MAC)
     include(${PROJECT_SOURCE_DIR}/share/icons/SetupIconComposerIcon.cmake)
     target_setup_iconcomposer_icon(MuseScoreStudio "${PROJECT_SOURCE_DIR}/share/icons/AppIcon/AppIcon.icon")
 
+    # The fork ships a ready made icon rather than an Icon Composer bundle:
+    # actool is absent on most machines, and where it is the upstream setup
+    # warns and leaves the bundle with no icon at all.
+    set(PLECTRO_ICNS ${PROJECT_SOURCE_DIR}/share/icons/AppIcon/PlectroScore.icns)
+    target_sources(MuseScoreStudio PRIVATE ${PLECTRO_ICNS})
+    set_source_files_properties(${PLECTRO_ICNS} PROPERTIES
+        MACOSX_PACKAGE_LOCATION Resources)
+    set_target_properties(MuseScoreStudio PROPERTIES
+        MACOSX_BUNDLE_ICON_FILE PlectroScore.icns)
+
     set_target_properties(MuseScoreStudio PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST ${PROJECT_SOURCE_DIR}/buildscripts/packaging/macOS/Info.plist.in
         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER ${MACOSX_BUNDLE_GUI_IDENTIFIER}
