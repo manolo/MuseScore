@@ -1,5 +1,6 @@
-# Every component below is either an open pull request or a branch holding a
-# feature the fork needs and upstream will not take. Nothing is committed onto
+# Every component below is either an open pull request, mine or somebody
+# else's, or a branch holding a feature the fork needs and upstream will not
+# take. Nothing is committed onto
 # a line by hand: the next rebuild would throw it away without saying so.
 # See CONVENTIONS.md.
 #
@@ -71,6 +72,15 @@ components:
       # Its base predates masternotationmock.h, so the mock main carries now
       # does not match the interface this pull request changes.
       - sync-masternotationmock
+
+  - name: plugin api scoreStateChanged
+    pr: 34893
+    ref: refs/fork/pr-34893
+    fetch: refs/pull/34893/head
+    note: >
+      Not mine: opened by Ash-86 against main. There is no branch for it here,
+      so it is fetched by number from upstream rather than adding a remote for
+      every contributor whose work I want in a build. Two files, plugin API only.
 
   - name: tremolo articulation mapping
     pr: 30951

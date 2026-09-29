@@ -73,7 +73,7 @@ manifest_scalar() {   # manifest_scalar <key>
     sed -n "s/^${1}:[[:space:]]*//p" "$MANIFEST" | head -1
 }
 
-manifest_components() {  # emits: ref|name|skip
+manifest_components() {  # emits: ref|name|skip|fetch
     python3 - "$MANIFEST" <<'PY'
 import re, sys
 text = open(sys.argv[1]).read()
@@ -88,7 +88,7 @@ for item in re.split(r'\n  - ', '\n' + m.group(1)):
         f = re.search(r'^\s*%s:\s*(.+?)\s*$' % k, item, re.M)
         return f.group(1).strip() if f else ''
     skip = 'yes' if re.search(r'^\s*skip:', item, re.M) else ''
-    print('|'.join([field('ref'), field('name') or field('ref'), skip]))
+    print('|'.join([field('ref'), field('name') or field('ref'), skip, field('fetch')]))
 PY
 }
 
@@ -205,12 +205,24 @@ fi
 step "Rebuilding $LINE from $BASE"
 run g checkout --quiet -B "$LINE" "$BASE"
 
-while IFS='|' read -r ref name skip; do
+while IFS='|' read -r ref name skip fetch; do
     [ -n "$ref$name" ] || continue
     if [ -n "$skip" ]; then
         printf '   skip  %-44s see manifest\n' "$name"
         SKIPPED+=("$name")
         continue
+    fi
+    # A pull request from somebody else's fork has no branch here. Fetch it by
+    # its number from upstream instead of adding a remote per contributor.
+    if [ -n "$fetch" ]; then
+        if [ "$DRY_RUN" = 1 ]; then
+            printf '   fetch %-44s %s\n' "$name" "$fetch"
+        else
+            g fetch origin --quiet "+$fetch:$ref" || {
+                echo "   cannot fetch $fetch for $name" >&2
+                exit 1
+            }
+        fi
     fi
     printf '   merge %-44s ' "$name"
     if [ "$DRY_RUN" = 1 ]; then echo "(dry run)"; continue; fi
