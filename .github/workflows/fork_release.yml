@@ -1,0 +1,206 @@
+name: 'Fork: release 5.0-tmp'
+
+# Cuts a release of the 5.0 line and keeps it.
+#
+# The push workflow builds in devel mode, which is right for iterating: the
+# "Development" suffix keeps its settings and its data directory away from a
+# real install, so trying a half finished branch cannot disturb real scores.
+# This one is the opposite. It builds in stable mode, so the app is called
+# PlectroScore 5, and its paths are the ordinary MuseScore ones, which is what
+# makes it usable for actual work.
+#
+# Signing and notarisation stay off: a fork holds no Apple certificate and
+# should not. Every one of those steps checks whether its secret is empty and
+# degrades with a warning rather than failing, so the build completes and
+# produces an unsigned app. macOS will ask the person who downloads it to
+# confirm the first launch. The release is marked prerelease to say so.
+#
+# Artifacts of the push builds expire after ninety days and need a GitHub
+# login to fetch. A release does not: it keeps a tag, notes saying which pull
+# requests went in, and direct download links.
+
+# Cut by pushing a tag, which is both the conventional way and the only way
+# that works here: workflow_dispatch needs the file on the repository's default
+# branch, and these workflows live on the line instead. GitHub answers a
+# dispatch of an unregistered workflow with a flat 404. The dispatch trigger is
+# kept because it becomes usable once a tag run has registered the workflow.
+on:
+  push:
+    tags:
+      - 'plectroscore-*'
+  workflow_dispatch:
+    inputs:
+      build_mode:
+        description: 'Build mode: stable gives clean names and paths, devel suffixes both'
+        type: choice
+        options: [stable, testing, devel]
+        default: stable
+      prerelease:
+        description: 'Mark as prerelease (leave on while builds are unsigned)'
+        type: boolean
+        default: true
+      framework_ref:
+        description: 'muse_framework ref to build against'
+        type: string
+        default: '5.0-tmp-framework'
+
+jobs:
+
+  build_mac:
+    uses: ./.github/workflows/build_macos.yml
+    with:
+      build_mode: ${{ inputs.build_mode || 'stable' }}
+      publish: 'off'
+      framework_repo: manolo/muse_framework
+      framework_ref: ${{ inputs.framework_ref || '5.0-tmp-framework' }}
+    secrets: inherit
+
+  build_windows:
+    uses: ./.github/workflows/build_windows.yml
+    with:
+      platforms: windows_x64
+      build_mode: ${{ inputs.build_mode || 'stable' }}
+      publish: 'off'
+      framework_repo: manolo/muse_framework
+      framework_ref: ${{ inputs.framework_ref || '5.0-tmp-framework' }}
+    secrets: inherit
+
+  build_linux:
+    uses: ./.github/workflows/build_linux.yml
+    with:
+      platforms: linux_x64 linux_arm64
+      build_mode: ${{ inputs.build_mode || 'stable' }}
+      publish: 'off'
+      framework_repo: manolo/muse_framework
+      framework_ref: ${{ inputs.framework_ref || '5.0-tmp-framework' }}
+    secrets: inherit
+
+  # The published macOS build is universal. Thinning it to arm64 roughly halves
+  # the download on an Apple silicon machine, and the bundle has to be re-signed
+  # ad hoc afterwards because thinning invalidates whatever signature it had.
+  mac_arm64:
+    needs: [build_mac]
+    runs-on: macos-latest
+    steps:
+      - name: Download macOS artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: 'MU4_*_Mac_*'
+          merge-multiple: true
+          path: ./raw/mac
+
+      - name: Thin to arm64
+        run: |
+          set -e
+          DMG=$(find ./raw/mac -name "*.dmg" | head -1)
+          MOUNT=$(mktemp -d)
+          hdiutil attach "$DMG" -mountpoint "$MOUNT" -nobrowse -quiet
+          APP=$(find "$MOUNT" -name "*.app" -maxdepth 2 | head -1)
+          ditto --arch arm64 "$APP" "$(basename "$APP")"
+          hdiutil detach "$MOUNT" -quiet
+          codesign --force --deep --sign - "$(basename "$APP")"
+          zip -qr --symlinks arm64.zip "$(basename "$APP")"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-mac-arm64
+          path: arm64.zip
+
+  release:
+    needs: [build_mac, build_windows, build_linux, mac_arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Download everything
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: ./raw
+
+      - name: Name the release
+        id: name
+        run: |
+          set -e
+          # The version is assembled from three variables, not stored whole
+          v() { sed -n "s/^set(MUSE_APP_VERSION_$1[[:space:]]*\"\\([0-9]*\\)\").*/\\1/p" version.cmake | head -1; }
+          MAJ=$(v MAJOR); MIN=$(v MINOR); PAT=$(v PATCH)
+          [ -n "$MAJ" ] && [ -n "$MIN" ] && [ -n "$PAT" ] || {
+            echo "cannot read the version from version.cmake" >&2
+            grep -n 'MUSE_APP_VERSION' version.cmake >&2
+            exit 1
+          }
+          VERSION="$MAJ.$MIN.$PAT"
+          DATE=$(date -u +%Y%m%d)
+          SHA=$(git rev-parse --short=10 HEAD)
+          # A tag run is named by its tag; a dispatch has to invent a name.
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="plectroscore-$VERSION-$DATE-$SHA"
+          fi
+          # Several releases share a version: what the manifest held that day is
+          # what differs, so the date and the commit are part of the identity.
+          echo "version=$VERSION"                        >> $GITHUB_OUTPUT
+          echo "tag=$TAG"                                >> $GITHUB_OUTPUT
+          echo "title=PlectroScore $VERSION ($DATE)"     >> $GITHUB_OUTPUT
+
+      - name: Collect the downloads
+        run: |
+          set -e
+          mkdir -p out
+          V="${{ steps.name.outputs.version }}"
+
+          take() {   # take <find args...> -> out/<name>
+            local out="$1"; shift
+            local f; f=$(find ./raw "$@" | head -1)
+            if [ -n "$f" ]; then cp "$f" "out/$out"; echo "  $out"
+            else echo "  WARNING: nothing matched for $out"; fi
+          }
+
+          take "PlectroScore-$V-mac.dmg"                 -name '*.dmg'
+          take "PlectroScore-$V-mac-arm64.zip"           -name 'arm64.zip'
+          take "PlectroScore-$V-win-x86_64.msi"          -name '*.msi'
+          take "PlectroScore-$V-linux-x86_64.AppImage"   -name '*x86_64*.AppImage' ! -name '*.zsync'
+          take "PlectroScore-$V-linux-aarch64.AppImage"  -name '*aarch64*.AppImage' ! -name '*.zsync'
+
+          echo; ls -lh out/
+
+      - name: Write the notes
+        run: |
+          set -e
+          {
+            echo "Built from \`${{ github.ref_name }}\` at \`$(git rev-parse --short=10 HEAD)\`, mode \`${{ inputs.build_mode || 'stable' }}\`."
+            echo
+            if [ -f fork/CONTENTS.md ]; then
+              tail -n +2 fork/CONTENTS.md
+            else
+              echo "No build manifest in this tree; rebuild with fork/rebuild.sh to get one."
+            fi
+            echo
+            echo "## Before you open it"
+            echo
+            echo "These builds are unsigned: a fork holds no Apple or Microsoft"
+            echo "certificate. macOS will refuse the first launch, so open it once"
+            echo "from the context menu and choose Open. Windows will show a"
+            echo "SmartScreen warning. Linux needs no ceremony."
+            echo
+            echo "Scores, plugins, styles and preferences are shared with MuseScore"
+            echo "on the same machine: this is a MuseScore that calls itself"
+            echo "something else, not a separate program."
+          } > NOTES.md
+          cat NOTES.md
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.name.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --title "${{ steps.name.outputs.title }}" \
+            --notes-file NOTES.md \
+            --target "$(git rev-parse HEAD)" \
+            ${{ (github.event_name != 'workflow_dispatch' || inputs.prerelease) && '--prerelease' || '' }} \
+            out/*
+          echo "released: ${{ steps.name.outputs.tag }}"
