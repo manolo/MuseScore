@@ -45,7 +45,7 @@ jobs:
   build_mac:
     uses: ./.github/workflows/build_macos.yml
     with:
-      build_mode: ${{ inputs.build_mode }}
+      build_mode: ${{ inputs.build_mode || 'stable' }}
       publish: 'off'
     secrets: inherit
 
@@ -53,7 +53,7 @@ jobs:
     uses: ./.github/workflows/build_windows.yml
     with:
       platforms: windows_x64
-      build_mode: ${{ inputs.build_mode }}
+      build_mode: ${{ inputs.build_mode || 'stable' }}
       publish: 'off'
     secrets: inherit
 
@@ -61,7 +61,7 @@ jobs:
     uses: ./.github/workflows/build_linux.yml
     with:
       platforms: linux_x64 linux_arm64
-      build_mode: ${{ inputs.build_mode }}
+      build_mode: ${{ inputs.build_mode || 'stable' }}
       publish: 'off'
     secrets: inherit
 
@@ -163,7 +163,7 @@ jobs:
         run: |
           set -e
           {
-            echo "Built from \`${{ github.ref_name }}\` at \`$(git rev-parse --short=10 HEAD)\`, mode \`${{ inputs.build_mode }}\`."
+            echo "Built from \`${{ github.ref_name }}\` at \`$(git rev-parse --short=10 HEAD)\`, mode \`${{ inputs.build_mode || 'stable' }}\`."
             echo
             if [ -f fork/CONTENTS.md ]; then
               tail -n +2 fork/CONTENTS.md
@@ -193,6 +193,6 @@ jobs:
             --title "${{ steps.name.outputs.title }}" \
             --notes-file NOTES.md \
             --target "$(git rev-parse HEAD)" \
-            ${{ inputs.prerelease && '--prerelease' || '' }} \
+            ${{ (github.event_name != 'workflow_dispatch' || inputs.prerelease) && '--prerelease' || '' }} \
             out/*
           echo "released: ${{ steps.name.outputs.tag }}"
