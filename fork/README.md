@@ -44,7 +44,18 @@ The upstream reusable workflows solve this themselves: `build_macos.yml`, `build
 
 ## Fixups: what rerere cannot reach
 
-`rerere` only ever sees conflicts. Two things it therefore cannot help with live in `fork/fixups/<line>/`, run in order after the merges:
+`rerere` only ever sees conflicts. Everything it therefore cannot help with lives in `fork/fixups/`, as small idempotent scripts run after the merges, in two phases:
+
+| Phase | What it is | Commit |
+|---|---|---|
+| `integration` | making the merged pull requests build together | `Fork integration: ...` |
+| `branding` | making the result PlectroScore | `Fork branding: ...` |
+
+Each phase becomes exactly one commit, which is the point of the split: branding is a name, an icon and two screens, so a reader chasing a code change can skip that commit whole, and dropping it gives back a plain build of the same source.
+
+`fixups/common/<phase>` runs before `fixups/<line>/<phase>`. Branding is identical on both lines and lives in `common`; a copy per line is a copy that drifts.
+
+Two things integration fixes that a merge never reports:
 
 **Clean but wrong automerges.** Merging #31200 leaves `#include "masklayout.h"` twice, because main and the pull request each add it at a different line and git's three way merge takes both as independent insertions. It is never a conflict, so it never reaches `rerere`, and it comes back on every rebuild.
 
@@ -54,7 +65,7 @@ Every fixup is idempotent and fails loudly rather than silently when the file st
 
 ## The submodule check
 
-After a rebuild the script verifies that **only the overlay commit touches `muse` or `muse_deps`**.
+After a rebuild the script verifies that **only the integration commit touches `muse` or `muse_deps`**, matching it by hash rather than by being the newest commit, since branding lands after it.
 
 This is not decoration. In September 2026 a single feature commit on the importer branch carried stale pointers for both submodules. It broke the pull request as an unresolvable delete/modify against main, and then broke all four platform builds with a crashpad link error, twice, because the first repair fixed `muse` and never looked at `muse_deps`. A feature commit has no business moving the framework; if this check fires, strip the pointer from the offending commit rather than resolving it here, or it returns on the next rebuild.
 

@@ -13,7 +13,9 @@ Commits are **thematic**: one subject each, with the pull request number or the 
 
 ## CI changes go in one commit, or in a few thematic ones
 
-The workflow the fork adds arrives through the overlay, as a **single commit** at the end of the rebuild. That is deliberate: it keeps everything that is fork scaffolding, rather than product, in one place that is trivial to identify and to drop.
+Everything the fork adds on its own account arrives at the end of the rebuild, in exactly **two commits**: `Fork integration`, which is the CI workflow, the framework pin and whatever the merged pull requests need to build together, and `Fork branding`, which is the name, the icon, the loading screen and the about box.
+
+That is deliberate. Both are scaffolding rather than product, so both must be trivial to identify and to drop, and they are kept apart because they are dropped for different reasons: branding goes if the build should be a plain MuseScore again, integration goes if the line is being taken somewhere that builds it differently. Mixed into one commit, neither could be removed without the other.
 
 When the CI grows enough that one commit stops describing it, split it by subject, never by file: one commit for the build workflow, one for packaging, one for whatever publishes. Do not scatter CI changes through the line's history, and never fold them into a commit that belongs to a pull request. Anything upstream might one day want has to be separable from the scaffolding that only the fork needs.
 

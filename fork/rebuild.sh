@@ -254,25 +254,62 @@ done < <(manifest_components)
 # What rerere cannot reach. Two kinds live here: clean but wrong automerges,
 # which are never conflicts so rerere never sees them, and adaptations a
 # component needs because its base predates something main has since added.
-step "Running fixups"
-FIXUPS="$TOOLS_DIR/fixups/$LINE"
-if [ -d "$FIXUPS" ] && [ "$DRY_RUN" = 0 ]; then
-    for f in "$FIXUPS"/*.sh; do
-        [ -e "$f" ] || continue
-        say "   $(basename "$f")"
-        ( cd "$REPO" && bash "$f" ) || {
-            echo "   fixup failed; it is probably stale, read its header" >&2
-            exit 1
-        }
+#
+# They run in two phases, and each phase becomes one commit. Integration is
+# what it takes to make the merged pull requests build together; branding is
+# what makes the result PlectroScore. Keeping them apart is what lets either
+# be read, reverted or carried elsewhere without dragging the other along.
+#
+# fixups/common/<phase> runs before fixups/<line>/<phase>. Most branding is
+# identical on both lines, and a copy per line is a copy that drifts.
+run_fixups() {
+    local phase="$1" ran=0 f
+    for dir in "$TOOLS_DIR/fixups/common/$phase" "$TOOLS_DIR/fixups/$LINE/$phase"; do
+        [ -d "$dir" ] || continue
+        for f in "$dir"/*.sh; do
+            [ -e "$f" ] || continue
+            ran=1
+            if [ "$DRY_RUN" = 1 ]; then
+                say "   would run: $(basename "$f")"
+                continue
+            fi
+            say "   $(basename "$f")"
+            ( cd "$REPO" && bash "$f" ) || {
+                echo "   fixup failed; it is probably stale, read its header" >&2
+                exit 1
+            }
+        done
     done
-elif [ -d "$FIXUPS" ]; then
-    for f in "$FIXUPS"/*.sh; do
-        [ -e "$f" ] || continue
-        say "   would run: $(basename "$f")"
-    done
-else
-    say "   none for this line"
+    [ "$ran" = 1 ] || say "   none for this line"
+}
+
+# What the rebuild may commit is only what it just created. The safety check
+# at the top ignores untracked files, and it has to: a worktree used for
+# building collects test output and install leftovers that no rebuild should
+# ever sweep into a commit. So the untracked files present before the fixups
+# run are photographed here, and staging takes only tracked edits plus files
+# that were not in that photograph.
+PRISTINE_UNTRACKED="$(mktemp)"
+trap 'rm -f "$PRISTINE_UNTRACKED"' EXIT
+if [ "$DRY_RUN" = 0 ]; then
+    g ls-files --others --exclude-standard | sort > "$PRISTINE_UNTRACKED"
+    IGNORED=$(wc -l < "$PRISTINE_UNTRACKED" | tr -d ' ')
+    # Said out loud rather than assumed. A file a fixup owns, left behind
+    # untracked by an earlier hand run, looks identical to build litter from
+    # here and would be dropped from the commit without a word.
+    [ "$IGNORED" = 0 ] || say "   ignoring $IGNORED untracked file(s) already in the worktree"
 fi
+
+stage_ours() {
+    g add -u
+    g ls-files --others --exclude-standard | sort | comm -13 "$PRISTINE_UNTRACKED" - \
+    | while IFS= read -r f; do
+        [ -n "$f" ] && g add -- "$f"
+    done
+}
+
+step "Integration fixups"
+run_fixups integration
 
 # -------------------------------------------------------------- provenance --
 # What went into this line, written into the line itself. Artifacts and
@@ -326,12 +363,11 @@ if [ "$DRY_RUN" = 0 ]; then
         done
     fi
 
-    # Stage everything, not a hand picked list. The fixups touch whatever the
+    # Stage by rule, never by a hand picked list. The fixups touch whatever the
     # change needs, version.cmake and the packaging scripts among them, and a
     # list of directories silently drops the ones nobody remembered: branding
     # was applied and then left out of the commit exactly that way.
-    # The rebuild refuses to start on a dirty tree, so anything here is ours.
-    g add -A
+    stage_ours
 fi
 
 if [ -n "$FRAMEWORK_PIN" ] && [ "$DRY_RUN" = 0 ]; then
@@ -339,25 +375,56 @@ if [ -n "$FRAMEWORK_PIN" ] && [ "$DRY_RUN" = 0 ]; then
     g update-index --add --cacheinfo "160000,$FRAMEWORK_PIN,muse"
 fi
 
+INTEGRATION_COMMIT=""
 if [ "$DRY_RUN" = 0 ] && [ -n "$(g status --porcelain --untracked-files=no)" ]; then
-    g commit --quiet -m "Fork overlay: CI workflow and framework pin for $LINE"
+    g commit --quiet -m "Fork integration: CI workflow and framework pin for $LINE"
+    INTEGRATION_COMMIT="$(g rev-parse HEAD)"
+fi
+
+# ---------------------------------------------------------------- branding --
+# Second and last commit: everything that makes the build PlectroScore rather
+# than MuseScore. It sits on top on purpose. What it changes is a name, an
+# icon and two screens, so a reader chasing a code change can skip it whole,
+# and dropping it gives back a plain build of the same source.
+step "Branding"
+if [ "$DRY_RUN" = 0 ]; then
+    run_fixups branding
+    stage_ours
+    if [ -n "$(g status --porcelain --untracked-files=no)" ]; then
+        g commit --quiet -m "Fork branding: PlectroScore name, icon, loading screen and about box"
+    else
+        say "   nothing to commit"
+    fi
+else
+    run_fixups branding
 fi
 
 # ------------------------------------------------------------------ checks --
 step "Checking the result"
 
-# Every submodule change must live in the single overlay commit. A stale pin
-# smuggled into a feature commit is what broke CI twice in September 2026:
-# once the muse pin, once muse_deps, both from the same commit.
+# Every submodule change must live in the integration commit, the one that
+# sets the pin. A stale pin smuggled into a feature commit is what broke CI
+# twice in September 2026: once the muse pin, once muse_deps, both from the
+# same commit.
+#
+# The integration commit is matched by its hash, not by being the newest.
+# Branding lands after it, so "everything except the tip" would now let a bad
+# pin through unnoticed.
 BAD=0
-for sm in $(g ls-tree "$BASE" | awk '$2=="commit"{print $4}'); do
-    OFFENDERS="$(g log --format='%h %s' "$BASE..$LINE" -- "$sm" | tail -n +2)"
+# Nothing was rebuilt in a dry run, so there is no integration commit to
+# compare against and the branch still carries the previous pass.
+for sm in $([ "$DRY_RUN" = 0 ] && g ls-tree "$BASE" | awk '$2=="commit"{print $4}'); do
+    # The grep exits 1 when nothing is left, which is the good case, so its
+    # status must not reach errexit.
+    OFFENDERS="$(g log --format='%H %h %s' "$BASE..$LINE" -- "$sm" \
+                 | grep -v "^${INTEGRATION_COMMIT:-no-such-commit} " \
+                 | cut -d' ' -f2- || true)"
     if [ -n "$OFFENDERS" ]; then
-        echo "   FAIL: commits other than the overlay touch $sm:" >&2
+        echo "   FAIL: commits other than the integration commit touch $sm:" >&2
         printf '%s\n' "$OFFENDERS" | sed 's/^/        /' >&2
         BAD=1
     else
-        say "   ok: only the overlay commit touches $sm"
+        say "   ok: only the integration commit touches $sm"
     fi
 done
 [ "$BAD" = 0 ] || { echo "
