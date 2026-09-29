@@ -24,6 +24,8 @@
 
 #include <QApplication>
 #include <QPainter>
+#include <QPixmap>
+#include <QFontDatabase>
 #include <QScreen>
 #include <QSvgRenderer>
 
@@ -37,10 +39,10 @@ static constexpr QSize loadingScreenSize(800, 380);
 
 static const QColor messageColor("#F1F1EE");
 
-static const QString website("www.musescore.org");
+static const QString website("github.com/manolo/MuseScore");
 static constexpr QRectF websiteRect(loadingScreenSize.width() - 48, loadingScreenSize.height() - 48, 0, 0);
 
-static const QColor versionNumberColor("#19F3FF");
+static const QColor versionNumberColor("#E8845C");
 static constexpr qreal versionNumberSpacing = 5.0;
 
 LoadingScreenView::LoadingScreenView(QWidget* parent)
@@ -68,6 +70,38 @@ void LoadingScreenView::draw(QPainter* painter)
 
     // Draw background
     m_backgroundRenderer->render(painter);
+
+    // Draw the fork's name, and what it is based on. The artwork leaves this
+    // area empty on purpose; the attribution belongs where people can see it.
+    {
+        QFont nameFont = QFontDatabase::systemFont(QFontDatabase::GeneralFont);
+        nameFont.setPixelSize(44);
+        nameFont.setWeight(QFont::DemiBold);
+        painter->setFont(nameFont);
+        painter->setPen(QPen(QColor("#F3E7E1")));
+        painter->drawText(QRectF(330, 150, 430, 56),
+                          Qt::AlignLeft | Qt::AlignVCenter | Qt::TextDontClip,
+                          QStringLiteral("PlectroScore"));
+
+        // Their wordmark, not ours, and smaller than ours: this says what the
+        // build is based on. Kept as an image because it is a mark, not type.
+        QFont basedFont = QFontDatabase::systemFont(QFontDatabase::GeneralFont);
+        basedFont.setPixelSize(16);
+        painter->setFont(basedFont);
+        painter->setPen(QPen(QColor("#C79A87")));
+        painter->drawText(QRectF(332, 208, 200, 22),
+                          Qt::AlignLeft | Qt::AlignVCenter | Qt::TextDontClip,
+                          QStringLiteral("based on"));
+
+        QPixmap wordmark(QStringLiteral(":/resources/musescore-wordmark.png"));
+        if (!wordmark.isNull()) {
+            const int wordmarkWidth = 208;
+            const int wordmarkHeight = wordmark.height() * wordmarkWidth / wordmark.width();
+            painter->drawPixmap(QRect(412, 208 + (22 - wordmarkHeight) / 2,
+                                      wordmarkWidth, wordmarkHeight),
+                                wordmark);
+        }
+    }
 
     // Draw message
     QFont font(QString::fromStdString(uiConfiguration()->fontFamily()));

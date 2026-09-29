@@ -31,7 +31,7 @@ import MuseScore.AppShell
 StyledDialogView {
     id: root
 
-    title: qsTrc("appshell/about", "About MuseScore Studio")
+    title: qsTrc("appshell/about", "About PlectroScore")
 
     contentHeight: 424
     contentWidth: 480
@@ -59,7 +59,7 @@ StyledDialogView {
                 id: logo
                 Layout.alignment: Qt.AlignHCenter
 
-                source: "resources/mu_logo.svg"
+                source: "resources/plectroscore-logo.png"
                 sourceSize: Qt.size(100, 100)
 
                 MouseArea {
@@ -85,6 +85,12 @@ StyledDialogView {
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: qsTrc("appshell/about", "Version:") + " " + aboutModel.museScoreVersion()
                     font: ui.theme.bodyBoldFont
+                }
+
+                StyledTextLabel {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: "based on MuseScore Studio"
+                    opacity: 0.7
                 }
 
                 Row {
