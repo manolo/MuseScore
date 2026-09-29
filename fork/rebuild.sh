@@ -308,8 +308,8 @@ PYIN
         echo
         echo "Built from the manifest by \`fork/rebuild.sh\`. Editing this file by"
         echo "hand achieves nothing: the next rebuild overwrites it."
-    } > "$REPO/fork/BUILD-MANIFEST.md"
-    say "   fork/BUILD-MANIFEST.md"
+    } > "$REPO/fork/CONTENTS.md"
+    say "   fork/CONTENTS.md"
 fi
 
 # ----------------------------------------------------------------- overlay --
@@ -324,14 +324,14 @@ if [ "$DRY_RUN" = 0 ]; then
             cp "$OVERLAY/$f" "$REPO/$f"
             say "   $f"
         done
-        g add -A .github 2>/dev/null || true
     fi
-    if [ -d "$REPO/fork" ]; then
-        g add -A fork 2>/dev/null || true
-    fi
-    if [ -n "$(g status --porcelain --untracked-files=no)" ]; then
-        g add -A src 2>/dev/null || true
-    fi
+
+    # Stage everything, not a hand picked list. The fixups touch whatever the
+    # change needs, version.cmake and the packaging scripts among them, and a
+    # list of directories silently drops the ones nobody remembered: branding
+    # was applied and then left out of the commit exactly that way.
+    # The rebuild refuses to start on a dirty tree, so anything here is ours.
+    g add -A
 fi
 
 if [ -n "$FRAMEWORK_PIN" ] && [ "$DRY_RUN" = 0 ]; then

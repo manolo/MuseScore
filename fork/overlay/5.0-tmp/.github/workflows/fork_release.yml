@@ -159,8 +159,8 @@ jobs:
           {
             echo "Built from \`${{ github.ref_name }}\` at \`$(git rev-parse --short=10 HEAD)\`, mode \`${{ inputs.build_mode }}\`."
             echo
-            if [ -f fork/BUILD-MANIFEST.md ]; then
-              tail -n +2 fork/BUILD-MANIFEST.md
+            if [ -f fork/CONTENTS.md ]; then
+              tail -n +2 fork/CONTENTS.md
             else
               echo "No build manifest in this tree; rebuild with fork/rebuild.sh to get one."
             fi
