@@ -78,21 +78,21 @@ VERSION_MINOR="$(cut -d'.' -f2 <<<"$BUILD_VERSION")"
 VERSION_PATCH="$(cut -d'.' -f3 <<<"$BUILD_VERSION")"
 
 # TODO: rename to MuseScore Studio (https://github.com/musescore/MuseScore/issues/32235)
-APP_NAME="MuseScore $VERSION_MAJOR"
+APP_NAME="PlectroScore $VERSION_MAJOR"
 if [ "$BUILD_MODE" == "devel" ]; then
-    APP_NAME="MuseScore $BUILD_VERSION Development"
+    APP_NAME="PlectroScore $BUILD_VERSION Development"
     VOL_NAME="MuseScore-Studio-${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}.${BUILD_NUMBER}-${BUILD_REVISION}"
 fi
 if [ "$BUILD_MODE" == "nightly" ]; then
-    APP_NAME="MuseScore $BUILD_VERSION Nightly"
+    APP_NAME="PlectroScore $BUILD_VERSION Nightly"
     VOL_NAME="MuseScore-Studio-${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}.${BUILD_NUMBER}-${BUILD_REVISION}"
 fi
 if [ "$BUILD_MODE" == "testing" ]; then
-    APP_NAME="MuseScore $BUILD_VERSION Testing"
+    APP_NAME="PlectroScore $BUILD_VERSION Testing"
     VOL_NAME="MuseScore-Studio-${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}.${BUILD_NUMBER}-${BUILD_REVISION}"
 fi
 if [ "$BUILD_MODE" == "stable" ]; then
-    APP_NAME="MuseScore $VERSION_MAJOR"
+    APP_NAME="PlectroScore $VERSION_MAJOR"
     VOL_NAME="MuseScore-Studio-${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}"
 fi
 
