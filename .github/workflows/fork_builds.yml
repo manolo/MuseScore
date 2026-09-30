@@ -1,0 +1,173 @@
+name: 'Fork: build 5.0'
+
+# Builds the 5.0 integration line on the fork and leaves the three platforms
+# as downloadable artifacts, so a build no longer has to be a local one.
+#
+# The framework comes from the fork, not from the pinned submodule: the pin
+# this line carries is main plus my own muse_framework pull requests, and that
+# commit does not exist upstream. The reusable workflows take framework_repo
+# and framework_ref and check the framework out over muse/ themselves, which
+# is why .gitmodules stays untouched.
+#
+# Triggered by hand as well as on push: a rebuild is often pushed several
+# times in a row while a conflict is being sorted out, and three platforms on
+# every one of those is a waste of minutes.
+
+on:
+  push:
+    # Every brand of this line, so a brand added to the manifest starts
+    # building without anybody editing a workflow. The file lives in the
+    # integration commit, which every brand shares, so it can name none of
+    # them individually anyway.
+    branches:
+      - '5.0-*'
+  workflow_dispatch:
+    inputs:
+      framework_ref:
+        description: 'muse_framework ref to build against'
+        type: string
+        default: '5.0-framework'
+
+env:
+  FRAMEWORK_REPO: manolo/muse_framework
+  FRAMEWORK_REF: ${{ inputs.framework_ref || '5.0-framework' }}
+
+jobs:
+
+  build_mac:
+    uses: ./.github/workflows/build_macos.yml
+    with:
+      build_mode: devel
+      publish: 'off'
+      framework_repo: manolo/muse_framework
+      framework_ref: ${{ inputs.framework_ref || '5.0-framework' }}
+    secrets: inherit
+
+  build_windows:
+    uses: ./.github/workflows/build_windows.yml
+    with:
+      platforms: windows_x64
+      build_mode: devel
+      publish: 'off'
+      framework_repo: manolo/muse_framework
+      framework_ref: ${{ inputs.framework_ref || '5.0-framework' }}
+    secrets: inherit
+
+  build_linux:
+    uses: ./.github/workflows/build_linux.yml
+    with:
+      platforms: linux_x64 linux_arm64
+      build_mode: devel
+      publish: 'off'
+      framework_repo: manolo/muse_framework
+      framework_ref: ${{ inputs.framework_ref || '5.0-framework' }}
+    secrets: inherit
+
+  # The published macOS build is universal. Thinning it to arm64 makes the
+  # download less than half the size on an Apple silicon machine, which is
+  # what this fork is actually run on. ditto thins the whole bundle, including
+  # frameworks and dylibs, and the bundle has to be re-signed afterwards.
+  package_mac_arm64_zip:
+    needs: [build_mac]
+    runs-on: macos-latest
+    steps:
+      - name: Download macOS artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: 'MU4_*_Mac_*'
+          merge-multiple: true
+          path: ./raw/mac
+
+      - name: Extract arm64 .app from DMG and zip
+        run: |
+          set -e
+          DMG=$(find ./raw/mac -name "*.dmg" | head -1)
+          echo "Using DMG: $DMG"
+
+          MOUNT_POINT=$(mktemp -d)
+          hdiutil attach "$DMG" -mountpoint "$MOUNT_POINT" -nobrowse -quiet
+
+          APP=$(find "$MOUNT_POINT" -name "*.app" -maxdepth 2 | head -1)
+          echo "Found app: $APP"
+
+          ditto --arch arm64 "$APP" app-arm64.app
+
+          hdiutil detach "$MOUNT_POINT" -quiet
+
+          # Ad-hoc signature, required after thinning; no Apple certificate needed
+          codesign --force --deep --sign - app-arm64.app
+
+          zip -r --symlinks 5.0-mac-arm64.zip app-arm64.app
+
+      - name: Upload arm64 zip
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: 5.0-mac-arm64-zip
+          path: 5.0-mac-arm64.zip
+
+  package:
+    needs: [build_mac, build_windows, build_linux, package_mac_arm64_zip]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download macOS universal artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: 'MU4_*_Mac_*'
+          merge-multiple: true
+          path: ./raw/mac
+
+      - name: Download macOS arm64 zip
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: 5.0-mac-arm64-zip
+          path: ./raw/mac-arm64
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: 'MU4_*_Win_x64*'
+          merge-multiple: true
+          path: ./raw/win
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: 'MU4_*_Lin_x64*'
+          merge-multiple: true
+          path: ./raw/linux
+
+      - name: Assemble package
+        run: |
+          set -e
+          mkdir -p out
+          DATE=$(date -u +"%Y-%m-%d")
+          SHA=$(echo "${{ github.sha }}" | cut -c1-10)
+          STAMP="${DATE}-${SHA}"
+
+          copy_one() {   # copy_one <dir> <find args...> -> out/<name>
+            local dir="$1" out="$2"; shift 2
+            local f
+            f=$(find "$dir" "$@" | head -1)
+            if [ -n "$f" ]; then
+              cp "$f" "out/$out"
+              echo "  $out  <-  $f"
+            else
+              echo "  WARNING: nothing matched in $dir"; ls "$dir" || true
+            fi
+          }
+
+          copy_one ./raw/mac       "MuseScore-5.0-${STAMP}-mac.dmg"           -name "*.dmg"
+          copy_one ./raw/mac-arm64 "MuseScore-5.0-${STAMP}-mac-arm64.zip"     -name "*.zip"
+          copy_one ./raw/win       "MuseScore-5.0-${STAMP}-win-x86_64.msi"    -name "*.msi"
+          copy_one ./raw/linux     "MuseScore-5.0-${STAMP}-linux-x86_64.AppImage" -name "*.AppImage" ! -name "*.zsync"
+
+          echo ""
+          echo "Package contents:"
+          ls -lh out/
+
+      - name: Upload package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: MuseScore-5.0
+          path: out/
+          retention-days: 90
