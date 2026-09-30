@@ -4,7 +4,7 @@
 # a line by hand: the next rebuild would throw it away without saying so.
 # See CONVENTIONS.md.
 #
-# Integration line: 5.0-tmp
+# Integration line: 5.0
 #
 # Today's upstream main plus every open pull request of mine, rebuilt from
 # scratch by fork/rebuild.sh. Nothing here is maintained by hand.
@@ -12,15 +12,22 @@
 # When one of these pull requests is merged upstream, delete its entry and
 # rebuild: the change then arrives through the base instead.
 
-line: 5.0-tmp
+line: 5.0
 base: origin/main
+
+# The brands stamped onto this line. Each becomes a branch <line>-<brand>,
+# all of them sharing one integration commit, so the builds differ in their
+# name and in nothing else. That is what makes comparing them worth anything.
+brands:
+  - plectroscore
+
 
 framework:
   repo: manolo/muse_framework
   upstream: origin/main
   # The branch the rebuild creates and pushes. CI fetches the pin from here,
   # so it must exist on the fork before a build can run.
-  branch: 5.0-tmp-framework
+  branch: 5.0-framework
   base: pin
   components:
     - name: layered articulation dynamics

@@ -1,4 +1,4 @@
-name: 'Fork: build 5.0-tmp'
+name: 'Fork: build 5.0'
 
 # Builds the 5.0 integration line on the fork and leaves the three platforms
 # as downloadable artifacts, so a build no longer has to be a local one.
@@ -15,18 +15,22 @@ name: 'Fork: build 5.0-tmp'
 
 on:
   push:
+    # Every brand of this line, so a brand added to the manifest starts
+    # building without anybody editing a workflow. The file lives in the
+    # integration commit, which every brand shares, so it can name none of
+    # them individually anyway.
     branches:
-      - 5.0-tmp
+      - '5.0-*'
   workflow_dispatch:
     inputs:
       framework_ref:
         description: 'muse_framework ref to build against'
         type: string
-        default: '5.0-tmp-framework'
+        default: '5.0-framework'
 
 env:
   FRAMEWORK_REPO: manolo/muse_framework
-  FRAMEWORK_REF: ${{ inputs.framework_ref || '5.0-tmp-framework' }}
+  FRAMEWORK_REF: ${{ inputs.framework_ref || '5.0-framework' }}
 
 jobs:
 
@@ -36,7 +40,7 @@ jobs:
       build_mode: devel
       publish: 'off'
       framework_repo: manolo/muse_framework
-      framework_ref: ${{ inputs.framework_ref || '5.0-tmp-framework' }}
+      framework_ref: ${{ inputs.framework_ref || '5.0-framework' }}
     secrets: inherit
 
   build_windows:
@@ -46,7 +50,7 @@ jobs:
       build_mode: devel
       publish: 'off'
       framework_repo: manolo/muse_framework
-      framework_ref: ${{ inputs.framework_ref || '5.0-tmp-framework' }}
+      framework_ref: ${{ inputs.framework_ref || '5.0-framework' }}
     secrets: inherit
 
   build_linux:
@@ -56,7 +60,7 @@ jobs:
       build_mode: devel
       publish: 'off'
       framework_repo: manolo/muse_framework
-      framework_ref: ${{ inputs.framework_ref || '5.0-tmp-framework' }}
+      framework_ref: ${{ inputs.framework_ref || '5.0-framework' }}
     secrets: inherit
 
   # The published macOS build is universal. Thinning it to arm64 makes the
@@ -86,20 +90,20 @@ jobs:
           APP=$(find "$MOUNT_POINT" -name "*.app" -maxdepth 2 | head -1)
           echo "Found app: $APP"
 
-          ditto --arch arm64 "$APP" MuseScore-5.0-tmp.app
+          ditto --arch arm64 "$APP" app-arm64.app
 
           hdiutil detach "$MOUNT_POINT" -quiet
 
           # Ad-hoc signature, required after thinning; no Apple certificate needed
-          codesign --force --deep --sign - MuseScore-5.0-tmp.app
+          codesign --force --deep --sign - app-arm64.app
 
-          zip -r --symlinks MuseScore-5.0-tmp-mac-arm64.zip MuseScore-5.0-tmp.app
+          zip -r --symlinks 5.0-mac-arm64.zip app-arm64.app
 
       - name: Upload arm64 zip
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: 5.0-tmp-mac-arm64-zip
-          path: MuseScore-5.0-tmp-mac-arm64.zip
+          name: 5.0-mac-arm64-zip
+          path: 5.0-mac-arm64.zip
 
   package:
     needs: [build_mac, build_windows, build_linux, package_mac_arm64_zip]
@@ -115,7 +119,7 @@ jobs:
       - name: Download macOS arm64 zip
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: 5.0-tmp-mac-arm64-zip
+          name: 5.0-mac-arm64-zip
           path: ./raw/mac-arm64
 
       - name: Download Windows artifact
@@ -152,10 +156,10 @@ jobs:
             fi
           }
 
-          copy_one ./raw/mac       "MuseScore-5.0-tmp-${STAMP}-mac.dmg"           -name "*.dmg"
-          copy_one ./raw/mac-arm64 "MuseScore-5.0-tmp-${STAMP}-mac-arm64.zip"     -name "*.zip"
-          copy_one ./raw/win       "MuseScore-5.0-tmp-${STAMP}-win-x86_64.msi"    -name "*.msi"
-          copy_one ./raw/linux     "MuseScore-5.0-tmp-${STAMP}-linux-x86_64.AppImage" -name "*.AppImage" ! -name "*.zsync"
+          copy_one ./raw/mac       "MuseScore-5.0-${STAMP}-mac.dmg"           -name "*.dmg"
+          copy_one ./raw/mac-arm64 "MuseScore-5.0-${STAMP}-mac-arm64.zip"     -name "*.zip"
+          copy_one ./raw/win       "MuseScore-5.0-${STAMP}-win-x86_64.msi"    -name "*.msi"
+          copy_one ./raw/linux     "MuseScore-5.0-${STAMP}-linux-x86_64.AppImage" -name "*.AppImage" ! -name "*.zsync"
 
           echo ""
           echo "Package contents:"
@@ -164,6 +168,6 @@ jobs:
       - name: Upload package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: MuseScore-5.0-tmp
+          name: MuseScore-5.0
           path: out/
           retention-days: 90

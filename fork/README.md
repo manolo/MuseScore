@@ -4,8 +4,10 @@ This branch holds no MuseScore source. It carries the definition of the integrat
 
 | Line | Base | What it is |
 |---|---|---|
-| `5.0-tmp` | `origin/main` | Today's upstream plus every open pull request of mine |
-| `4.7-tmp` | `origin/4.7` | The 4.7 line plus ports that mostly never go upstream |
+| `5.0` | `origin/main` | Today's upstream plus every open pull request of mine |
+| `4.7` | `origin/4.7` | The 4.7 line plus ports that mostly never go upstream |
+
+A line is not a branch. Each one is built once and then stamped with every brand its manifest declares, one branch per brand. The brand branches share their parent commit exactly, so they are the same build under different names, which is the only way comparing them means anything.
 
 Conventions for what may live on a line, how CI changes are committed, and how upstream's own workflows behave on a fork: [CONVENTIONS.md](CONVENTIONS.md).
 
@@ -18,11 +20,12 @@ What made rebuilding painful before was re-resolving the same conflicts on every
 ## Rebuilding a line
 
 ```sh
-fork/rebuild.sh 5.0-tmp --dry-run    # see what would happen
-fork/rebuild.sh 5.0-tmp
+fork/rebuild.sh 5.0 --dry-run              # see what would happen
+fork/rebuild.sh 5.0
+fork/rebuild.sh 5.0 --brand plectroscore   # just the one
 ```
 
-The script fetches, rebuilds the framework branch and pushes it, archives the previous tip as `archive/<line>-pre-<date>`, rebuilds the line from its base, applies the overlay, pins the framework, and then checks the result. It stops on any conflict it cannot replay, tells you where, and picks up where it left off when you rerun.
+The script fetches, rebuilds the framework branch and pushes it, archives the previous tips as `archive/<line>-<brand>-pre-<date>`, rebuilds the integration from the base onto `<line>-integration`, applies the overlay, pins the framework, stamps each brand onto its own branch, and then checks the result. It stops on any conflict it cannot replay, tells you where, and picks up where it left off when you rerun.
 
 Nothing is pushed except the framework branch. Build and try the line before pushing it.
 
@@ -36,11 +39,11 @@ Resolve it in the source worktree, `git add` and `git commit --no-edit`, then ru
 
 ## Why the framework branch has to be pushed
 
-`5.0-tmp` pins a `muse` commit that is upstream's main plus my own framework pull requests. That commit does not exist in `musescore/muse_framework`, so CI cannot fetch it from the pin alone.
+`5.0` pins a `muse` commit that is upstream's main plus my own framework pull requests. That commit does not exist in `musescore/muse_framework`, so CI cannot fetch it from the pin alone.
 
 The upstream reusable workflows solve this themselves: `build_macos.yml`, `build_linux.yml` and `build_windows.yml` accept `framework_repo` and `framework_ref` and check the framework out over `muse/`. The fork workflow passes my fork and the rebuilt branch, so `.gitmodules` is never touched and `check_submodules.yml` has nothing to complain about.
 
-`4.7-tmp` has no framework section at all: that line still uses the old monolithic layout with no submodules.
+`4.7` has no framework section at all: that line still uses the old monolithic layout with no submodules.
 
 ## Fixups: what rerere cannot reach
 
@@ -49,9 +52,11 @@ The upstream reusable workflows solve this themselves: `build_macos.yml`, `build
 | Phase | What it is | Commit |
 |---|---|---|
 | `integration` | making the merged pull requests build together | `Fork integration: ...` |
-| `branding` | making the result PlectroScore | `Fork branding: ...` |
+| `branding` | giving the build a name, once per brand | `Fork branding: ...` |
 
-Each phase becomes exactly one commit, which is the point of the split: branding is a name, an icon and two screens, so a reader chasing a code change can skip that commit whole, and dropping it gives back a plain build of the same source.
+Integration becomes one commit; branding becomes one commit per brand, each on its own branch. That is the point of the split: branding is a name, an icon and two screens, so a reader chasing a code change can skip that commit whole, dropping it gives back a plain build of the same source, and two brands can share one integration.
+
+A brand is a directory under `fork/brand/` holding an `identity.sh`, which is the only place its name is written down. The drawing lives in `fork/brand/art/` and is shared; a brand that wants its own drops the file in its own directory and it wins.
 
 `fixups/common/<phase>` runs before `fixups/<line>/<phase>`. Branding is identical on both lines and lives in `common`; a copy per line is a copy that drifts.
 
@@ -65,7 +70,7 @@ Every fixup is idempotent and fails loudly rather than silently when the file st
 
 ## The submodule check
 
-After a rebuild the script verifies that **only the integration commit touches `muse` or `muse_deps`**, matching it by hash rather than by being the newest commit, since branding lands after it.
+After a rebuild the script verifies two things. That **only the integration commit touches `muse` or `muse_deps`**, matched by hash rather than by being the newest commit, since branding lands after it. And that **every brand branch has the same parent**, because the moment they do not, the two builds differ by more than a name and comparing them proves nothing.
 
 This is not decoration. In September 2026 a single feature commit on the importer branch carried stale pointers for both submodules. It broke the pull request as an unresolvable delete/modify against main, and then broke all four platform builds with a crashpad link error, twice, because the first repair fixed `muse` and never looked at `muse_deps`. A feature commit has no business moving the framework; if this check fires, strip the pointer from the offending commit rather than resolving it here, or it returns on the next rebuild.
 
@@ -73,19 +78,25 @@ This is not decoration. In September 2026 a single feature commit on the importe
 
 The push builds are for iterating: they are `devel`, so the app carries a
 Development suffix and keeps its settings and data directory away from a real
-install. A release is the opposite, `stable`, so it is called PlectroScore 5
-and uses the ordinary MuseScore paths.
+install. A release is the opposite, `stable`, so it carries its own name
+rather than MuseScore Studio Development, and uses the ordinary MuseScore
+paths.
 
 Releases are cut by pushing a tag:
 
 ```sh
-git tag plectroscore-5.0.0-$(date +%Y%m%d) 5.0-tmp
-git push manolo plectroscore-5.0.0-$(date +%Y%m%d)
+git tag release-5.0.0-$(date +%Y%m%d) 5.0-plectroscore
+git push manolo release-5.0.0-$(date +%Y%m%d)
 ```
 
 That builds the three platforms and publishes a GitHub release on the fork,
 with the five downloads and notes listing which pull requests went in, taken
 from `fork/CONTENTS.md`, which the rebuild writes into the line.
+
+The tag says nothing about the brand and the workflow names none: it reads
+`MUSE_APP_NAME_HUMAN_READABLE` out of `version.cmake` on the tagged commit, so
+the release is titled and the downloads named after whichever brand the tag
+sits on.
 
 It has to be a tag rather than a button. `workflow_dispatch` requires the
 workflow file to sit on the repository's default branch, and these live on the

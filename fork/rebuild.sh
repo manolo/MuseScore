@@ -2,13 +2,19 @@
 #
 # Rebuild an integration line from its manifest.
 #
-#   fork/rebuild.sh 5.0-tmp
-#   fork/rebuild.sh 4.7-tmp --no-push-framework
+#   fork/rebuild.sh 5.0
+#   fork/rebuild.sh 4.7 --no-push-framework
 #
 # The line is always rebuilt from upstream, never updated in place: a pull
 # request merged upstream disappears by deleting its manifest entry, and
 # nothing of it is left behind. Conflict resolutions are remembered by rerere,
 # so a rebuild that changed nothing asks nothing.
+#
+# The integration is built ONCE, onto <line>-integration, and each brand named
+# in the manifest is then stamped onto its own branch <line>-<brand> as a
+# single commit on top of it. The brand branches therefore share one parent
+# commit exactly, which is what makes putting two of them side by side mean
+# anything: they differ in a name and in nothing else.
 
 set -o errexit
 set -o nounset
@@ -18,9 +24,10 @@ usage() {
     cat >&2 <<'EOF'
 usage: rebuild.sh <line> [options]
 
-  <line>                  5.0-tmp or 4.7-tmp
+  <line>                  5.0 or 4.7
   --repo <path>           repository to work in (default: autodetected)
   --manifest <path>       manifest file (default: fork/<line>.yml)
+  --brand <name>          stamp only this brand (default: all in the manifest)
   --no-push-framework     build the framework branch but do not push it
   --dry-run               report what would happen, change nothing
 EOF
@@ -30,6 +37,7 @@ EOF
 LINE=""
 REPO=""
 MANIFEST=""
+ONLY_BRAND=""
 PUSH_FRAMEWORK=1
 DRY_RUN=0
 
@@ -37,6 +45,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --repo)              REPO="$2"; shift 2 ;;
         --manifest)          MANIFEST="$2"; shift 2 ;;
+        --brand)             ONLY_BRAND="$2"; shift 2 ;;
         --no-push-framework) PUSH_FRAMEWORK=0; shift ;;
         --dry-run)           DRY_RUN=1; shift ;;
         -h|--help)           usage ;;
@@ -124,8 +133,33 @@ for item in re.split(r'\n    - ', '\n' + c.group(1)):
 PY
 }
 
+manifest_brands() {
+    python3 - "$MANIFEST" <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+m = re.search(r'^brands:\n((?:\s*-\s*\S+\n)+)', text, re.M)
+if not m:
+    sys.exit(0)
+for line in m.group(1).splitlines():
+    name = line.strip().lstrip('-').strip()
+    if name:
+        print(name)
+PY
+}
+
 BASE="$(manifest_scalar base)"
 [ -n "$BASE" ] || { echo "manifest has no base" >&2; exit 1; }
+
+BRANDS=()
+while read -r b; do [ -n "$b" ] && BRANDS+=("$b"); done < <(manifest_brands)
+if [ -n "$ONLY_BRAND" ]; then
+    printf '%s\n' "${BRANDS[@]}" | grep -qx "$ONLY_BRAND" || {
+        echo "brand $ONLY_BRAND is not in $MANIFEST" >&2; exit 1; }
+    BRANDS=("$ONLY_BRAND")
+fi
+[ ${#BRANDS[@]} -gt 0 ] || { echo "manifest declares no brands" >&2; exit 1; }
+
+INTEGRATION="$LINE-integration"
 
 STAMP="$(date +%Y%m%d)"
 SKIPPED=()
@@ -135,6 +169,7 @@ say "line     : $LINE"
 say "repo     : $REPO"
 say "manifest : $MANIFEST"
 say "base     : $BASE"
+say "brands   : ${BRANDS[*]}"
 [ "$DRY_RUN" = 1 ] && say "mode     : dry run, nothing will change"
 
 # ------------------------------------------------------------------ safety --
@@ -194,16 +229,19 @@ if [ -n "$FRAMEWORK_REPO" ] && [ "$(manifest_scalar framework)" != "none" ]; the
 fi
 
 # -------------------------------------------------------------------- line --
-step "Archiving the previous tip"
-if g rev-parse --verify --quiet "$LINE" >/dev/null; then
-    run g tag -f "archive/$LINE-pre-$STAMP" "$LINE"
-    say "   archive/$LINE-pre-$STAMP -> $(g rev-parse --short "$LINE" 2>/dev/null || echo '?')"
-else
-    say "   no previous $LINE, nothing to archive"
-fi
+step "Archiving the previous tips"
+archived=0
+for brand in "${BRANDS[@]}"; do
+    if g rev-parse --verify --quiet "$LINE-$brand" >/dev/null; then
+        run g tag -f "archive/$LINE-$brand-pre-$STAMP" "$LINE-$brand"
+        say "   archive/$LINE-$brand-pre-$STAMP -> $(g rev-parse --short "$LINE-$brand" 2>/dev/null || echo '?')"
+        archived=1
+    fi
+done
+[ "$archived" = 1 ] || say "   nothing built here yet, nothing to archive"
 
-step "Rebuilding $LINE from $BASE"
-run g checkout --quiet -B "$LINE" "$BASE"
+step "Rebuilding the integration from $BASE"
+run g checkout --quiet -B "$INTEGRATION" "$BASE"
 
 while IFS='|' read -r ref name skip fetch; do
     [ -n "$ref$name" ] || continue
@@ -255,10 +293,11 @@ done < <(manifest_components)
 # which are never conflicts so rerere never sees them, and adaptations a
 # component needs because its base predates something main has since added.
 #
-# They run in two phases, and each phase becomes one commit. Integration is
-# what it takes to make the merged pull requests build together; branding is
-# what makes the result PlectroScore. Keeping them apart is what lets either
-# be read, reverted or carried elsewhere without dragging the other along.
+# They run in two phases. Integration is what it takes to make the merged pull
+# requests build together and is committed once; branding is what gives the
+# build a name, and is committed once per brand. Keeping them apart is what
+# lets either be read, reverted or carried elsewhere without dragging the
+# other along, and it is what lets two brands share one integration.
 #
 # fixups/common/<phase> runs before fixups/<line>/<phase>. Most branding is
 # identical on both lines, and a copy per line is a copy that drifts.
@@ -382,22 +421,35 @@ if [ "$DRY_RUN" = 0 ] && [ -n "$(g status --porcelain --untracked-files=no)" ]; 
 fi
 
 # ---------------------------------------------------------------- branding --
-# Second and last commit: everything that makes the build PlectroScore rather
-# than MuseScore. It sits on top on purpose. What it changes is a name, an
-# icon and two screens, so a reader chasing a code change can skip it whole,
-# and dropping it gives back a plain build of the same source.
+# One commit per brand, each on its own branch, all of them sitting directly
+# on the integration commit. What a brand changes is a name, an icon and two
+# screens, so a reader chasing a code change can skip that commit whole, and
+# dropping it gives back a plain build of the same source.
 step "Branding"
-if [ "$DRY_RUN" = 0 ]; then
+for brand in "${BRANDS[@]}"; do
+    BRAND_DIR="$TOOLS_DIR/brand/$brand"
+    [ -f "$BRAND_DIR/identity.sh" ] || {
+        echo "   no identity for brand $brand at $BRAND_DIR" >&2; exit 1; }
+    # shellcheck disable=SC1091
+    APP_NAME=""; . "$BRAND_DIR/identity.sh"
+    export BRAND_DIR
+
+    say ""
+    say "   $brand -> $LINE-$brand"
+    if [ "$DRY_RUN" = 1 ]; then
+        run_fixups branding
+        continue
+    fi
+
+    g checkout --quiet -B "$LINE-$brand" "$INTEGRATION"
     run_fixups branding
     stage_ours
     if [ -n "$(g status --porcelain --untracked-files=no)" ]; then
-        g commit --quiet -m "Fork branding: PlectroScore name, icon, loading screen and about box"
+        g commit --quiet -m "Fork branding: $APP_NAME name, icon, loading screen and about box"
     else
         say "   nothing to commit"
     fi
-else
-    run_fixups branding
-fi
+done
 
 # ------------------------------------------------------------------ checks --
 step "Checking the result"
@@ -414,30 +466,54 @@ BAD=0
 # Nothing was rebuilt in a dry run, so there is no integration commit to
 # compare against and the branch still carries the previous pass.
 for sm in $([ "$DRY_RUN" = 0 ] && g ls-tree "$BASE" | awk '$2=="commit"{print $4}'); do
-    # The grep exits 1 when nothing is left, which is the good case, so its
-    # status must not reach errexit.
-    OFFENDERS="$(g log --format='%H %h %s' "$BASE..$LINE" -- "$sm" \
-                 | grep -v "^${INTEGRATION_COMMIT:-no-such-commit} " \
-                 | cut -d' ' -f2- || true)"
-    if [ -n "$OFFENDERS" ]; then
-        echo "   FAIL: commits other than the integration commit touch $sm:" >&2
-        printf '%s\n' "$OFFENDERS" | sed 's/^/        /' >&2
-        BAD=1
-    else
-        say "   ok: only the integration commit touches $sm"
-    fi
+    for brand in "${BRANDS[@]}"; do
+        # The grep exits 1 when nothing is left, which is the good case, so its
+        # status must not reach errexit.
+        OFFENDERS="$(g log --format='%H %h %s' "$BASE..$LINE-$brand" -- "$sm" \
+                     | grep -v "^${INTEGRATION_COMMIT:-no-such-commit} " \
+                     | cut -d' ' -f2- || true)"
+        if [ -n "$OFFENDERS" ]; then
+            echo "   FAIL: commits other than the integration commit touch $sm on $LINE-$brand:" >&2
+            printf '%s\n' "$OFFENDERS" | sed 's/^/        /' >&2
+            BAD=1
+        fi
+    done
+    [ "$BAD" = 1 ] || say "   ok: only the integration commit touches $sm"
 done
+
+# The brands must differ by exactly one commit, or they are not comparable.
+if [ "$DRY_RUN" = 0 ] && [ ${#BRANDS[@]} -gt 1 ]; then
+    PARENTS="$(for brand in "${BRANDS[@]}"; do g rev-parse "$LINE-$brand^"; done | sort -u | wc -l)"
+    if [ "$PARENTS" -eq 1 ]; then
+        say "   ok: every brand sits on the same integration commit"
+    else
+        echo "   FAIL: the brand branches do not share one parent" >&2
+        BAD=1
+    fi
+fi
 [ "$BAD" = 0 ] || { echo "
-   A feature commit is carrying a submodule pointer. Strip it there rather
-   than resolving it here, or it comes back on every rebuild." >&2; exit 1; }
+   Something above is wrong with the shape of the result. A submodule pointer
+   in a feature commit has to be stripped there rather than resolved here, or
+   it comes back on every rebuild; brands that do not share a parent mean the
+   branding phase built on the wrong thing." >&2; exit 1; }
 
 step "Result"
-say "   $LINE -> $(g rev-parse --short "$LINE" 2>/dev/null || echo 'dry run')"
-say "   commits over $BASE: $(g rev-list --count "$BASE..$LINE" 2>/dev/null || echo '?')"
+if [ "$DRY_RUN" = 0 ]; then
+    for brand in "${BRANDS[@]}"; do
+        say "   $LINE-$brand -> $(g rev-parse --short "$LINE-$brand")"
+    done
+    say "   commits over $BASE: $(g rev-list --count "$BASE..$LINE-${BRANDS[0]}" 2>/dev/null || echo '?')"
+else
+    say "   dry run"
+fi
 if [ ${#SKIPPED[@]} -gt 0 ]; then
     say "   left out on purpose:"
     printf '     %s\n' "${SKIPPED[@]}"
 fi
+# Leave the worktree on the everyday brand rather than on whichever one the
+# loop happened to end with.
+[ "$DRY_RUN" = 0 ] && g checkout --quiet "$LINE-${BRANDS[0]}"
+
 say ""
 say "   Not pushed. Build and try it before you do:"
-say "       cd $REPO && ms-build-release"
+say "       cd $REPO && ms-build-release          # now on $LINE-${BRANDS[0]}"

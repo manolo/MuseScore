@@ -4,7 +4,7 @@
 #
 # The about box still showed MuseScore's logo. Leaving it was a deliberate
 # choice, on the reasoning that the logo says what the attribution line says,
-# but a dialog titled About PlectroScore showing somebody else's mark just
+# but a dialog titled About something else showing somebody else's mark just
 # looks like the icon was forgotten. It now shows the pick.
 #
 # The loading screen said "based on MuseScore Studio" in plain type, which was
@@ -19,27 +19,33 @@
 set -o errexit
 set -o nounset
 
-BRAND="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/brand"
+[ -n "${BRAND_DIR:-}" ] || { echo "   $0: BRAND_DIR is not set" >&2; exit 1; }
+# shellcheck disable=SC1091
+. "$BRAND_DIR/identity.sh"
+
+ART="$(cd "$BRAND_DIR/.." && pwd)/art"
+art() { if [ -f "$BRAND_DIR/$1" ]; then echo "$BRAND_DIR/$1"; else echo "$ART/$1"; fi; }
+
 SPLASH_CPP="src/appshell/widgets/splashscreen/loadingscreenview.cpp"
 APPSHELL_CMAKE="src/appshell/CMakeLists.txt"
 QML_CMAKE="src/appshell/qml/MuseScore/AppShell/CMakeLists.txt"
 ABOUT_QML="src/appshell/qml/MuseScore/AppShell/AboutDialog.qml"
 
 WORDMARK="resources/musescore-wordmark.png"
-ABOUT_LOGO="resources/plectroscore-logo.png"
+ABOUT_LOGO="resources/$APP_SLUG-logo.png"
 
 for f in "$SPLASH_CPP" "$APPSHELL_CMAKE" "$QML_CMAKE" "$ABOUT_QML"; do
     [ -f "$f" ] || { echo "   $0: no $f; the fixup is stale" >&2; exit 1; }
 done
-[ -f "$BRAND/musescore-wordmark.png" ] || {
-    echo "   $0: no wordmark in $BRAND" >&2; exit 1; }
+[ -f "$(art musescore-wordmark.png)" ] || {
+    echo "   $0: no wordmark in $ART" >&2; exit 1; }
 
 changed=0
 
 # ------------------------------------------------------- about dialog icon --
 DEST="src/appshell/qml/MuseScore/AppShell/$ABOUT_LOGO"
-if ! cmp -s "$BRAND/plectroscore-512.png" "$DEST" 2>/dev/null; then
-    cp "$BRAND/plectroscore-512.png" "$DEST"
+if ! cmp -s "$(art icon-512.png)" "$DEST" 2>/dev/null; then
+    cp "$(art icon-512.png)" "$DEST"
     echo "   about: logo asset"
     changed=1
 fi
@@ -77,8 +83,8 @@ fi
 
 # ------------------------------------------------------ splash attribution --
 DEST="src/appshell/$WORDMARK"
-if ! cmp -s "$BRAND/musescore-wordmark.png" "$DEST" 2>/dev/null; then
-    cp "$BRAND/musescore-wordmark.png" "$DEST"
+if ! cmp -s "$(art musescore-wordmark.png)" "$DEST" 2>/dev/null; then
+    cp "$(art musescore-wordmark.png)" "$DEST"
     echo "   splash: wordmark asset"
     changed=1
 fi

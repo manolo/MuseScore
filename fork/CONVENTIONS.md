@@ -2,7 +2,7 @@
 
 ## Every commit on a line answers to something
 
-A commit on `5.0-tmp` or `4.7-tmp` is only ever one of two things:
+A commit on a line, `5.0` or `4.7`, is only ever one of two things:
 
 1. **Work that exists as a pull request.** It arrives by merging that pull request's branch, named in the manifest with its number. It is never typed into the line by hand: if it needs fixing, fix it on its own branch and rebuild.
 2. **A feature the fork needs and upstream will not take.** These live on their own branch, `fork/4.7-ports` for the 4.7 line, and enter as a manifest component like any other.
@@ -13,7 +13,7 @@ Commits are **thematic**: one subject each, with the pull request number or the 
 
 ## CI changes go in one commit, or in a few thematic ones
 
-Everything the fork adds on its own account arrives at the end of the rebuild, in exactly **two commits**: `Fork integration`, which is the CI workflow, the framework pin and whatever the merged pull requests need to build together, and `Fork branding`, which is the name, the icon, the loading screen and the about box.
+Everything the fork adds on its own account arrives at the end of the rebuild, in exactly **two commits per brand branch**: `Fork integration`, which is the CI workflow, the framework pin and whatever the merged pull requests need to build together, shared by every brand of the line, and `Fork branding` on top, which is the name, the icon, the loading screen and the about box.
 
 That is deliberate. Both are scaffolding rather than product, so both must be trivial to identify and to drop, and they are kept apart because they are dropped for different reasons: branding goes if the build should be a plain MuseScore again, integration goes if the line is being taken somewhere that builds it differently. Mixed into one commit, neither could be removed without the other.
 
@@ -53,9 +53,9 @@ Publishing is avoided by passing `publish: 'off'`, which is what the fork workfl
 
 ### What does misbehave
 
-**Pull requests opened inside the fork** pull in the whole upstream matrix, `check_unit_tests`, `check_visual_tests`, codestyle, submodules and the three builds. On `4.7-tmp` both test workflows fail, for reasons belonging to that line rather than to the fork. If a line is not meant to pass the upstream suites, do not open a pull request for it inside the fork; push the branch and let `fork_builds.yml` do the work.
+**Pull requests opened inside the fork** pull in the whole upstream matrix, `check_unit_tests`, `check_visual_tests`, codestyle, submodules and the three builds. On `4.7` both test workflows fail, for reasons belonging to that line rather than to the fork. If a line is not meant to pass the upstream suites, do not open a pull request for it inside the fork; push the branch and let `fork_builds.yml` do the work.
 
-**`check_submodules`** insists the pinned `muse` commit exists upstream. `5.0-tmp` pins a commit that lives only on the framework fork, so this check would fail. It only runs on `pull_request`, so pushing a line never triggers it, and the fork workflows sidestep the problem entirely by passing `framework_repo` and `framework_ref` instead of changing `.gitmodules`.
+**`check_submodules`** insists the pinned `muse` commit exists upstream. `5.0` pins a commit that lives only on the framework fork, so this check would fail. It only runs on `pull_request`, so pushing a line never triggers it, and the fork workflows sidestep the problem entirely by passing `framework_repo` and `framework_ref` instead of changing `.gitmodules`.
 
 **The Windows portable job on the 4.7 line** builds fine and then dies signing. It uploads to `s3://muse-sign`, a service only MuseScore holds credentials for, and unlike the macOS signing it never checks whether the secret is empty. Worse, it cannot be switched off from the caller: its condition reads
 

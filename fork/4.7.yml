@@ -3,9 +3,9 @@
 # a line by hand: the next rebuild would throw it away without saying so.
 # See CONVENTIONS.md.
 #
-# Integration line: 4.7-tmp
+# Integration line: 4.7
 #
-# The maintained 4.7 line. Unlike 5.0-tmp, most of its content does not exist
+# The maintained 4.7 line. Unlike 5.0, most of its content does not exist
 # as an upstream pull request: these are ports retro-adapted to the older API,
 # and several will never go upstream at all.
 #
@@ -16,8 +16,15 @@
 # The repository at this line uses the OLD monolithic layout: no muse or
 # muse_deps submodules. The framework section is therefore absent on purpose.
 
-line: 4.7-tmp
+line: 4.7
 base: origin/4.7
+
+# The brands stamped onto this line. Each becomes a branch <line>-<brand>,
+# all of them sharing one integration commit, so the builds differ in their
+# name and in nothing else. That is what makes comparing them worth anything.
+brands:
+  - plectroscore
+
 
 framework: none
 

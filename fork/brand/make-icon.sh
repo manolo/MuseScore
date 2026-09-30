@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 #
-# Generate the PlectroScore icon in every format the three platforms want.
+# Generate the fork's icon in every format the three platforms want.
+#
+# The drawing belongs to no single brand: every brand uses this same pick,
+# so the files are named for what they are and the fixup copies them under
+# whatever the brand is called.
 #
 #   fork/brand/make-icon.sh [outdir]      default: fork/brand
 #
@@ -36,7 +40,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # The generated files sit beside this script and are committed, so a build
 # never needs ImageMagick; the script is here to change the design, not to
 # be a build step.
-OUT="${1:-$HERE}"
+OUT="${1:-$HERE/art}"
 
 command -v magick   >/dev/null || { echo "need ImageMagick (magick)" >&2; exit 1; }
 command -v iconutil >/dev/null || echo "note: no iconutil, the .icns will be skipped (macOS only)" >&2
@@ -104,42 +108,42 @@ magick -size 1024x1024 "gradient:${TOP}-${BOTTOM}" "$WORK/gradient.png"
 magick "$WORK/gradient.png" \( "$WORK/stencil.png" -colorspace gray \) \
     -compose CopyOpacity -composite \
     -colorspace sRGB -background none -distort SRT "$TILT" \
-    PNG32:"$OUT/plectroscore-1024.png"
+    PNG32:"$OUT/icon-1024.png"
 
-echo "master: $OUT/plectroscore-1024.png"
+echo "master: $OUT/icon-1024.png"
 
 # ------------------------------------------------------------------ sizes --
 for sz in 512 256 128 64 48 32 16; do
-    magick "$OUT/plectroscore-1024.png" -resize ${sz}x${sz} PNG32:"$OUT/plectroscore-$sz.png"
+    magick "$OUT/icon-1024.png" -resize ${sz}x${sz} PNG32:"$OUT/icon-$sz.png"
 done
 echo "pngs:   16 32 48 64 128 256 512 1024"
 
 # -------------------------------------------------------------------- icns --
 if command -v iconutil >/dev/null; then
-    SET="$WORK/PlectroScore.iconset"
+    SET="$WORK/icon.iconset"
     mkdir -p "$SET"
     # Apple wants each size twice, once plain and once as the @2x of the half
     for pair in 16:16x16 32:16x16@2x 32:32x32 64:32x32@2x \
                 128:128x128 256:128x128@2x 256:256x256 512:256x256@2x \
                 512:512x512 1024:512x512@2x; do
-        magick "$OUT/plectroscore-1024.png" -resize "${pair%%:*}x${pair%%:*}" \
+        magick "$OUT/icon-1024.png" -resize "${pair%%:*}x${pair%%:*}" \
             PNG32:"$SET/icon_${pair##*:}.png"
     done
-    iconutil -c icns "$SET" -o "$OUT/PlectroScore.icns"
-    echo "icns:   $OUT/PlectroScore.icns"
+    iconutil -c icns "$SET" -o "$OUT/icon.icns"
+    echo "icns:   $OUT/icon.icns"
 fi
 
 # --------------------------------------------------------------------- ico --
-magick "$OUT/plectroscore-1024.png" \
-    -define icon:auto-resize=256,128,64,48,32,16 "$OUT/PlectroScore.ico"
-echo "ico:    $OUT/PlectroScore.ico"
+magick "$OUT/icon-1024.png" \
+    -define icon:auto-resize=256,128,64,48,32,16 "$OUT/icon.ico"
+echo "ico:    $OUT/icon.ico"
 
 # ----------------------------------------------------------------- preview --
 # Small sizes on both grounds, which is the only review that matters.
 for bg_name in 'ece8e1:light' '1c1c1e:dark'; do
     bg="#${bg_name%%:*}"
-    magick "$OUT/plectroscore-128.png" "$OUT/plectroscore-64.png" \
-           "$OUT/plectroscore-32.png" "$OUT/plectroscore-16.png" \
+    magick "$OUT/icon-128.png" "$OUT/icon-64.png" \
+           "$OUT/icon-32.png" "$OUT/icon-16.png" \
         -background "$bg" -gravity center -extent 150x150 +append \
         -bordercolor "$bg" -border 10 PNG32:"$WORK/${bg_name##*:}.png"
 done

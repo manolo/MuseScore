@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Draw the PlectroScore loading screen.
+# Draw the fork's loading screen.
 #
 #   fork/brand/make-splash.sh [outdir]      default: fork/brand
 #
@@ -28,7 +28,7 @@ set -o nounset
 set -o pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT="${1:-$HERE}"
+OUT="${1:-$HERE/art}"
 mkdir -p "$OUT"
 
 W=800

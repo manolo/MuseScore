@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Give the build its own identity: PlectroScore.
+# Give the build its own identity, whichever brand is being stamped.
 #
 # Only the name the app shows. Everything that decides where files live is
 # left exactly as upstream has it, on purpose: this is a MuseScore that calls
@@ -28,7 +28,13 @@
 set -o errexit
 set -o nounset
 
-NAME_HUMAN="PlectroScore"
+# The brand is a parameter: rebuild.sh points BRAND_DIR at one of the
+# directories under fork/brand/ and every string comes from there.
+[ -n "${BRAND_DIR:-}" ] || { echo "   $0: BRAND_DIR is not set" >&2; exit 1; }
+# shellcheck disable=SC1091
+. "$BRAND_DIR/identity.sh"
+
+NAME_HUMAN="$APP_NAME"
 
 VERSION_CMAKE="version.cmake"
 MACOS_PACKAGE="buildscripts/ci/macos/package.sh"
@@ -62,6 +68,37 @@ if not m or m.group(1) != "MuseScoreStudio":
 open(path, 'w').write(s)
 print("   version.cmake: display name only; paths left as upstream")
 PY
+fi
+
+# ----------------------------------------------------- bundle identifier --
+# Two installed brands sharing one CFBundleIdentifier confuse LaunchServices:
+# `open -b` becomes ambiguous and a double click on a score may start either
+# one. A brand that expects to sit beside another sets a suffix.
+#
+# It costs nothing else. Paths and settings come from the Qt application name,
+# set in src/app/main.cpp, never from the identifier, so both brands still
+# share scores, plugins, styles and preferences.
+if [ -n "${APP_BUNDLE_ID_SUFFIX:-}" ]; then
+    python3 - "$VERSION_CMAKE" "$APP_BUNDLE_ID_SUFFIX" <<'PYID'
+import re, sys
+path, suffix = sys.argv[1], sys.argv[2]
+s = open(path).read()
+
+m = re.search(r'^set\(MUSE_APP_GUI_IDENTIFIER\s+(.+?)\)\s*$', s, re.M)
+if not m:
+    print("   cannot find MUSE_APP_GUI_IDENTIFIER; read version.cmake and "
+          "update this fixup", file=sys.stderr)
+    sys.exit(1)
+
+value = m.group(1).strip()
+if value.endswith(suffix):
+    print("   bundle identifier already suffixed")
+    sys.exit(0)
+
+s = s[:m.start(1)] + value + suffix + s[m.end(1):]
+open(path, 'w').write(s)
+print("   bundle identifier: %s%s" % (value, suffix))
+PYID
 fi
 
 # -------------------------------------------------------- macOS packaging --

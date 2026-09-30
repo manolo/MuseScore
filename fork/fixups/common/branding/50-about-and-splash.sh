@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Say PlectroScore on the loading screen and in the about box, and say what it
-# is based on.
+# Say the fork's name on the loading screen and in the about box, and say what
+# it is based on.
 #
 # The attribution is not decoration. The code is MuseScore's under the GPL,
 # and the honest thing for a renamed build is to name its origin where anyone
@@ -20,26 +20,32 @@
 set -o errexit
 set -o nounset
 
-BRAND="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/brand"
+[ -n "${BRAND_DIR:-}" ] || { echo "   $0: BRAND_DIR is not set" >&2; exit 1; }
+# shellcheck disable=SC1091
+. "$BRAND_DIR/identity.sh"
+
+ART="$(cd "$BRAND_DIR/.." && pwd)/art"
+art() { if [ -f "$BRAND_DIR/$1" ]; then echo "$BRAND_DIR/$1"; else echo "$ART/$1"; fi; }
+
 SPLASH_SVG="src/appshell/resources/LoadingScreen.svg"
 SPLASH_CPP="src/appshell/widgets/splashscreen/loadingscreenview.cpp"
 ABOUT_QML="src/appshell/qml/MuseScore/AppShell/AboutDialog.qml"
 
-NAME="PlectroScore"
-BASED_ON="based on MuseScore Studio"
-LINK="github.com/manolo/MuseScore"
+NAME="$APP_NAME"
+BASED_ON="$APP_ATTRIBUTION"
+LINK="$APP_LINK"
 
 for f in "$SPLASH_SVG" "$SPLASH_CPP" "$ABOUT_QML"; do
     [ -f "$f" ] || { echo "   $0: no $f; the fixup is stale" >&2; exit 1; }
 done
-[ -f "$BRAND/LoadingScreen.svg" ] || {
+[ -f "$(art LoadingScreen.svg)" ] || {
     echo "   $0: no splash art; run fork/brand/make-splash.sh" >&2; exit 1; }
 
 changed=0
 
 # ---------------------------------------------------------- splash artwork --
-if ! cmp -s "$BRAND/LoadingScreen.svg" "$SPLASH_SVG"; then
-    cp "$BRAND/LoadingScreen.svg" "$SPLASH_SVG"
+if ! cmp -s "$(art LoadingScreen.svg)" "$SPLASH_SVG"; then
+    cp "$(art LoadingScreen.svg)" "$SPLASH_SVG"
     echo "   splash: artwork"
     changed=1
 fi
