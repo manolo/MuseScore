@@ -54,6 +54,8 @@ class Staff;
 class Drumset;
 class Lyrics;
 class Spanner;
+class Note;
+class Chord;
 
 extern Selection* selectionWrap(mu::engraving::Selection* select);
 
@@ -766,6 +768,73 @@ public:
      * @since 4.6
     */
     Q_INVOKABLE void showElementInScore(apiv1::EngravingItem* element, int staffIdx = -1);
+
+    /// Add a grace note to a chord.
+    /// \param chord The chord to add the grace note to.
+    /// \param pitch The MIDI pitch of the grace note (0-127).
+    /// \param noteType The type of grace note (use NoteType enum: ACCIACCATURA, APPOGGIATURA, GRACE4, GRACE16, GRACE32).
+    /// \param duration The visual duration in ticks (e.g., 480 for quarter, 240 for eighth, 120 for sixteenth, 60 for thirty-second).
+    /// \returns The created Note, or null if creation failed.
+    /// \since MuseScore 4.6
+    Q_INVOKABLE apiv1::Note* setGraceNote(apiv1::Chord* chord, int pitch, int noteType, int duration);
+
+    /// Load a style file (.mss) into the score.
+    /// \param filePath Path to the .mss style file.
+    /// \param allowAnyVersion If true, allows loading styles from any MuseScore version.
+    /// \returns true if the style was loaded successfully.
+    /// \since MuseScore 4.5
+    Q_INVOKABLE bool loadStyle(const QString& filePath, bool allowAnyVersion = false);
+
+    /// Add a linked staff to the given staff with a specific staff type.
+    /// \param staff The source staff to link from.
+    /// \param staffTypeId The staff type identifier (e.g., "tab6StrFull" for Tab. 6-str. full).
+    /// \returns true if the linked staff was added successfully.
+    /// \since MuseScore 4.5
+    Q_INVOKABLE bool addLinkedStaff(apiv1::Staff* staff, const QString& staffTypeId);
+
+    /// Reset an excerpt to regenerate it with current staves from the main score.
+    /// Use this after adding linked staves to include them in existing parts.
+    /// \param excerpt The excerpt to reset.
+    /// \returns true if successful.
+    /// \since MuseScore 4.5
+    Q_INVOKABLE bool resetExcerpt(apiv1::Excerpt* excerpt);
+
+    /// Create a new excerpt (part) from an existing Part in the score.
+    /// \param part The Part to create an excerpt from.
+    /// \param name Optional custom name for the excerpt. If empty, uses the part name.
+    /// \returns The newly created Excerpt, or null if creation failed.
+    /// \since MuseScore 4.5
+    Q_INVOKABLE apiv1::Excerpt* createExcerptFromPart(apiv1::Part* part, const QString& name = QString());
+
+    /// Duplicate an existing excerpt with a new name.
+    /// \param excerpt The Excerpt to duplicate.
+    /// \param name The name for the duplicated excerpt.
+    /// \returns The newly created Excerpt, or null if duplication failed.
+    /// \since MuseScore 4.5
+    Q_INVOKABLE apiv1::Excerpt* duplicateExcerpt(apiv1::Excerpt* excerpt, const QString& name);
+
+    /// Open an excerpt in a new tab and optionally set it as the current view.
+    /// \param excerpt The Excerpt to open.
+    /// \param setAsCurrent If true, switch the view to this excerpt.
+    /// \returns true if successful.
+    /// \since MuseScore 4.5
+    Q_INVOKABLE bool openExcerpt(apiv1::Excerpt* excerpt, bool setAsCurrent = true);
+
+    /// Reset all text elements to use their default style properties.
+    /// \since MuseScore 4.5
+    Q_INVOKABLE void resetTextStyleOverrides();
+
+    /// Remove an excerpt (linked part) from the score.
+    /// \param excerpt The Excerpt to remove.
+    /// \returns true if successful.
+    /// \since MuseScore 4.6
+    Q_INVOKABLE bool removeExcerpt(apiv1::Excerpt* excerpt);
+
+    /// Remove a staff from the score.
+    /// \param staff The Staff to remove.
+    /// \returns true if successful.
+    /// \since MuseScore 4.6
+    Q_INVOKABLE bool removeStaff(apiv1::Staff* staff);
 
     /** APIDOC
      * Create PlayEvents for all notes based on ornamentation.

@@ -35,5 +35,6 @@ public:
 
     virtual QQmlEngine* qmlEngine() const = 0;
     virtual QQmlEngine* qmlEngineApiV1() const = 0;
+    virtual void clearComponentCache() = 0;
 };
 }
