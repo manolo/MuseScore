@@ -4,9 +4,14 @@ The identity of the fork's builds, kept apart from the integration lines so that
 
 ## Brands
 
-A brand is a directory holding an `identity.sh`, and that file is the only place its name is written down. There is one so far, `plectroscore`. Before this it was written in eleven files, which is a thing you only discover by having to change it.
+A brand is a directory holding an `identity.sh`, and that file is the only place its name is written down. The name moved once already, from PlectroScore to MuseMore, and that cost an edit in eleven files; it now costs one.
 
-The drawing in `art/` is **shared by every brand**, so two of them differ in their name and in nothing else. That is what would make putting them side by side worth the trouble. A brand that ever wants its own artwork puts the file in its own directory and the fixups prefer it.
+| Brand | What it is |
+|---|---|
+| `musemore` | the everyday build |
+| `plectroscore` | the alternative, kept alive to be shown beside the other rather than argued about |
+
+The drawing in `art/` is **shared by every brand**: the two differ in their name and in nothing else, which is exactly what makes seeing them together worth the trouble. A brand that ever wants its own artwork puts the file in its own directory and the fixups prefer it.
 
 `identity.sh` also carries `APP_BUNDLE_ID_SUFFIX`. Two bundles sharing a `CFBundleIdentifier` confuse LaunchServices, so a brand meant to sit beside another gets a suffix; the everyday one keeps upstream's identifier and with it the permissions macOS has already granted. It costs nothing else, because paths and settings come from the Qt application name set in `src/app/main.cpp`, never from the identifier.
 

@@ -7,7 +7,9 @@ This branch holds no MuseScore source. It carries the definition of the integrat
 | `5.0` | `origin/main` | Today's upstream plus every open pull request of mine |
 | `4.7` | `origin/4.7` | The 4.7 line plus ports that mostly never go upstream |
 
-A line is not a branch. Each one is built once and then stamped with every brand its manifest declares, one branch per brand. The brand branches share their parent commit exactly, so they are the same build under different names, which is the only way comparing them means anything.
+A line is not a branch. Each one is built once and then stamped with every brand its manifest declares, one branch per brand: `5.0-musemore`, `5.0-plectroscore`, and the same for 4.7. The brand branches share their parent commit exactly, so they are the same build under different names, which is the only way comparing them means anything.
+
+`musemore` is the everyday brand. `plectroscore` is the alternative, kept alive rather than argued about.
 
 Conventions for what may live on a line, how CI changes are committed, and how upstream's own workflows behave on a fork: [CONVENTIONS.md](CONVENTIONS.md).
 
@@ -22,7 +24,7 @@ What made rebuilding painful before was re-resolving the same conflicts on every
 ```sh
 fork/rebuild.sh 5.0 --dry-run              # see what would happen
 fork/rebuild.sh 5.0
-fork/rebuild.sh 5.0 --brand plectroscore   # just the one
+fork/rebuild.sh 5.0 --brand musemore       # just the one
 ```
 
 The script fetches, rebuilds the framework branch and pushes it, archives the previous tips as `archive/<line>-<brand>-pre-<date>`, rebuilds the integration from the base onto `<line>-integration`, applies the overlay, pins the framework, stamps each brand onto its own branch, and then checks the result. It stops on any conflict it cannot replay, tells you where, and picks up where it left off when you rerun.
@@ -85,7 +87,7 @@ paths.
 Releases are cut by pushing a tag:
 
 ```sh
-git tag release-5.0.0-$(date +%Y%m%d) 5.0-plectroscore
+git tag release-5.0.0-$(date +%Y%m%d) 5.0-musemore
 git push manolo release-5.0.0-$(date +%Y%m%d)
 ```
 
