@@ -251,7 +251,7 @@ jobs:
     # Disable on pull_request
     if: |
       github.event_name != 'pull_request' &&
-      (github.event_name != 'workflow_dispatch' || contains(inputs.platforms, 'windows_portable'))
+      (inputs.platforms == '' || contains(inputs.platforms, 'windows_portable'))
     runs-on: windows-2025
     steps:
     - name: Cancel Previous Runs
