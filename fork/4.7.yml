@@ -28,6 +28,66 @@ base: origin/4.7
 brands:
   - plectrascore
 
+# What the installer carries besides MuseScore itself. Each of these is taken
+# from where it is published, never from a working copy, and the version that
+# actually went in is recorded in fork/CONTENTS.md so a build cannot lie about
+# what it shipped.
+#
+#   kind: release  takes an asset from the latest release of repo
+#   kind: raw      takes a file from a branch of repo
+#
+# dest is relative to the source tree. share/plugins and share/extensions are
+# installed wholesale by share/CMakeLists.txt, so anything landing there needs
+# no build change; share/sound and share/vst3 get their rules from the
+# 20-install-rules fixup.
+extras:
+  - name: Plectro VST, free edition
+    kind: release
+    repo: manolo/vst-plectro
+    license: MIT
+    # One asset per platform. macOS and Windows unpack from a zip, Linux from
+    # a tarball. There is no arm64 Linux build, so that AppImage ships without
+    # the plugin and the README says so.
+    assets:
+      macos: 'Plectro-*-macOS-VST3.zip'
+      windows: 'Plectro-*-Windows-x64-VST3.zip'
+      linux_x86_64: 'Plectro-*-Linux-x86_64-VST3.tar.gz'
+    dest: share/vst3
+
+  - name: Lyrics and Chords Extractor
+    kind: release
+    repo: manolo/lyrics-extractor
+    license: GPL-3.0-or-later
+    # A .mext is a zip holding manifest.json and the files it names
+    asset: 'lyrics-extractor.mext'
+    unpack: yes
+    dest: share/extensions/lyrics-extractor
+
+  - name: Bandurria with tremolo
+    kind: raw
+    repo: manolo/sound-fonts
+    ref: main
+    license: CC0-1.0
+    path: Bandurria-Con-Tremolo.sf2
+    dest: share/sound/Bandurria-Con-Tremolo.sf2
+
+  - name: Laud with tremolo
+    kind: raw
+    repo: manolo/sound-fonts
+    ref: main
+    license: CC0-1.0
+    path: Laud-Con-Tremolo.sf2
+    dest: share/sound/Laud-Con-Tremolo.sf2
+
+  - name: Pulso y Pua
+    kind: raw
+    repo: manolo/sound-fonts
+    ref: main
+    license: CC0-1.0
+    # The MuseScore 3 style single file plugin, not a 4.4 extension
+    path: PulsoPua.qml
+    dest: share/plugins/PulsoPua.qml
+
 
 framework: none
 

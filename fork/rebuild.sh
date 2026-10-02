@@ -435,12 +435,13 @@ for brand in "${BRANDS[@]}"; do
     # The fixups run as separate processes, so what they need has to be
     # exported. LINE lets a fixup pick up per line material, such as the
     # README fragment saying what this particular line adds.
-    export BRAND_DIR LINE TOOLS_DIR
+    export BRAND_DIR LINE TOOLS_DIR MANIFEST
 
     say ""
     say "   $brand -> $LINE-$brand"
     if [ "$DRY_RUN" = 1 ]; then
         run_fixups branding
+        run_fixups extras
         continue
     fi
 
@@ -451,6 +452,19 @@ for brand in "${BRANDS[@]}"; do
         g commit --quiet -m "Fork branding: $APP_NAME name, icon, loading screen and about box"
     else
         say "   nothing to commit"
+    fi
+
+    # ------------------------------------------------------------- extras --
+    # Third and last commit of a brand branch: what the installer carries
+    # besides MuseScore itself, taken from where each piece is published.
+    #
+    # Content rather than code, so it gets its own commit: a reader chasing a
+    # change can skip it whole, and dropping it gives back the same program
+    # without the bundled sounds and plugins.
+    run_fixups extras
+    stage_ours
+    if [ -n "$(g status --porcelain --untracked-files=no)" ]; then
+        g commit --quiet -m "Fork extras: bundled soundfonts, plugins and VST"
     fi
 done
 
