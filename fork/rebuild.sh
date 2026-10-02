@@ -432,7 +432,10 @@ for brand in "${BRANDS[@]}"; do
         echo "   no identity for brand $brand at $BRAND_DIR" >&2; exit 1; }
     # shellcheck disable=SC1091
     APP_NAME=""; . "$BRAND_DIR/identity.sh"
-    export BRAND_DIR
+    # The fixups run as separate processes, so what they need has to be
+    # exported. LINE lets a fixup pick up per line material, such as the
+    # README fragment saying what this particular line adds.
+    export BRAND_DIR LINE TOOLS_DIR
 
     say ""
     say "   $brand -> $LINE-$brand"

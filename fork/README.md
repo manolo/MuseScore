@@ -7,9 +7,9 @@ This branch holds no MuseScore source. It carries the definition of the integrat
 | `5.0` | `origin/main` | Today's upstream plus every open pull request of mine |
 | `4.7` | `origin/4.7` | The 4.7 line plus ports that mostly never go upstream |
 
-A line is not a branch. Each one is built once and then stamped with every brand its manifest declares, one branch per brand: `5.0-musemore`, `5.0-plectroscore`, and the same for 4.7. The brand branches share their parent commit exactly, so they are the same build under different names, which is the only way comparing them means anything.
+A line is not a branch. Each one is built once and then stamped with every brand its manifest declares, one branch per brand: today that is one brand, so `5.0-plectrascore` and `4.7-plectrascore`. Where there are several they share their parent commit exactly, so they are the same build under different names, which is the only way comparing them means anything.
 
-`musemore` is the everyday brand. `plectroscore` is the alternative, kept alive rather than argued about.
+The brand is `plectrascore`. `fork/brand/musemore/` holds one that is deliberately not built, and says why.
 
 Conventions for what may live on a line, how CI changes are committed, and how upstream's own workflows behave on a fork: [CONVENTIONS.md](CONVENTIONS.md).
 
@@ -24,7 +24,7 @@ What made rebuilding painful before was re-resolving the same conflicts on every
 ```sh
 fork/rebuild.sh 5.0 --dry-run              # see what would happen
 fork/rebuild.sh 5.0
-fork/rebuild.sh 5.0 --brand musemore       # just the one
+fork/rebuild.sh 5.0 --brand plectrascore   # just the one
 ```
 
 The script fetches, rebuilds the framework branch and pushes it, archives the previous tips as `archive/<line>-<brand>-pre-<date>`, rebuilds the integration from the base onto `<line>-integration`, applies the overlay, pins the framework, stamps each brand onto its own branch, and then checks the result. It stops on any conflict it cannot replay, tells you where, and picks up where it left off when you rerun.
@@ -58,7 +58,9 @@ The upstream reusable workflows solve this themselves: `build_macos.yml`, `build
 
 Integration becomes one commit; branding becomes one commit per brand, each on its own branch. That is the point of the split: branding is a name, an icon and two screens, so a reader chasing a code change can skip that commit whole, dropping it gives back a plain build of the same source, and two brands can share one integration.
 
-A brand is a directory under `fork/brand/` holding an `identity.sh`, which is the only place its name is written down. The drawing lives in `fork/brand/art/` and is shared; a brand that wants its own drops the file in its own directory and it wins.
+A brand is a directory under `fork/brand/` holding an `identity.sh`, which is the only place its name and its wording are written down. The drawing lives in `fork/brand/art/` and is shared; a brand that wants its own drops the file in its own directory and it wins.
+
+The branding phase also rewrites the line's `README.md`, assembled from the brand, from `fork/readme/<line>.md` saying what that line adds, and from the component table the integration phase already wrote. So what the README claims went in cannot drift from what actually did.
 
 `fixups/common/<phase>` runs before `fixups/<line>/<phase>`. Branding is identical on both lines and lives in `common`; a copy per line is a copy that drifts.
 
@@ -87,7 +89,7 @@ paths.
 Releases are cut by pushing a tag:
 
 ```sh
-git tag release-5.0.0-$(date +%Y%m%d) 5.0-musemore
+git tag release-5.0.0-$(date +%Y%m%d) 5.0-plectrascore
 git push manolo release-5.0.0-$(date +%Y%m%d)
 ```
 
