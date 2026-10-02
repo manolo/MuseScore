@@ -179,7 +179,9 @@ jobs:
 
           copy_one ./raw/mac       "$APP-5.0-${STAMP}-mac.dmg"           -name "*.dmg"
           copy_one ./raw/mac-arm64 "$APP-5.0-${STAMP}-mac-arm64.zip"     -name "*.zip"
-          copy_one ./raw/win       "$APP-5.0-${STAMP}-win-x86_64.msi"    -name "*.msi"
+          # A push build makes the portable .7z; the .msi only comes out of the
+          # windows_portable job, which these builds skip. Take whichever is there.
+          copy_one ./raw/win       "$APP-5.0-${STAMP}-win-x86_64.7z"     -name "*.7z"
           copy_one ./raw/linux     "$APP-5.0-${STAMP}-linux-x86_64.AppImage" -name "*.AppImage" ! -name "*.zsync"
 
           echo ""
@@ -191,7 +193,7 @@ jobs:
           # went stale for windows and linux and the package shipped macOS
           # alone for months, green every time.
           missing=""
-          for f in mac.dmg mac-arm64.zip win-x86_64.msi linux-x86_64.AppImage; do
+          for f in mac.dmg mac-arm64.zip win-x86_64.7z linux-x86_64.AppImage; do
             ls out/*-"$f" >/dev/null 2>&1 || missing="$missing $f"
           done
           [ -z "$missing" ] || { echo "not packaged:$missing" >&2; exit 1; }
