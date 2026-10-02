@@ -1,0 +1,58 @@
+{
+  "Name": "Plectro",
+  "Version": "0.2.1",
+  "Factory Info": {
+    "Vendor": "Do2tis",
+    "URL": "",
+    "E-Mail": "",
+    "Flags": {
+      "Unicode": true,
+      "Classes Discardable": false,
+      "Component Non Discardable": false,
+    },
+  },
+  "Classes": [
+    {
+      "CID": "ABCDEF019182FAEB446F3274506C6563",
+      "Category": "Audio Module Class",
+      "Name": "Plectro",
+      "Vendor": "Do2tis",
+      "Version": "0.2.1",
+      "SDKVersion": "VST 3.7.12",
+      "Sub Categories": [
+        "Instrument",
+      ],
+      "Class Flags": 2,
+      "Cardinality": 2147483647,
+      "Snapshots": [
+      ],
+    },
+    {
+      "CID": "ABCDEF011234ABCD446F3274506C6563",
+      "Category": "Component Controller Class",
+      "Name": "Plectro",
+      "Vendor": "Do2tis",
+      "Version": "0.2.1",
+      "SDKVersion": "VST 3.7.12",
+      "Sub Categories": [
+        "Instrument",
+      ],
+      "Class Flags": 2,
+      "Cardinality": 2147483647,
+      "Snapshots": [
+      ],
+    },
+    {
+      "CID": "ABCDEF01C0DEF00D446F3274506C6563",
+      "Category": "Plugin Compatibility Class",
+      "Name": "Plectro",
+      "Vendor": "Do2tis",
+      "Version": "0.2.1",
+      "SDKVersion": "VST 3.7.12",
+      "Class Flags": 0,
+      "Cardinality": 2147483647,
+      "Snapshots": [
+      ],
+    },
+  ],
+}
