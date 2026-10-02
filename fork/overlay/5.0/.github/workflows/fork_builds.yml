@@ -141,14 +141,14 @@ jobs:
       - name: Download Windows artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: 'MU4_*_Win_x64*'
+          pattern: 'MU4_*_Win_*'
           merge-multiple: true
           path: ./raw/win
 
       - name: Download Linux artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: 'MU4_*_Lin_x64*'
+          pattern: 'MU4_*_Lin_x86_64_*'
           merge-multiple: true
           path: ./raw/linux
 
@@ -185,9 +185,16 @@ jobs:
           echo ""
           echo "Package contents:"
           ls -lh out/
-          # An empty out/ makes upload-artifact warn and upload nothing, which
-          # looks exactly like success. It is a failure.
-          [ -n "$(ls -A out/)" ] || { echo "nothing was packaged" >&2; exit 1; }
+
+          # Every platform the line builds has to be in the package. Checking
+          # only that out/ is non-empty is not enough: the download patterns
+          # went stale for windows and linux and the package shipped macOS
+          # alone for months, green every time.
+          missing=""
+          for f in mac.dmg mac-arm64.zip win-x86_64.msi linux-x86_64.AppImage; do
+            ls out/*-"$f" >/dev/null 2>&1 || missing="$missing $f"
+          done
+          [ -z "$missing" ] || { echo "not packaged:$missing" >&2; exit 1; }
 
       - name: Upload package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
