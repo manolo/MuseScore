@@ -47,12 +47,21 @@ import re, sys
 path = sys.argv[1]
 s = open(path).read()
 
-# Install them inside the same option that guards MS Basic, so a test build
-# that turns soundfonts off does not drag these in either.
+# Do NOT write the destination from memory. The two lines name it with
+# different variables, MUSE_APP_INSTALL_RESOURCES_LOCATION on 5.0 and
+# Mscore_SHARE_NAME plus Mscore_INSTALL_NAME on 4.7, and one of them ends in a
+# slash while the other does not. Getting it wrong sends the install to /sound
+# at the root of the disk, which is exactly what happened. Copy the line that
+# is already there instead.
+dest = re.search(r'^\s*DESTINATION\s+(\S*sound)\s*$', s, re.M)
+if not dest:
+    print("   cannot find where MS Basic is installed; read "
+          "share/sound/CMakeLists.txt and update this fixup", file=sys.stderr)
+    sys.exit(1)
+
 m = re.search(r'^if \(MUE_INSTALL_SOUNDFONT\)\s*$', s, re.M)
 if not m:
-    print("   cannot find the MUE_INSTALL_SOUNDFONT guard; read "
-          "share/sound/CMakeLists.txt and update this fixup", file=sys.stderr)
+    print("   cannot find the MUE_INSTALL_SOUNDFONT guard", file=sys.stderr)
     sys.exit(1)
 
 block = '''
@@ -61,13 +70,14 @@ block = '''
     file(GLOB PLECTRA_SOUNDFONTS "${CMAKE_CURRENT_SOURCE_DIR}/*-Con-Tremolo.sf2")
     if (PLECTRA_SOUNDFONTS)
         install(FILES ${PLECTRA_SOUNDFONTS}
-            DESTINATION ${MUSE_APP_INSTALL_RESOURCES_LOCATION}/sound
+            DESTINATION %s
             )
     endif ()
-'''
+''' % dest.group(1)
+
 s = s[:m.end()] + "\n" + block + s[m.end():]
 open(path, 'w').write(s)
-print("   sound: the fork's soundfonts")
+print("   sound: the fork's soundfonts, into %s" % dest.group(1))
 PY
     changed=1
 fi
@@ -85,6 +95,14 @@ if not anchor:
           "and update this fixup", file=sys.stderr)
     sys.exit(1)
 
+# Where the resources go, taken from the rule that is already there. 5.0 and
+# 4.7 name this with different variables and only one of them ends in a
+# slash, so it is read rather than written from memory.
+res = re.search(r'^install \(DIRECTORY\n    plugins\n\s*DESTINATION (\S+)\s*$', s, re.M)
+if not res:
+    print("   cannot find where the plugins directory is installed", file=sys.stderr)
+    sys.exit(1)
+
 block = '''
 # The bundled VST3, which cannot live under the resources directory: the VST
 # module never looks there. These three destinations are the application level
@@ -95,7 +113,10 @@ block = '''
 # arm64 has none today and ships without it.
 if (APPLE)
     set(PLECTRA_VST3 "${CMAKE_CURRENT_SOURCE_DIR}/vst3/macos")
-    set(PLECTRA_VST3_DEST "mscore.app/Contents/VST3")
+    # A sibling of Resources inside the bundle, derived from wherever the
+    # resources go rather than written out, because the two lines name that
+    # place with different variables.
+    string(REGEX REPLACE "Resources/?$" "VST3" PLECTRA_VST3_DEST "RESOURCES_DEST")
 elseif (WIN32)
     set(PLECTRA_VST3 "${CMAKE_CURRENT_SOURCE_DIR}/vst3/windows")
     set(PLECTRA_VST3_DEST "VST3")
@@ -114,9 +135,9 @@ if (PLECTRA_VST3 AND EXISTS "${PLECTRA_VST3}")
     endforeach ()
 endif ()
 '''
-s = s[:anchor.end()] + block + s[anchor.end():]
+s = s[:anchor.end()] + block.replace("RESOURCES_DEST", res.group(1)) + s[anchor.end():]
 open(path, 'w').write(s)
-print("   share: the bundled VST3, per platform")
+print("   share: the bundled VST3, per platform, mac under %s" % res.group(1))
 PY
     changed=1
 fi
