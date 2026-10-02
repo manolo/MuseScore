@@ -4,16 +4,18 @@ The identity of the fork's builds, kept apart from the integration lines so that
 
 ## Brands
 
-A brand is a directory holding an `identity.sh`, and that file is the only place its name is written down. The name moved once already, from PlectroScore to MuseMore, and that cost an edit in eleven files; it now costs one.
+A brand is a directory holding an `identity.sh`, and that file is the only place its name and its wording are written down. The name has moved twice, PlectroScore to MuseMore to PlectraScore, and the first of those cost an edit in eleven files. It now costs one.
 
 | Brand | What it is |
 |---|---|
-| `musemore` | the everyday build |
-| `plectroscore` | the alternative, kept alive to be shown beside the other rather than argued about |
+| `plectrascore` | the build, and the only one listed in the manifests |
+| `musemore` | **not built.** A name that was chosen for a day and dropped; the file says why, which is worth more than the name was |
 
-The drawing in `art/` is **shared by every brand**: the two differ in their name and in nothing else, which is exactly what makes seeing them together worth the trouble. A brand that ever wants its own artwork puts the file in its own directory and the fixups prefer it.
+The drawing in `art/` is **shared by every brand**, so two of them would differ in their name and in nothing else. A brand that ever wants its own artwork puts the file in its own directory and the fixups prefer it.
 
-`identity.sh` also carries `APP_BUNDLE_ID_SUFFIX`. Two bundles sharing a `CFBundleIdentifier` confuse LaunchServices, so a brand meant to sit beside another gets a suffix; the everyday one keeps upstream's identifier and with it the permissions macOS has already granted. It costs nothing else, because paths and settings come from the Qt application name set in `src/app/main.cpp`, never from the identifier.
+`identity.sh` carries the wording as well as the name: `APP_TAGLINE` and `APP_BLURB` are what the loading screen, the about box and the README say the build is for.
+
+It also carries `APP_BUNDLE_ID_SUFFIX`. Two bundles sharing a `CFBundleIdentifier` confuse LaunchServices, so a brand meant to sit beside another gets a suffix; the one people install keeps upstream's identifier and with it the permissions macOS has already granted. It costs nothing else, because paths and settings come from the Qt application name set in `src/app/main.cpp`, never from the identifier.
 
 ## The icon
 

@@ -20,12 +20,13 @@ line: 4.7
 base: origin/4.7
 
 # The brands stamped onto this line. Each becomes a branch <line>-<brand>,
-# all of them sharing one integration commit, so the builds differ in their
-# name and in nothing else. That is what makes comparing them worth anything.
-# The first is the everyday one.
+# sharing one integration commit, so two builds would differ in their name
+# and in nothing else.
+#
+# One for now. fork/brand/musemore/ holds a brand that is deliberately not
+# listed here, and says why.
 brands:
-  - musemore
-  - plectroscore
+  - plectrascore
 
 
 framework: none
