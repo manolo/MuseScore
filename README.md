@@ -1,95 +1,88 @@
-# ![MuseScore Studio](share/icons/musescore_logo_full.png)
+# PlectraScore
 
-Music notation and composition software
+A MuseScore fork for pulso y púa ensembles. Bandurria, laúd and guitar, in the Spanish and Latin American tradition.
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.en.html)
-[![Coverage](https://s3.us-east-1.amazonaws.com/extensions.musescore.org/test/code_coverage/coverage_badge.svg?)](https://github.com/musescore/MuseScore/actions/workflows/check_unit_tests.yml)
+It is a fork of [MuseScore Studio](https://github.com/musescore/MuseScore), and it stays one: the same file formats, the same plugins, the same styles and the same settings directory, so a score moves between the two without noticing. What changes is that the things a plectrum ensemble needs are already in it, instead of waiting in a pull request.
 
-MuseScore Studio is an open source and free music notation software. For support, contribution, and bug reports visit MuseScore.org. Fork and make pull requests!
+## Why it exists
 
-## Features
+Bandurria, laúd and guitar ensembles, the tuna and rondalla tradition and its Latin American relatives, are a small enough audience that notation software never quite gets to them. Their repertoire sits in file formats nobody reads any more, their instruments play techniques that general purpose playback approximates badly, and the fixes for both are the kind of change that is correct, narrow and of no interest to a maintainer with a thousand other issues open.
 
-- WYSIWYG design, notes are entered on a "virtual notepaper"
-- TrueType font(s) for printing & display allows for high quality scaling to all sizes
-- Easy & fast note entry
-- Many editing functions
-- MusicXML import/export
-- MIDI (SMF) import/export
-- MEI import/export
-- MuseData import
-- MIDI input for note entry
-- Integrated sequencer and software synthesizer to play the score
-- Print or create PDF files
+So the fixes get written, offered upstream, and wait. This is where they run in the meantime.
 
-## More info
+Everything here is offered upstream first and carried here second. When one is merged it leaves this fork, because at that point MuseScore does it and the fork should not.
 
-- [MuseScore Studio Homepage](https://musescore.org)
-- [MuseScore Studio Git workflow instructions](https://musescore.org/en/developers-handbook/git-workflow)
-- [How to compile MuseScore Studio?](https://github.com/musescore/MuseScore/wiki/Set-up-developer-environment)
+## What this line adds
 
-## License
+This line follows MuseScore's `main`, so it is a preview of the next major version with the fork's work merged on top.
 
-MuseScore Studio is licensed under GPL version 3.0. See [license file](https://github.com/musescore/MuseScore/blob/master/LICENSE.txt) in the same directory.
 
-## Packages
+## What the installer brings with it
 
-See [Code Structure on Wiki](https://github.com/musescore/MuseScore/wiki/CodeStructure)
+Installing this is meant to leave the machine ready to write for a rondalla, so the pieces that would otherwise have to be hunted down one by one are already inside:
 
-## Building
+- **Bandurria and laúd soundfonts**, with the tremolo split by velocity, so a tremolo roll sounds like a tremolo roll and not like repeated notes.
+- **The Plectro VST**, found by the program without installing it into the system plugin folder.
+- **Pulso y Púa**, the plugin for the writing this repertoire actually needs.
+- **Lyrics and Chords Extractor**, for getting the words and the chords out of a score.
 
-**Read the [Compilation section](https://github.com/musescore/MuseScore/wiki/Set-up-developer-environment) of the [MuseScore Wiki](https://github.com/musescore/MuseScore/wiki) for a complete build walkthrough and a list of dependencies.**
+Each is taken from where it is published and the exact version is listed in `fork/CONTENTS.md`, which is also where the release notes get it from. The Linux build for arm64 ships without the VST, because there is no arm64 build of it published yet; everything else is there.
 
-### Getting sources
+### Sound and playback
 
-If using git to download repo of entire code history, type:
+Plucked strings are where most of the work goes, because this is where a general purpose notation program has least reason to care and a plectrum ensemble has most.
 
-    git clone  --recurse-submodules https://github.com/musescore/MuseScore.git
-    cd MuseScore
+- Tremolo on a single string instrument maps to the sampled tremolo preset instead of being synthesised as repeated notes, which is what makes a bandurria tremolo sound like a bandurria.
+- Articulations reach VST3 instruments as keyswitches, so a library that distinguishes legato, staccato or tremolo is actually told which one to play.
+- A layered articulation no longer loses the written dynamic when it carries no expression pattern of its own.
 
-(The `--recurse-submodules` ensures that the [`muse_framework`](https://github.com/musescore/muse_framework) git submodule is checked out into the `muse/` subdirectory.)
+### Tablature
 
-Otherwise, you can just download the latest source release tarball from the [Releases page](https://github.com/musescore/MuseScore/releases), and then from your download directory type:
+- Fret numbers for half notes are circled, the convention tablature uses to mark them and which MuseScore does not draw.
 
-    tar xzf MuseScore-x.x.x.tar.gz
-    cd MuseScore-x.x.x
+### Encore import
 
-### Release Build
+A native importer for Encore `.enc` files, the format a great deal of Spanish and Latin American plectrum repertoire exists in and nothing else reads.
 
-To compile MuseScore Studio for release, type:
+It covers Encore 2.x through 5.x including the encrypted variant, MusicTime documents, tablature staves, lyrics, chord symbols, fretboard diagrams, page setup and voice merging, with import preferences for the decisions that have no single right answer.
 
-    cmake -P build.cmake -DCMAKE_BUILD_TYPE=Release
+### Scores with many parts
 
-On MacOS, append `-G Ninja` in order to use the `ninja` build tool (which you may need to install), since this
-is required to compile Swift components.
+- Excerpts are created on demand rather than all at once, which cuts memory and file size on scores with many parts and fixes part renames not surviving a save. A rondalla score with a part per instrument is exactly the case this was written for.
 
-If something goes wrong, append the word "clean" to the above command to delete the build subdirectory:
+### Plugin API
 
-    cmake -P build.cmake -DCMAKE_BUILD_TYPE=Release clean
+- `scoreStateChanged` is available again, so plugins can react to the score being edited.
 
-Then try running the first command again.
+## Where each piece comes from
 
-### Running
 
-To start MuseScore Studio, type:
+Line `5.0`, rebuilt from `origin/main` at 9140c5e4b7.
 
-    cmake -P build.cmake -DCMAKE_BUILD_TYPE=Release run
+| Component | Pull request |
+|---|---|
+| Encore importer | #34129 |
+| tablature fret circle | #31200 |
+| uninitialised excerpts | #31738 |
+| plugin api scoreStateChanged | #34893 |
+| tremolo articulation mapping | left out, see the manifest |
 
-Or run the compiled executable directly.
+Generated from the manifest by `fork/rebuild.sh`.
 
-### Debug Build
+## Installing
 
-A debug version can be built and run by replacing `-DCMAKE_BUILD_TYPE=Release`
-with `-DCMAKE_BUILD_TYPE=Debug` in the above commands.
+Builds for macOS, Windows and Linux are published as [releases](github.com/manolo/MuseScore/releases). They are unsigned, because a fork holds no Apple or Microsoft certificate: macOS will refuse the first launch, so open it once from the context menu and choose Open, and Windows will show a SmartScreen warning.
 
-If you omit the `-DCMAKE_BUILD_TYPE` option entirely then `RelWithDebInfo` is
-used by default, as it provides a useful compromise between Release and Debug.
+PlectraScore shares its scores, plugins, styles and preferences with MuseScore on the same machine. It is a MuseScore that calls itself something else, not a separate program, and installing it changes nothing about an existing MuseScore.
 
-### Testing
+## Building, and everything else
 
-See the [Unit tests section](https://github.com/musescore/MuseScore/wiki/Unit-tests) of the [MuseScore Studio Wiki](https://github.com/musescore/MuseScore/wiki) for instructions on how to run the test suite.
+Unchanged from upstream: [MuseScore's README](https://github.com/musescore/MuseScore/blob/master/README.md) is the reference, and is not copied here because a copy goes stale.
 
-### Code Formatting
+How the fork is maintained, what each line carries and how a release is cut: the `fork/tools` branch, starting at `fork/README.md`.
 
-Run `./hooks/install.sh` to install a pre-commit hook that will format your staged files. Requires that you install `uncrustify`.
+## Licence
 
-If you have problems, please report them. To uninstall, run `./hooks/uninstall.sh`.
+GPL-3.0-only, the same as MuseScore Studio. See [LICENSE.txt](LICENSE.txt).
+
+MuseScore is a trademark of MuseScore Limited and is used here only to say what this is based on. The name is not licensed with the code, and this build claims no endorsement.
