@@ -36,6 +36,7 @@
 #include "engraving/dom/trill.h"
 
 #include "engraving/editing/editnote.h"
+#include "engraving/editing/editstaff.h"
 #include "engraving/editing/editsystemlocks.h"
 
 // api
@@ -650,6 +651,25 @@ bool Staff::isVoiceVisible(int voice)
     return staff()->isVoiceVisible(voice);
 }
 
+void Staff::setShow(bool visible)
+{
+    mu::engraving::Staff* s = staff();
+    if (!s) {
+        return;
+    }
+
+    s->score()->undo(new mu::engraving::ChangeStaff(
+                         s,
+                         visible,
+                         s->defaultClefType(),
+                         s->userDist(),
+                         s->cutaway(),
+                         s->hideSystemBarLine(),
+                         s->mergeMatchingRests(),
+                         s->reflectTranspositionInLinkedTab()
+                         ));
+}
+
 //---------------------------------------------------------
 //   Spanner::ornament
 //---------------------------------------------------------
@@ -660,6 +680,134 @@ Ornament* Spanner::ornament() const
         return wrap<Ornament>(toTrill(spanner())->ornament());
     }
     return nullptr;
+}
+
+//---------------------------------------------------------
+//   FretDiagram::setDot / setMarker / setBarre / clear
+///   When the element is owned by the score, use the undo-aware DOM methods
+///   so that modifications are recorded on the undo stack and propagated to
+///   all linked clones. When the element is plugin-owned (not yet added to
+///   a score), use the direct setters to avoid accessing an invalid undo
+///   stack (see ScoreElement::set() in scoreelement.cpp for the same pattern).
+//---------------------------------------------------------
+
+void FretDiagram::setDot(int string, int fret, bool add, int dotType)
+{
+    if (string < 0 || string >= fretDiagram()->strings()) {
+        LOGW("PluginAPI::FretDiagram::setDot: string %d is out of range (0..%d)", string, fretDiagram()->strings() - 1);
+        return;
+    }
+    if (fret < 0) {
+        LOGW("PluginAPI::FretDiagram::setDot: fret %d is negative", fret);
+        return;
+    }
+    if (dotType < int(mu::engraving::FretDotType::NORMAL)
+        || dotType > int(mu::engraving::FretDotType::TRIANGLE)) {
+        LOGW("PluginAPI::FretDiagram::setDot: dotType %d is out of range", dotType);
+        return;
+    }
+    if (ownership() == Ownership::SCORE) {
+        fretDiagram()->undoSetFretDot(string, fret, add,
+                                      static_cast<mu::engraving::FretDotType>(dotType));
+    } else {
+        fretDiagram()->setDot(string, fret, add,
+                              static_cast<mu::engraving::FretDotType>(dotType));
+    }
+}
+
+void FretDiagram::setMarker(int string, int marker)
+{
+    if (string < 0 || string >= fretDiagram()->strings()) {
+        LOGW("PluginAPI::FretDiagram::setMarker: string %d is out of range (0..%d)", string, fretDiagram()->strings() - 1);
+        return;
+    }
+    if (marker < int(mu::engraving::FretMarkerType::NONE)
+        || marker > int(mu::engraving::FretMarkerType::CROSS)) {
+        LOGW("PluginAPI::FretDiagram::setMarker: marker %d is out of range", marker);
+        return;
+    }
+    if (ownership() == Ownership::SCORE) {
+        fretDiagram()->undoSetFretMarker(string,
+                                         static_cast<mu::engraving::FretMarkerType>(marker));
+    } else {
+        fretDiagram()->setMarker(string,
+                                 static_cast<mu::engraving::FretMarkerType>(marker));
+    }
+}
+
+void FretDiagram::setBarre(int string, int fret, bool add)
+{
+    if (string < 0 || string >= fretDiagram()->strings()) {
+        LOGW("PluginAPI::FretDiagram::setBarre: string %d is out of range (0..%d)", string, fretDiagram()->strings() - 1);
+        return;
+    }
+    if (fret <= 0) {
+        LOGW("PluginAPI::FretDiagram::setBarre: fret %d must be > 0", fret);
+        return;
+    }
+    if (ownership() == Ownership::SCORE) {
+        fretDiagram()->undoSetFretBarre(string, fret, add);
+    } else {
+        fretDiagram()->setBarre(string, fret, add);
+    }
+}
+
+void FretDiagram::clear()
+{
+    if (ownership() == Ownership::SCORE) {
+        fretDiagram()->undoFretClear();
+    } else {
+        fretDiagram()->clear();
+    }
+}
+
+QVariantList FretDiagram::dots() const
+{
+    QVariantList result;
+    for (const auto& [string, dotVec] : fretDiagram()->dots()) {
+        for (const mu::engraving::FretItem::Dot& d : dotVec) {
+            if (!d.exists()) {
+                continue;
+            }
+            QVariantMap entry;
+            entry["string"] = string;
+            entry["fret"] = d.fret;
+            entry["dotType"] = int(d.dtype);
+            result.append(entry);
+        }
+    }
+    return result;
+}
+
+QVariantList FretDiagram::markers() const
+{
+    QVariantList result;
+    for (const auto& [string, m] : fretDiagram()->markers()) {
+        if (!m.exists()) {
+            continue;
+        }
+        QVariantMap entry;
+        entry["string"] = string;
+        entry["markerType"] = int(m.mtype);
+        result.append(entry);
+    }
+    return result;
+}
+
+QVariantList FretDiagram::barres() const
+{
+    QVariantList result;
+    for (const auto& [fret, b] : fretDiagram()->barres()) {
+        if (!b.exists()) {
+            continue;
+        }
+        QVariantMap entry;
+        entry["fret"] = fret;
+        entry["startString"] = b.startString;
+        entry["endString"] = b.endString;
+        result.append(entry);
+    }
+    return result;
 }
 
 //---------------------------------------------------------
@@ -694,6 +842,52 @@ EngravingItem* mu::engraving::apiv1::wrap(mu::engraving::EngravingItem* e, Owner
     API_WRAP(Page)
     API_WRAP(SpannerSegment)
     API_WRAP(Spanner)
+    using mu::engraving::ElementType;
+    switch (e->type()) {
+    case ElementType::TIE:
+    case ElementType::PARTIAL_TIE:
+    case ElementType::LAISSEZ_VIB:
+        return wrap<Tie>(toTie(e), own);
+    case ElementType::ORNAMENT:
+        return wrap<Ornament>(toOrnament(e), own);
+    case ElementType::NOTE:
+        return wrap<Note>(toNote(e), own);
+    case ElementType::CHORD:
+        return wrap<Chord>(toChord(e), own);
+    case ElementType::TUPLET:
+        return wrap<Tuplet>(toTuplet(e), own);
+    case ElementType::HARMONY:
+        return wrap<Harmony>(toHarmony(e), own);
+    case ElementType::FRET_DIAGRAM:
+        return wrap<FretDiagram>(toFretDiagram(e), own);
+    case ElementType::SEGMENT:
+        return wrap<Segment>(toSegment(e), own);
+    case ElementType::MEASURE:
+        return wrap<Measure>(toMeasure(e), own);
+    case ElementType::HBOX:
+    case ElementType::VBOX:
+    case ElementType::TBOX:
+    case ElementType::FBOX:
+        return wrap<MeasureBase>(toMeasureBase(e), own);
+    case ElementType::SYSTEM:
+        return wrap<System>(toSystem(e), own);
+    case ElementType::PAGE:
+        return wrap<Page>(toPage(e), own);
+    default:
+        if (e->isDurationElement()) {
+            if (e->isChordRest()) {
+                return wrap<ChordRest>(toChordRest(e), own);
+            }
+            return wrap<DurationElement>(toDurationElement(e), own);
+        }
+        if (e->isSpannerSegment()) {
+            return wrap<SpannerSegment>(toSpannerSegment(e), own);
+        }
+        if (e->isSpanner()) {
+            return wrap<Spanner>(toSpanner(e), own);
+        }
+        break;
+    }
     return wrap<EngravingItem>(e, own);
 
 #undef API_WRAP
