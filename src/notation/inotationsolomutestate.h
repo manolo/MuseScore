@@ -40,10 +40,19 @@ public:
         bool mute = false;
         bool solo = false;
 
+        // A part (excerpt) can keep its own volume and balance; the main
+        // score's mix applies while hasCustomVolume is false
+        float volumeDb = 0.0f;
+        float balance = 0.0f;
+        bool hasCustomVolume = false;
+
         bool operator ==(const SoloMuteState& other) const
         {
             return mute == other.mute
-                   && solo == other.solo;
+                   && solo == other.solo
+                   && volumeDb == other.volumeDb
+                   && balance == other.balance
+                   && hasCustomVolume == other.hasCustomVolume;
         }
     };
 
