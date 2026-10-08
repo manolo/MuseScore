@@ -45,7 +45,7 @@ extras:
     # a tarball. There is no arm64 Linux build, so that AppImage ships without
     # the plugin and the README says so.
     assets:
-      macos: 'Plectro-*-macOS-VST3.zip'
+      macos: 'Plectro-*-macOS-arm64-VST3.zip'
       windows: 'Plectro-*-Windows-x64-VST3.zip'
       linux_x86_64: 'Plectro-*-Linux-x86_64-VST3.tar.gz'
     dest: share/vst3
@@ -108,6 +108,14 @@ framework:
         The pull request still points at fix-tremolo-string-instruments. A
         renamed copy, 31273-tremolo-strings-preset, also exists on the fork.
         Decide which one is canonical and drop the other.
+
+    - name: dialog lost from the interactive stack
+      pr: 334
+      ref: manolo/35130-primary-page-stack
+      note: >
+        The branch name carries the wrong issue number. It fixes
+        musescore/MuseScore#35128, a crash on closing a plugin window
+        after switching to Home.
 
 components:
   - name: Encore importer
