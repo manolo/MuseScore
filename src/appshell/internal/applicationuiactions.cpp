@@ -63,7 +63,7 @@ const UiActionList ApplicationUiActions::m_actions = {
     UiAction("about-musescore",
              mu::context::UiCtxAny,
              mu::context::CTX_ANY,
-             TranslatableString("action", "&About MuseScore Studio…")
+             TranslatableString("action", "&About PlectraScore…")
              ),
     UiAction("about-qt",
              mu::context::UiCtxAny,

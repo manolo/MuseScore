@@ -18,7 +18,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>. 
 
-set(MUSE_APP_NAME_HUMAN_READABLE "MuseScore Studio")
+set(MUSE_APP_NAME_HUMAN_READABLE "PlectraScore")
 set(MUSE_APP_NAME_MACHINE_READABLE "MuseScoreStudio")
 
 set(MUSE_APP_NAME_HUMAN_READABLE_COMPAT "MuseScore")
