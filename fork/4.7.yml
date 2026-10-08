@@ -49,7 +49,7 @@ extras:
     # a tarball. There is no arm64 Linux build, so that AppImage ships without
     # the plugin and the README says so.
     assets:
-      macos: 'Plectro-*-macOS-VST3.zip'
+      macos: 'Plectro-*-macOS-arm64-VST3.zip'
       windows: 'Plectro-*-Windows-x64-VST3.zip'
       linux_x86_64: 'Plectro-*-Linux-x86_64-VST3.tar.gz'
     dest: share/vst3
