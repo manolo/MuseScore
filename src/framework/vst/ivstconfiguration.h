@@ -21,6 +21,8 @@
  */
 #pragma once
 
+#include <string>
+
 #include "modularity/imoduleinterface.h"
 
 #include "io/path.h"

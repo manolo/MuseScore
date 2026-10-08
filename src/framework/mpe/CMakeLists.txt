@@ -28,8 +28,8 @@ target_sources(muse_mpe PRIVATE
     events.h
     playbacksetupdata.h
     iarticulationprofilesrepository.h
+    articulationstringutils.h
 
-    internal/articulationstringutils.h
     internal/articulationprofilesrepository.cpp
     internal/articulationprofilesrepository.h
 )

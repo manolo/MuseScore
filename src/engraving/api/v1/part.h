@@ -34,6 +34,7 @@ namespace mu::engraving::apiv1 {
 class EngravingItem;
 class Fraction;
 class Instrument;
+class MixerChannel;
 class Part;
 class Staff;
 
@@ -120,6 +121,10 @@ class Part : public ScoreElement
     /// The part object of this part in the main score.
     /// \since MuseScore 4.6
     Q_PROPERTY(apiv1::Part * masterPart READ masterPart);
+    /// Access to mixer channel controls for this part.
+    /// Provides volume, balance, mute, solo, and sound selection.
+    /// \since MuseScore 4.7
+    Q_PROPERTY(apiv1::MixerChannel * mixerChannel READ mixerChannel)
 
 public:
     /// \cond MS_INTERNAL
@@ -194,6 +199,13 @@ public:
     /// \param tick Tick location in the score, as a fraction.
     /// \since MuseScore 4.6
     Q_INVOKABLE apiv1::Fraction* tickOfCurrentHarpDiagram(apiv1::Fraction* tick);
+
+    /// \cond MS_INTERNAL
+    apiv1::MixerChannel* mixerChannel();
+    /// \endcond
+
+private:
+    mutable apiv1::MixerChannel* m_mixerChannel = nullptr;
 };
 }
 

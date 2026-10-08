@@ -121,7 +121,11 @@ UiContext UiContextResolver::resolveCurrentUiContext() const
     }
 
     if (interactive()->isCurrentUriDialog().val) {
-        bool isExtensionDialog = currentUri == EXTENSIONS_DIALOG_URI;
+        // The viewer opens at muse://extensions/viewer, but interactive()->currentUri()
+        // tracks the extension's own URI (e.g. musescore://extensions/midi-to-tab),
+        // so also treat any musescore://extensions/* URI as an extension dialog.
+        bool isExtensionDialog = currentUri == EXTENSIONS_DIALOG_URI
+                                 || currentUri.toString().find("musescore://extensions/") == 0;
         if (!isExtensionDialog) {
             return context::UiCtxDialogOpened;
         }

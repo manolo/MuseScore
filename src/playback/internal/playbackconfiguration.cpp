@@ -51,6 +51,7 @@ static const Settings::Key MIXER_VOLUME_SECTION_VISIBLE_KEY(moduleName, "playbac
 static const Settings::Key MIXER_FADER_SECTION_VISIBLE_KEY(moduleName, "playback/mixer/faderSectionVisible");
 static const Settings::Key MIXER_MUTE_AND_SOLO_SECTION_VISIBLE_KEY(moduleName, "playback/mixer/muteAndSoloSectionVisible");
 static const Settings::Key MIXER_TITLE_SECTION_VISIBLE_KEY(moduleName, "playback/mixer/titleSectionVisible");
+static const Settings::Key PLAYBACK_CURSOR_VISIBLE_KEY(moduleName, "playback/cursorVisible");
 
 static const Settings::Key MIXER_RESET_SOUND_FLAGS_WHEN_CHANGE_SOUND_WARNING(moduleName,
                                                                              "playback/mixer/needToShowAboutResetSoundFlagsWhwnChangeSoundWarning");
@@ -124,6 +125,11 @@ void PlaybackConfiguration::init()
             m_isMixerSectionVisibleChanged.send(sectionType, val.toBool());
         });
     }
+
+    settings()->setDefaultValue(PLAYBACK_CURSOR_VISIBLE_KEY, Val(true));
+    settings()->valueChanged(PLAYBACK_CURSOR_VISIBLE_KEY).onReceive(this, [this](const Val& val) {
+        m_isPlaybackCursorVisibleChanged.send(val.toBool());
+    });
 
     settings()->setDefaultValue(MUTE_HIDDEN_INSTRUMENTS, Val(true));
     settings()->valueChanged(MUTE_HIDDEN_INSTRUMENTS).onReceive(nullptr, [this](const Val& mute) {
@@ -222,6 +228,21 @@ muse::async::Channel<bool> PlaybackConfiguration::playNotesOnMidiInputChanged() 
 PlaybackCursorType PlaybackConfiguration::cursorType() const
 {
     return settings()->value(PLAYBACK_CURSOR_TYPE_KEY).toEnum<PlaybackCursorType>();
+}
+
+bool PlaybackConfiguration::isPlaybackCursorVisible() const
+{
+    return settings()->value(PLAYBACK_CURSOR_VISIBLE_KEY).toBool();
+}
+
+void PlaybackConfiguration::setPlaybackCursorVisible(bool visible)
+{
+    settings()->setSharedValue(PLAYBACK_CURSOR_VISIBLE_KEY, Val(visible));
+}
+
+muse::async::Channel<bool> PlaybackConfiguration::isPlaybackCursorVisibleChanged() const
+{
+    return m_isPlaybackCursorVisibleChanged;
 }
 
 bool PlaybackConfiguration::isMixerSectionVisible(MixerSectionType sectionType) const

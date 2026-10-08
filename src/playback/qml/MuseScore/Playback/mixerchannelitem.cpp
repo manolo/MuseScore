@@ -233,12 +233,30 @@ void MixerChannelItem::loadInputParams(const AudioInputParams& newParams)
 
 void MixerChannelItem::loadOutputParams(const AudioOutputParams& newParams)
 {
-    if (!muse::RealIsEqual(m_outParams.volume, newParams.volume)) {
+    // Handle volume updates with debouncing to prevent feedback loops
+    // When user drags fader, many intermediate values are sent to audio system.
+    // Audio system echoes them back asynchronously. We must ignore ALL echoed values
+    // until the audio system catches up to our CURRENT (most recent) value.
+    if (m_volumeChangeInFlight) {
+        // Check if audio system has caught up to our current value
+        if (muse::RealIsEqual(newParams.volume, m_outParams.volume)) {
+            // Audio system confirmed our current value - clear the flag
+            m_volumeChangeInFlight = false;
+            // Don't emit - slider already shows this value
+        }
+        // else: ignore stale value from audio system (it's still catching up)
+    } else if (!muse::RealIsEqual(m_outParams.volume, newParams.volume)) {
+        // No pending change - accept external update
         m_outParams.volume = newParams.volume;
         emit volumeLevelChanged(newParams.volume);
     }
 
-    if (!muse::RealIsEqual(m_outParams.balance, newParams.balance)) {
+    // Handle balance updates with same debouncing logic
+    if (m_balanceChangeInFlight) {
+        if (muse::RealIsEqual(newParams.balance, m_outParams.balance)) {
+            m_balanceChangeInFlight = false;
+        }
+    } else if (!muse::RealIsEqual(m_outParams.balance, newParams.balance)) {
         m_outParams.balance = newParams.balance;
         emit balanceChanged(newParams.balance);
     }
@@ -428,6 +446,7 @@ void MixerChannelItem::setVolumeLevel(float volumeLevel)
     }
 
     m_outParams.volume = volumeLevel;
+    m_volumeChangeInFlight = true;  // Block incoming audio system echoes until it catches up
     emit volumeLevelChanged(m_outParams.volume);
     emit outputParamsChanged(m_outParams);
 }
@@ -439,6 +458,7 @@ void MixerChannelItem::setBalance(int balance)
     }
 
     m_outParams.balance = balance / BALANCE_SCALING_FACTOR;
+    m_balanceChangeInFlight = true;  // Block incoming audio system echoes until it catches up
     emit balanceChanged(balance);
     emit outputParamsChanged(m_outParams);
 }
