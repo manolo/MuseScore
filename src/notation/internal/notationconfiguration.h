@@ -169,6 +169,10 @@ public:
     void setIsAutomaticallyPanEnabled(bool enabled) override;
     muse::async::Notification isAutomaticallyPanEnabledChanged() const override;
 
+    bool isPlaybackCursorVisible() const override;
+    void setPlaybackCursorVisible(bool visible) override;
+    muse::async::Notification isPlaybackCursorVisibleChanged() const override;
+
     bool isPlayRepeatsEnabled() const override;
     void setIsPlayRepeatsEnabled(bool enabled) override;
     muse::async::Notification isPlayRepeatsChanged() const override;
@@ -281,6 +285,7 @@ private:
     muse::async::Channel<QColor> m_anchorColorChanged;
 
     muse::async::Notification m_isAutomaticallyPanEnabledChanged;
+    muse::async::Notification m_isPlaybackCursorVisibleChanged;
     muse::async::Notification m_isCountInEnabledChanged;
 };
 }
