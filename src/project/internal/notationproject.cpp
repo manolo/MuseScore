@@ -27,6 +27,7 @@
 #include <QBuffer>
 #include <QDir>
 #include <QFile>
+#include <QRegularExpression>
 
 #include "global/concurrency/concurrent.h"
 #include "global/io/buffer.h"
@@ -210,8 +211,31 @@ Ret NotationProject::doLoad(const muse::io::path_t& path, const OpenParams& open
     // Load style if present
     if (!openParams.stylePath.empty()) {
         muse::io::File styleFile(openParams.stylePath);
-        mu::engraving::MasterScore* ms = m_engravingProject->masterScore();
-        mu::engraving::EditStyle::loadStyle(ms->transactionManager()->currentOrDummyTransaction(), ms, styleFile);
+        if (!openParams.stylePartsFilter.empty()) {
+            // stylePartsFilter: only apply to matching excerpts
+            mu::engraving::MStyle loadedStyle;
+            if (styleFile.open(muse::io::IODevice::ReadOnly)) {
+                loadedStyle.read(&styleFile, false);
+                styleFile.close();
+            }
+            bool negateFilter = openParams.stylePartsFilter.at(0) == u'!';
+            QString filterPattern = QString::fromStdU16String(
+                negateFilter ? openParams.stylePartsFilter.mid(1).toStdU16String()
+                : openParams.stylePartsFilter.toStdU16String());
+            QRegularExpression filterRegex(QRegularExpression::wildcardToRegularExpression(filterPattern));
+            for (mu::engraving::Excerpt* excerpt : m_engravingProject->masterScore()->excerpts()) {
+                if (excerpt->excerptScore()) {
+                    QString excerptName = excerpt->name();
+                    bool matches = filterRegex.match(excerptName).hasMatch();
+                    if (negateFilter ? !matches : matches) {
+                        excerpt->excerptScore()->setStyle(loadedStyle, false);
+                    }
+                }
+            }
+        } else {
+            mu::engraving::MasterScore* ms = m_engravingProject->masterScore();
+            mu::engraving::EditStyle::loadStyle(ms->transactionManager()->currentOrDummyTransaction(), ms, styleFile);
+        }
     }
 
     mu::engraving::compat::EngravingCompat::doPreLayoutCompatIfNeeded(m_engravingProject->masterScore());
@@ -310,10 +334,17 @@ Ret NotationProject::doImport(const muse::io::path_t& path, const OpenParams& op
 
     io::path_t stylePath = openParams.stylePath.empty() ? notationConfiguration()->styleFileImportPath() : openParams.stylePath;
 
-    // Load style if present
+    // Load style if present - read into MStyle for reuse (to support stylePartsFilter)
+    mu::engraving::MStyle loadedStyle;
+    bool styleLoaded = false;
     if (!stylePath.empty()) {
         muse::io::File styleFile(stylePath);
-        mu::engraving::EditStyle::loadStyle(score->transactionManager()->currentOrDummyTransaction(), score, styleFile);
+        if (openParams.stylePartsFilter.empty()) {
+            mu::engraving::EditStyle::loadStyle(score->transactionManager()->currentOrDummyTransaction(), score, styleFile);
+        } else if (styleFile.open(muse::io::IODevice::ReadOnly)) {
+            styleLoaded = loadedStyle.read(&styleFile, false);
+            styleFile.close();
+        }
     }
 
     // Init ChordList
@@ -336,6 +367,24 @@ Ret NotationProject::doImport(const muse::io::path_t& path, const OpenParams& op
         score = original->unrollRepeats();
         delete original;
         m_engravingProject->setMasterScore(score);
+    }
+
+    // Apply style to excerpts (parts) if style was specified and filter is active
+    if (styleLoaded && !openParams.stylePartsFilter.empty()) {
+        bool negateFilter = openParams.stylePartsFilter.at(0) == u'!';
+        QString filterPattern = QString::fromStdU16String(
+            negateFilter ? openParams.stylePartsFilter.mid(1).toStdU16String()
+            : openParams.stylePartsFilter.toStdU16String());
+        QRegularExpression filterRegex(QRegularExpression::wildcardToRegularExpression(filterPattern));
+        for (mu::engraving::Excerpt* excerpt : score->excerpts()) {
+            if (excerpt->excerptScore()) {
+                QString excerptName = excerpt->name();
+                bool matches = filterRegex.match(excerptName).hasMatch();
+                if (negateFilter ? !matches : matches) {
+                    excerpt->excerptScore()->setStyle(loadedStyle, false);
+                }
+            }
+        }
     }
 
     // Setup audio settings
@@ -405,7 +454,7 @@ Ret NotationProject::loadTemplate(const ProjectCreateOptions& projectOptions)
 {
     TRACEFUNC;
 
-    Ret ret = load(projectOptions.templatePath);
+    Ret ret = load(projectOptions.templatePath, OpenParams {});
 
     if (ret) {
         setPath(projectOptions.title.isEmpty() ? scoreDefaultTitle() : projectOptions.title);
