@@ -461,6 +461,20 @@ muse::async::Notification NotationConfigurationStub::isAutomaticallyPanEnabledCh
     return {};
 }
 
+bool NotationConfigurationStub::isPlaybackCursorVisible() const
+{
+    return true;
+}
+
+void NotationConfigurationStub::setPlaybackCursorVisible(bool)
+{
+}
+
+muse::async::Notification NotationConfigurationStub::isPlaybackCursorVisibleChanged() const
+{
+    return {};
+}
+
 bool NotationConfigurationStub::isSmoothPanning() const
 {
     return false;

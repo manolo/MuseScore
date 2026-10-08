@@ -60,6 +60,7 @@ public:
     MOCK_METHOD(muse::Ret, togglePlayRepeats, (), (override));
     MOCK_METHOD(muse::Ret, togglePlayChordSymbols, (), (override));
     MOCK_METHOD(muse::Ret, toggleAutomaticallyPan, (), (override));
+    MOCK_METHOD(muse::Ret, togglePlaybackCursor, (), (override));
     MOCK_METHOD(muse::Ret, toggleCountIn, (), (override));
     MOCK_METHOD(muse::Ret, toggleHearPlaybackWhenEditing, (), (override));
 

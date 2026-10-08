@@ -935,6 +935,13 @@ muse::Ret PlaybackController::toggleAutomaticallyPan()
     return make_ok();
 }
 
+muse::Ret PlaybackController::togglePlaybackCursor()
+{
+    bool visible = notationConfiguration()->isPlaybackCursorVisible();
+    notationConfiguration()->setPlaybackCursorVisible(!visible);
+    return make_ok();
+}
+
 muse::Ret PlaybackController::toggleMetronome()
 {
     bool metronomeEnabled = notationConfiguration()->isMetronomeEnabled();
