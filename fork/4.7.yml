@@ -96,9 +96,10 @@ components:
     ref: fork/4.7-ports
     local: true
     note: >
-      Seventeen commits as of 2026-09-28: the Encore importer adapted to 4.7,
-      VST timing and keyswitches, several plugin API additions, the tablature
-      fret circle, and assorted fixes. Rebased onto origin/4.7 when that moves,
+      Twenty-six commits as of 2026-10-08: the Encore importer adapted to 4.7,
+      VST timing and keyswitches, several plugin API additions including the
+      mixer, the tablature fret circle, the floating mixer panel sizing, and
+      assorted fixes ported from the 4.6 patches. Rebased onto origin/4.7 when that moves,
       which is the one place a conflict has to be resolved.
 
 api-notes:
