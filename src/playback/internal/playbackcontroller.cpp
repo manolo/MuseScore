@@ -22,6 +22,8 @@
 
 #include "playbackcontroller.h"
 
+#include <cmath>
+
 #include "async/notifylist.h"
 #include "containers.h"
 #include "modularity/ioc.h"
@@ -351,7 +353,16 @@ void PlaybackController::setTrackSoloMuteState(const InstrumentTrackId& trackId,
         return;
     }
 
-    m_notation->soloMuteState()->setTrackSoloMuteState(trackId, state);
+    // The mute and solo buttons know nothing of the part's own volume; keep it
+    SoloMuteState newState = state;
+    const SoloMuteState& existing = m_notation->soloMuteState()->trackSoloMuteState(trackId);
+    if (existing.hasCustomVolume && !state.hasCustomVolume) {
+        newState.volumeDb = existing.volumeDb;
+        newState.balance = existing.balance;
+        newState.hasCustomVolume = true;
+    }
+
+    m_notation->soloMuteState()->setTrackSoloMuteState(trackId, newState);
 }
 
 void PlaybackController::playElements(const std::vector<const notation::EngravingItem*>& elements, const PlayParams& params, bool isMidi)
@@ -1349,6 +1360,14 @@ AudioOutputParams PlaybackController::trackOutputParams(const InstrumentTrackId&
 
     AudioOutputParams result = audioSettings()->trackOutputParams(instrumentTrackId);
 
+    if (m_notation && m_notation->soloMuteState()) {
+        const SoloMuteState& soloMuteState = m_notation->soloMuteState()->trackSoloMuteState(instrumentTrackId);
+        if (soloMuteState.hasCustomVolume) {
+            result.volume = volume_db_t::make(soloMuteState.volumeDb);
+            result.balance = balance_t::make(soloMuteState.balance);
+        }
+    }
+
     if (instrumentTrackId == notationPlayback()->metronomeTrackId()) {
         result.muted = !notationConfiguration()->isMetronomeEnabled() && !notationConfiguration()->isCountInEnabled();
         return result;
@@ -1599,6 +1618,11 @@ void PlaybackController::subscribeOnAudioParamsChanges()
         });
 
         if (instrumentIt != m_instrumentTrackIdMap.end()) {
+            if (isExcerptOpen()) {
+                storeExcerptControlParams(instrumentIt->first, params);
+                return;
+            }
+
             AudioOutputParams outParams = audioSettings()->trackOutputParams(instrumentIt->first);
             outParams.setControl(params);
             audioSettings()->setTrackOutputParams(instrumentIt->first, outParams);
@@ -1727,6 +1751,37 @@ void PlaybackController::setupPlayer()
         currentPlayer()->setDuration(totalPlaybackTime);
         m_totalPlayTimeChanged.notify();
     });
+}
+
+bool PlaybackController::isExcerptOpen() const
+{
+    return m_notation && m_masterNotation && m_notation != m_masterNotation->notation();
+}
+
+void PlaybackController::storeExcerptControlParams(const InstrumentTrackId& instrumentTrackId, const ControlParams& params)
+{
+    // Automated values belong to the main score; a part only keeps a fixed one
+    if (params.volume.hasAutomation() || params.balance.hasAutomation() || !m_notation->soloMuteState()) {
+        return;
+    }
+
+    const float volume = std::get<volume_db_t>(params.volume.value()).raw();
+    const float balance = std::get<balance_t>(params.balance.value()).raw();
+
+    // The part keeps its own value only while it differs from the main score
+    const AudioOutputParams masterParams = audioSettings()->trackOutputParams(instrumentTrackId);
+    constexpr float EPSILON = 0.001f;
+    const bool differs = std::abs(volume - masterParams.volume.raw()) > EPSILON
+                         || std::abs(balance - masterParams.balance.raw()) > EPSILON;
+
+    SoloMuteState state = m_notation->soloMuteState()->trackSoloMuteState(instrumentTrackId);
+    state.hasCustomVolume = differs;
+    if (differs) {
+        state.volumeDb = volume;
+        state.balance = balance;
+    }
+
+    m_notation->soloMuteState()->setTrackSoloMuteState(instrumentTrackId, state);
 }
 
 void PlaybackController::updateSoloMuteStates()
