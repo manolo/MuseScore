@@ -117,6 +117,13 @@ framework:
         musescore/MuseScore#35128, a crash on closing a plugin window
         after switching to Home.
 
+    - name: floating mixer panel
+      ref: manolo/fork/floating-mixer-panel
+      note: >
+        Not a pull request. The framework half of fitting the floating mixer
+        panel to its content: dock geometry and the title bar double click.
+        The QML half is in fork/5.0-ports.
+
 components:
   - name: Encore importer
     pr: 34129
@@ -160,12 +167,23 @@ components:
       so it is fetched by number from upstream rather than adding a remote for
       every contributor whose work I want in a build. Two files, plugin API only.
 
+  - name: 5.0 ports and fork features
+    ref: fork/5.0-ports
+    local: true
+    note: >
+      What the 4.7 line carries and upstream main does not, ported to the 5.0
+      API: the mixer API and per part volume, the plugin API additions, the
+      playback cursor toggle, lyricsWordSpacing, --style-parts, the tremolo
+      gate (#31273) and channel, and the re-entrant tuning fix. Rebased onto
+      origin/main when that moves, the one place its conflicts are resolved.
+
   - name: tremolo articulation mapping
     pr: 30951
     skip: >
       Cannot be merged. It edits soundmapping.h, a path that moved into the
-      muse submodule, so the merge comes out as delete/modify. It needs
-      porting, not merging.
+      muse submodule, so the merge comes out as delete/modify. Its engraving
+      half is ported in fork/5.0-ports and its sound mapping half arrives with
+      framework PR #263.
 
 overlay:
   - .github/workflows/fork_builds.yml
