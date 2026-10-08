@@ -563,6 +563,12 @@ void MasterNotation::resetExcerpt(IExcerptNotationPtr& excerptNotation)
 
     get_impl(excerptNotation)->reinit(newExcerpt);
 
+    // Resetting a part also drops its own mix
+    if (excerptNotation->notation()->soloMuteState()) {
+        excerptNotation->notation()->soloMuteState()->clearAllStates();
+    }
+    initNotationSoloMuteState(excerptNotation->notation());
+
     masterScore()->setExcerptsChanged(false);
 
     undoStack()->commitChanges();

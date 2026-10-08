@@ -215,6 +215,8 @@ private:
     void setupPlayer();
 
     void updateSoloMuteStates();
+    bool isExcerptOpen() const;
+    void storeExcerptControlParams(const engraving::InstrumentTrackId& instrumentTrackId, const muse::audio::ControlParams& params);
     void updateAuxMuteStates();
 
     using TrackAddFinished = std::function<void ()>;
