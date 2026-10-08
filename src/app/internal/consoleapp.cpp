@@ -207,6 +207,7 @@ int MuseScoreConsoleApp::processConverter(const MuseScoreCmdOptions::ConverterTa
 
     converter::OpenParams openParams;
     openParams.stylePath = task.params[MuseScoreCmdOptions::ParamKey::StylePath].toString();
+    openParams.stylePartsFilter = task.params[MuseScoreCmdOptions::ParamKey::StylePartsFilter].toString();
     openParams.forceMode = task.params[MuseScoreCmdOptions::ParamKey::ForceMode].toBool();
     openParams.unrollRepeats = task.params[MuseScoreCmdOptions::ParamKey::UnrollRepeats].toBool();
 
