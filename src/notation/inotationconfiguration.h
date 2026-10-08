@@ -169,6 +169,10 @@ public:
     virtual void setIsAutomaticallyPanEnabled(bool enabled) = 0;
     virtual muse::async::Notification isAutomaticallyPanEnabledChanged() const = 0;
 
+    virtual bool isPlaybackCursorVisible() const = 0;
+    virtual void setPlaybackCursorVisible(bool visible) = 0;
+    virtual muse::async::Notification isPlaybackCursorVisibleChanged() const = 0;
+
     virtual bool isPlayRepeatsEnabled() const = 0;
     virtual void setIsPlayRepeatsEnabled(bool enabled) = 0;
     virtual muse::async::Notification isPlayRepeatsChanged() const = 0;

@@ -107,6 +107,10 @@ void PlaybackCommandsState::init()
         updateCommandStates({ PAN_TOGGLE_COMMAND });
     });
 
+    notationConfiguration()->isPlaybackCursorVisibleChanged().onNotify(this, [this]() {
+        updateCommandStates({ PLAYBACK_CURSOR_TOGGLE_COMMAND });
+    });
+
     notationConfiguration()->isCountInEnabledChanged().onNotify(this, [this]() {
         updateCommandStates({ COUNTIN_TOGGLE_COMMAND });
     });
@@ -196,6 +200,8 @@ CommandState PlaybackCommandsState::commandState(const Command& command) const
         return CommandState(true, playbackConfiguration()->playNotesWhenEditing());
     } else if (command == PAN_TOGGLE_COMMAND) {
         return CommandState(true, notationConfiguration()->isAutomaticallyPanEnabled());
+    } else if (command == PLAYBACK_CURSOR_TOGGLE_COMMAND) {
+        return CommandState(true, notationConfiguration()->isPlaybackCursorVisible());
     } else if (command == COUNTIN_TOGGLE_COMMAND) {
         return CommandState(true, notationConfiguration()->isCountInEnabled());
     } else if (command == CLEAR_ONLINESOUNDS_CACHE_COMMAND) {

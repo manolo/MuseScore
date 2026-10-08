@@ -165,6 +165,13 @@ static const std::vector<CommandInfo> s_commandInfos = {
         Decoration(IconCode::Code::PAN_SCORE, rcommand::Checkable::Yes)
     },
     CommandInfo{
+        PLAYBACK_CURSOR_TOGGLE_COMMAND,
+        TranslatableString("playback", "Show playback cursor"),
+        TranslatableString("playback", "Toggle the playback cursor"),
+        InputSchema(),
+        Decoration(IconCode::Code::VERTICAL, rcommand::Checkable::Yes)
+    },
+    CommandInfo{
         COUNTIN_TOGGLE_COMMAND,
         TranslatableString("playback", "Count-in when playing"),
         TranslatableString("playback", "Toggle count-in when playing"),

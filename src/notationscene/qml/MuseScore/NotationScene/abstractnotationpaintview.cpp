@@ -158,6 +158,10 @@ void AbstractNotationPaintView::load()
         onPlayingChanged();
     }, async::Asyncable::Mode::SetReplace);
 
+    notationConfiguration()->isPlaybackCursorVisibleChanged().onNotify(this, [this]() {
+        onPlayingChanged();
+    }, async::Asyncable::Mode::SetReplace);
+
     scheduleRedraw();
 }
 
@@ -1566,10 +1570,11 @@ void AbstractNotationPaintView::onPlayingChanged()
     TRACEFUNC;
 
     bool isPlaying = globalContext()->playbackState()->isPlaying();
-    m_playbackCursor->setVisible(isPlaying);
+    bool cursorVisible = isPlaying && notationConfiguration()->isPlaybackCursorVisible();
+    m_playbackCursor->setVisible(cursorVisible);
 
     if (m_playbackCursorItem) {
-        m_playbackCursorItem->setVisible(isPlaying);
+        m_playbackCursorItem->setVisible(cursorVisible);
     }
 
     m_autoScrollEnabled = true;
@@ -1771,7 +1776,8 @@ void AbstractNotationPaintView::setPlaybackCursorItem(QQuickItem* cursor)
     m_playbackCursorItem = cursor;
 
     if (m_playbackCursorItem) {
-        m_playbackCursorItem->setVisible(globalContext()->playbackState()->isPlaying());
+        m_playbackCursorItem->setVisible(globalContext()->playbackState()->isPlaying()
+                                         && notationConfiguration()->isPlaybackCursorVisible());
         m_playbackCursorItem->setEnabled(false); // ignore mouse & keyboard events
         m_playbackCursorItem->setProperty("color", notationConfiguration()->playbackCursorColor());
 

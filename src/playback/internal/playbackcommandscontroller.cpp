@@ -68,6 +68,7 @@ void PlaybackCommandsController::init()
     registerCommand(CHORDSYMBOLS_TOGGLE_COMMAND, &IPlaybackController::togglePlayChordSymbols);
     registerCommand(HEAR_PLAYBACK_WHEN_EDITING_TOGGLE_COMMAND, &IPlaybackController::toggleHearPlaybackWhenEditing);
     registerCommand(PAN_TOGGLE_COMMAND, &IPlaybackController::toggleAutomaticallyPan);
+    registerCommand(PLAYBACK_CURSOR_TOGGLE_COMMAND, &IPlaybackController::togglePlaybackCursor);
     registerCommand(COUNTIN_TOGGLE_COMMAND, &IPlaybackController::toggleCountIn);
     registerCommand(OPEN_PLAYBACK_SETUP_COMMAND, [this]() { return showPlaybackSetup(); });
     registerCommand(RELOAD_PLAYBACK_CACHE_COMMAND, &IPlaybackController::reloadPlaybackCache);
@@ -97,6 +98,7 @@ void PlaybackCommandsController::init()
             { "play-chord-symbols", CHORDSYMBOLS_TOGGLE_COMMAND, {} },
             { "toggle-hear-playback-when-editing", HEAR_PLAYBACK_WHEN_EDITING_TOGGLE_COMMAND, {} },
             { "pan", PAN_TOGGLE_COMMAND, {} },
+            { "playback-cursor", PLAYBACK_CURSOR_TOGGLE_COMMAND, {} },
             { "countin", COUNTIN_TOGGLE_COMMAND, {} },
             { "reload-playback-cache", RELOAD_PLAYBACK_CACHE_COMMAND, {} },
             { "clear-online-sounds-cache", CLEAR_ONLINESOUNDS_CACHE_COMMAND, {} },

@@ -154,6 +154,9 @@ public:
     MOCK_METHOD(bool, isAutomaticallyPanEnabled, (), (const, override));
     MOCK_METHOD(void, setIsAutomaticallyPanEnabled, (bool), (override));
     MOCK_METHOD(muse::async::Notification, isAutomaticallyPanEnabledChanged, (), (const, override));
+    MOCK_METHOD(bool, isPlaybackCursorVisible, (), (const, override));
+    MOCK_METHOD(void, setPlaybackCursorVisible, (bool), (override));
+    MOCK_METHOD(muse::async::Notification, isPlaybackCursorVisibleChanged, (), (const, override));
 
     MOCK_METHOD(bool, isPlayRepeatsEnabled, (), (const, override));
     MOCK_METHOD(void, setIsPlayRepeatsEnabled, (bool), (override));
