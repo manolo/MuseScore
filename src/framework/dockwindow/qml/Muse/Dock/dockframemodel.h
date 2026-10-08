@@ -27,6 +27,7 @@
 
 #include "modularity/ioc.h"
 #include "actions/iactionsdispatcher.h"
+#include "idockwindowprovider.h"
 
 #include "docktabsmodel.h"
 
@@ -55,6 +56,7 @@ class DockFrameModel : public QObject, public muse::Contextable
     QML_ELEMENT
 
     muse::ContextInject<muse::actions::IActionsDispatcher> dispatcher = { this };
+    muse::ContextInject<IDockWindowProvider> dockWindowProvider = { this };
 
 public:
     explicit DockFrameModel(QObject* parent = nullptr);
@@ -72,6 +74,7 @@ public:
     QRect highlightingRect() const;
 
     Q_INVOKABLE void handleMenuItem(const QString& itemId) const;
+    Q_INVOKABLE bool notifyTitleBarDoubleClicked();
 
 public slots:
     void setFrame(QQuickItem* item);

@@ -164,10 +164,10 @@ Rectangle {
         titleBarCpp: root.titleBarCpp
 
         onDoubleClicked: function(mouse) {
-            if (titleBarComp) {
-                let pos = titleBarMouseArea.mapToItem(titleBarComp, mouse.x, mouse.y)
-                titleBarComp.doubleClicked(pos)
-            }
+            // Notify dock about double click (this allows docks to handle it themselves)
+            // Returns true if the dock is floating (handled the event)
+            // If not floating, we also don't do the default toggle behavior
+            frameModel.notifyTitleBarDoubleClicked()
         }
     }
 

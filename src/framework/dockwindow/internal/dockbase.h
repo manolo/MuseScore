@@ -75,6 +75,12 @@ class DockBase : public QQuickItem, public Contextable
                READ navigationSection_property WRITE setNavigationSection NOTIFY navigationSectionChanged)
     Q_PROPERTY(int contentNavigationPanelOrderStart READ contentNavigationPanelOrderStart NOTIFY contentNavigationPanelOrderStartChanged)
 
+    Q_PROPERTY(int nonContentsHeight READ nonContentsHeight NOTIFY nonContentsHeightChanged)
+    Q_PROPERTY(int floatingWindowOverhead READ floatingWindowOverhead NOTIFY floatingChanged)
+    Q_PROPERTY(QSize currentScreenSize READ currentScreenSize NOTIFY currentScreenSizeChanged)
+    Q_PROPERTY(QPoint currentScreenPosition READ currentScreenPosition NOTIFY currentScreenSizeChanged)
+    Q_PROPERTY(QPoint globalPosition READ globalPosition)
+
     QML_ELEMENT
 
 public:
@@ -129,10 +135,16 @@ public:
     Q_INVOKABLE void open();
     Q_INVOKABLE void close();
     Q_INVOKABLE void resize(int width, int height);
+    Q_INVOKABLE void setFloatingPosition(int x, int y);
 
     ui::INavigationSection* navigationSection() const;
     ui::NavigationSection* navigationSection_property() const;
     int contentNavigationPanelOrderStart() const;
+
+    int nonContentsHeight() const;
+    int floatingWindowOverhead() const;
+    QSize currentScreenSize() const;
+    QPoint currentScreenPosition() const;
 
 public slots:
     void setTitle(const QString& title);
@@ -185,6 +197,11 @@ signals:
 
     void navigationSectionChanged();
     void contentNavigationPanelOrderStartChanged();
+
+    void nonContentsHeightChanged();
+    void currentScreenSizeChanged();
+
+    void titleBarDoubleClicked();
 
 protected:
     friend class DockWindow;
