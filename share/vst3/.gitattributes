@@ -1,0 +1,3 @@
+# Published binaries, shipped byte for byte. Nothing here is text, and letting
+# git normalise line endings inside a bundle can invalidate its signature.
+* -text -diff
