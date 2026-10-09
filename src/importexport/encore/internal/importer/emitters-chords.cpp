@@ -76,7 +76,7 @@ void handleChordSym(BuildCtx& ctx, const MeasEmitCtx& mc, const NoteElemCtx& ec)
     if (!seg) {
         seg = mc.measure->getSegment(SegmentType::ChordRest, ec.elemTick);
     }
-    Harmony* h = Factory::createHarmony(ctx.score->dummy()->segment());
+    Harmony* h = Factory::createHarmony(ctx.score->dummy());
     h->setTrack(ec.track);
     h->setHarmony(String(raw));
 
@@ -84,7 +84,7 @@ void handleChordSym(BuildCtx& ctx, const MeasEmitCtx& mc, const NoteElemCtx& ec)
     // then wrap the harmony in a FretDiagram (segment annotation with the Harmony as its child);
     // chords without the flag, or whose name the database cannot resolve, keep the plain text symbol.
     if (ecs->hasFretDiagram) {
-        FretDiagram* fd = Factory::createFretDiagram(ctx.score->dummy()->segment());
+        FretDiagram* fd = Factory::createFretDiagram(ctx.score->dummy());
         fd->setTrack(ec.track);
         fd->updateDiagram(h->harmonyName());
         if (!fd->isClear()) {
