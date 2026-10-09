@@ -380,6 +380,18 @@ for item in re.split(r'\n  - ', '\n' + (m.group(1) if m else '')):
         print("| %s | left out, see the manifest |" % name)
     else:
         print("| %s | %s |" % (name, ("#" + pr) if pr else "not a pull request"))
+
+# The framework's own components, whose pull requests live in muse_framework
+fw = re.search(r'^framework:\n(.*?)(?=^\w|\Z)', text, re.S | re.M)
+fc = re.search(r'^  components:\n(.*)', fw.group(1), re.S | re.M) if fw else None
+for item in re.split(r'\n    - ', '\n' + (fc.group(1) if fc else '')):
+    if not item.strip():
+        continue
+    def g(k):
+        x = re.search(r'^\s*%s:\s*(.+?)\s*$' % k, item, re.M)
+        return x.group(1).strip() if x else ''
+    name, pr = g('name') or g('ref'), g('pr')
+    print("| %s (framework) | %s |" % (name, ("muse_framework#" + pr) if pr else "not a pull request"))
 PYIN
         echo
         echo "Built from the manifest by \`fork/rebuild.sh\`. Editing this file by"
