@@ -57,6 +57,7 @@ public:
     muse::Ret togglePlayRepeats() override;
     muse::Ret togglePlayChordSymbols() override;
     muse::Ret toggleAutomaticallyPan() override;
+    muse::Ret togglePlaybackCursor() override;
     muse::Ret toggleCountIn() override;
     muse::Ret toggleHearPlaybackWhenEditing() override;
 

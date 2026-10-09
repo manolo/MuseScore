@@ -158,6 +158,9 @@ public:
     bool isAutomaticallyPanEnabled() const override;
     void setIsAutomaticallyPanEnabled(bool enabled)  override;
     muse::async::Notification isAutomaticallyPanEnabledChanged() const override;
+    bool isPlaybackCursorVisible() const override;
+    void setPlaybackCursorVisible(bool visible) override;
+    muse::async::Notification isPlaybackCursorVisibleChanged() const override;
 
     bool isSmoothPanning() const override;
     void setIsSmoothPanning(bool value) override;

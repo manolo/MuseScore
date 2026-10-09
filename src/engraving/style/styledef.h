@@ -121,6 +121,7 @@ enum class Sid : short {
     lyricsMinTopDistance, // actual meaning: distance to elements on same staff
     lyricsMinBottomDistance, // actual meaning: distance to elements on other staff
     lyricsMinDistance, // actual meaning: min horizontal spacing of lyrics-to-lyrics
+    lyricsWordSpacing,
     lyricsLineHeight,
     lyricsDashMinLength,
     lyricsDashMaxLength,
@@ -765,6 +766,7 @@ enum class Sid : short {
     tremoloStrokeLengthMultiplier,
     tremoloNoteSidePadding,
     tremoloOutSidePadding,
+    tremoloUnmeasuredMinStrokes,
     // TODO tremoloMaxBeamLength,
 
     linearStretch,

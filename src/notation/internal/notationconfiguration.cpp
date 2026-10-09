@@ -82,6 +82,7 @@ static const Settings::Key START_NOTE_INPUT_AT_SELECTED_NOTE_REST_WHEN_PRESSING_
                                                                                          "score/startNoteInputAtSelectionWhenPressingMidiKey");
 static const Settings::Key USE_MIDI_INPUT_WRITTEN_PITCH(module_name, "io/midi/useWrittenPitch");
 static const Settings::Key IS_AUTOMATICALLY_PAN_ENABLED(module_name, "application/playback/panPlayback");
+static const Settings::Key IS_PLAYBACK_CURSOR_VISIBLE(module_name, "application/playback/cursorVisible");
 static const Settings::Key IS_PLAY_REPEATS_ENABLED(module_name, "application/playback/playRepeats");
 static const Settings::Key IS_PLAY_CHORD_SYMBOLS_ENABLED(module_name, "application/playback/playChordSymbols");
 static const Settings::Key IS_PLAY_PREVIEW_NOTES_IN_INPUT_BY_DURATION_ENABLED(module_name,
@@ -289,6 +290,11 @@ void NotationConfiguration::init()
     settings()->setDefaultValue(IS_AUTOMATICALLY_PAN_ENABLED, Val(true));
     settings()->valueChanged(IS_AUTOMATICALLY_PAN_ENABLED).onReceive(this, [this](const Val&) {
         m_isAutomaticallyPanEnabledChanged.notify();
+    });
+
+    settings()->setDefaultValue(IS_PLAYBACK_CURSOR_VISIBLE, Val(true));
+    settings()->valueChanged(IS_PLAYBACK_CURSOR_VISIBLE).onReceive(this, [this](const Val&) {
+        m_isPlaybackCursorVisibleChanged.notify();
     });
 
     settings()->setDefaultValue(IS_PLAY_REPEATS_ENABLED, Val(true));
@@ -887,6 +893,21 @@ void NotationConfiguration::setIsAutomaticallyPanEnabled(bool enabled)
 Notification NotationConfiguration::isAutomaticallyPanEnabledChanged() const
 {
     return m_isAutomaticallyPanEnabledChanged;
+}
+
+bool NotationConfiguration::isPlaybackCursorVisible() const
+{
+    return settings()->value(IS_PLAYBACK_CURSOR_VISIBLE).toBool();
+}
+
+void NotationConfiguration::setPlaybackCursorVisible(bool visible)
+{
+    settings()->setSharedValue(IS_PLAYBACK_CURSOR_VISIBLE, Val(visible));
+}
+
+Notification NotationConfiguration::isPlaybackCursorVisibleChanged() const
+{
+    return m_isPlaybackCursorVisibleChanged;
 }
 
 bool NotationConfiguration::isPlayRepeatsEnabled() const

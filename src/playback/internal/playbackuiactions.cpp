@@ -168,6 +168,14 @@ const UiActionList PlaybackUiActions::s_settingsActions = {
              IconCode::Code::PAN_SCORE,
              Checkable::Yes
              ),
+    UiAction("playback-cursor",
+             mu::context::UiCtxAny,
+             mu::context::CTX_ANY,
+             TranslatableString("action", "Show playback cursor"),
+             TranslatableString("action", "Show playback cursor"),
+             IconCode::Code::VERTICAL,
+             Checkable::Yes
+             ),
     UiAction("countin",
              mu::context::UiCtxAny,
              mu::context::CTX_ANY,
