@@ -57,8 +57,8 @@ static const std::vector<CommandInfo> s_commandInfos = {
 
     CommandInfo(
         APP_ABOUT_MUSESCORE_COMMAND,
-        TranslatableString("action", "&About MuseScore Studio…"),
-        TranslatableString("action", "About MuseScore Studio"),
+        TranslatableString("action", "&About PlectraScore…"),
+        TranslatableString("action", "About PlectraScore"),
         InputSchema(),
         Decoration()
         ),
