@@ -118,11 +118,12 @@ framework:
         after switching to Home.
 
     - name: version 1 plugins never receive run
+      pr: 347
       ref: manolo/fix-v1-plugin-run-in-dialog
       note: >
-        Not a pull request yet, and worth one: upstream has the same bug. A
-        dialog plugin opens through a command, inside async message
-        processing, so its run only arrived after the dialog closed.
+        Fixes musescore/MuseScore#35175, a regression of the commands
+        migration: a dialog plugin opens inside async message processing, so
+        its run only arrived after the dialog closed.
 
     - name: floating mixer panel
       ref: manolo/fork/floating-mixer-panel
