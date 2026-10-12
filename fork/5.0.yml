@@ -175,6 +175,14 @@ components:
       so it is fetched by number from upstream rather than adding a remote for
       every contributor whose work I want in a build. Two files, plugin API only.
 
+  - name: fretboard diagram offset writable from plugins
+    pr: 35187
+    ref: 35180-fretdiagram-fretoffset-writable
+    note: >
+      Fixes musescore/MuseScore#35180, a regression of my own #32996: the
+      FretDiagram wrapper redeclared fretOffset read-only, so plugins could no
+      longer set it. The 4.7 line carries the same fix in fork/4.7-ports.
+
   - name: 5.0 ports and fork features
     ref: fork/5.0-ports
     local: true
