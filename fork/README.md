@@ -80,11 +80,10 @@ This is not decoration. In September 2026 a single feature commit on the importe
 
 ## Cutting a release
 
-The push builds are for iterating: they are `devel`, so the app carries a
-Development suffix and keeps its settings and data directory away from a real
-install. A release is the opposite, `stable`, so it carries its own name
-rather than MuseScore Studio Development, and uses the ordinary MuseScore
-paths.
+Push builds and releases are both `stable`, so every artifact carries its own
+name rather than MuseScore Studio Development and uses the ordinary MuseScore
+paths, exactly like the app installed locally with `ms-build-release`. A
+release differs only in being tagged and published.
 
 Releases are cut by pushing a tag:
 
