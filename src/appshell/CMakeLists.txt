@@ -65,6 +65,7 @@ qt_add_resources(appshell appshell_resources
         /
     FILES
         resources/LoadingScreen.svg
+        resources/musescore-wordmark.png
         resources/welcomedialog/ExploreTutorials.png
         resources/welcomedialog/MuseScoreCom.png
         resources/welcomedialog/MuseSounds.png

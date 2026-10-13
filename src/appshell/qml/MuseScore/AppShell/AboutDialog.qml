@@ -31,7 +31,7 @@ import MuseScore.AppShell
 StyledDialogView {
     id: root
 
-    title: qsTrc("appshell/about", "About MuseScore Studio")
+    title: qsTrc("appshell/about", "About PlectraScore")
 
     contentHeight: 424
     contentWidth: 480
@@ -59,7 +59,7 @@ StyledDialogView {
                 id: logo
                 Layout.alignment: Qt.AlignHCenter
 
-                source: "resources/mu_logo.svg"
+                source: "resources/plectrascore-logo.png"
                 sourceSize: Qt.size(100, 100)
 
                 MouseArea {
@@ -85,6 +85,31 @@ StyledDialogView {
                     anchors.horizontalCenter: parent.horizontalCenter
                     text: qsTrc("appshell/about", "Version:") + " " + aboutModel.museScoreVersion()
                     font: ui.theme.bodyBoldFont
+                }
+
+                StyledTextLabel {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: parent.width
+                    horizontalAlignment: Text.AlignHCenter
+                    text: "A MuseScore fork for pulso y púa ensembles"
+                    opacity: 0.9
+                }
+
+                StyledTextLabel {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: parent.width
+                    horizontalAlignment: Text.AlignHCenter
+                    text: "Bandurria, laúd and guitar, in the Spanish and Latin American tradition."
+                    opacity: 0.7
+                    wrapMode: Text.WordWrap
+                }
+
+                StyledTextLabel {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: parent.width
+                    horizontalAlignment: Text.AlignHCenter
+                    text: "based on MuseScore Studio"
+                    opacity: 0.7
                 }
 
                 Row {
