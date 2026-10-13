@@ -22,6 +22,7 @@
 
 #include "stringdata.h"
 
+#include <climits>
 #include <map>
 
 #include "defer.h"
@@ -393,7 +394,9 @@ int StringData::pitchOffsetAt(const Staff* staff, const Fraction& tick, int stri
 //   Finds string and fret for a note.
 //
 //   Fills *string and *fret with suitable values for pitch / pitchOffset,
-//   using the highest possible string.
+//   choosing the string that results in the lowest fret number.
+//   This correctly handles re-entrant tunings (e.g., guitarrón, ukulele)
+//   where strings are not ordered strictly by pitch.
 //   If note cannot be fretted, uses fret 0 on nearest string and returns false
 //
 //    Note: Strings are stored internally from lowest (0) to highest (strings()-1),
@@ -410,48 +413,64 @@ bool StringData::convertPitch(int pitch, int pitchOffset, int* string, int* fret
 
     pitch += pitchOffset;
 
-    // if above max fret on highest string, fret on first string, but return failure
-    if (pitch > m_stringTable.at(strings - 1).pitch + m_frets) {
-        *string = 0;
-        *fret   = 0;
-        return false;
-    }
+    // Search ALL strings to find the best match (lowest fret number).
+    // This correctly handles:
+    // - Re-entrant tunings (e.g., ukulele, charango, guitarrón)
+    // - Partial capo strings like banjo 5th string (startFret > 0)
+    int bestString = -1;
+    int bestFret = INT_MAX;
 
-    if (isFiveStringBanjo()) {
-        // special case: open banjo 5th string
-        if (pitch == m_stringTable.at(0).pitch) {
-            *string = 4;
-            *fret = 0;
-            return true;
-        }
-        // test remaining 4 strings from highest to lowest
-        for (int i = 4; i > 0; i--) {
-            instrString strg = m_stringTable.at(i);
+    for (int i = 0; i < strings; i++) {
+        instrString strg = m_stringTable.at(i);
+        if (strg.open) {
+            // open string: can only play its exact pitch
+            if (pitch == strg.pitch && 0 < bestFret) {
+                bestFret = 0;
+                bestString = i;
+            }
+        } else {
+            // fretted string: can play from open pitch up to max fret
             if (pitch >= strg.pitch) {
-                *string = strings - i - 1;
-                *fret = pitch - strg.pitch;
-                return true;
+                int candidateFret = pitch - strg.pitch;
+
+                // For strings with startFret (like banjo 5th string),
+                // frets 1 through startFret-1 don't physically exist
+                bool fretExists = (candidateFret == 0)
+                                  || (strg.startFret == 0)
+                                  || (candidateFret >= strg.startFret);
+
+                // For fretless instruments (m_frets == 0), allow any fret position
+                bool fretInRange = (m_frets == 0) || (candidateFret <= m_frets);
+
+                if (fretExists && fretInRange && candidateFret < bestFret) {
+                    bestFret = candidateFret;
+                    bestString = i;
+                }
             }
         }
-    } else {
-        // look for a suitable string, starting from the highest
-        // NOTE: this assumes there are always enough frets to fill
-        // the interval between any fretted string and the next
-        for (int i = strings - 1; i >= 0; i--) {
-            instrString strg = m_stringTable.at(i);
-            if (pitch >= strg.pitch) {
-                *string = strings - i - 1;
-                int fretCorrection = (capo.active && muse::contains(capo.ignoredStrings, (string_idx_t)*string)) ? capo.fretPosition : 0;
-                *fret = pitch - strg.pitch + fretCorrection;
-                return true;
-            }
-        }
     }
 
-    // if no string found, pitch is below lowest string:
-    // fret on last string, but return failure
-    *string = strings - 1;
-    *fret   = 0;
+    if (bestString >= 0) {
+        // Convert internal string index to visual string number (reversed)
+        *string = strings - bestString - 1;
+        int fretCorrection = (capo.active && muse::contains(capo.ignoredStrings, (string_idx_t)*string)) ? capo.fretPosition : 0;
+        *fret = bestFret + fretCorrection;
+        return true;
+    }
+
+    // if no string found, pitch is out of range:
+    // find the nearest string and use fret 0, but return failure
+    int nearestString = 0;
+    int minDistance = INT_MAX;
+    for (int i = 0; i < strings; i++) {
+        int distance = std::abs(pitch - m_stringTable.at(i).pitch);
+        if (distance < minDistance) {
+            minDistance = distance;
+            nearestString = i;
+        }
+    }
+    *string = strings - nearestString - 1;
+    *fret = 0;
     return false;
 }
 

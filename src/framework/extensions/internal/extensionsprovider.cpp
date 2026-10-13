@@ -51,6 +51,9 @@ KnownCategories ExtensionsProvider::knownCategories() const
 
 void ExtensionsProvider::reloadExtensions()
 {
+    //! NOTE Clear QML component cache to force reload of modified plugins
+    uiEngine()->clearComponentCache();
+
     ExtensionsLoader loader;
     m_manifests = loader.loadManifestList(configuration()->defaultPath(),
                                           configuration()->userPath());

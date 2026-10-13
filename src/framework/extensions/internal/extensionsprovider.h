@@ -28,6 +28,7 @@
 #include "../iextensionsconfiguration.h"
 #include "../iextensionsprovider.h"
 #include "../iextensionsexecpointsregister.h"
+#include "../iextensionsuiengine.h"
 #include "global/iinteractive.h"
 #include "io/ifilesystem.h"
 
@@ -37,6 +38,7 @@ class ExtensionsProvider : public IExtensionsProvider, public Contextable, publi
     GlobalInject<IExtensionsConfiguration> configuration;
     GlobalInject<io::IFileSystem> fileSystem;
     ContextInject<IExtensionsExecPointsRegister> execPointsRegister = { this };
+    ContextInject<IExtensionsUiEngine> uiEngine = { this };
     ContextInject<IInteractive> interactive = { this };
 
 public:
