@@ -60,9 +60,40 @@ UPSTREAM_README="https://github.com/musescore/MuseScore/blob/master/README.md"
         echo "Generated from the manifest by \`fork/rebuild.sh\`."
         echo
     fi
+    BUILDS_URL="https://$APP_LINK/actions/workflows/fork_builds.yml?query=branch%3A$LINE-$APP_SLUG+is%3Asuccess"
     echo "## Installing"
     echo
-    echo "Builds for macOS, Windows and Linux are published as [releases]($APP_LINK/releases). They are unsigned, because a fork holds no Apple or Microsoft certificate: macOS will refuse the first launch, so open it once from the context menu and choose Open, and Windows will show a SmartScreen warning."
+    echo "### Where to download it"
+    echo
+    echo "Take the newest build of this line: [latest successful builds of $LINE-$APP_SLUG]($BUILDS_URL). Open the run at the top of the list and download the artifact named \`$APP_NAME-$LINE\` from the bottom of its page. It holds one file per platform:"
+    echo
+    echo "| Platform | File |"
+    echo "|---|---|"
+    echo "| macOS, Apple silicon | \`$APP_NAME-$LINE-<date>-<commit>-mac-arm64.zip\` |"
+    echo "| macOS, Intel and Apple silicon | \`$APP_NAME-$LINE-<date>-<commit>-mac.dmg\` |"
+    echo "| Windows | \`$APP_NAME-$LINE-<date>-<commit>-win-x86_64.msi\` |"
+    echo "| Linux | \`$APP_NAME-$LINE-<date>-<commit>-linux-x86_64.AppImage\` |"
+    echo
+    echo "GitHub only lets a signed in account download build artifacts, and keeps them for 90 days. Tagged versions, when there are any, are also listed under [releases](https://$APP_LINK/releases)."
+    echo
+    echo "### Trusting an unsigned build"
+    echo
+    echo "$APP_NAME is not signed: a fork holds no Apple or Microsoft certificate. The builds are made by the public workflow linked above, from the source in this branch, but the operating system has no way to know that, so it has to be told once to trust the program."
+    echo
+    echo "**macOS.** Drag the app to Applications and open it. macOS refuses the first launch. Open **System Settings, Privacy & Security**, scroll to Security, choose **Open Anyway** next to the message about $APP_NAME and confirm with your password. On macOS 14 and earlier, Control click the app and choose **Open** instead. If macOS says the app is damaged, that is the download quarantine and not real damage; clear it from Terminal:"
+    echo
+    echo '```sh'
+    echo "xattr -dr com.apple.quarantine /Applications/$APP_NAME*.app"
+    echo '```'
+    echo
+    echo "**Windows.** SmartScreen stops the installer with \"Windows protected your PC\". Choose **More info**, then **Run anyway**. If the button is missing, right click the \`.msi\`, open **Properties**, tick **Unblock** and run it again."
+    echo
+    echo "**Linux.** Make the AppImage executable and run it:"
+    echo
+    echo '```sh'
+    echo "chmod +x $APP_NAME-*.AppImage"
+    echo "./$APP_NAME-*.AppImage"
+    echo '```'
     echo
     echo "$APP_NAME shares its scores, plugins, styles and preferences with MuseScore on the same machine. It is a MuseScore that calls itself something else, not a separate program, and installing it changes nothing about an existing MuseScore."
     echo
