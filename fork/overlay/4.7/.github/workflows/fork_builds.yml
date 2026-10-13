@@ -18,12 +18,16 @@ on:
       - '4.7-*'
   workflow_dispatch:
 
+# stable, as in fork_release.yml: every build is a release build, named and
+# stored like the installed app, without the Development suffix that devel adds
+# to the title, the bundle identifier and the settings directory.
+
 jobs:
 
   build_mac:
     uses: ./.github/workflows/build_macos.yml
     with:
-      build_mode: devel
+      build_mode: stable
       publish: 'off'
     secrets: inherit
 
@@ -31,7 +35,7 @@ jobs:
     uses: ./.github/workflows/build_windows.yml
     with:
       platforms: windows_x64
-      build_mode: devel
+      build_mode: stable
       publish: 'off'
     secrets: inherit
 
@@ -39,7 +43,7 @@ jobs:
     uses: ./.github/workflows/build_linux.yml
     with:
       platforms: linux_x64 linux_arm64
-      build_mode: devel
+      build_mode: stable
       publish: 'off'
     secrets: inherit
 
