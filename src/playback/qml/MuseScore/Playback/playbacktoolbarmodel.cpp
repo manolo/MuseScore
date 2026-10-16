@@ -108,6 +108,7 @@ void PlaybackToolBarModel::updateActions()
         makeMenuItem(CHORDSYMBOLS_TOGGLE_COMMAND),
         makeMenuItem(HEAR_PLAYBACK_WHEN_EDITING_TOGGLE_COMMAND),
         makeMenuItem(PAN_TOGGLE_COMMAND),
+        makeMenuItem(PLAYBACK_CURSOR_TOGGLE_COMMAND),
         makeMenuItem(COUNTIN_TOGGLE_COMMAND),
     };
 

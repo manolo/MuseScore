@@ -54,6 +54,7 @@ void PlaybackCommandsController::init()
     registerCommand(CHORDSYMBOLS_TOGGLE_COMMAND, &IPlaybackController::togglePlayChordSymbols);
     registerCommand(HEAR_PLAYBACK_WHEN_EDITING_TOGGLE_COMMAND, &IPlaybackController::toggleHearPlaybackWhenEditing);
     registerCommand(PAN_TOGGLE_COMMAND, &IPlaybackController::toggleAutomaticallyPan);
+    registerCommand(PLAYBACK_CURSOR_TOGGLE_COMMAND, &IPlaybackController::togglePlaybackCursor);
     registerCommand(COUNTIN_TOGGLE_COMMAND, &IPlaybackController::toggleCountIn);
     registerCommand(OPEN_PLAYBACK_SETUP_COMMAND, [this]() { return showPlaybackSetup(); });
     registerCommand(RELOAD_PLAYBACK_CACHE_COMMAND, &IPlaybackController::reloadPlaybackCache);

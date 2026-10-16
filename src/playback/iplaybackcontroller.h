@@ -79,6 +79,7 @@ public:
     virtual muse::Ret togglePlayRepeats() = 0;
     virtual muse::Ret togglePlayChordSymbols() = 0;
     virtual muse::Ret toggleAutomaticallyPan() = 0;
+    virtual muse::Ret togglePlaybackCursor() = 0;
     virtual muse::Ret toggleCountIn() = 0;
     virtual muse::Ret toggleHearPlaybackWhenEditing() = 0;
 

@@ -133,6 +133,11 @@ muse::Ret PlaybackControllerStub::toggleAutomaticallyPan()
     return muse::make_ok();
 }
 
+muse::Ret PlaybackControllerStub::togglePlaybackCursor()
+{
+    return muse::make_ok();
+}
+
 muse::Ret PlaybackControllerStub::toggleCountIn()
 {
     return muse::make_ok();
