@@ -177,7 +177,7 @@ bool tryHandleGraceNote(BuildCtx& ctx, MeasEmitCtx& mc, NoteElemCtx& ec,
                               || graceNoteType == NoteType::GRACE8_AFTER);
     DurationType graceDt = eighthGlyph ? DurationType::V_EIGHTH
                            : realDuration2DurationType(en->realDuration, en->faceValue);
-    Chord* gc = Factory::createChord(ctx.score->dummy()->segment());
+    Chord* gc = Factory::createChord(ctx.score->dummy());
     gc->setTrack(ec.track);
     TDuration gdur(graceDt);
     gc->setDurationType(gdur);
