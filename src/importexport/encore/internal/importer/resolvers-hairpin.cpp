@@ -174,7 +174,7 @@ void resolveHairpins(BuildCtx& ctx)
         if (!validTrack(score, ph.track)) {
             continue;
         }
-        Hairpin* hp = Factory::createHairpin(score->dummy()->segment());
+        Hairpin* hp = Factory::createHairpin(score->dummy());
         hp->setTrack(ph.track);
         hp->setTrack2(ph.track);
         hp->setTick(startTick);
