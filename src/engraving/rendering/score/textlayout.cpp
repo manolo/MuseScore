@@ -22,6 +22,7 @@
 #include "textlayout.h"
 #include "tlayout.h"
 #include "dom/box.h"
+#include "dom/lyrics.h"
 #include "dom/page.h"
 #include "dom/staff.h"
 #include "dom/textlinebase.h"
@@ -352,7 +353,20 @@ void TextLayout::layoutTextBlock(TextBlock* item, const TextBase* t)
             // Optimization: don't calculate character position
             // for the next fragment if there is no next fragment
             if (fi != fiLast) {
-                const double w  = fm.width(f.text);
+                double w  = fm.width(f.text);
+                // Add extra spacing for word boundaries in lyrics (minimum spacing)
+                if (t->isLyrics()) {
+                    double minWordSpacing = t->style().styleMM(Sid::lyricsWordSpacing);
+                    double currentSpaceWidth = fm.width(String(u" "));
+                    if (currentSpaceWidth < minWordSpacing) {
+                        double extraSpace = minWordSpacing - currentSpaceWidth;
+                        for (size_t si = 0; si < f.text.size(); ++si) {
+                            if (f.text.at(si).isSpace()) {
+                                w += extraSpace;
+                            }
+                        }
+                    }
+                }
                 x += w;
             }
 

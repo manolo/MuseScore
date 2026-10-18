@@ -25,6 +25,9 @@
 #include <QRect>
 #include <QTimer>
 #include <QAction>
+#include <QScreen>
+#include <QGuiApplication>
+#include <QQuickWindow>
 
 #include "log.h"
 
@@ -140,6 +143,14 @@ QPoint DockBase::globalPosition() const
 {
     if (!m_dockWidget) {
         return QPoint();
+    }
+
+    // When floating, return the floating window's position (matches setFloatingPosition)
+    if (m_floating) {
+        KDDockWidgets::FloatingWindow* fw = m_dockWidget->floatingWindow();
+        if (fw) {
+            return fw->pos();
+        }
     }
 
     auto frame = static_cast<const KDDockWidgets::FrameQuick*>(m_dockWidget->frame());
@@ -589,7 +600,7 @@ void DockBase::resize(int width, int height)
     m_maximumHeight = height;
 
     applySizeConstraints();
-    parentContainer->layoutEqually();
+    parentContainer->layoutEqually_recursive();
 
     m_minimumWidth = minSizeBackup.width();
     m_maximumWidth = maxSizeBackup.width();
@@ -597,6 +608,20 @@ void DockBase::resize(int width, int height)
     m_maximumHeight = maxSizeBackup.height();
 
     applySizeConstraints();
+}
+
+void DockBase::setFloatingPosition(int x, int y)
+{
+    if (!m_dockWidget || !m_floating) {
+        return;
+    }
+
+    KDDockWidgets::FloatingWindow* fw = m_dockWidget->floatingWindow();
+    if (!fw) {
+        return;
+    }
+
+    fw->move(x, y);
 }
 
 muse::ui::INavigationSection* DockBase::navigationSection() const
@@ -612,6 +637,98 @@ muse::ui::NavigationSection* DockBase::navigationSection_property() const
 int DockBase::contentNavigationPanelOrderStart() const
 {
     return m_contentNavigationPanelOrderStart;
+}
+
+int DockBase::nonContentsHeight() const
+{
+    if (!m_dockWidget) {
+        return 0;
+    }
+
+    auto frame = static_cast<const KDDockWidgets::FrameQuick*>(m_dockWidget->frame());
+    if (!frame) {
+        return 0;
+    }
+
+    const QQuickItem* visualItem = frame->visualItem();
+    return visualItem ? visualItem->property("nonContentsHeight").toInt() : 0;
+}
+
+int DockBase::floatingWindowOverhead() const
+{
+    if (!m_dockWidget || !m_floating) {
+        return 0;
+    }
+
+    KDDockWidgets::FloatingWindow* fw = m_dockWidget->floatingWindow();
+    if (!fw) {
+        return 0;
+    }
+
+    // Get titleBarHeight and margins from the floating window's visual item
+    const QQuickItem* visualItem = fw->property("visualItem").value<QQuickItem*>();
+    if (visualItem) {
+        int titleBarHeight = visualItem->property("titleBarHeight").toInt();
+        int margins = visualItem->property("margins").toInt();
+        return titleBarHeight + margins * 2;
+    }
+
+    // Fallback: estimate based on typical values
+    return 44; // ~36 for titlebar + 2*4 for margins
+}
+
+QSize DockBase::currentScreenSize() const
+{
+    if (!m_dockWidget) {
+        QScreen* primary = QGuiApplication::primaryScreen();
+        return primary ? primary->availableSize() : QSize(1920, 1080);
+    }
+
+    // For floating windows, get the screen where the window is located
+    if (KDDockWidgets::FloatingWindow* fw = m_dockWidget->floatingWindow()) {
+        if (QScreen* screen = fw->screen()) {
+            return screen->availableSize();
+        }
+    }
+
+    // For docked panels, get the screen from the main window
+    if (QQuickItem* win = m_dockWidget->window()) {
+        if (QQuickWindow* qwin = win->window()) {
+            if (QScreen* screen = qwin->screen()) {
+                return screen->availableSize();
+            }
+        }
+    }
+
+    QScreen* primary = QGuiApplication::primaryScreen();
+    return primary ? primary->availableSize() : QSize(1920, 1080);
+}
+
+QPoint DockBase::currentScreenPosition() const
+{
+    if (!m_dockWidget) {
+        QScreen* primary = QGuiApplication::primaryScreen();
+        return primary ? primary->availableGeometry().topLeft() : QPoint(0, 0);
+    }
+
+    // For floating windows, get the screen where the window is located
+    if (KDDockWidgets::FloatingWindow* fw = m_dockWidget->floatingWindow()) {
+        if (QScreen* screen = fw->screen()) {
+            return screen->availableGeometry().topLeft();
+        }
+    }
+
+    // For docked panels, get the screen from the main window
+    if (QQuickItem* win = m_dockWidget->window()) {
+        if (QQuickWindow* qwin = win->window()) {
+            if (QScreen* screen = qwin->screen()) {
+                return screen->availableGeometry().topLeft();
+            }
+        }
+    }
+
+    QScreen* primary = QGuiApplication::primaryScreen();
+    return primary ? primary->availableGeometry().topLeft() : QPoint(0, 0);
 }
 
 void DockBase::componentComplete()
@@ -737,11 +854,10 @@ void DockBase::applySizeConstraints()
         return;
     }
 
-    if (const Layouting::Item* layout = frame->layoutItem()) {
-        if (Layouting::ItemBoxContainer* container = layout->parentBoxContainer()) {
-            container->layoutEqually_recursive();
-        }
-    }
+    // NOTE: Removed layoutEqually_recursive() call that was causing
+    // panels to jump to maximum size when resizing below minimum.
+    // The size constraints are already applied to the frame above,
+    // so KDDockWidgets will enforce them during resize operations.
 }
 
 void DockBase::setUpFrameConnections()

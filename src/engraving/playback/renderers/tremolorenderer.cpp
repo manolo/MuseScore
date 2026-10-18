@@ -49,6 +49,75 @@ static bool containEqualTremolo(const Chord* c1, const Chord* c2)
     return false;
 }
 
+static bool hasPlayingTremolo(const Chord* chord)
+{
+    if (!chord || chord->tremoloType() == TremoloType::INVALID_TREMOLO) {
+        return false;
+    }
+
+    if (const TremoloSingleChord* single = chord->tremoloSingleChord()) {
+        return single->playTremolo();
+    }
+
+    if (const TremoloTwoChord* two = chord->tremoloTwoChord()) {
+        return two->playTremolo();
+    }
+
+    return false;
+}
+
+//! NOTE A tie never re-attacks, so a chord that carries no tremolo of its own is simply held by
+//!      the tie and the tremolo goes on covering it. A chord carrying a tremolo of its own
+//!      renders its own strokes instead, and ends the span unless it is the very same tremolo.
+static bool tieHoldsTremolo(const Chord* tremoloChord, const Chord* tiedChord)
+{
+    if (!hasPlayingTremolo(tiedChord)) {
+        return true;
+    }
+
+    return containEqualTremolo(tremoloChord, tiedChord);
+}
+
+//! NOTE Ticks of the notes that merely hold this chord through a tie, which its tremolo therefore
+//!      has to cover. Stops at the first chord carrying a tremolo of its own, and at a chord the
+//!      tie does not hold whole, so that no note is sustained past its own end.
+static int tiedContinuationTicks(const Note* note)
+{
+    int ticks = 0;
+    std::unordered_set<const Note*> notes { note };
+
+    while (note && note->tieForNonPartial() && note->tieForNonPartial()->playSpanner()) {
+        const Note* nextNote = note->tieForNonPartial()->endNote();
+        const Chord* nextChord = nextNote ? nextNote->chord() : nullptr;
+
+        if (!nextChord || hasPlayingTremolo(nextChord)) {
+            break;
+        }
+
+        if (muse::contains(notes, nextNote)) {
+            break; // prevents infinite loop
+        }
+
+        ticks += nextChord->actualTicks().ticks();
+        note = nextNote;
+        notes.insert(note);
+    }
+
+    return ticks;
+}
+
+static int tiedContinuationTicks(const Chord* chord)
+{
+    int ticks = -1;
+
+    for (const Note* note : chord->notes()) {
+        const int noteTicks = tiedContinuationTicks(note);
+        ticks = ticks < 0 ? noteTicks : std::min(ticks, noteTicks);
+    }
+
+    return std::max(ticks, 0);
+}
+
 static timestamp_t tremoloTimestampFrom(const Note* note, const RenderingContext& ctx)
 {
     const Note* originalNote = note;
@@ -99,11 +168,13 @@ static duration_t tremoloDuration(const Note* note, const timestamp_t tremoloTim
         }
     }
 
+    const Chord* tremoloChord = note->chord();
+
     while (note && note->tieForNonPartial() && note->tieForNonPartial()->playSpanner()) {
         const Note* nextNote = note->tieForNonPartial()->endNote();
         const Chord* nextChord = nextNote ? nextNote->chord() : nullptr;
 
-        if (!nextChord || !containEqualTremolo(nextChord, note->chord())) {
+        if (!nextChord || !tieHoldsTremolo(tremoloChord, nextChord)) {
             break;
         }
 
@@ -122,6 +193,22 @@ static duration_t tremoloDuration(const Note* note, const timestamp_t tremoloTim
     }
 
     return ctx.nominalDuration;
+}
+
+static bool playsAsUnmeasured(const Chord* chord, const TremoloSingleChord* tremolo, int lines)
+{
+    // A two note tremolo alternates between two pitches, so it can never collapse into one event
+    if (!tremolo) {
+        return false;
+    }
+
+    const int minStrokes = chord->style().styleI(Sid::tremoloUnmeasuredMinStrokes);
+    if (minStrokes <= 0) {
+        return false;
+    }
+
+    // Beams count towards the total, so an eighth note with two strokes reaches three
+    return chord->beams() + lines >= minStrokes;
 }
 
 const ArticulationTypeSet& TremoloRenderer::supportedTypes()
@@ -169,8 +256,12 @@ void TremoloRenderer::doRender(const EngravingItem* item, const mpe::Articulatio
         overallDurationTicks = tremolo.two->chord1()->actualTicks().ticks() + tremolo.two->chord2()->actualTicks().ticks();
     }
 
+    // The tremolo also covers whatever a tie holds after it, which is rendered nowhere else
+    const Chord* lastChord = tremolo.two && tremolo.two->chord2() ? tremolo.two->chord2() : chord;
+    overallDurationTicks += tiedContinuationTicks(lastChord);
+
     int stepDurationTicks = 0;
-    if (preferredType == ArticulationType::TremoloBuzz) {
+    if (preferredType == ArticulationType::TremoloBuzz || playsAsUnmeasured(chord, tremolo.single, tremolo.lines())) {
         stepDurationTicks = overallDurationTicks;
     } else {
         stepDurationTicks = TremoloRenderer::stepDurationTicks(chord, tremolo.lines());
@@ -186,7 +277,6 @@ void TremoloRenderer::doRender(const EngravingItem* item, const mpe::Articulatio
     if (stepsCount == 0) {
         return;
     }
-
     stepDurationTicks = overallDurationTicks / stepsCount;
 
     TremoloTimeCache tremoloTimeCache;

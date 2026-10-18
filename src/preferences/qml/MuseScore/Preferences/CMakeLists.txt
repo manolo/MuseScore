@@ -93,6 +93,7 @@ qt_add_qml_module(preferences_qml
         internal/ComboBoxWithTitle.qml
         internal/CommonAudioApiConfiguration.qml
         internal/DefaultStyleSection.qml
+        internal/EncoreSection.qml
         internal/FoldersSection.qml
         internal/FFmpegSection.qml
         internal/ImportStyleSection.qml
