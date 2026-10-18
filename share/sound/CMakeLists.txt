@@ -20,6 +20,16 @@
 
 if (MUE_INSTALL_SOUNDFONT)
 
+
+    # The fork's own voices. Nothing has to register them: the soundfont scan
+    # is recursive over the resources directory and filters *.sf2 and *.sf3.
+    file(GLOB PLECTRA_SOUNDFONTS "${CMAKE_CURRENT_SOURCE_DIR}/*-Con-Tremolo.sf2")
+    if (PLECTRA_SOUNDFONTS)
+        install(FILES ${PLECTRA_SOUNDFONTS}
+            DESTINATION ${Mscore_SHARE_NAME}${Mscore_INSTALL_NAME}sound
+            )
+    endif ()
+
     if (NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/MS Basic.sf3")
       install (FILES FluidR3Mono_GM.sf3
           DESTINATION ${Mscore_SHARE_NAME}${Mscore_INSTALL_NAME}sound
