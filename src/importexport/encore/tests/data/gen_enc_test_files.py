@@ -2174,6 +2174,26 @@ def gen_v0c4_tie():
     return assemble(0xC4, [(meas_hdr(2, 4), e)], fill_ts=(2, 4))
 
 
+
+# notes_tie_downbeat_after_shortened_measure.enc
+# A 4/4 first bar holding a single quarter, which the importer shortens to a 1/4 pickup while it
+# emits the notes, then a 4/4 bar whose downbeat C4 is tied to the C4 after it.
+# Shortening a bar moves every later bar earlier, and the lookup that finds the tie's first note
+# answered from the bars' old positions, so a tie leaving a downbeat found nothing and was dropped.
+def gen_v0c4_tie_downbeat_after_shortened_measure():
+    e0  = note_v0c4(0, 0, 0, fv=3, pitch=67)   # pickup quarter
+    e0 += end_marker()
+    e1  = note_v0c4(  0, 0, 0, fv=3, pitch=60)  # downbeat C4, ties forward
+    e1 += tie_v0c4(   0, 0, 0)
+    e1 += note_v0c4(240, 0, 0, fv=3, pitch=60)  # tie receiver
+    e1 += note_v0c4(480, 0, 0, fv=3, pitch=64)
+    e1 += note_v0c4(720, 0, 0, fv=3, pitch=67)
+    e1 += end_marker()
+    return assemble(0xC4, [
+        (meas_hdr(4, 4), e0),
+        (meas_hdr(4, 4), e1),
+    ], fill_ts=(4, 4))
+
 # ===========================================================================
 # notes_dotted_rest.enc
 # v0xC4 3/4 measure: a quarter note, then a dotted 8th rest (dotControl=180),
@@ -14271,6 +14291,7 @@ if __name__=='__main__':
     write("notes_triple_dotted_advance.enc",   gen_v0c4_triple_dotted_advance())
     write("notes_v0c2_near_simultaneous_chord.enc", gen_v0c2_near_simultaneous_chord())
     write("notes_tie.enc",          gen_v0c4_tie())
+    write("notes_tie_downbeat_after_shortened_measure.enc", gen_v0c4_tie_downbeat_after_shortened_measure())
     write("notes_dotted_rest.enc",  gen_v0c4_dotted_rest())
     write("notes_dotted_note.enc",  gen_v0c4_dotted_note())
     write("notes_rdur_snap.enc",    gen_v0c4_rdur_snap())
