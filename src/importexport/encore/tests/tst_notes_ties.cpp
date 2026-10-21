@@ -503,6 +503,32 @@ TEST_F(Tst_NotesTies, tie_element_creates_mscore_tie)
     delete score;
 }
 
+TEST_F(Tst_NotesTies, tie_from_downbeat_survives_shortened_earlier_measure)
+{
+    // A pickup shortened to 1/4 moves the next bar earlier; the tie leaving that bar's downbeat
+    // used to be dropped because the start note was looked up at the bar's old position.
+    MasterScore* score = readEncoreScore("notes_tie_downbeat_after_shortened_measure.enc");
+    ASSERT_NE(score, nullptr);
+    EXPECT_TRUE(score->sanityCheck());
+
+    Measure* pickup = measureAt(score, 0);
+    ASSERT_NE(pickup, nullptr);
+    ASSERT_EQ(pickup->ticks(), Fraction(1, 4)) << "precondition: the first measure must be shortened";
+
+    Measure* m = measureAt(score, 1);
+    ASSERT_NE(m, nullptr);
+    Segment* s = m->findSegment(SegmentType::ChordRest, m->tick());
+    ASSERT_NE(s, nullptr);
+    ASSERT_TRUE(s->element(0) && s->element(0)->isChord());
+    Note* start = toChord(s->element(0))->upNote();
+    EXPECT_EQ(start->pitch(), 60);
+
+    ASSERT_NE(start->tieFor(), nullptr) << "the downbeat C4 must tie into the next C4";
+    ASSERT_NE(start->tieFor()->endNote(), nullptr);
+    EXPECT_EQ(start->tieFor()->endNote()->tick(), m->tick() + Fraction(1, 4));
+    delete score;
+}
+
 TEST_F(Tst_NotesTies, sf_tiestart_not_filtered_by_rdur)
 {
     // A 64th/128th note that starts a tie must bypass the short-rdur (<15) MIDI-artifact filter.
