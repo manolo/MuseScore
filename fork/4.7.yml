@@ -96,7 +96,7 @@ components:
     ref: fork/4.7-ports
     local: true
     note: >
-      Twenty-eight commits as of 2026-10-18: the Encore importer adapted to 4.7,
+      Twenty-nine commits as of 2026-10-22: the Encore importer adapted to 4.7,
       VST timing and keyswitches, several plugin API additions including the
       mixer, the tablature fret circle, the floating mixer panel sizing, the
       writable fretboard diagram offset (PR #35187), the tremolo that carries on
