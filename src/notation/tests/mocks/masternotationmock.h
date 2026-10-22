@@ -45,8 +45,8 @@ public:
     MOCK_METHOD(IExcerptNotationPtr, createEmptyExcerpt, (const QString& name), (const, override));
     MOCK_METHOD(const ExcerptNotationList&, excerpts, (), (const, override));
     MOCK_METHOD(muse::async::Notification, excerptsChanged, (), (const, override));
-    MOCK_METHOD(const ExcerptNotationList&, potentialExcerpts, (), (const, override));
     MOCK_METHOD(void, initExcerpts, (const ExcerptNotationList& excerpts), (override));
+    MOCK_METHOD(void, deinitExcerpts, (const ExcerptNotationList& excerpts), (override));
     MOCK_METHOD(void, setExcerpts, (const ExcerptNotationList& excerpts), (override));
     MOCK_METHOD(void, resetExcerpt, (IExcerptNotationPtr & excerpt), (override));
     MOCK_METHOD(void, sortExcerpts, (ExcerptNotationList & excerpts), (override));
