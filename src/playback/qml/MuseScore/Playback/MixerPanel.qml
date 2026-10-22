@@ -44,6 +44,16 @@ ColumnLayout {
         navigation.order: root.contentNavigationPanelOrderStart
     }
 
+    // Actual content size for limiting panel maximum size
+    readonly property int actualContentHeight: flickable.implicitHeight + (horizontalScrollBar.visible ? horizontalScrollBar.height + 1 : 0)
+    // Calculate full width needed to show all channels without scroll
+    readonly property int actualContentWidth: {
+        var headerW = contextMenuModel.labelsSectionVisible ? prv.headerWidth : 0
+        var channelsW = mixerPanelModel.count * (prv.channelItemWidth + 1) // +1 for separators
+        return headerW + channelsW + 1 // +1 for trailing separator
+    }
+    readonly property bool hasChannels: mixerPanelModel.count > 0
+
     signal resizeRequested(var newWidth, var newHeight)
 
     spacing: 0

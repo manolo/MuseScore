@@ -113,6 +113,7 @@ void CommandLineParser::init()
     m_parser.addOption(QCommandLineOption("source-update", "Update the source in the given score"));
 
     m_parser.addOption(QCommandLineOption({ "S", "style" }, "Load style file", "style"));
+    m_parser.addOption(QCommandLineOption("style-parts", "Filter which parts receive the style (glob pattern, e.g. '*-tab' or '!*-tab')", "pattern"));
 
     m_parser.addOption(QCommandLineOption("sound-profile",
                                           "Use with '-o <file>.mp3' or with '-j <file>', override the sound profile in the given score(s). "
@@ -464,6 +465,10 @@ void CommandLineParser::parse(int argc, char** argv)
 
     if (m_parser.isSet("S")) {
         m_options->converterTask.params[MuseScoreCmdOptions::ParamKey::StylePath] = fromUserInputPath(m_parser.value("S"));
+    }
+
+    if (m_parser.isSet("style-parts")) {
+        m_options->converterTask.params[MuseScoreCmdOptions::ParamKey::StylePartsFilter] = m_parser.value("style-parts");
     }
 
     if (m_parser.isSet("sound-profile")) {
