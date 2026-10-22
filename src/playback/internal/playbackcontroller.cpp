@@ -21,6 +21,8 @@
  */
 #include "playbackcontroller.h"
 
+#include <cmath>
+
 #include "async/notifylist.h"
 
 #include "modularity/ioc.h"
@@ -70,6 +72,7 @@ static const ActionCode REPEAT_CODE("repeat");
 static const ActionCode PLAY_CHORD_SYMBOLS_CODE("play-chord-symbols");
 static const ActionCode PLAYBACK_SETUP("playback-setup");
 static const ActionCode TOGGLE_HEAR_PLAYBACK_WHEN_EDITING_CODE("toggle-hear-playback-when-editing");
+static const ActionCode PLAYBACK_CURSOR_CODE("playback-cursor");
 
 static AudioOutputParams makeReverbOutputParams()
 {
@@ -127,6 +130,7 @@ void PlaybackController::init()
     dispatcher()->reg(this, INPUT_SOUNDING_PITCH, [this]() { PlaybackController::setMidiUseWrittenPitch(false); });
     dispatcher()->reg(this, PLAYBACK_SETUP, this, &PlaybackController::openPlaybackSetupDialog);
     dispatcher()->reg(this, TOGGLE_HEAR_PLAYBACK_WHEN_EDITING_CODE, this, &PlaybackController::toggleHearPlaybackWhenEditing);
+    dispatcher()->reg(this, PLAYBACK_CURSOR_CODE, this, &PlaybackController::togglePlaybackCursor);
     dispatcher()->reg(this, "playback-reload-cache", this, &PlaybackController::reloadPlaybackCache);
 
     m_onlineSoundsController->regActions();
@@ -163,6 +167,10 @@ void PlaybackController::init()
 
     configuration()->playNotesWhenEditingChanged().onNotify(this, [this]() {
         notifyActionCheckedChanged(TOGGLE_HEAR_PLAYBACK_WHEN_EDITING_CODE);
+    });
+
+    configuration()->isPlaybackCursorVisibleChanged().onReceive(this, [this](bool) {
+        notifyActionCheckedChanged(PLAYBACK_CURSOR_CODE);
     });
 
     m_measureInputLag = configuration()->shouldMeasureInputLag();
@@ -333,7 +341,16 @@ void PlaybackController::setTrackSoloMuteState(const InstrumentTrackId& trackId,
         return;
     }
 
-    m_notation->soloMuteState()->setTrackSoloMuteState(trackId, state);
+    // Preserve existing volume/balance when only updating solo/mute
+    auto existingState = m_notation->soloMuteState()->trackSoloMuteState(trackId);
+    INotationSoloMuteState::SoloMuteState newState = state;
+    if (existingState.hasCustomVolume && !state.hasCustomVolume) {
+        newState.volumeDb = existingState.volumeDb;
+        newState.balance = existingState.balance;
+        newState.hasCustomVolume = true;
+    }
+
+    m_notation->soloMuteState()->setTrackSoloMuteState(trackId, newState);
 }
 
 void PlaybackController::playElements(const std::vector<const notation::EngravingItem*>& elements, const PlayParams& params, bool isMidi)
@@ -942,6 +959,12 @@ void PlaybackController::toggleHearPlaybackWhenEditing()
     configuration()->setPlayNotesWhenEditing(!wasPlayNotesWhenEditing);
 }
 
+void PlaybackController::togglePlaybackCursor()
+{
+    bool wasVisible = configuration()->isPlaybackCursorVisible();
+    configuration()->setPlaybackCursorVisible(!wasVisible);
+}
+
 void PlaybackController::reloadPlaybackCache()
 {
     INotationPlaybackPtr nPlayback = notationPlayback();
@@ -1256,6 +1279,15 @@ AudioOutputParams PlaybackController::trackOutputParams(const InstrumentTrackId&
 
     AudioOutputParams result = audioSettings()->trackOutputParams(instrumentTrackId);
 
+    // Check if current notation has custom volume/balance for this track
+    if (m_notation && m_notation->soloMuteState()) {
+        const auto soloMuteState = m_notation->soloMuteState()->trackSoloMuteState(instrumentTrackId);
+        if (soloMuteState.hasCustomVolume) {
+            result.volume = muse::audio::volume_dbfs_t::make(soloMuteState.volumeDb);
+            result.balance = soloMuteState.balance;
+        }
+    }
+
     if (instrumentTrackId == notationPlayback()->metronomeTrackId()) {
         result.muted = !notationConfiguration()->isMetronomeEnabled() && !notationConfiguration()->isCountInEnabled();
         return result;
@@ -1375,7 +1407,38 @@ void PlaybackController::subscribeOnAudioParamsChanges()
         });
 
         if (instrumentIt != m_instrumentTrackIdMap.end()) {
-            audioSettings()->setTrackOutputParams(instrumentIt->first, params);
+            const InstrumentTrackId& instrumentTrackId = instrumentIt->first;
+
+            // Check if we're in an excerpt (not master score)
+            bool isExcerpt = m_notation && m_masterNotation
+                             && m_notation != m_masterNotation->notation();
+
+            if (isExcerpt && m_notation->soloMuteState()) {
+                // Get master's volume/balance from audioSettings
+                AudioOutputParams masterParams = audioSettings()->trackOutputParams(instrumentTrackId);
+
+                // Only save custom volume if it differs from master
+                // Use a small epsilon for floating point comparison
+                constexpr float EPSILON = 0.001f;
+                bool volumeDiffers = std::abs(params.volume.raw() - masterParams.volume.raw()) > EPSILON;
+                bool balanceDiffers = std::abs(params.balance - masterParams.balance) > EPSILON;
+
+                auto soloMuteState = m_notation->soloMuteState()->trackSoloMuteState(instrumentTrackId);
+
+                if (volumeDiffers || balanceDiffers) {
+                    // Save volume/balance to excerpt-specific state
+                    soloMuteState.volumeDb = params.volume.raw();
+                    soloMuteState.balance = params.balance;
+                    soloMuteState.hasCustomVolume = true;
+                } else {
+                    // Volume matches master - clear custom volume flag
+                    soloMuteState.hasCustomVolume = false;
+                }
+                m_notation->soloMuteState()->setTrackSoloMuteState(instrumentTrackId, soloMuteState);
+            } else {
+                // Save to global project settings (master score)
+                audioSettings()->setTrackOutputParams(instrumentTrackId, params);
+            }
             return;
         }
 
@@ -1541,7 +1604,23 @@ void PlaybackController::updateSoloMuteStates()
         }
 
         // 3. Update params for playback / mixer
-        AudioOutputParams params = trackOutputParams(instrumentTrackId);
+        // For excerpts, when no custom volume is set, we want to use the master's volume settings.
+        // trackOutputParams() would return the current playback volume (which may have been modified),
+        // so we need to get the base params from audioSettings() instead.
+        bool isExcerpt = m_masterNotation && m_notation != m_masterNotation->notation();
+        AudioOutputParams params;
+        if (isExcerpt && !soloMuteState.hasCustomVolume) {
+            // Use master score's volume/balance (from audioSettings)
+            params = audioSettings()->trackOutputParams(instrumentTrackId);
+        } else if (soloMuteState.hasCustomVolume) {
+            // Use excerpt's custom volume/balance
+            params = audioSettings()->trackOutputParams(instrumentTrackId);
+            params.volume = muse::audio::volume_dbfs_t::make(soloMuteState.volumeDb);
+            params.balance = soloMuteState.balance;
+        } else {
+            // Master notation - use current params
+            params = trackOutputParams(instrumentTrackId);
+        }
         params.solo = soloMuteState.solo;
         params.muted = soloMuteState.mute || shouldForceMute;
         params.forceMute = shouldForceMute;
@@ -1580,7 +1659,8 @@ bool PlaybackController::actionChecked(const ActionCode& actionCode) const
         { PAN_CODE, notationConfiguration()->isAutomaticallyPanEnabled() },
         { METRONOME_CODE, notationConfiguration()->isMetronomeEnabled() },
         { COUNT_IN_CODE, notationConfiguration()->isCountInEnabled() },
-        { TOGGLE_HEAR_PLAYBACK_WHEN_EDITING_CODE, configuration()->playNotesWhenEditing() }
+        { TOGGLE_HEAR_PLAYBACK_WHEN_EDITING_CODE, configuration()->playNotesWhenEditing() },
+        { PLAYBACK_CURSOR_CODE, configuration()->isPlaybackCursorVisible() }
     };
 
     return isChecked[actionCode];

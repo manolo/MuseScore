@@ -84,8 +84,10 @@ bool NoteRenderer::shouldRender(const Note* note, const RenderingContext& ctx, c
             return false;
         };
 
-        // Only render tied notes if tremolo is actually enabled for playback
-        if (shouldTremoloPlay(startChord) || shouldTremoloPlay(endChord)) {
+        //!NOTE A tremolo on the chord the tie ends at is a tremolo of its own, so that note is
+        //!     rendered. A tremolo on the chord the tie starts from goes on covering the tied
+        //!     note instead (see TremoloRenderer), because a tie must never re-attack.
+        if (shouldTremoloPlay(endChord)) {
             return true;
         }
 

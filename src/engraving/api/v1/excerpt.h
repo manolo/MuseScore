@@ -65,6 +65,7 @@ public:
 
     Score* partScore();
     QString title() { return e->name(); }
+    mu::engraving::Excerpt* excerpt() const { return e; }
     /// \endcond
 
     /// Checks whether two variables represent the same object. \since MuseScore 3.3

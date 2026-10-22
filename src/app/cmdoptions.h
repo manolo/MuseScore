@@ -35,6 +35,7 @@ struct CmdOptions {
     enum class ParamKey {
         HighlightConfigPath,
         StylePath,
+        StylePartsFilter,
         ScoreSource,
         ScoreTransposeOptions,
         ScoreElementsOptions,
