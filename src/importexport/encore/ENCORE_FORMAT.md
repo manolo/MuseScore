@@ -465,6 +465,8 @@ Because the tuning is per track, a file mixing differently tuned tab staves carr
 
 **Encore does state the fingering, note by note.** A tab staff's element stream is not empty: for every note the staff draws it holds one element in the rest layout with bit `0x8` set in the voice nibble, carrying the string at `+12`, the fret at `+13` and the written pitch at `+15`, the slot a note uses. The string is written as twice its index counted from the lowest string, so `02` names the lowest and `0C` the sixth, and the three fields always agree: the open pitch of the named string plus the fret is the pitch at `+15` `[verified]`. A genuine rest has a voice nibble below 4 and no pitch, so the voice bit tells the two apart.
 
+**A guitar left on another instrument still shows itself here.** Nothing obliges an author to pick a guitar before adding the tab, so a guitar part can sit on a clarinet or a piano at Key 0 and sound an octave high in Encore itself. Its tab still states the guitar tuning, `34 39 3E 43 47 4C`, and its position elements still land on the written pitches of the staff above, which a default tuning on an unrelated staff does not do; those two together are what identify the guitar `[verified]`.
+
 Where the notes themselves live depends on the score. A notation plus tab pair keeps them on the notation staff, and the tab's stream carries only the position elements above, which is why the tab is a derived view of a staff that holds the music. A tab-only score has no other staff to hold them, and there those same elements are the notes: they carry no face value, and their duration comes from the gap rule in 7.1.
 
 ## 5.4 Measure block (`MEAS`)

@@ -26,6 +26,8 @@
 #include <gtest/gtest.h>
 
 #include "engraving/dom/chord.h"
+#include "engraving/dom/clef.h"
+#include "engraving/dom/instrument.h"
 #include "engraving/dom/masterscore.h"
 #include "engraving/dom/measure.h"
 #include "engraving/dom/note.h"
@@ -389,6 +391,100 @@ TEST_F(Tst_Instruments, tab_standalone_reads_own_notes)
     EXPECT_GE(n->fret(), 0);
     EXPECT_TRUE(score->sanityCheck());
     delete score;
+}
+
+// ===========================================================================
+// A guitar left on another instrument in Encore: Key 0 and no guitar name on the notation staff, but
+// the tab below it states the guitar tuning, written an octave above the sound, and a fingering on
+// every note. That proves a guitar, so the part becomes one with the guitar's Key -12: octave treble
+// clef, notes an octave below the written pitch, tuning 40..64, and each note on the file's string.
+// ===========================================================================
+static std::vector<Note*> notesOfStaff(MasterScore* score, staff_idx_t staffIdx)
+{
+    std::vector<Note*> notes;
+    for (Segment* seg = score->firstMeasure()->first(SegmentType::ChordRest); seg; seg = seg->next(SegmentType::ChordRest)) {
+        EngravingItem* el = seg->element(staffIdx * VOICES);
+        if (el && el->isChord()) {
+            for (Note* n : toChord(el)->notes()) {
+                notes.push_back(n);
+            }
+        }
+    }
+    return notes;
+}
+
+static void expectProvenGuitar(MasterScore* score, Part* part)
+{
+    const Instrument* inst = part->instrument();
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(inst->id().contains(u"guitar")) << "the part becomes a guitar, not " << inst->id().toStdString();
+    EXPECT_EQ(score->staff(0)->clef(Fraction(0, 1)), ClefType::G8_VB) << "guitar is written in the octave treble clef";
+    const StringData* sd = inst->stringData();
+    ASSERT_NE(sd, nullptr);
+    std::vector<int> tuning;
+    for (const instrString& is : sd->stringList()) {
+        tuning.push_back(is.pitch);
+    }
+    EXPECT_EQ(tuning, (std::vector<int> { 40, 45, 50, 55, 59, 64 })) << "the guitar sounds an octave below its tab tuning";
+    EXPECT_EQ(inst->transpose().chromatic, 0) << "the octave is in the clef, not in a transposition";
+}
+
+TEST_F(Tst_Instruments, tab_proves_a_guitar_left_at_key_zero)
+{
+    mu::iex::enc::EncImportOptions opts;
+    opts.tablatureImportMode = mu::iex::enc::TablatureImportMode::Linked;
+    MasterScore* score = readEncoreScoreWithOpts("instruments_tab_guitar_key0.enc", opts);
+    ASSERT_NE(score, nullptr);
+    ASSERT_EQ(score->parts().size(), size_t(1));
+    expectProvenGuitar(score, score->parts().front());
+
+    std::vector<Note*> notes = notesOfStaff(score, 0);
+    ASSERT_EQ(notes.size(), size_t(4));
+    const int pitches[] = { 57, 59, 52, 64 };
+    const int strings[] = { 2, 1, 3, 0 };
+    const int frets[] = { 2, 0, 2, 0 };
+    for (size_t i = 0; i < notes.size(); ++i) {
+        EXPECT_EQ(notes[i]->pitch(), pitches[i]) << "note " << i << " sounds an octave below the written pitch";
+        EXPECT_EQ(notes[i]->string(), strings[i]) << "note " << i << " keeps the file's string";
+        EXPECT_EQ(notes[i]->fret(), frets[i]) << "note " << i << " keeps the file's fret";
+    }
+    EXPECT_TRUE(score->sanityCheck());
+    delete score;
+}
+
+TEST_F(Tst_Instruments, tab_proves_a_guitar_in_separate_mode_too)
+{
+    mu::iex::enc::EncImportOptions opts;
+    opts.tablatureImportMode = mu::iex::enc::TablatureImportMode::Separate;
+    MasterScore* score = readEncoreScoreWithOpts("instruments_tab_guitar_key0.enc", opts);
+    ASSERT_NE(score, nullptr);
+    ASSERT_EQ(score->parts().size(), size_t(2));
+    expectProvenGuitar(score, score->parts().front());
+    EXPECT_TRUE(score->parts().back()->instrument()->id().contains(u"guitar")) << "the tab part is the same guitar";
+    std::vector<Note*> notes = notesOfStaff(score, 0);
+    ASSERT_FALSE(notes.empty());
+    EXPECT_EQ(notes.front()->pitch(), 57);
+    delete score;
+}
+
+// Fingerings that miss the notes, a tuning that is not the guitar's, or a staff named after another
+// instrument, whose guitar tuning is just the one Encore gives a new tab: the staff imports as stated.
+TEST_F(Tst_Instruments, tab_that_proves_no_guitar_leaves_the_staff_alone)
+{
+    mu::iex::enc::EncImportOptions opts;
+    opts.tablatureImportMode = mu::iex::enc::TablatureImportMode::Linked;
+    for (const char* file : { "instruments_tab_guitar_key0_unmatched.enc", "instruments_tab_mandolin_key0.enc",
+                              "instruments_tab_guitar_key0_named_bandurria.enc" }) {
+        MasterScore* score = readEncoreScoreWithOpts(file, opts);
+        ASSERT_NE(score, nullptr) << file;
+        ASSERT_FALSE(score->parts().empty()) << file;
+        EXPECT_FALSE(score->parts().front()->instrument()->id().contains(u"guitar")) << file;
+        EXPECT_EQ(score->staff(0)->clef(Fraction(0, 1)), ClefType::G) << file;
+        std::vector<Note*> notes = notesOfStaff(score, 0);
+        ASSERT_FALSE(notes.empty()) << file;
+        EXPECT_EQ(notes.front()->pitch(), 69) << file << ": the written pitch stays";
+        delete score;
+    }
 }
 
 // ===========================================================================

@@ -5650,6 +5650,65 @@ def gen_v0c4_tab_hidden_notation():
     return hdr + line_block + meas + SKELETON_POST
 
 
+# instruments_tab_guitar_key0*.enc
+# A guitar its author never set up as one: the notation staff (instrument 0) keeps Key 0 and no guitar
+# name, while the tab below it (instrument 1) carries the tuning Encore writes for a guitar, an octave
+# above its sound, and a fingering under every note. The fingerings landing on the written pitches is
+# what proves a guitar, so the importer gives it the guitar's Key -12. Two variants that must not be
+# promoted: fingerings one string off the notes, and a mandolin tuning whose fingerings do match.
+def _tab_written_pair(tuning, fingerings, name='Solo'):
+    hdr, line_block = _tab_header_and_line([
+        (0x00, 0, 0x00),   # instrument 0: notation, treble clef
+        (0x08, 1, 0x01),   # instrument 1: tablature
+    ])
+    tk0 = _tk_block(0, name, [])
+    tk1 = _tk_block(1, 'Tab', tuning)
+
+    def note_raw(tick, pitch):
+        d = bytearray(25)
+        d[0] = 28
+        d[2] = 3             # quarter
+        d[12] = pitch
+        return struct.pack('<H', tick) + bytes([(9 << 4) | 0]) + bytes(d)
+
+    def tab_fingering(tick, string_byte, fret, pitch):
+        d = bytearray(15)
+        d[0] = 18
+        d[1] = 0x01
+        d[9] = string_byte
+        d[10] = fret
+        d[12] = pitch
+        return struct.pack('<H', tick) + bytes([(8 << 4) | 0x8]) + bytes(d)
+
+    e = b''
+    for i, (pitch, string_byte, fret) in enumerate(fingerings):
+        e += note_raw(i * 240, pitch) + tab_fingering(i * 240, string_byte, fret, pitch)
+    meas = meas_block(meas_hdr(4, 4), e + end_marker())
+    return hdr + tk0 + tk1 + line_block + meas + SKELETON_POST
+
+
+GUITAR_WRITTEN = [52, 57, 62, 67, 71, 76]
+# (written pitch, string byte = 2 x (index from the lowest string + 1), fret)
+GUITAR_KEY0_FINGERINGS = [(69, 8, 2), (71, 10, 0), (64, 6, 2), (76, 12, 0)]
+
+
+def gen_v0c4_tab_guitar_key0():
+    return _tab_written_pair(GUITAR_WRITTEN, GUITAR_KEY0_FINGERINGS)
+
+
+def gen_v0c4_tab_guitar_key0_unmatched():
+    return _tab_written_pair(GUITAR_WRITTEN, [(p, b + 2, f) for (p, b, f) in GUITAR_KEY0_FINGERINGS[:3]]
+                             + [(76, 10, 0)])
+
+
+def gen_v0c4_tab_guitar_key0_named_bandurria():
+    return _tab_written_pair(GUITAR_WRITTEN, GUITAR_KEY0_FINGERINGS, name='Bandurria')
+
+
+def gen_v0c4_tab_mandolin_key0():
+    return _tab_written_pair([55, 62, 69, 76], [(69, 6, 0), (71, 6, 2), (64, 4, 2), (76, 8, 0)])
+
+
 # instruments_tab_linked_pair.enc
 # A notation staff (instrument 0, with notes) immediately followed by an empty tablature staff
 # (instrument 1) that has no notes of its own, exactly as Encore stores a notation+tab pair. In
@@ -14460,6 +14519,10 @@ if __name__=='__main__':
     write("instruments_tab_tuning_key_offset.enc",        gen_v0c4_tab_tuning_key_offset())
     write("instruments_tab_two_tunings.enc",              gen_v0c4_tab_two_tunings())
     write("instruments_tab_hidden_notation.enc",          gen_v0c4_tab_hidden_notation())
+    write("instruments_tab_guitar_key0.enc",           gen_v0c4_tab_guitar_key0(), layout=False)
+    write("instruments_tab_guitar_key0_unmatched.enc", gen_v0c4_tab_guitar_key0_unmatched(), layout=False)
+    write("instruments_tab_mandolin_key0.enc",         gen_v0c4_tab_mandolin_key0(), layout=False)
+    write("instruments_tab_guitar_key0_named_bandurria.enc", gen_v0c4_tab_guitar_key0_named_bandurria(), layout=False)
     write("instruments_tab_linked_pair.enc",              gen_v0c4_tab_linked_pair())
     write("instruments_tab_linked_frets.enc",             gen_v0c4_tab_linked_frets())
     write("instruments_tab_linked_overfull.enc",          gen_v0c4_tab_linked_overfull())

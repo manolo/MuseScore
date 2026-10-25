@@ -490,6 +490,7 @@ bool EncRoot::read(QDataStream& ds)
     for (int i = 0; i < static_cast<int>(instruments.size()); ++i) {
         if (instruments[i].name.isEmpty()) {
             instruments[i].name = QString("Part %1").arg(i + 1);
+            instruments[i].nameIsPlaceholder = true;
         }
     }
 

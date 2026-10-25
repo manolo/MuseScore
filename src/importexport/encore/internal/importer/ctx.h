@@ -282,6 +282,8 @@ struct BuildCtx
     std::vector<PendingMeasureRepeat> pendingMeasureRepeats {};
     std::vector<PendingBowing> pendingBowings {};
     std::vector<PendingTabFingering> pendingTabFingerings {};
+    // Encore instruments whose tab proves a guitar left at Key 0; buildParts imports them as guitars.
+    std::set<int> provenGuitars {};
     // (measIdx, staffIdx) -> the notes emitted there with the Encore tick they came from. Filled only
     // when a tab staff may hand its fingerings over, which is the only reader of it.
     bool trackNotesForTab { false };
