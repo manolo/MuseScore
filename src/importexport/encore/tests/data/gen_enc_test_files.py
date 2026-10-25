@@ -10083,6 +10083,34 @@ def gen_sco5_format_305():
     return _sco5_file(ENC_FORMAT_3_05, elems)
 
 
+def stafftext_sco5_pre4(tick, tind):
+    """32-byte staff text of the macOS Encore 3. Every field is a big-endian word, the TEXT entry
+    index too, so its value sits in the last byte. The rest is copied from a real element."""
+    d = bytearray.fromhex('50 20 00 1e 00 00 00 7d 00 00 00 7d ff f9 00 00 00 91 00 05 00 14 00 0c 00 00 00 00')
+    return struct.pack('>H', tick) + bytes(d) + struct.pack('>H', tind)
+
+
+def text_block_sco5(entries):
+    """TEXT block as the macOS Encore 3 writes it: big-endian counts, then per entry a size, the
+    14-byte header it uses and the Latin-1 text with its NUL."""
+    head = bytes.fromhex('00 01 00 01 00 00 00 00 00 14 00 0a 00 00')
+    payloads = [head + t.encode('latin-1') + b'\x00' for t in entries]
+    body = b''.join(struct.pack('>H', len(pl)) + pl for pl in payloads)
+    content = struct.pack('>HHI', 0, len(entries), len(body)) + body
+    return b'TEXT' + struct.pack('>I', len(content)) + content
+
+
+# ===========================================================================
+# text_sco5_stafftext_index_word.enc
+# Two staff texts naming TEXT entries 0 and 1, "3" and "4", fingerings the way the macOS Encore 3
+# writes them. The index is a big-endian word, so its first byte is zero for both.
+# ===========================================================================
+def gen_sco5_stafftext_index_word():
+    elems  = note_sco5_pre4(0, 2, 60, 72) + stafftext_sco5_pre4(0, 0)
+    elems += note_sco5_pre4(480, 2, 64, 76) + stafftext_sco5_pre4(480, 1)
+    return _sco5_file(ENC_FORMAT_3_05, elems, trailer=text_block_sco5(["3", "4"]))
+
+
 # ===========================================================================
 # ornaments_v0c2_same_measure_slur_no_cross.enc
 # Regression: v0xC2 slur starting mid-measure must end within the same measure,
@@ -14586,6 +14614,7 @@ if __name__=='__main__':
     write("notes_sco5_tie_arc_bigendian.enc",       gen_sco5_tie_arc_bigendian(), layout=False)
     write("ornaments_sco5_bigendian.enc",          gen_sco5_ornaments_and_rest(), layout=False)
     write("structure_sco5_format_305.enc",          gen_sco5_format_305(), layout=False)
+    write("text_sco5_stafftext_index_word.enc",     gen_sco5_stafftext_index_word(), layout=False)
     write("text_lyrics_grandstaff_routed_notes.enc", gen_v0c4_lyrics_grandstaff_routed_notes())
     write("importer_inner_tuplet_note_level_cap.enc", gen_v0c4_inner_tuplet_note_level_cap())
     write("importer_score_size2.enc", set_line_staff_size_hint(set_score_size(assemble(0xC4, [(meas_hdr(4, 4),
