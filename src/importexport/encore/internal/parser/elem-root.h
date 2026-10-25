@@ -52,6 +52,7 @@ struct EncTabTuning {
 
 struct EncInstrument {
     QString name;
+    bool nameIsPlaceholder { false };   // the file named no instrument; name is the "Part N" fallback
     quint32 offset    { 0 };
     qint64 contentFilePos { -1 };   // byte offset of TK content start (after 8-byte header); -1 for compact
     int nstaves   { 0 };

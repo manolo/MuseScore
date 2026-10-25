@@ -29,6 +29,9 @@
 #include "ctx.h"
 
 namespace mu::iex::enc {
+// Before buildParts: find the guitars Encore left on another instrument, whose tab states the guitar
+// tuning and a fingering on the notes of the staff above. See ENCORE_IMPORTER.md 3.4.
+void findGuitarsProvenByTablature(BuildCtx& ctx);
 void buildParts(BuildCtx& ctx);
 void buildMeasures(BuildCtx& ctx);
 void buildInitialSignatures(BuildCtx& ctx);

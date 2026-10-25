@@ -300,6 +300,8 @@ struct BuildCtx
     std::vector<PendingMeasureRepeat> pendingMeasureRepeats {};
     std::vector<PendingBowing> pendingBowings {};
     std::vector<PendingTabFingering> pendingTabFingerings {};
+    // Encore instruments whose tab proves a guitar left at Key 0; buildParts imports them as guitars.
+    std::set<int> provenGuitars {};
     std::vector<PendingVibrato> pendingVibratos {};
     std::vector<PendingBend> pendingBends {};
     // (measIdx, staffIdx) -> the pitch wheel Encore recorded there, as (Encore tick, signed position).

@@ -85,6 +85,7 @@ enum class MatchStep {
     RhythmStaff,    // RHYTHM staff -> snare-drum
     MidiProgram,    // MIDI program lookup
     MidiFamily,     // nearest template in the same GM family (fallback before Grand Piano)
+    TabGuitar,      // the tab proves a guitar whatever the name and program say
 };
 
 static const char* matchStepLabel(MatchStep step)
@@ -98,6 +99,7 @@ static const char* matchStepLabel(MatchStep step)
     case MatchStep::PercKeyword:   return "perc keyword";
     case MatchStep::RhythmStaff:   return "RHYTHM staff";
     case MatchStep::MidiProgram:   return "MIDI program";
+    case MatchStep::TabGuitar:     return "tab proves a guitar";
     case MatchStep::MidiFamily:    return "MIDI family";
     }
     return "";
@@ -128,7 +130,9 @@ static void applyInstrumentOrFallback(Part* part, const InstrumentTemplate* tmpl
         part->setPartName(String(instr.name));
     }
     auto setInstrName = [&](Instrument& ins) {
-        if (!instr.name.isEmpty()) {
+        // A proven guitar the file never named keeps the template's name rather than "Part N".
+        const bool keepTemplateName = matchStep == MatchStep::TabGuitar && instr.nameIsPlaceholder;
+        if (!instr.name.isEmpty() && !keepTemplateName) {
             ins.setLongName(String(instr.name));
         }
         ins.setShortName(String());
@@ -237,6 +241,7 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
                                                      bool isPercByClef,
                                                      bool isRhythm,
                                                      bool encWantsTab,
+                                                     bool provenGuitar,
                                                      InstrumentSearchMode searchMode)
 {
     // Piano mode: skip all matching and go straight to fallback.
@@ -258,6 +263,15 @@ static const InstrumentTemplate* applyBestInstrument(Part* part,
             matchStep = step;
         }
     };
+
+    // Step 0: the tab proved a guitar. The program picks the kind when it already names a guitar, GM
+    // 25 to 32; otherwise it is the classical guitar.
+    if (provenGuitar) {
+        if (instr.midiProgram >= 25 && instr.midiProgram <= 32) {
+            tryStep(MatchStep::TabGuitar, tryMidiProgram(instr, -12));
+        }
+        tryStep(MatchStep::TabGuitar, searchTemplate(String(u"guitar-nylon")));
+    }
 
     // Step 1: PERC clef or GM Percussive range (113 to 128 1-indexed) -> drumset.
     static constexpr int GM_PERC_FIRST = 113;
@@ -427,7 +441,9 @@ void buildParts(BuildCtx& ctx)
           : "name then MIDI";
     LOGD() << "---- Instrument assignment (using " << searchModeLabel << ") ----";
     int cumStaffIdx = 0;  // running index into enc.lines[0].staffData
-    for (const auto& instr : enc.instruments) {
+    for (int instrIdx = 0; instrIdx < static_cast<int>(enc.instruments.size()); ++instrIdx) {
+        const EncInstrument& instr = enc.instruments[instrIdx];
+        const bool provenGuitar = ctx.provenGuitars.count(instrIdx) > 0;
         int ns = instr.nstaves > 0 ? instr.nstaves : 1;
         Part* part = new Part(score);
 
@@ -439,14 +455,15 @@ void buildParts(BuildCtx& ctx)
         const bool encWantsTab = lsd && (lsd->clef == EncClefType::TAB
                                          || lsd->staffType == EncStaffType::TAB);
         const InstrumentTemplate* tmpl = applyBestInstrument(part, instr, isPercByClef, isRhythm,
-                                                             encWantsTab, ctx.opts.instrumentSearchMode);
+                                                             encWantsTab, provenGuitar, ctx.opts.instrumentSearchMode);
 
         const bool showFromLine = !lsd || lsd->showStaff;
         if (!showFromLine) {
             part->setShow(false);
         }
 
-        const int pitchOffset = static_cast<int>(instr.keyTransposeSemitones);
+        // A proven guitar takes the Key a guitar declares in Encore.
+        const int pitchOffset = provenGuitar ? -12 : static_cast<int>(instr.keyTransposeSemitones);
         // A non-octave or upward offset goes on the instrument, so a plain clef keeps the written pitch. A
         // downward octave is left to the octave clef instead. See ENCORE_IMPORTER.md 3.5.
         Instrument* instrument = part->instrument();
@@ -534,6 +551,104 @@ static bool encStaffIsNotation(const EncRoot& enc, int i)
     const EncLineStaffData* d = lineStaffDataAt(enc, i);
     return d && d->staffType == EncStaffType::MELODY
            && d->clef != EncClefType::TAB && d->clef != EncClefType::PERC;
+}
+
+// The six open strings as Encore writes a guitar's, an octave above the sound: standard and drop D.
+static bool isEncoreGuitarTuning(const EncTabTuning& tuning)
+{
+    static const std::vector<int> standard { 52, 57, 62, 67, 71, 76 };
+    static const std::vector<int> dropD { 50, 57, 62, 67, 71, 76 };
+    return tuning.hasData && (tuning.openStringPitches == standard || tuning.openStringPitches == dropD);
+}
+
+// The share of the tab's fingerings that land on a note of the notation staff at the same measure and
+// tick, with the written pitch the tuning and the fret give; and how many fingerings there were.
+static std::pair<double, int> tabFingeringsOnNotes(const EncRoot& enc, int notationStaff, int tabStaff,
+                                                   const std::vector<int>& tuning)
+{
+    int total = 0;
+    int matched = 0;
+    for (const EncMeasure& m : enc.measures) {
+        std::multimap<int, int> pitchesByTick;
+        for (const auto& e : m.elements) {
+            if (const EncNote* n = dynamic_cast<const EncNote*>(e.get()); n && n->staffIdx == notationStaff) {
+                pitchesByTick.emplace(n->tick, n->semiTonePitch);
+            }
+        }
+        for (const auto& e : m.elements) {
+            const EncRest* r = dynamic_cast<const EncRest*>(e.get());
+            if (!r || !r->isTabFingering || r->staffIdx != tabStaff) {
+                continue;
+            }
+            ++total;
+            const int lowIdx = r->tabString / 2 - 1;
+            if (lowIdx < 0 || lowIdx >= static_cast<int>(tuning.size())) {
+                continue;
+            }
+            const int written = tuning[lowIdx] + r->tabFret;
+            auto [from, to] = pitchesByTick.equal_range(r->tick);
+            if (std::any_of(from, to, [written](const auto& tp) { return tp.second == written; })) {
+                ++matched;
+            }
+        }
+    }
+    return { total ? static_cast<double>(matched) / total : 0.0, total };
+}
+
+// The guitar tuning is also the one Encore gives a new tab, so a staff its author named after another
+// instrument, a bandurria or a voice, keeps that instrument. Only a confident name match counts.
+static bool namesAnotherInstrument(const EncInstrument& instr)
+{
+    if (instr.nameIsPlaceholder) {
+        return false;
+    }
+    bool exact = false;
+    bool unique = false;
+    const InstrumentTemplate* named = findEncoreInstrumentTemplate(instr.name, -1, ENC_KEY_NO_FILTER, &exact, &unique);
+    return named && (exact || unique) && !named->id.contains(u"guitar");
+}
+
+void findGuitarsProvenByTablature(BuildCtx& ctx)
+{
+    const EncRoot& enc = ctx.enc;
+    if (enc.lines.empty()) {
+        return;
+    }
+    const int nstaves = static_cast<int>(enc.lines[0].staffData.size());
+    auto instrumentOf = [&](int staff) { return static_cast<int>(enc.lines[0].staffData[staff].instrumentIndex()); };
+    auto singleStaff = [&](int ii) {
+        return ii < static_cast<int>(enc.instruments.size()) && enc.instruments[ii].nstaves <= 1;
+    };
+    for (int t = 1; t < nstaves; ++t) {
+        const int n = t - 1;
+        if (!encStaffIsTab(enc, t) || !encStaffIsNotation(enc, n)) {
+            continue;
+        }
+        const int notationInstr = instrumentOf(n);
+        const int tabInstr = instrumentOf(t);
+        if (notationInstr == tabInstr || !singleStaff(notationInstr) || !singleStaff(tabInstr)) {
+            continue;
+        }
+        if (enc.instruments[notationInstr].keyTransposeSemitones != 0
+            || namesAnotherInstrument(enc.instruments[notationInstr]) || namesAnotherInstrument(enc.instruments[tabInstr])) {
+            continue;
+        }
+        const EncTabTuning& tuning = enc.instruments[tabInstr].tabTuning.hasData ? enc.instruments[tabInstr].tabTuning
+                                     : enc.tabTuning;
+        if (!isEncoreGuitarTuning(tuning)) {
+            continue;
+        }
+        const auto [share, total] = tabFingeringsOnNotes(enc, n, t, tuning.openStringPitches);
+        static constexpr double kMinShare = 0.9;
+        static constexpr int kMinFingerings = 4;
+        if (total < kMinFingerings || share < kMinShare) {
+            continue;
+        }
+        ctx.provenGuitars.insert(notationInstr);
+        ctx.provenGuitars.insert(tabInstr);
+        LOGD() << "  staff " << n << " is a guitar left at Key 0: the tab below states the guitar tuning and "
+               << static_cast<int>(share * 100 + 0.5) << "% of its " << total << " fingerings land on its notes";
+    }
 }
 
 // A tab staff is a derived view with no notes of its own (frets come from the notation staff),

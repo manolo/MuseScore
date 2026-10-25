@@ -343,6 +343,7 @@ static void buildScore(MasterScore* score, const EncRoot& enc, const EncImportOp
     score->style().set(Sid::maxStaffSpread,       Spatium(0.0));
 
     BuildCtx ctx{ score, enc, opts };
+    findGuitarsProvenByTablature(ctx);
     buildParts(ctx);
     buildMeasures(ctx);
     buildInitialSignatures(ctx);
