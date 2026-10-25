@@ -26,6 +26,15 @@
 #include "readers.h"
 
 namespace mu::iex::enc {
+// These fields are words whose value fits a byte. Reading the word takes the right byte in either byte
+// order, where reading the first byte returns the high one in a big-endian file. See ENCORE_FORMAT.md 6.8.
+static quint8 wordLowByte(QDataStream& ds)
+{
+    quint16 word = 0;
+    ds >> word;
+    return static_cast<quint8>(word & 0xFF);
+}
+
 bool EncOrnament::read(QDataStream& ds)
 {
     const qint64 elemPos = ds.device()->pos();   // first byte after the type/voice byte; see ENCORE_FORMAT.md §8.2 Ornament subtypes
@@ -37,23 +46,24 @@ bool EncOrnament::read(QDataStream& ds)
     ds >> xoffset;
     ds >> yoffset;
     ds.skipRawData(2);
-    ds >> altMezuro;   // +16: v0xC2 spanning measure-count
-    ds.skipRawData(1);
-    ds >> alMezuro;    // +18: v0xC4 spanning measure-count
-    ds.skipRawData(1);
+    altMezuro = wordLowByte(ds);   // +16: v0xC2 spanning measure-count
+    alMezuro = wordLowByte(ds);    // +18: v0xC4 spanning measure-count
     ds >> xoffset2;
     ds.skipRawData(4);
-    ds >> speguleco;
-    speguleco &= 3;
-    ds.skipRawData(1);
-    ds >> noto;
-    ds.skipRawData(1);
-    ds >> tempo;
+    speguleco = wordLowByte(ds) & 3;
+    noto = wordLowByte(ds);
+    const int tempoEnd = 32 + bodyShift;
+    if (static_cast<int>(size) >= tempoEnd) {
+        tempo = wordLowByte(ds);
+    } else {
+        ds >> tempo;
+    }
     // The text index has its own slot only in a long enough element; otherwise it shares the tempo
     // byte. The threshold moves with the body layout, so a pre-3.07 size-32 staff text still reaches
-    // its own slot. See ENCORE_FORMAT.md §8.2 Ornament subtypes.
-    if (static_cast<int>(size) >= 33 + bodyShift) {
-        ds.skipRawData(1);
+    // its own slot, a whole word there. See ENCORE_FORMAT.md §8.2 Ornament subtypes.
+    if (static_cast<int>(size) >= tempoEnd + 2) {
+        tind = wordLowByte(ds);
+    } else if (static_cast<int>(size) >= tempoEnd + 1) {
         ds >> tind;
     } else {
         tind = tempo;
