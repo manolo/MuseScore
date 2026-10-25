@@ -10030,6 +10030,59 @@ def gen_sco5_ornaments_and_rest():
     return bytes(h) + line_blk + meas_blk
 
 
+def _sco5_file(format_version, elems, trailer=b''):
+    """A minimal big-endian SCO5 file with one staff and one 4/4 measure holding `elems`."""
+    def be(fmt, *a):
+        return struct.pack('>' + fmt, *a)
+
+    h = bytearray(194)
+    h[0:4] = b'SCO5'
+    struct.pack_into('>I', h, 4, 194)         # where the first block starts, the same in every SCO5
+    struct.pack_into('>H', h, 0x28, format_version)
+    struct.pack_into('>h', h, 0x2E, 1)
+    struct.pack_into('>h', h, 0x30, 1)
+    h[0x32] = 1
+    h[0x33] = 1
+    struct.pack_into('>h', h, 0x34, 1)
+    h[0x52] = 4
+
+    line = bytearray(10) + be('H', 0) + bytes([1])
+    staff = bytearray(30)
+    staff[19] = 1
+    line += staff
+    line_blk = b'LINE' + be('I', len(line)) + bytes(line)
+
+    mh = bytearray(0x36)
+    struct.pack_into('>H', mh, 0, 100)
+    struct.pack_into('>H', mh, 4, 240)
+    struct.pack_into('>H', mh, 6, 960)
+    mh[8], mh[9] = 4, 4
+    body = elems + b'\xff\xff'
+    meas_blk = b'MEAS' + be('I', len(body)) + bytes(mh) + body
+    return bytes(h) + line_blk + meas_blk + trailer
+
+
+def note_sco5_pre4(tick, fv, pitch, decoy, voice=0):
+    """22-byte note of the macOS Encore 3, big-endian: pitch at +13 and, at +15 where Encore 4
+    keeps the pitch, the low byte of the playback duration."""
+    d = bytearray(19)
+    d[0] = 22
+    d[2] = fv
+    d[10] = pitch
+    d[12] = decoy
+    return struct.pack('>H', tick) + bytes([0x90 | (voice & 0xF)]) + bytes(d)
+
+
+# ===========================================================================
+# structure_sco5_format_305.enc
+# The macOS Encore 3 also writes SCO5, at format 3.05 with the 22-byte note. Two half notes, C4 and
+# E4, each with a decoy an octave up in the slot the 4.20 layout reads the pitch from.
+# ===========================================================================
+def gen_sco5_format_305():
+    elems = note_sco5_pre4(0, 2, 60, 72) + note_sco5_pre4(480, 2, 64, 76)
+    return _sco5_file(ENC_FORMAT_3_05, elems)
+
+
 # ===========================================================================
 # ornaments_v0c2_same_measure_slur_no_cross.enc
 # Regression: v0xC2 slur starting mid-measure must end within the same measure,
@@ -14532,6 +14585,7 @@ if __name__=='__main__':
     write("instruments_sco5_tk_names.enc",         gen_sco5_tk_instrument_names(), layout=False)
     write("notes_sco5_tie_arc_bigendian.enc",       gen_sco5_tie_arc_bigendian(), layout=False)
     write("ornaments_sco5_bigendian.enc",          gen_sco5_ornaments_and_rest(), layout=False)
+    write("structure_sco5_format_305.enc",          gen_sco5_format_305(), layout=False)
     write("text_lyrics_grandstaff_routed_notes.enc", gen_v0c4_lyrics_grandstaff_routed_notes())
     write("importer_inner_tuplet_note_level_cap.enc", gen_v0c4_inner_tuplet_note_level_cap())
     write("importer_score_size2.enc", set_line_staff_size_hint(set_score_size(assemble(0xC4, [(meas_hdr(4, 4),

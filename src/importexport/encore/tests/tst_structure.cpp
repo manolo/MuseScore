@@ -1270,6 +1270,29 @@ TEST_F(Tst_Structure, sco5_macos_page_letter_default_margins)
     delete score;
 }
 
+// The macOS Encore 3 writes SCO5 at format 3.05. Its 22-byte notes keep the pitch at +13, and the
+// +15 slot the Encore 5 layout reads holds a decoy an octave up. The page keeps the macOS margins.
+TEST_F(Tst_Structure, sco5_format_305_reads_with_its_own_layout)
+{
+    MasterScore* score = readEncoreScore("structure_sco5_format_305.enc");
+    ASSERT_NE(score, nullptr);
+    muse::Ret ret = score->sanityCheck();
+    EXPECT_TRUE(ret) << ret.text();
+
+    std::vector<int> pitches;
+    for (Segment* s = score->firstMeasure()->first(SegmentType::ChordRest); s; s = s->next(SegmentType::ChordRest)) {
+        if (EngravingItem* e = s->element(0); e && e->isChord()) {
+            for (Note* n : toChord(e)->notes()) {
+                pitches.push_back(n->pitch());
+            }
+        }
+    }
+    EXPECT_EQ(pitches, (std::vector<int> { 60, 64 })) << "pitch from +13, not from the +15 decoy";
+    EXPECT_NEAR(score->style().styleD(Sid::pageOddLeftMargin), 0.25, 1e-6) << "SCO5 uses a uniform 0.25\" margin";
+
+    delete score;
+}
+
 // When per-line measureCount reads 0 (e.g. SCO5), each system's span must be derived from the LINE start
 // deltas so system locks still apply.
 TEST_F(Tst_Structure, system_breaks_from_line_start_deltas_when_count_zero)

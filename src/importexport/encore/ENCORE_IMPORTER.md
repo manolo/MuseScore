@@ -147,7 +147,7 @@ The substitution table lives apart, in `parser/zbot_table.cpp`, with its provena
 
 MusicTime was the smaller and cheaper sibling of Encore from the same publisher, and it writes the very same format under its own magic. Its files reach the same readers.
 
-`isReadableEncoreMagic` accepts `MTIW` and `MTIM` beside `SCOW` and `SCO5`. `EncHeader::readMagicAndVersion` treats `MTIM` as big-endian the way it treats `SCO5`. `EncFormatReader::create` matches both by magic, because a Macintosh container has no version byte at `0x04`. Everything below that is unchanged, and format 2.62 selects the compact geometry through the path a format 2.50 file takes.
+`isReadableEncoreMagic` accepts `MTIW` and `MTIM` beside `SCOW` and `SCO5`. `EncHeader::readMagicAndVersion` treats `MTIM` as big-endian the way it treats `SCO5`. `EncFormatReader::create` places both by magic and format version, because a Macintosh container has no version byte at `0x04`: a `SCO5` below 4.20 gets the v0xC2 reader, flagged as a Macintosh container so it keeps the uniform page margins. Everything below that is unchanged, and format 2.62 selects the compact geometry through the path a format 2.50 file takes.
 
 The module registers the reader for `mus` beside `enc`, so the open dialog lists both under the Encore filter.
 
