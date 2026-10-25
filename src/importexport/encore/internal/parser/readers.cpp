@@ -121,11 +121,18 @@ static std::unique_ptr<EncFormatReader> readerForFormatVersion(quint16 formatVer
     return makeFormatReader_V0xC4();
 }
 
-// SCO5 is matched by magic because its version byte is not 0xC4 even though it shares that format.
+// SCO5 has no version byte, so its format version places it: the macOS Encore 5 writes 4.20 and the
+// macOS Encore 3 writes 3.05. See ENCORE_FORMAT.md 1.5.
 std::unique_ptr<EncFormatReader> EncFormatReader::create(quint8 chuMagio, const QString& magic, quint16 formatVersion)
 {
     if (magic == "SCO5") {
-        return makeFormatReader_SCO5();
+        if (formatVersion >= ENC_FORMAT_4_20) {
+            return makeFormatReader_SCO5();
+        }
+        if (formatVersion >= ENC_FORMAT_3_05) {
+            return makeFormatReader_V0xC2(formatVersion, true);
+        }
+        return readerForFormatVersion(formatVersion);
     }
     // The macOS MusicTime container has no version byte where the others keep one, so its format
     // version decides on its own. The Windows one carries the byte in the usual place and moves
