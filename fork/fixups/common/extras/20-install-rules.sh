@@ -119,7 +119,9 @@ if (APPLE)
     string(REGEX REPLACE "Resources/?$" "VST3" PLECTRA_VST3_DEST "RESOURCES_DEST")
 elseif (WIN32)
     set(PLECTRA_VST3 "${CMAKE_CURRENT_SOURCE_DIR}/vst3/windows")
-    set(PLECTRA_VST3_DEST "VST3")
+    # Next to the executable, which installs to bin: the SDK looks for a VST3
+    # folder in the directory of the running exe, not in the install root.
+    set(PLECTRA_VST3_DEST "bin/VST3")
 elseif (UNIX AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     set(PLECTRA_VST3 "${CMAKE_CURRENT_SOURCE_DIR}/vst3/linux_x86_64")
     set(PLECTRA_VST3_DEST "bin/vst3")
