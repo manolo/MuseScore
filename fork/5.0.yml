@@ -125,6 +125,14 @@ framework:
         migration: a dialog plugin opens inside async message processing, so
         its run only arrived after the dialog closed.
 
+    - name: VST activated before its processing is set up
+      pr: 401
+      ref: manolo/fix/vst-activate-before-setup
+      note: >
+        Fixes musescore/MuseScore#35454: exporting parts crashed when a VST
+        instrument finished loading after its track was switched on. The 4.7
+        backport is in fork/4.7-ports.
+
     - name: floating mixer panel
       ref: manolo/fork/floating-mixer-panel
       note: >
