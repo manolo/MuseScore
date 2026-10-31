@@ -30,6 +30,9 @@
 
 #include "ui/qml/Muse/Ui/navigationsection.h"
 #include "uicomponents/qml/Muse/UiComponents/abstractmenumodel.h"
+#include "idockwindow.h"
+#include "dockpageview.h"
+#include "internal/dockbase.h"
 
 #include "docktypes.h"
 
@@ -280,4 +283,34 @@ void DockFrameModel::handleMenuItem(const QString& itemId) const
     if (menuModel) {
         menuModel->handleMenuItem(itemId);
     }
+}
+
+bool DockFrameModel::notifyTitleBarDoubleClicked()
+{
+    KDDockWidgets::DockWidgetBase* dockWidget = currentDockWidget();
+    if (!dockWidget) {
+        return false;
+    }
+
+    QString dockName = dockWidget->uniqueName();
+
+    // Use DockWindowProvider to get the current page and find the dock by name
+    IDockWindow* window = dockWindowProvider()->window();
+    if (!window) {
+        return false;
+    }
+
+    DockPageView* page = window->currentPage();
+    if (!page) {
+        return false;
+    }
+
+    DockBase* dockBase = page->dockByName(dockName);
+    if (dockBase) {
+        // Return true if the dock is floating (to prevent default dock/undock behavior)
+        bool isFloating = dockBase->floating();
+        emit dockBase->titleBarDoubleClicked();
+        return isFloating;
+    }
+    return false;
 }

@@ -60,6 +60,10 @@ public:
 
     PlaybackCursorType cursorType() const override;
 
+    bool isPlaybackCursorVisible() const override;
+    void setPlaybackCursorVisible(bool visible) override;
+    muse::async::Channel<bool> isPlaybackCursorVisibleChanged() const override;
+
     bool isMixerSectionVisible(MixerSectionType sectionType) const override;
     void setMixerSectionVisible(MixerSectionType sectionType, bool visible) override;
     muse::async::Channel<MixerSectionType, bool> isMixerSectionVisibleChanged() const override;
@@ -119,6 +123,7 @@ private:
     muse::async::Channel<muse::audio::aux_channel_idx_t, bool> m_isAuxSendVisibleChanged;
     muse::async::Channel<muse::audio::aux_channel_idx_t, bool> m_isAuxChannelVisibleChanged;
     muse::async::Channel<MixerSectionType, bool> m_isMixerSectionVisibleChanged;
+    muse::async::Channel<bool> m_isPlaybackCursorVisibleChanged;
 
     muse::async::Channel<bool> m_muteHiddenInstrumentsChanged;
 };

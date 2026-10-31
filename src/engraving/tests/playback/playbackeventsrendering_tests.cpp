@@ -3668,3 +3668,92 @@ TEST_F(Engraving_PlaybackEventsRendererTests, HandbellsLetVibrate)
 
     delete score;
 }
+
+/**
+ * @brief PlaybackEventsRendererTests_Single_Note_Tremolo_TiedToPlainNote
+ * @details In this case we're gonna render a piece of score with an A4 half note carrying a 32nd
+ *          tremolo, tied to a plain A4 half note, followed by a separate A4 quarter note.
+ *          A tie must never re-attack, so the tremolo covers the whole tied value and the tied
+ *          note produces no event of its own, while the repeated quarter note still attacks.
+ */
+TEST_F(Engraving_PlaybackEventsRendererTests, Single_Note_Tremolo_TiedToPlainNote)
+{
+    // [GIVEN] Simple piece of score (violin, 4/4, 120 bpm, Treble Cleff)
+    Score* score = ScoreRW::readScore(
+        PLAYBACK_EVENTS_RENDERING_DIR + "tremolo_tied_to_plain_note/tremolo_tied_to_plain_note.mscx");
+    ASSERT_TRUE(score);
+
+    // [GIVEN] Fulfill articulations profile with dummy patterns
+    m_defaultProfile->setPattern(ArticulationType::Standard, m_dummyPattern);
+    m_defaultProfile->setPattern(ArticulationType::Tremolo32nd, m_dummyPattern);
+
+    // [GIVEN] Dummy context
+    PlaybackContextPtr ctx = std::make_shared<PlaybackContext>();
+
+    // [GIVEN] Chord carrying the tremolo, tied to a plain chord
+    const Chord* tremoloChord = findChord(score, 1920);
+    ASSERT_TRUE(tremoloChord);
+    ASSERT_EQ(tremoloChord->notes().size(), 1);
+    ASSERT_TRUE(tremoloChord->notes().front()->tieFor());
+
+    // [WHEN] Request to render the tremolo chord
+    PlaybackEventsMap result;
+    m_renderer.render(tremoloChord, 0, m_defaultProfile, ctx, result);
+
+    // [THEN] The tremolo spans both tied halves, so it is rendered as twice as many sub-notes
+    constexpr size_t expectedSubNotesCount = 32;
+    constexpr mpe::duration_t expectedSubNoteDuration = WHOLE_NOTE_DURATION / expectedSubNotesCount;
+    constexpr mpe::timestamp_t expectedTremoloTimestamp = 2000000; // timestamp of the tremolo chord
+
+    ASSERT_EQ(result.size(), 1);
+    ASSERT_EQ(result.begin()->second.size(), expectedSubNotesCount);
+
+    for (size_t i = 0; i < expectedSubNotesCount; ++i) {
+        const mpe::NoteEvent& noteEvent = std::get<mpe::NoteEvent>(result.begin()->second.at(i));
+
+        EXPECT_EQ(noteEvent.expressionCtx().articulations.size(), 1);
+        ASSERT_TRUE(noteEvent.expressionCtx().articulations.contains(ArticulationType::Tremolo32nd));
+
+        // [THEN] Every sub-note belongs to one tremolo covering the whole tied value
+        const mpe::ArticulationMeta& meta = noteEvent.expressionCtx().articulations.at(ArticulationType::Tremolo32nd).meta;
+        EXPECT_EQ(meta.timestamp, expectedTremoloTimestamp);
+        EXPECT_EQ(meta.overallDuration, WHOLE_NOTE_DURATION);
+
+        EXPECT_EQ(noteEvent.arrangementCtx().nominalDuration, expectedSubNoteDuration);
+        EXPECT_EQ(noteEvent.arrangementCtx().nominalTimestamp,
+                  expectedTremoloTimestamp + static_cast<mpe::timestamp_t>(i) * expectedSubNoteDuration);
+        EXPECT_EQ(noteEvent.pitchCtx().nominalPitchLevel, pitchLevel(PitchClass::A, 4));
+    }
+
+    // [GIVEN] Chord of the tied note, which carries no tremolo
+    const Chord* tiedChord = findChord(score, 2880);
+    ASSERT_TRUE(tiedChord);
+    ASSERT_TRUE(tiedChord->notes().front()->tieBack());
+
+    // [WHEN] Request to render the tied chord
+    result.clear();
+    m_renderer.render(tiedChord, 0, m_defaultProfile, ctx, result);
+
+    // [THEN] It produces no event at all: the tremolo above already covers it
+    EXPECT_TRUE(result.empty());
+
+    // [GIVEN] The A4 quarter note that merely repeats the same pitch, without a tie
+    const Chord* repeatedChord = findChord(score, 3840);
+    ASSERT_TRUE(repeatedChord);
+    ASSERT_FALSE(repeatedChord->notes().front()->tieBack());
+
+    // [WHEN] Request to render it
+    result.clear();
+    m_renderer.render(repeatedChord, 0, m_defaultProfile, ctx, result);
+
+    // [THEN] It still attacks on its own, as a plain note
+    ASSERT_EQ(result.size(), 1);
+    ASSERT_EQ(result.begin()->second.size(), 1);
+
+    const mpe::NoteEvent& repeatedNoteEvent = std::get<mpe::NoteEvent>(result.begin()->second.front());
+    EXPECT_EQ(repeatedNoteEvent.expressionCtx().articulations.size(), 1);
+    EXPECT_TRUE(repeatedNoteEvent.expressionCtx().articulations.contains(ArticulationType::Standard));
+    EXPECT_EQ(repeatedNoteEvent.arrangementCtx().nominalDuration, QUARTER_NOTE_DURATION);
+
+    delete score;
+}
