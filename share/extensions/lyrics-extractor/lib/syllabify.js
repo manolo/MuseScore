@@ -1,0 +1,3 @@
+// Copyright (C) 2026 Manolo Carrasco (do2tis)
+// SPDX-License-Identifier: GPL-3.0-or-later
+var _modules={},_names=[],LANGUAGE_NAMES={es:"Español"};function register(code,module){_modules[code]||_names.push(code),_modules[code]=module}function languages(){for(var result=[],i=0;i<_names.length;i++){var code=_names[i];result.push({code:code,name:LANGUAGE_NAMES[code]||code})}return result}function syllabifyWord(code,word){var module=_modules[code];return module?module.syllabifyWord(word):[word]}"undefined"!=typeof exports&&(register("es",require("./syllabify-es")),exports.register=register,exports.languages=languages,exports.syllabifyWord=syllabifyWord);

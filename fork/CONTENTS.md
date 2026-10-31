@@ -8,3 +8,13 @@ Line `4.7`, rebuilt from `origin/4.7` at 4829cc5f00.
 
 Built from the manifest by `fork/rebuild.sh`. Editing this file by
 hand achieves nothing: the next rebuild overwrites it.
+
+## Bundled with the installer
+
+| Extra | Taken from | Licence |
+|---|---|---|
+| Plectro VST, free edition | manolo/vst-plectro v0.2.6 | MIT |
+| Lyrics and Chords Extractor | manolo/lyrics-extractor v2.5.1 | GPL-3.0-or-later |
+| Bandurria with tremolo | manolo/sound-fonts@1fddc2ef3 | CC0-1.0 |
+| Laud with tremolo | manolo/sound-fonts@169ad18bc | CC0-1.0 |
+| Pulso y Pua | manolo/sound-fonts@58321bd85 | CC0-1.0 |
