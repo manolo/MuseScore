@@ -443,10 +443,118 @@ DockPage {
                     mixerPanel.resize(newWidth, newHeight)
                 }
 
+                property var lastScreenSize: null
+
+                Timer {
+                    id: screenPollTimer
+                    interval: 500
+                    repeat: true
+                    onTriggered: {
+                        var currentSize = mixerPanel.currentScreenSize
+                        if (mixerPanelComponent.lastScreenSize === null ||
+                            currentSize.width !== mixerPanelComponent.lastScreenSize.width ||
+                            currentSize.height !== mixerPanelComponent.lastScreenSize.height) {
+                            mixerPanelComponent.lastScreenSize = currentSize
+                            mixerPanelComponent.updatePanelWidth()
+                        }
+                    }
+                }
+
+                onActualContentHeightChanged: {
+                    mixerPanelComponent.updateMaximumHeight()
+                }
+
+                onActualContentWidthChanged: {
+                    mixerPanelComponent.updatePanelWidth()
+                }
+
+                function updateMaximumHeight() {
+                    if (actualContentHeight > 0) {
+                        mixerPanel.maximumHeight = actualContentHeight + mixerPanel.nonContentsHeight + mixerPanel.floatingWindowOverhead
+                    }
+                }
+
+                function updatePanelWidth() {
+                    // Only resize if mixer has channels loaded
+                    if (actualContentWidth > 0 && hasChannels) {
+                        // Resize panel to fit content width, capped at 90% of current screen width
+                        var screenSize = mixerPanel.currentScreenSize
+                        var maxWidth = screenSize.width * 0.9
+                        var targetWidth = Math.min(actualContentWidth, maxWidth)
+                        mixerPanel.resize(targetWidth, mixerPanel.height)
+                    }
+                }
+
+                property int savedWidth: -1
+                property int savedX: -1
+
+                function toggleFullWidth() {
+                    var screenSize = mixerPanel.currentScreenSize
+                    var screenPos = mixerPanel.currentScreenPosition
+                    var currentWidth = mixerPanel.width
+                    var currentX = mixerPanel.globalPosition.x
+                    var currentY = mixerPanel.globalPosition.y
+                    var windowMargin = 8 // Floating window border margin
+
+                    if (currentWidth >= screenSize.width) {
+                        // Already full width, restore previous size and position
+                        var targetWidth
+                        var targetX
+
+                        if (savedWidth > 0) {
+                            // Restore saved state
+                            targetWidth = savedWidth
+                            targetX = savedX
+                        } else {
+                            // No saved state, calculate centered position
+                            var maxWidth = screenSize.width * 0.9
+                            targetWidth = Math.min(actualContentWidth, maxWidth)
+                            targetX = screenPos.x + (screenSize.width - targetWidth) / 2
+                        }
+
+                        mixerPanel.resize(targetWidth, mixerPanel.height)
+                        mixerPanel.setFloatingPosition(targetX, currentY)
+                        savedWidth = -1
+                        savedX = -1
+                    } else {
+                        // Save current state before expanding
+                        savedWidth = currentWidth
+                        savedX = currentX
+
+                        // Expand to full screen width, move to x=0 of current screen, keep Y
+                        mixerPanel.resize(screenSize.width, mixerPanel.height)
+                        mixerPanel.setFloatingPosition(screenPos.x - windowMargin, currentY)
+                    }
+                }
+
                 Connections {
                     target: mixerPanel
                     function onPanelShown() {
                         mixerPanelComponent.resizePanelToContentHeight()
+                    }
+                    function onFloatingChanged() {
+                        if (mixerPanel.floating) {
+                            Qt.callLater(function() {
+                                mixerPanelComponent.updateMaximumHeight()
+                                mixerPanelComponent.updatePanelWidth()
+                                mixerPanelComponent.resizePanelToContentHeight()
+                            })
+                            // Start polling for screen changes when floating
+                            screenPollTimer.start()
+                        } else {
+                            mixerPanelComponent.updateMaximumHeight()
+                            screenPollTimer.stop()
+                        }
+                    }
+                    function onCurrentScreenSizeChanged() {
+                        // Recalculate size when panel moves to a different monitor
+                        mixerPanelComponent.updatePanelWidth()
+                    }
+                    function onTitleBarDoubleClicked() {
+                        // When floating (undocked), toggle between full width and normal width
+                        if (mixerPanel.floating) {
+                            mixerPanelComponent.toggleFullWidth()
+                        }
                     }
                 }
             }

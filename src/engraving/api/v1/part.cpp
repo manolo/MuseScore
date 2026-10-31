@@ -23,11 +23,15 @@
 #include "part.h"
 
 #include "engraving/dom/harppedaldiagram.h"
+#include "engraving/dom/score.h"
 
 // api
 #include "apistructs.h"
 #include "elements.h"
 #include "instrument.h"
+#include "mixer.h"
+
+#include "log.h"
 
 using namespace mu::engraving::apiv1;
 
@@ -127,4 +131,37 @@ EngravingItem* Part::prevHarpDiagramFromTick(Fraction* tick)
 Fraction* Part::tickOfCurrentHarpDiagram(Fraction* tick)
 {
     return wrap(part()->currentHarpDiagramTick(tick->fraction()));
+}
+
+//---------------------------------------------------------
+//   Part::mixerChannel
+//---------------------------------------------------------
+
+MixerChannel* Part::mixerChannel()
+{
+    if (m_mixerChannel) {
+        return m_mixerChannel;
+    }
+
+    if (!part()) {
+        return nullptr;
+    }
+
+    // Keyed by part rather than by instrument, which can change under the part
+    const mu::engraving::ID partId = part()->id();
+    if (MixerChannel::s_mixerChannelCache.contains(partId)) {
+        m_mixerChannel = MixerChannel::s_mixerChannelCache.value(partId);
+        return m_mixerChannel;
+    }
+
+    mu::engraving::InstrumentTrackId trackId;
+    trackId.partId = partId;
+    if (const mu::engraving::Instrument* instrument = part()->instrument()) {
+        trackId.instrumentId = instrument->id();
+    }
+
+    // Owned by the cache, not by this wrapper, so it survives the plugin closing
+    m_mixerChannel = new MixerChannel(trackId, part()->score()->iocContext(), nullptr);
+    MixerChannel::s_mixerChannelCache.insert(partId, m_mixerChannel);
+    return m_mixerChannel;
 }

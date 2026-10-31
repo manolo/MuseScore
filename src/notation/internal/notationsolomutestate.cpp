@@ -23,6 +23,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+#include <vector>
+
 #include "engraving/infrastructure/mscreader.h"
 
 #include "notationsolomutestate.h"
@@ -55,6 +57,12 @@ Ret NotationSoloMuteState::read(const engraving::MscReader& reader, const muse::
         soloMuteState.mute = soloMuteObj.value("mute").toBool();
         soloMuteState.solo = soloMuteObj.value("solo").toBool();
 
+        if (soloMuteObj.contains("volumeDb")) {
+            soloMuteState.volumeDb = static_cast<float>(soloMuteObj.value("volumeDb").toDouble());
+            soloMuteState.balance = static_cast<float>(soloMuteObj.value("balance").toDouble(0.0));
+            soloMuteState.hasCustomVolume = true;
+        }
+
         m_trackSoloMuteStatesMap.emplace(id, std::move(soloMuteState));
     }
 
@@ -74,6 +82,11 @@ Ret NotationSoloMuteState::write(io::IODevice* out)
         QJsonObject soloMuteStateObject;
         soloMuteStateObject["mute"] = pair.second.mute;
         soloMuteStateObject["solo"] = pair.second.solo;
+
+        if (pair.second.hasCustomVolume) {
+            soloMuteStateObject["volumeDb"] = static_cast<double>(pair.second.volumeDb);
+            soloMuteStateObject["balance"] = static_cast<double>(pair.second.balance);
+        }
 
         currentTrack["soloMuteState"] = soloMuteStateObject;
         tracksArray.append(currentTrack);
@@ -111,8 +124,21 @@ void NotationSoloMuteState::setTrackSoloMuteState(const InstrumentTrackId& partI
         return;
     }
 
+    // A change of volume or balance alone is not announced: listeners would
+    // push the mix back to the engine, which is where the change came from.
+    // The first custom volume is, so playback picks it up.
+    bool shouldSignal = true;
+    if (it != m_trackSoloMuteStatesMap.end()) {
+        const SoloMuteState& existing = it->second;
+        const bool customVolumeAppeared = !existing.hasCustomVolume && state.hasCustomVolume;
+        shouldSignal = existing.mute != state.mute || existing.solo != state.solo || customVolumeAppeared;
+    }
+
     m_trackSoloMuteStatesMap.insert_or_assign(partId, state);
-    m_trackSoloMuteStateChanged.send(partId, state);
+
+    if (shouldSignal) {
+        m_trackSoloMuteStateChanged.send(partId, state);
+    }
 }
 
 void NotationSoloMuteState::removeTrackSoloMuteState(const engraving::InstrumentTrackId& trackId)
@@ -120,6 +146,22 @@ void NotationSoloMuteState::removeTrackSoloMuteState(const engraving::Instrument
     auto soloMuteSearch = m_trackSoloMuteStatesMap.find(trackId);
     if (soloMuteSearch != m_trackSoloMuteStatesMap.end()) {
         m_trackSoloMuteStatesMap.erase(soloMuteSearch);
+    }
+}
+
+void NotationSoloMuteState::clearAllStates()
+{
+    std::vector<InstrumentTrackId> trackIds;
+    for (const auto& pair : m_trackSoloMuteStatesMap) {
+        trackIds.push_back(pair.first);
+    }
+
+    m_trackSoloMuteStatesMap.clear();
+
+    // Listeners learn about each cleared track, with the default state
+    const SoloMuteState emptyState;
+    for (const InstrumentTrackId& trackId : trackIds) {
+        m_trackSoloMuteStateChanged.send(trackId, emptyState);
     }
 }
 
